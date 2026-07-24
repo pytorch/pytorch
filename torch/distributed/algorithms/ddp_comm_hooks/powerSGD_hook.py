@@ -46,7 +46,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
     """
     Apply Gram-Schmidt procedure to orthogonalize a batch of matrices.
 
-    If epsilon is 0, this is equivalent to `torch.qr(matrices, out=(matrices, _))`,
+    If epsilon is 0, this is equivalent to `torch.linalg.qr(matrices, out=(matrices, _))`,
     """
     num_cols = matrices.shape[2]
     for i in range(num_cols):
@@ -207,7 +207,7 @@ class PowerSGDState:
 
         self.process_group = process_group
         self.matrix_approximation_rank = matrix_approximation_rank
-        # Deferring PowerSGD compression util step 'start_powerSGD_iter' can have two advantages:
+        # Deferring PowerSGD compression until step 'start_powerSGD_iter' can have two advantages:
         # 1) It turns out that PowerSGD may lead to a non-trivial accuracy loss,
         # even if the matrix approximation rank is increased to a large value.
         # To mitigate the accuracy loss, a simple yet effective way is mixing vanilla allreduce

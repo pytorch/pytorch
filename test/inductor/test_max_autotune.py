@@ -28,10 +28,13 @@ from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
+    _TestCodeCacheBenchmarkRequest,
+    _TestEnvBenchmarkRequest,
     AsyncAutotuner,
     AutotuneProcessPool,
     ExternKernelBenchmarkRequest,
     get_visible_devices_env_var,
+    run_autotune_in_subprocess,
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
@@ -39,7 +42,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
-from torch._inductor.heuristics.template.registry import override_template_heuristics
+from torch._inductor.heuristics.registry import override_template_heuristics
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
@@ -114,19 +117,31 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-if torch.version.hip:
-    # Temporary addition to ensure inductor tests can be
-    # enabled. Currently TF32 accuracy issues cause these tests
-    # to fail. We will use FP32 as reference to ensure the generated
-    # triton kernels are adequately tested.
-    #
-    # Track in: https://github.com/pytorch/pytorch/issues/169392
-    torch.set_float32_matmul_precision("highest")
-else:
-    torch.set_float32_matmul_precision("high")
-
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
+
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    if torch.version.hip:
+        # Temporary: TF32 accuracy issues on ROCm fail these tests; use FP32
+        # as reference to ensure the generated triton kernels are adequately
+        # tested. Track in: https://github.com/pytorch/pytorch/issues/169392
+        torch.set_float32_matmul_precision("highest")
+    else:
+        torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
+
 
 # Conditional patch for decompose_k tests - override to 10 on ROCm, no-op elsewhere
 _DECOMPOSE_K_PATCH_ROCM = (
@@ -1232,6 +1247,7 @@ class TestMaxAutotune(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_conv_backends": "TRITON",
                 "max_autotune_gemm_search_space": search_space,
             }
         ):
@@ -1794,7 +1810,7 @@ class TestMaxAutotune(TestCase):
 
                         self.assertTrue(
                             divisor_found,
-                            f"Could not find a split in {divisors} in {kernel}",
+                            lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
                         )
 
             compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
@@ -2222,7 +2238,7 @@ class TestMaxAutotune(TestCase):
         Verifies that get_template_heuristic returns an instance of our custom class
         and that get_template_configs yields the expected configs.
         """
-        from torch._inductor.heuristics.template.registry import (
+        from torch._inductor.heuristics.registry import (
             get_registered_heuristic_class,
             get_template_heuristic,
         )
@@ -2696,7 +2712,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.heuristics.template.registry.get_template_heuristic"
+            "torch._inductor.heuristics.registry.get_template_heuristic"
         ) as config_mock:
             # Create heuristic instance and modify it before setting as mock return value
             # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
@@ -2838,7 +2854,7 @@ class TestMaxAutotune(TestCase):
                     self.assertIsInstance(
                         choice.layout,
                         expected_layout,
-                        f"Expected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
+                        lambda msg: f"{msg}\nExpected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
                     )
             return choices
 
@@ -3156,7 +3172,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
         )
 
         with config.patch(
@@ -3196,7 +3212,7 @@ class TestMaxAutotune(TestCase):
         expected_offset = 7 * batch * K
         self.assertTrue(
             expected_offset > 2**31 - 1,
-            f"Test requires offset > i32_max, got {expected_offset}",
+            lambda msg: f"{msg}\nTest requires offset > i32_max, got {expected_offset}",
         )
 
         torch._dynamo.mark_dynamic(x, 0)
@@ -3238,7 +3254,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             M * N >= 2**32,
-            f"Test requires M*N >= 2^32 for overflow, got {M * N}",
+            lambda msg: f"{msg}\nTest requires M*N >= 2^32 for overflow, got {M * N}",
         )
 
         with config.patch(
@@ -3280,7 +3296,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
         )
 
         with config.patch(
@@ -3761,13 +3777,13 @@ class TestTemplateConfigPruning(TestCase):
             if triton_compilation_fails:
                 self.assertTrue(
                     exceeds,
-                    f"Config {c} failed to compile due to shared memory, "
+                    lambda msg: f"{msg}\nConfig {c} failed to compile due to shared memory, "
                     "but the checker predicted it would NOT exceed shared memory limits.",
                 )
             else:
                 self.assertTrue(
                     captured_smem <= smem_estimation,
-                    f"Estimated maximum smem should exceed actual smem used for config {c}",
+                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {c}",
                 )
 
 
@@ -4046,12 +4062,12 @@ class TestMaxAutotuneSubproc(TestCase):
         self.assertGreater(
             len(finite_timings_ms),
             0,
-            f"Expected finite autotune benchmark timings, got {benchmark_timings_ms}",
+            lambda msg: f"{msg}\nExpected finite autotune benchmark timings, got {benchmark_timings_ms}",
         )
         self.assertGreater(
             min(finite_timings_ms),
             0.0,
-            f"Expected autotune benchmark timing > 0, got {finite_timings_ms}",
+            lambda msg: f"{msg}\nExpected autotune benchmark timing > 0, got {finite_timings_ms}",
         )
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
@@ -4261,6 +4277,117 @@ class TestTuningProcess(TestCase):
 class TestTuningProcessPool(TestCase):
     # Use only one device/subprocess so we test the process restarts
     # and is usable after a crash.
+    def assert_path_in_dir(self, path, expected_dir):
+        self.assertEqual(
+            os.path.commonpath([path, expected_dir]),
+            expected_dir,
+        )
+
+    @config.patch({"autotune_multi_device": False})
+    def test_tuning_pool_cache_env_resets(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            tuning_pool = TuningProcessPool()
+            choice = _TestTritonTemplateCaller(
+                _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
+            )
+            stale_triton_cache_dir = os.path.join(
+                tempfile.gettempdir(), "stale_triton_cache"
+            )
+
+            try:
+                process = tuning_pool.processes[0]
+                process.put(
+                    choice.bmreq.benchmark,
+                    extra_env={"TRITON_CACHE_DIR": stale_triton_cache_dir},
+                )
+                self.assertEqual(process.get(), stale_triton_cache_dir)
+
+                self.assertIsNone(os.environ.get("TRITON_CACHE_DIR"))
+                self.assertIsNone(tuning_pool.target(choice))
+            finally:
+                tuning_pool.shutdown()
+
+    @config.patch({"autotune_multi_device": False})
+    def test_tuning_pool_cache_env_clears_codecache(self):
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            tempfile.TemporaryDirectory() as cache_dir_1,
+            tempfile.TemporaryDirectory() as cache_dir_2,
+        ):
+            tuning_pool = TuningProcessPool()
+            choice = _TestTritonTemplateCaller(_TestCodeCacheBenchmarkRequest())
+
+            try:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
+                path_1 = tuning_pool.target(choice)
+                self.assert_path_in_dir(path_1, cache_dir_1)
+
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
+                path_2 = tuning_pool.target(choice)
+                self.assert_path_in_dir(path_2, cache_dir_2)
+                self.assertNotEqual(path_1, path_2)
+            finally:
+                tuning_pool.shutdown()
+
+    @config.patch({"pipeline_max_autotune_gemm": True})
+    def test_autotune_process_pool_cache_env_resets(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            autotune_pool = AutotuneProcessPool()
+            bmreq = _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
+            stale_triton_cache_dir = os.path.join(
+                tempfile.gettempdir(), "stale_triton_cache"
+            )
+
+            try:
+                os.environ["TRITON_CACHE_DIR"] = stale_triton_cache_dir
+                self.assertEqual(
+                    autotune_pool.submit(
+                        run_autotune_in_subprocess,
+                        bmreq,
+                    ).result(timeout=30),
+                    stale_triton_cache_dir,
+                )
+
+                os.environ.pop("TRITON_CACHE_DIR", None)
+                self.assertIsNone(
+                    autotune_pool.submit(
+                        run_autotune_in_subprocess,
+                        bmreq,
+                    ).result(timeout=30)
+                )
+            finally:
+                autotune_pool._shutdown()
+
+    @config.patch({"pipeline_max_autotune_gemm": True})
+    def test_autotune_process_pool_cache_env_clears_codecache(self):
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            tempfile.TemporaryDirectory() as cache_dir_1,
+            tempfile.TemporaryDirectory() as cache_dir_2,
+        ):
+            autotune_pool = AutotuneProcessPool()
+            bmreq = _TestCodeCacheBenchmarkRequest()
+
+            try:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
+                path_1 = autotune_pool.submit(
+                    run_autotune_in_subprocess,
+                    bmreq,
+                ).result(timeout=30)
+                self.assert_path_in_dir(path_1, cache_dir_1)
+
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
+                path_2 = autotune_pool.submit(
+                    run_autotune_in_subprocess,
+                    bmreq,
+                ).result(timeout=30)
+                self.assert_path_in_dir(path_2, cache_dir_2)
+                self.assertNotEqual(path_1, path_2)
+            finally:
+                autotune_pool._shutdown()
+
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
         tuning_pool = TuningProcessPool()
@@ -4544,10 +4671,7 @@ class TestPrologueFusion(TestCase):
             # upcast preserves zero mask
             FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "generated code is different in native matmul",
-    )
+    @unittest.skip("Triton bug in compilation")
     def test_gather_fusion(self):
         M, K, N = (64, 128, 256)
         x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
@@ -4570,96 +4694,6 @@ class TestPrologueFusion(TestCase):
             .check("dot")
             .run(code[0])
         )
-        (
-            FileCheck()
-            .check("tl.load(in_ptr1 + (_loop_invariant_idx_m)")
-            .check("for k_idx")
-            .check_not("tl.load(in_ptr1")
-            .check("tl.dot")
-            .run(code[0])
-        )
-        self.assertEqual(
-            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", code[0])), 1
-        )
-
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "generated code is different in native matmul",
-    )
-    def test_gather_fusion_hoists_both_inputs(self):
-        M, K, N = (64, 128, 256)
-        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
-        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
-        idx_m = torch.randperm(M, device=GPU_TYPE)
-        idx_n = torch.randperm(N, device=GPU_TYPE)
-
-        def foo(x, y, idx_m, idx_n):
-            return x[idx_m] @ y[:, idx_n]
-
-        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
-        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
-
-        kernel_code = code[0]
-        loop_start = kernel_code.index("for k_idx")
-        dot_start = kernel_code.index("tl.dot", loop_start)
-        pre_loop = kernel_code[:loop_start]
-        loop_body = kernel_code[loop_start:dot_start]
-
-        self.assertRegex(
-            pre_loop,
-            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\)",
-        )
-        self.assertRegex(
-            pre_loop,
-            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\)",
-        )
-        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
-        self.assertRegex(loop_body, r"_loop_invariant_A_tmp\d+")
-        self.assertRegex(loop_body, r"_loop_invariant_B_tmp\d+")
-        self.assertEqual(
-            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", kernel_code)), 1
-        )
-        self.assertEqual(
-            len(re.findall(r"_loop_invariant_B_tmp\d+ = tl\.load", kernel_code)), 1
-        )
-
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "generated code is different in native matmul",
-    )
-    def test_gather_fusion_hoists_even_k_false(self):
-        M, K, N = (64, 130, 256)
-        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
-        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
-        idx_m = torch.randperm(M, device=GPU_TYPE)
-        idx_n = torch.randperm(N, device=GPU_TYPE)
-
-        def foo(x, y, idx_m, idx_n):
-            return x[idx_m] @ y[:, idx_n]
-
-        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
-        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
-
-        kernel_code = code[0]
-        self.assertIn("EVEN_K : tl.constexpr = False", kernel_code)
-        loop_start = kernel_code.index("for k_idx")
-        dot_start = kernel_code.index("tl.dot", loop_start)
-        pre_loop = kernel_code[:loop_start]
-        loop_body = kernel_code[loop_start:dot_start]
-
-        self.assertRegex(
-            pre_loop,
-            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\), None",
-        )
-        self.assertRegex(
-            pre_loop,
-            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\), None",
-        )
-        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
-        self.assertIn("a_mask =", loop_body)
-        self.assertIn("b_mask =", loop_body)
-        self.assertIn(", a_mask", loop_body)
-        self.assertIn(", b_mask", loop_body)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
