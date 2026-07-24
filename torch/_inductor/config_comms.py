@@ -31,7 +31,7 @@ sink_iterative_use_runtime_estimations: bool = False
 # Broadcast runtime estimations doing real Collective operation between all ranks.
 # If non-deterministic runtime estimations are used this must be used to make
 # all ranks to do identical decisions and prevent global Collectives reordering,
-# (that will result un NCCL hangs)
+# (that will result in NCCL hangs)
 reorder_for_compute_comm_overlap_broadcast_runtime_estimations: bool = False
 
 # Block of Ratios to workaround imperfection of current runtime estimations
