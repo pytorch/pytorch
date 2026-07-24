@@ -16,6 +16,11 @@ from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import
 )
 from cutlass.operators.status import Status
 
+from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+    canonical_tensorssa_reduction_type,
+    materialize_tensorssa_reduction,
+)
+
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
 
 
@@ -147,6 +152,13 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         local_reduce = getattr(args, "local_reduce_out", None)
         local_reduce_feed = getattr(args, "local_reduce_feed_out", None)
         secondary_feed = getattr(args, "local_reduce_secondary_feed_out", None)
+        reduction = materialize_tensorssa_reduction(
+            canonical_tensorssa_reduction_type(
+                getattr(args, "local_reduce_type", "sum")
+            ),
+            getattr(args, "local_reduce_source", "identity"),
+            getattr(args, "local_reduce_type", "sum"),
+        )
         return self.cute_compile(
             self.impl,
             args.A.tensor,
@@ -166,6 +178,11 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             getattr(args, "local_reduce_source", "identity"),
             getattr(args, "local_reduce_feeds_main", False),
             getattr(args, "local_reduce_secondary_feed_type", None),
+            reduction.reduce_op,
+            reduction.init_val,
+            reduction.combine,
+            reduction.source,
+            reduction.finalize,
             *epilogue_params,
             target_sm=target_sm,
         )

@@ -8,9 +8,10 @@ template kernels, particularly for flex attention modifications.
 
 import dataclasses
 import math
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import cast
 
 import sympy
 
@@ -64,6 +65,17 @@ class TensorSSAReduction:
     combine_expr: str
 
 
+@dataclasses.dataclass(frozen=True)
+class MaterializedTensorSSAReduction:
+    """CuTeDSL compile-time operands for a TensorSSA reduction."""
+
+    reduce_op: object
+    init_val: object
+    combine: Callable
+    source: Callable
+    finalize: Callable
+
+
 TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
     "sum": TensorSSAReduction("cute.ReductionOp.ADD", "0.0", "lhs + rhs"),
     "prod": TensorSSAReduction("cute.ReductionOp.MUL", "1.0", "lhs * rhs"),
@@ -84,6 +96,113 @@ def tensorssa_reduction(reduction_type: ReductionType) -> TensorSSAReduction:
             f"{reduction_type} does not map to a CuTe TensorSSA reduction"
         )
     return reduction
+
+
+def _sum_combine(lhs, rhs):
+    return lhs + rhs
+
+
+def _prod_combine(lhs, rhs):
+    return lhs * rhs
+
+
+def _max_combine(lhs, rhs):
+    import cutlass
+
+    return cutlass.max(lhs, rhs)
+
+
+def _min_combine(lhs, rhs):
+    import cutlass
+
+    return cutlass.min(lhs, rhs)
+
+
+def _identity_source(value):
+    return value
+
+
+def _square_source(value):
+    return value * value
+
+
+def _abs_source(value):
+    import cutlass.cute as cute
+
+    return cute.math.abs(value)
+
+
+def _abs_scale_source(value):
+    import cutlass.cute as cute
+
+    return cute.math.max(cute.math.abs(value), cute.full_like(value, 1e-12)) / 448.0
+
+
+def _identity_finalize(value, group):
+    return value
+
+
+def _mean_finalize(value, group):
+    return value / group
+
+
+def canonical_tensorssa_reduction_type(reduction_type: str) -> ReductionType:
+    """Return the associative primitive used by a composed reduction plan."""
+    if reduction_type == "logsumexp":
+        return "max"
+    if reduction_type in (
+        "online_softmax",
+        "direct_bool_gt_zero",
+    ) or reduction_type.startswith(("mean", "normalize_sum", "variance")):
+        return "sum"
+    if reduction_type == "normalize_absmax":
+        return "max"
+    return cast(ReductionType, reduction_type)
+
+
+def materialize_tensorssa_reduction(
+    reduction_type: ReductionType,
+    source_type: str = "identity",
+    plan_type: str | None = None,
+) -> MaterializedTensorSSAReduction:
+    """Materialize a TensorSSA descriptor as CuTeDSL compile-time operands."""
+    import cutlass
+    import cutlass.cute as cute
+
+    tensorssa_reduction(reduction_type)
+    reduce_op = {
+        "sum": cute.ReductionOp.ADD,
+        "prod": cute.ReductionOp.MUL,
+        "max": cute.ReductionOp.MAX,
+        "min": cute.ReductionOp.MIN,
+    }[reduction_type]
+    init_val = {
+        "sum": 0.0,
+        "prod": 1.0,
+        "max": -cutlass.Float32.inf,
+        "min": cutlass.Float32.inf,
+    }[reduction_type]
+
+    combine = {
+        "sum": _sum_combine,
+        "prod": _prod_combine,
+        "max": _max_combine,
+        "min": _min_combine,
+    }[reduction_type]
+    source = {
+        "identity": _identity_source,
+        "square": _square_source,
+        "abs": _abs_source,
+        "abs_scale": _abs_scale_source,
+    }[source_type]
+    finalize = (
+        _mean_finalize
+        if plan_type is not None and plan_type.startswith("mean")
+        else _identity_finalize
+    )
+    return MaterializedTensorSSAReduction(
+        reduce_op, init_val, combine, source, finalize
+    )
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
