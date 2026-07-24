@@ -1536,10 +1536,10 @@ class DequeVariable(CommonListMethodsVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
-            return VariableTracker.build(tx, f"deque([{items}])")
+            return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
             tx,
-            f"deque([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
+            f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
     def as_python_constant(self) -> collections.deque[Any]:

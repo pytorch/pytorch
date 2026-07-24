@@ -1,8 +1,24 @@
 diff --git a/gemm_act.py b/gemm_act.py
-index f6bbf7f..a4fee8f 100644
+index 8fb1d67..0a687ca 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
-@@ -491,0 +492,85 @@ class GemmActSm120(GemmActMixin, GemmSm120):
+@@ -119,0 +120,15 @@ def register_local_reduce_fns(
++def validate_grouped_n_contract_device(
++    group: int | None, device_capacity: tuple[int, int]
++) -> None:
++    """Validate grouped-main support consistently before and during compilation."""
++    if group is None:
++        return
++    if device_capacity[0] == 12:
++        raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
++    if group > 2 and device_capacity[0] not in (10, 11):
++        raise NotImplementedError(
++            "grouped_n_contract groups larger than 2 are currently validated "
++            "only on SM100 and SM110"
++        )
++
++
+@@ -491,0 +507,85 @@ class GemmActSm120(GemmActMixin, GemmSm120):
 +def _grouped_n_contract_epi_tile(epi_tile, group):
 +    if isinstance(epi_tile[1], cute.Layout):
 +        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
@@ -88,9 +104,9 @@ index f6bbf7f..a4fee8f 100644
 +    )
 +
 +
-@@ -664,0 +750 @@ def _compile_gemm_act(
+@@ -664,0 +765 @@ def _compile_gemm_act(
 +    main_output_transform_group,
-@@ -688,0 +775,7 @@ def _compile_gemm_act(
+@@ -688,0 +790,7 @@ def _compile_gemm_act(
 +        "grouped_n_contract": {
 +            8: GemmGroupedNContractSm80,
 +            9: GemmGroupedNContractSm90,
@@ -98,33 +114,32 @@ index f6bbf7f..a4fee8f 100644
 +            11: GemmGroupedNContractSm100,
 +            12: GemmGroupedNContractSm120,
 +        },
-@@ -690,0 +784,11 @@ def _compile_gemm_act(
+@@ -690,0 +799,10 @@ def _compile_gemm_act(
++    if gemm_cls_name == "grouped_n_contract":
++        validate_grouped_n_contract_device(
++            main_output_transform_group, device_capacity
++        )
 +    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group != 2:
-+        if device_capacity[0] != 10:
-+            raise NotImplementedError(
-+                "grouped_n_contract groups larger than 2 are currently validated "
-+                "only on SM100"
-+            )
 +        GemmCls = {4: GemmGroupedNContract4Sm100}.get(main_output_transform_group)
 +        if GemmCls is None:
 +            raise NotImplementedError(
 +                f"unsupported grouped_n_contract group={main_output_transform_group}"
 +            )
-@@ -706 +810,5 @@ def _compile_gemm_act(
+@@ -706 +824,5 @@ def _compile_gemm_act(
 -    pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
 +    pa_n = (
 +        cute.sym_int()
 +        if gemm_cls_name in ("gated", "grouped_n_contract")
 +        else n
 +    )
-@@ -720 +828,3 @@ def _compile_gemm_act(
+@@ -720 +842,3 @@ def _compile_gemm_act(
 -        pa_leading_dim = 1 if gemm_cls_name == "gated" else pa_leading
 +        pa_leading_dim = (
 +            1 if gemm_cls_name in ("gated", "grouped_n_contract") else pa_leading
 +        )
-@@ -900,0 +1011 @@ def gemm_act(
+@@ -900,0 +1025 @@ def gemm_act(
 +    main_output_transform_group: int | None = None,
-@@ -950,0 +1062,16 @@ def gemm_act(
+@@ -950,0 +1076,16 @@ def gemm_act(
 +    if main_output_transform_group is not None:
 +        if main_output_transform_group not in (2, 4):
 +            raise NotImplementedError(
@@ -141,21 +156,12 @@ index f6bbf7f..a4fee8f 100644
 +                "grouped_n_contract does not compose with auxiliary outputs"
 +            )
 +        gemm_cls_name = "grouped_n_contract"
-@@ -957,0 +1085,4 @@ def gemm_act(
+@@ -957,0 +1099,4 @@ def gemm_act(
 +    if main_output_transform_group is not None and any(
 +        tensor.stride(-1) != 1 for tensor in postact_tensors
 +    ):
 +        raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
-@@ -1034,0 +1166,10 @@ def gemm_act(
-+    if main_output_transform_group is not None:
-+        if device_capacity[0] == 12:
-+            raise NotImplementedError(
-+                "grouped_n_contract is not yet supported on SM120"
-+            )
-+        if main_output_transform_group > 2 and device_capacity[0] != 10:
-+            raise NotImplementedError(
-+                "grouped_n_contract groups larger than 2 are currently validated "
-+                "only on SM100"
-+            )
-@@ -1158,0 +1300 @@ def gemm_act(
+@@ -1034,0 +1180 @@ def gemm_act(
++    validate_grouped_n_contract_device(main_output_transform_group, device_capacity)
+@@ -1158,0 +1305 @@ def gemm_act(
 +        0 if main_output_transform_group is None else main_output_transform_group,
