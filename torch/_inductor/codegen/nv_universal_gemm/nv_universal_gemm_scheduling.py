@@ -745,23 +745,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         buffer.get_name(), group, 1, "online_softmax", "identity"
                     )
             if isinstance(buffer.data, Pointwise):
-                m, n = gemm_node.get_size()
-                output_size = buffer.get_size()
-                if len(output_size) != 3:
+                layout = GroupedReductionLayout.from_output_shape(
+                    buffer.get_size(), gemm_node.get_size()
+                )
+                if layout is None or layout.axis != 1:
                     return None
-                out_m, out_groups, group = output_size
-                try:
-                    group = V.graph.sizevars.optimization_hint(group)
-                except Exception:
-                    return None
+                group = layout.group_size
                 store = GemmEpilogueIRAnalysis.from_buffers((buffer,)).store(
                     buffer.get_name()
                 )
                 operations = operation_names_ir(store) if store is not None else ()
                 if (
                     group <= 32
-                    and V.graph.sizevars.statically_known_equals(out_m, m)
-                    and V.graph.sizevars.statically_known_equals(out_groups * group, n)
                     and frozenset(("exp", "truediv")).issubset(operations)
                     and nodes[0].read_writes.reads
                     and all(
@@ -877,26 +872,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     if scheduler_node is not None
                     else []
                 )
-                try:
-                    m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
-                    output_size = tuple(
-                        map(V.graph.sizevars.optimization_hint, buffer.get_size())
-                    )
-                except Exception:
-                    continue
-                if (
-                    len(output_size) == 3
-                    and output_size[0] * output_size[1] == m
-                    and output_size[2] == n
-                ):
-                    group, axis = output_size[1], 0
-                elif (
-                    len(output_size) == 3
-                    and output_size[0] == m
-                    and output_size[1] * output_size[2] == n
-                ):
-                    group, axis = output_size[2], 1
+                layout = GroupedReductionLayout.from_output_shape(
+                    buffer.get_size(), gemm_node.get_size()
+                )
+                if layout is not None:
+                    group, axis = layout.group_size, layout.axis
                 else:
+                    try:
+                        _, n = map(
+                            V.graph.sizevars.optimization_hint, gemm_node.get_size()
+                        )
+                    except Exception:
+                        continue
                     group = len(reads) - 1
                     if group <= 1 or group > 4:
                         continue
@@ -966,25 +953,19 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if buffers is None:
             return None
         analysis = GemmEpilogueIRAnalysis.from_buffers(buffers)
-        try:
-            m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
-        except Exception:
-            return None
         finalizers = []
         for buffer in buffers:
             if not isinstance(buffer.data, Pointwise):
                 continue
-            try:
-                out_m, out_groups, group = map(
-                    V.graph.sizevars.optimization_hint, buffer.get_size()
-                )
-            except Exception:
+            layout = GroupedReductionLayout.from_output_shape(
+                buffer.get_size(), gemm_node.get_size()
+            )
+            if layout is None or layout.axis != 1:
                 continue
+            group = layout.group_size
             store = analysis.store(buffer.get_name())
             if (
                 1 < group <= 32
-                and out_m == m
-                and out_groups * group == n
                 and store is not None
                 and frozenset(("mul", "reciprocal")).issubset(operation_names_ir(store))
             ):
