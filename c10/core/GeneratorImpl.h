@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <tuple>
 
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
@@ -77,6 +78,15 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   virtual void graphsafe_set_state(
       const c10::intrusive_ptr<c10::GeneratorImpl>& new_state);
   virtual c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const;
+  // Reserves `increment` Philox outputs and returns 1-element int64 tensors
+  // (seed, offset, intragraph_offset); the values a kernel launched now should
+  // consume are (seed, offset + intragraph_offset). Only supported by
+  // Philox-based generators.
+  virtual std::tuple<
+      c10::intrusive_ptr<c10::TensorImpl>,
+      c10::intrusive_ptr<c10::TensorImpl>,
+      c10::intrusive_ptr<c10::TensorImpl>>
+  philox_state(uint64_t increment);
   Device device() const;
 
   // See Note [Acquire lock when using random generators]
