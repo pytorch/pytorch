@@ -1224,32 +1224,34 @@ class FlexGemmEpilogueEmitter:
         self.env[node] = lowered_reduce
 
     def lower_mx_scale(self, node: torch.fx.Node) -> bool:
-        """Lower compact MX scale encoding before broadcasting the stored value."""
-        if (
-            self.feed_main is not None
-            or not is_shape_preserving_pointwise_node(node)
-            or _cute_op_name(node.target) != "mx_e8m0_scale"
-            or not node.args
-            or not isinstance(node.args[0], torch.fx.Node)
-        ):
+        """Encode a stored MX scale before broadcasting its compact reduction.
+
+        Feed-main reductions arrive as already-broadcast epilogue parameters, so
+        their scale operation follows the ordinary pointwise lowering path.
+        """
+        if _cute_op_name(node.target) != "mx_e8m0_scale":
             return False
-        reduction = reduction_from_node(node.args[0])
-        if (
-            reduction is None
-            or not isinstance(reduction[0], torch.fx.Node)
-            or reduction[0] not in self.grouped_tensors
-        ):
+        if self.feed_main is not None:
+            return False
+        source = node.all_input_nodes[0]
+        reduction = reduction_from_node(source)
+        if reduction is None:
+            return False
+        reduction_input = reduction[0]
+        if not isinstance(reduction_input, torch.fx.Node):
+            return False
+        layout = self.grouped_tensors.get(reduction_input)
+        if layout is None:
             return False
         node_args = tuple(_cute_arg(arg, self.env) for arg in node.args)
         node_kwargs = {
             key: _cute_arg(value, self.env) for key, value in node.kwargs.items()
         }
         self.env[node] = _cute_call(node.target, node_args, node_kwargs)
-        reduction_input = reduction[0]
         _, self.store_sources[node] = _keepdim_and_broadcast(
             self.kernel,
             self.env[node],
-            self.grouped_tensors[reduction_input],
+            layout,
             _cute_arg(reduction_input, self.env),
         )
         return True

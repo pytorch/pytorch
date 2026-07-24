@@ -136,24 +136,26 @@ def flex_gemm_body_decomposition_table(
 
 def normalize_mx_scale_rounding(rounding: str | None) -> str:
     """Resolve the MX scale-rounding recipe."""
-    if rounding is None:
-        return "rceil"
-    if rounding not in ("floor", "rceil"):
-        raise ValueError(
-            f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
-        )
-    return rounding
+    match rounding:
+        case None:
+            return "rceil"
+        case "floor" | "rceil":
+            return rounding
+        case _:
+            raise ValueError(
+                f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
+            )
 
 
 def normalize_nvfp4_scale_rounding(rounding: str | None) -> str:
     """Resolve the NVFP4 scale-rounding recipe."""
-    if rounding is None:
-        return "nearest"
-    if rounding != "nearest":
-        raise ValueError(
-            f"nvfp4_e4m3_scale rounding must be 'nearest' or None, got {rounding!r}"
-        )
-    return rounding
+    match rounding:
+        case None | "nearest":
+            return "nearest"
+        case _:
+            raise ValueError(
+                f"nvfp4_e4m3_scale rounding must be 'nearest' or None, got {rounding!r}"
+            )
 
 
 def validate_mx_scale_max_value(max_value: float) -> None:
