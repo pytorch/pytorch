@@ -215,6 +215,13 @@ def side_effect_func(x: torch.Tensor):
     print(x)
 
 
+@torch.fx.wrap
+def wrapped_optional_typing_dict(
+    value: dict[int, tuple[torch.Tensor, torch.Tensor]] | None,
+):
+    return value
+
+
 def _enrich_profiler_traces(prof):
     """
     Helper function to extract and augment profiler events with stack traces.
@@ -2580,6 +2587,25 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
             return a[0]
 
         torch.jit.script(symbolic_trace(forward))
+
+    def test_optional_typing_dict_placeholder_annotation_python314(self):
+        class OptionalTypingDictModule(torch.nn.Module):
+            def forward(
+                self,
+                value: typing.Optional[  # noqa: UP045
+                    typing.Dict[  # noqa: UP006
+                        int, typing.Tuple[torch.Tensor, torch.Tensor]  # noqa: UP006
+                    ]
+                ],
+            ):
+                return wrapped_optional_typing_dict(value)
+
+        traced = symbolic_trace(OptionalTypingDictModule())
+
+        FileCheck().check("value : typing_Union[typing_Dict").check(
+            "typing_Tuple"
+        ).check("NoneType]").run(traced.code)
+        torch.jit.script(traced)
 
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
