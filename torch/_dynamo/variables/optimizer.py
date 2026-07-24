@@ -46,7 +46,7 @@ from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
 from .lists import ListVariable
-from .misc import GetAttrVariable
+from .misc import CallMethodVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -155,10 +155,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 raise AssertionError(
                     "OptimizerVariable requires a source for getattro_impl"
                 )
-            return GetAttrVariable(
+            return CallMethodVariable(
                 self,
                 name,
-                py_type=type(getattr(self.value, name)),
                 source=AttrSource(self.source, name),
             )
 
