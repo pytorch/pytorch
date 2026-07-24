@@ -47,20 +47,10 @@ pip3 install --pre torch torchvision torchaudio --index-url https://download.pyt
 
 #### Previous Versions
 
-**v2.11.0**
+For previous PyTorch releases with Intel GPU (XPU) support, refer to the [previous versions](https://pytorch.org/get-started/previous-versions/) page and use the `xpu` index URL:
 
 ```bash
-pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/xpu
-```
-
-**v2.10.0**
-
-```bash
-pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/xpu
-```
-
-```{note}
-For older wheels, please refer to the [previous versions](https://pytorch.org/get-started/previous-versions/) page and ensure you use the `xpu` index URL.
+pip install torch==<version> torchvision==<version> torchaudio==<version> --index-url https://download.pytorch.org/whl/xpu
 ```
 
 ### From Source
