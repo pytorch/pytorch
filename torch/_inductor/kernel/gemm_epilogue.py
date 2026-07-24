@@ -58,6 +58,72 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True)
+class GemmReductionConfig:
+    """Describe a grouped reduction recognized during scheduler analysis."""
+
+    output_name: str
+    group: int
+    axis: int
+    reduction_type: str
+    source_type: str
+
+    @property
+    def contract(self) -> tuple[int, int, str, str]:
+        return self.group, self.axis, self.reduction_type, self.source_type
+
+    def replace(
+        self,
+        *,
+        output_name: str | None = None,
+        reduction_type: str | None = None,
+        source_type: str | None = None,
+    ) -> "GemmReductionConfig":
+        return dataclasses.replace(
+            self,
+            output_name=self.output_name if output_name is None else output_name,
+            reduction_type=(
+                self.reduction_type if reduction_type is None else reduction_type
+            ),
+            source_type=self.source_type if source_type is None else source_type,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmReductionPlan:
+    """Describe grouped reduction outputs passed from lowering to codegen."""
+
+    reduction_output: str | None
+    group: int
+    axis: int
+    reduction_type: str
+    source_type: str
+    primary_output: str
+    feeds_main: bool = False
+    feed_output: str | None = None
+    secondary_feed_output: str | None = None
+    secondary_feed_type: str | None = None
+
+    @property
+    def geometry(self) -> tuple[int, int]:
+        return self.group, self.axis
+
+    @property
+    def auxiliary_outputs(self) -> tuple[str, ...]:
+        return tuple(
+            output
+            for output in (
+                self.reduction_output,
+                self.feed_output,
+                self.secondary_feed_output,
+            )
+            if output is not None
+        )
+
+    def with_primary_output(self, output: str) -> "GemmReductionPlan":
+        return dataclasses.replace(self, primary_output=output)
+
+
+@dataclasses.dataclass(frozen=True)
 class GroupedReductionLayout:
     """Describe a grouped view over one axis of a two-dimensional GEMM output."""
 
