@@ -1882,8 +1882,14 @@ using SyclIpcHandle =
     sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
 
 struct IpcMemoryCache {
+  struct CacheEntry {
+    c10::DeviceIndex device{-1};
+    void* ptr{nullptr};
+    std::weak_ptr<void> wp;
+  };
+
   std::mutex cache_mutex;
-  ska::flat_hash_map<std::string, std::weak_ptr<void>> handle_to_ptr;
+  ska::flat_hash_map<std::string, CacheEntry> handle_to_ptr;
 
   std::shared_ptr<void> getOrOpenHandle(
       const SyclIpcHandle& handle_data,
@@ -1895,11 +1901,15 @@ struct IpcMemoryCache {
 
     auto it = handle_to_ptr.find(handle_key);
     if (it != handle_to_ptr.end()) {
-      auto shared_ptr = it->second.lock();
-      if (shared_ptr) {
-        return shared_ptr;
+      if (it->second.device != device) {
+        handle_to_ptr.erase(it);
+      } else {
+        auto shared_ptr = it->second.wp.lock();
+        if (shared_ptr) {
+          return shared_ptr;
+        }
+        handle_to_ptr.erase(it);
       }
-      handle_to_ptr.erase(it);
     }
 
     c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
@@ -1952,16 +1962,25 @@ struct IpcMemoryCache {
       TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
     }
 
-    auto shared_ptr = std::shared_ptr<void>(raw_ptr, [device](void* ptr) {
-      try {
-        c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
-        sycl::ext::oneapi::experimental::ipc_memory::close(ptr);
-      } catch (const std::exception& e) {
-        TORCH_WARN("XPU IPC close failed: ", e.what());
-      }
-    });
+    auto shared_ptr = std::shared_ptr<void>(
+        raw_ptr, [this, device, handle_key](void* ptr) {
+          {
+            std::lock_guard<std::mutex> deleter_lock(cache_mutex);
+            auto it = handle_to_ptr.find(handle_key);
+            if (it != handle_to_ptr.end() && it->second.ptr == ptr) {
+              handle_to_ptr.erase(it);
+            }
+          }
 
-    handle_to_ptr[handle_key] = shared_ptr;
+          try {
+            c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
+            sycl::ext::oneapi::experimental::ipc_memory::close(ptr);
+          } catch (const std::exception& e) {
+            TORCH_WARN("XPU IPC close failed: ", e.what());
+          }
+        });
+
+    handle_to_ptr[handle_key] = CacheEntry{device, raw_ptr, shared_ptr};
     return shared_ptr;
   }
 };
