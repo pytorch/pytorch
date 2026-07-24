@@ -349,10 +349,8 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
   // emit kernel writes through a tensor whose stride matches `sorted_values`.
   Tensor unique_values = at::empty({num_unique}, work.options());
   Tensor bound_pos = at::empty({num_unique}, self_flat.options().dtype(kLong));
-  Tensor counts = return_counts ? at::empty({num_unique}, self_flat.options().dtype(kLong))
-                                : at::empty({0}, self_flat.options().dtype(kLong));
-  Tensor inverse = return_inverse ? at::empty({numel}, self_flat.options().dtype(kLong))
-                                  : at::empty({0}, self_flat.options().dtype(kLong));
+  auto counts =  at::empty({return_counts ? num_unique : 0L}, self_flat.options().dtype(kLong));
+  auto inverse = at::empty({return_inverse ? numel : 0L}, self_flat.options().dtype(kLong));
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {

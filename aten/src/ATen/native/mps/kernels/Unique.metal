@@ -9,9 +9,6 @@ kernel void unique_mark_boundaries(
     device int* mask [[buffer(1)]],
     constant ulong& numel [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
-  if (ulong(tid) >= numel) {
-    return;
-  }
   if (tid == 0) {
     mask[0] = 1;
   } else {
@@ -34,9 +31,6 @@ kernel void unique_emit(
     device long* bound_pos [[buffer(4)]],
     constant ulong& numel [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
-  if (ulong(tid) >= numel) {
-    return;
-  }
   if (mask[tid]) {
     long k = long(scan[tid]) - 1;
     unique_values[k] = sorted[tid];
@@ -51,9 +45,6 @@ kernel void unique_counts(
     constant ulong& num_unique [[buffer(2)]],
     constant ulong& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  if (ulong(tid) >= num_unique) {
-    return;
-  }
   long next = (ulong(tid + 1) == num_unique) ? long(numel) : bound_pos[tid + 1];
   counts[tid] = next - bound_pos[tid];
 }
@@ -67,9 +58,6 @@ kernel void unique_inverse(
     device long* inverse [[buffer(2)]],
     constant ulong& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  if (ulong(tid) >= numel) {
-    return;
-  }
   inverse[sort_idx[tid]] = long(scan[tid]) - 1;
 }
 
