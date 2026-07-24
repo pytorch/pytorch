@@ -407,6 +407,41 @@ class TestReadOnlyInputs(unittest.TestCase):
         self.assertIn("mX_s.data = const_cast<void*>(mX.const_data_ptr());", src)
         self.assertIn("mOut_s.data = mOut.data_ptr();", src)
 
+    def test_triton_c_launcher(self):
+        sc = {
+            "prefix": "p",
+            "kind": "triton",
+            "symbol": "sym",
+            "args": [
+                {"name": "a", "kind": "tensor", "read_only": True},
+                {"name": "out", "kind": "tensor"},
+            ],
+        }
+        src = toolchains.get_toolchain("triton").gen_launcher(sc)
+        self.assertIn("reinterpret_cast<CUdeviceptr>(a.const_data_ptr())", src)
+        self.assertIn("reinterpret_cast<CUdeviceptr>(out.data_ptr())", src)
+
+    def test_cubin_launcher(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "p.cubin"), "wb") as f:
+                f.write(b"x")
+            sc = {
+                "prefix": "p",
+                "kind": "triton_cubin",
+                "symbol": "sym",
+                "shared": 0,
+                "block_x": 128,
+                "launch": {"grid_x": "1"},
+                "_dir": d,
+                "args": [
+                    {"name": "a", "kind": "tensor", "read_only": True},
+                    {"name": "out", "kind": "tensor"},
+                ],
+            }
+            src = toolchains.get_toolchain("triton_cubin").gen_launcher(sc)
+        self.assertIn("reinterpret_cast<CUdeviceptr>(a.const_data_ptr());", src)
+        self.assertIn("reinterpret_cast<CUdeviceptr>(out.data_ptr());", src)
+
 
 class TestSourceStaleness(unittest.TestCase):
     def test_sources_current_roundtrip(self):
@@ -476,6 +511,61 @@ class TestToolchainRegistry(unittest.TestCase):
         for tc in toolchains.TOOLCHAINS.values():
             for pattern in tc.link_source_globs:
                 self.assertIn(pattern.split("/")[-1], cmake)
+
+
+CUBIN_SIDECAR = {
+    "prefix": "fakemm_f32_rc",
+    "kind": "triton_cubin",
+    "symbol": "_fakemm_kernel",
+    "spec": {"dtype": "float32"},
+    "launch": {"grid_x": "B_dim*((M+31)/32)"},
+    "shared": 512,
+    "block_x": 128,
+    "args": [
+        {"name": "a", "kind": "tensor"},
+        {"name": "B_dim", "kind": "scalar", "ctype": "int32_t"},
+        {"name": "M", "kind": "scalar", "ctype": "int32_t"},
+    ],
+}
+
+
+class TestCubinLauncher(unittest.TestCase):
+    def _gen(self, tmpdir):
+        import os as _os
+
+        with open(_os.path.join(tmpdir, "fakemm_f32_rc.cubin"), "wb") as f:
+            f.write(b"\x7fELF-fake")
+        sc = dict(CUBIN_SIDECAR, _dir=tmpdir)
+        return toolchains.get_toolchain("triton_cubin").gen_launcher(sc)
+
+    def test_generic_driver_launch(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._gen(d)
+        # Embedded cubin bytes; per-device call_once load; TORCH_CHECK
+        # (not exit()) error handling -- the two fixes over the C
+        # template path.
+        self.assertIn("const unsigned char fakemm_f32_rc_cubin[]", src)
+        self.assertIn("c10::call_once(fakemm_f32_rc_once[device]", src)
+        self.assertIn(
+            'cuModuleGetFunction(&fakemm_f32_rc_fn[device], mod, "_fakemm_kernel")', src
+        )
+        self.assertNotIn("exit(", src)
+        # Grid exprs from the sidecar; num_warps*32 block; shared bytes.
+        self.assertIn("const unsigned gx = B_dim*((M+31)/32);", src)
+        self.assertIn("128, 1, 1, 512, stream", src)
+        # Triton ABI: hidden scratch pointers appended after visible args.
+        self.assertIn("&M, &global_scratch, &profile_scratch}", src)
+        # Same launcher signature invariant as every other toolchain.
+        self.assertIn(
+            "void launch_fakemm_f32_rc(const at::Tensor& a, int32_t B_dim, int32_t M, cudaStream_t stream)",
+            src,
+        )
+
+    def test_no_link_sources(self):
+        # Cubin is embedded: nothing for CMake to compile beyond the
+        # generated .cpp itself.
+        tc = toolchains.get_toolchain("triton_cubin")
+        self.assertEqual(tc.link_source_globs, ())
 
 
 class TestEndToEndGeneration(unittest.TestCase):

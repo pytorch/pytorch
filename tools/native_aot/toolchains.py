@@ -41,6 +41,10 @@ the AOT lib), so torch is always importable during export.
 
 from __future__ import annotations
 
+import glob
+import os
+import re
+
 
 class Toolchain:
     kind: str = ""
@@ -188,7 +192,281 @@ void launch_{prefix}({tparams}, cudaStream_t stream) {{
         )
 
 
-TOOLCHAINS: dict[str, Toolchain] = {tc.kind: tc for tc in (CuteDslToolchain(),)}
+class TritonToolchain(Toolchain):
+    """triton.tools.compile: a self-contained .c (cubin embedded, grid
+    baked in) with a flat CUresult entry point; cubin load is lazy inside
+    the entry and current-context-only (multi-GPU unsupported for now)."""
+
+    kind = "triton"
+    artifact_exts = (".c", ".h")
+    link_source_globs = ("*/*.c",)
+    launcher_includes = ("#include <cuda.h>",)
+
+    REQUIRED_BUILD_KEYS = ("kernel_path", "kernel_name", "signature", "grid", "args")
+
+    # Entry points are C symbols (the specialization-hash suffix is
+    # recorded in the sidecar as "symbol" at export time).
+    LAUNCHER_TMPL = """\
+extern "C" CUresult {symbol}(CUstream stream, {csig});
+
+void launch_{prefix}({tparams}, cudaStream_t stream) {{
+  CUresult rc = {symbol}(stream, {call_args});
+  TORCH_CHECK(rc == CUDA_SUCCESS, "{prefix} launch failed with CUresult ", static_cast<int>(rc));
+}}
+"""
+
+    def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
+        from pathlib import Path
+
+        from triton.tools.compile import compile_kernel, CompileArgs
+
+        # Explicit arch: activate a fixed-target driver so neither
+        # create_binder nor compile touches a device. (CompileArgs.target
+        # as a string is unusable: compile.py str-splits it into a
+        # GPUTarget with a STR arch, which breaks ptxas selection.)
+        if arch:
+            self._activate_triton_target(arch)
+        compile_kernel(
+            CompileArgs(
+                path=b["kernel_path"],
+                kernel_name=b["kernel_name"],
+                signature=b["signature"],
+                grid=b["grid"],
+                num_warps=b.get("num_warps", 4),
+                num_stages=b.get("num_stages", 3),
+                out_name=b["prefix"],
+                out_path=Path(out_dir) / b["prefix"],
+            )
+        )
+        # compile_kernel appends a specialization-hash suffix to both the
+        # file names and the C symbol; normalize the files to
+        # <prefix>.{c,h} and record the real symbol for the launcher.
+        prefix = b["prefix"]
+        symbol = None
+        for path in glob.glob(os.path.join(out_dir, f"{prefix}.*_*.*")):
+            ext = os.path.splitext(path)[1]
+            dst = os.path.join(out_dir, prefix + ext)
+            os.replace(path, dst)
+            if ext == ".h":
+                with open(dst) as hf:
+                    m = re.search(rf"CUresult (\w*{prefix}\w*)\(CUstream", hf.read())
+                symbol = m.group(1) if m else None
+        if symbol is None:
+            raise RuntimeError(
+                f"{prefix}: could not find entry symbol in generated header"
+            )
+        return {"symbol": symbol, "args": b["args"]}
+
+    def kernel_includes(self, sidecar: dict) -> list[str]:
+        return []  # cubin load is inside the .c; only <cuda.h> types needed
+
+    def gen_launcher(self, sidecar: dict) -> str:
+        prefix = sidecar["prefix"]
+        args = sidecar["args"]
+        csig, tparams, call = [], [], []
+        for a in args:
+            if a["kind"] == "tensor":
+                csig.append(f"CUdeviceptr {a['name']}")
+                tparams.append(f"const at::Tensor& {a['name']}")
+                # read_only inputs go through const_data_ptr: a mutable
+                # data_ptr() would materialize copy-on-write tensors.
+                ptr = (
+                    f"{a['name']}.const_data_ptr()"
+                    if a.get("read_only")
+                    else f"{a['name']}.data_ptr()"
+                )
+                call.append(f"reinterpret_cast<CUdeviceptr>({ptr})")
+            else:
+                csig.append(f"{a['ctype']} {a['name']}")
+                tparams.append(f"{a['ctype']} {a['name']}")
+                call.append(a["name"])
+        return self.LAUNCHER_TMPL.format(
+            prefix=prefix,
+            symbol=sidecar["symbol"],
+            csig=", ".join(csig),
+            tparams=", ".join(tparams),
+            call_args=", ".join(call),
+        )
+
+
+class TritonFromCubinToolchain(TritonToolchain):
+    """Triton compiled to a RAW cubin, launched by a generic driver-API
+    launcher that this toolchain generates -- no triton.tools.compile C
+    template. Spike for the "generic cubin launcher" direction: any
+    compiler that yields SASS + (symbol, shared bytes) metadata can share
+    this launcher shape. Fixes the C-template path's two limitations:
+    module load is per-device (call_once over cuModuleLoadData at first
+    use on each device) and errors surface as TORCH_CHECK, not exit().
+
+    Builder contract: same keys as TritonToolchain, minus ``grid``
+    (string baked into C) and plus ``launch``: {"grid_x"/"grid_y"/
+    "grid_z": C++ exprs over the named scalar args, "block":
+    num_warps*32 threads is derived}. The cubin is embedded in the
+    generated .cpp as a byte array, so deployment stays a single .so.
+    """
+
+    kind = "triton_cubin"
+    artifact_exts = (".cubin",)
+    link_source_globs = ()  # cubin bytes are embedded in the generated .cpp
+    launcher_includes = ("#include <cuda.h>",)
+
+    REQUIRED_BUILD_KEYS = ("kernel_path", "kernel_name", "signature", "launch", "args")
+
+    LAUNCHER_TMPL = """\
+namespace {{
+// {prefix}: raw cubin ({cubin_len} bytes), embedded; loaded per device on
+// first use. Generic driver-API launch: any SASS-emitting toolchain can
+// share this shape.
+const unsigned char {prefix}_cubin[] = {{{cubin_bytes}}};
+constexpr int kMaxDevices = 64;
+CUfunction {prefix}_fn[kMaxDevices] = {{}};
+c10::once_flag {prefix}_once[kMaxDevices];
+
+CUfunction {prefix}_get(int device) {{
+  TORCH_CHECK(device >= 0 && device < kMaxDevices, "device index ", device);
+  c10::call_once({prefix}_once[device], [&] {{
+    CUmodule mod = nullptr;
+    CUresult rc = cuModuleLoadData(&mod, {prefix}_cubin);
+    TORCH_CHECK(rc == CUDA_SUCCESS, "{prefix}: cuModuleLoadData failed with CUresult ", static_cast<int>(rc));
+    rc = cuModuleGetFunction(&{prefix}_fn[device], mod, "{symbol}");
+    TORCH_CHECK(rc == CUDA_SUCCESS, "{prefix}: cuModuleGetFunction failed with CUresult ", static_cast<int>(rc));
+  }});
+  return {prefix}_fn[device];
+}}
+}} // namespace
+
+void launch_{prefix}({tparams}, cudaStream_t stream) {{
+{arg_decls}
+  // Triton kernel ABI appends two hidden scratch pointers after the
+  // visible arguments (see triton/tools/compile.py arg_pointers).
+  CUdeviceptr global_scratch = 0;
+  CUdeviceptr profile_scratch = 0;
+  void* kernel_args[] = {{{arg_ptrs}, &global_scratch, &profile_scratch}};
+  const unsigned gx = {grid_x};
+  const unsigned gy = {grid_y};
+  const unsigned gz = {grid_z};
+  if (gx * gy * gz == 0) return;
+  int device = -1;
+  TORCH_CHECK(cudaGetDevice(&device) == cudaSuccess, "{prefix}: cudaGetDevice failed");
+  CUresult rc = cuLaunchKernel({prefix}_get(device), gx, gy, gz,
+                               {block_x}, 1, 1, {shared}, stream, kernel_args, nullptr);
+  TORCH_CHECK(rc == CUDA_SUCCESS, "{prefix} launch failed with CUresult ", static_cast<int>(rc));
+}}
+"""
+
+    def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
+        import triton
+        from triton.backends.compiler import GPUTarget
+
+        kernel_mod = _load_module_by_path("kernel", b["kernel_path"])
+        kernel = getattr(kernel_mod, b["kernel_name"])
+
+        sig = [s.strip() for s in b["signature"].split(",")]
+
+        def _const(s: str):
+            try:
+                return int(s)
+            except ValueError:
+                return None
+
+        constants = {
+            kernel.arg_names[i]: _const(s)
+            for i, s in enumerate(sig)
+            if _const(s) is not None
+        }
+        arg_types = {
+            kernel.arg_names[i]: s for i, s in enumerate(sig) if _const(s) is None
+        }
+
+        if arch:
+            target = self._activate_triton_target(arch)
+        else:
+            import torch
+
+            cap = torch.cuda.get_device_capability()
+            target = GPUTarget("cuda", cap[0] * 10 + cap[1], 32)
+        src = triton.compiler.ASTSource(
+            fn=kernel, constexprs=constants, signature=arg_types
+        )
+        compiled = triton.compile(
+            src,
+            target=target,
+            options={
+                "num_warps": b.get("num_warps", 4),
+                "num_stages": b.get("num_stages", 3),
+            },
+        )
+        with open(os.path.join(out_dir, b["prefix"] + ".cubin"), "wb") as f:
+            f.write(compiled.asm["cubin"])
+        return {
+            "args": b["args"],
+            "launch": b["launch"],
+            "symbol": compiled.metadata.name,
+            "shared": compiled.metadata.shared,
+            "block_x": 32 * b.get("num_warps", 4),
+        }
+
+    def kernel_includes(self, sidecar: dict) -> list[str]:
+        return []
+
+    def gen_launcher(self, sidecar: dict) -> str:
+        # The cubin is read at GENERATION time from next to the sidecar
+        # and embedded; the sidecar carries its own directory.
+        cubin_path = os.path.join(sidecar["_dir"], sidecar["prefix"] + ".cubin")
+        with open(cubin_path, "rb") as f:
+            data = f.read()
+        cubin_bytes = ",".join(str(x) for x in data)
+
+        args = sidecar["args"]
+        tparams, decls, ptrs = [], [], []
+        for a in args:
+            n = a["name"]
+            if a["kind"] == "tensor":
+                tparams.append(f"const at::Tensor& {n}")
+                # read_only inputs go through const_data_ptr: a mutable
+                # data_ptr() would materialize copy-on-write tensors.
+                ptr = (
+                    f"{n}.const_data_ptr()" if a.get("read_only") else f"{n}.data_ptr()"
+                )
+                decls.append(
+                    f"  CUdeviceptr {n}_p = reinterpret_cast<CUdeviceptr>({ptr});"
+                )
+                ptrs.append(f"&{n}_p")
+            else:
+                tparams.append(f"{a['ctype']} {n}")
+                ptrs.append(f"&{n}")
+        launch = sidecar["launch"]
+        return self.LAUNCHER_TMPL.format(
+            prefix=sidecar["prefix"],
+            symbol=sidecar["symbol"],
+            cubin_len=len(data),
+            cubin_bytes=cubin_bytes,
+            tparams=", ".join(tparams),
+            arg_decls="\n".join(decls),
+            arg_ptrs=", ".join(ptrs),
+            grid_x=launch["grid_x"],
+            grid_y=launch.get("grid_y", "1"),
+            grid_z=launch.get("grid_z", "1"),
+            block_x=sidecar["block_x"],
+            shared=sidecar["shared"],
+        )
+
+
+def _load_module_by_path(name: str, path: str):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module from {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+TOOLCHAINS: dict[str, Toolchain] = {
+    tc.kind: tc
+    for tc in (CuteDslToolchain(), TritonToolchain(), TritonFromCubinToolchain())
+}
 
 
 def get_toolchain(kind: str) -> Toolchain:
