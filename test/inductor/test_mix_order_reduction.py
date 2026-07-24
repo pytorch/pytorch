@@ -122,10 +122,9 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("shape", ((4096, 8192), (4096, 16384), (8192, 16384)))
     def test_wide_reduction_fuses_in_strict_mode(self, shape):
-        """A wide reduction (large ncol, nrow < ncol*2) should use mix-order
-        fusion in the default (strict) mode. Fusion now triggers when ncol is
-        wide enough for an efficient per-row persistent reduction.
-        """
+        """Wide reductions (large ncol, nrow < ncol*2) should use mix-order
+        fusion in the default (strict) mode, now that the `nrow >= ncol*2`
+        gate is removed."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -145,11 +144,34 @@ class MixOrderReductionTest(TestBase):
             f"wide reduction {shape} should use mix-order fusion in strict mode",
         )
 
+    @parametrize("shape", ((6144, 4000), (8192, 6144)))
+    def test_flat_reduction_fuses_in_strict_mode(self, shape):
+        """A relatively flat reduction (nrow >= 4096, nrow < ncol*2) should use
+        mix-order fusion in the default (strict) mode, now that the
+        `nrow >= ncol*2` gate is removed."""
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        M, N = shape
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=torch.bfloat16)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            1,
+            metrics.codegen_mix_order_reduction,
+            f"flat reduction {shape} should use mix-order fusion in strict mode",
+        )
+
     def test_wide_reduction_respects_row_floor(self):
-        """The wide-reduction path still requires nrow >= 4096: too few rows
-        lacks the parallelism to split the other reduction across, so the shape
-        is left unfused in strict mode (guards against over-fusing 2048x8192).
-        """
+        """Strict mode still requires nrow >= 4096: with too few rows there is
+        not enough parallelism to split the other reduction across, so the
+        shape is left unfused (guards against over-fusing 2048x8192)."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 

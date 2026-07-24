@@ -401,21 +401,9 @@ class MixOrderReduction:
             ):
                 return False
 
-            # Fuse when wide (large ncol => the per-row persistent reduction is
-            # efficient) or tall (nrow >= ncol*2 => the other reduction splits
-            # well across rows).
-            wide_enough = V.graph.sizevars.evaluate_expr(
-                sympy.Ge(ncol, 4096),
-                size_oblivious=True,
-                fallback_value=False,
-            )
-            tall_enough = V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, ncol * 2),
-                size_oblivious=True,
-                fallback_value=False,
-            )
-            if not (wide_enough or tall_enough):
-                return False
+            # Don't gate on the nrow/ncol ratio: mix-order reduction can also
+            # be helpful on relatively flat inputs, and a `nrow >= ncol * 2`
+            # gate would reject profitable shapes.
 
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
