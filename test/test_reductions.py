@@ -2451,6 +2451,7 @@ class TestReductions(TestCase):
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
     @onlyAccelerator
+    @skipIfMPS
     # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
