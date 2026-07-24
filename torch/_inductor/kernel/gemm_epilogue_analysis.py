@@ -59,44 +59,6 @@ FEED_MAIN_BINARY_FUNCTIONS = frozenset(
 
 
 @dataclasses.dataclass(frozen=True)
-class GemmReductionConfig:
-    output_name: str
-    group: int
-    axis: int
-    reduction_type: str
-    source_type: str
-
-    @property
-    def contract(self) -> tuple[int, int, str, str]:
-        return self.group, self.axis, self.reduction_type, self.source_type
-
-    def replace(
-        self,
-        *,
-        output_name: str | None = None,
-        reduction_type: str | None = None,
-        source_type: str | None = None,
-    ) -> "GemmReductionConfig":
-        return dataclasses.replace(
-            self,
-            output_name=self.output_name if output_name is None else output_name,
-            reduction_type=(
-                self.reduction_type if reduction_type is None else reduction_type
-            ),
-            source_type=self.source_type if source_type is None else source_type,
-        )
-
-    def as_tuple(self) -> tuple[str, int, int, str, str]:
-        return (
-            self.output_name,
-            self.group,
-            self.axis,
-            self.reduction_type,
-            self.source_type,
-        )
-
-
-@dataclasses.dataclass(frozen=True)
 class GemmLocalReduceMatch:
     """Describe a supported grouped local-reduction value found in the FX graph.
 
