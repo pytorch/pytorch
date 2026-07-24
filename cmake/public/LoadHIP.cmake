@@ -350,6 +350,7 @@ if(PYTORCH_FOUND_HIP)
 
   # Optional components.
   find_package_and_print_version(hipsparselt)  # Will be required when ready.
+  find_package_and_print_version(hipfile)
   # ROCm 8.0 and later requires libhipcxx! This should be marked as
   # 'REQUIRED' once minimal ROCm version is bumped to 8.0 or later.
   find_package_and_print_version(libhipcxx)

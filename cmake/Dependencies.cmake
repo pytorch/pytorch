@@ -1117,6 +1117,12 @@ if(USE_ROCM)
       caffe2_update_option(USE_HIPSPARSELT OFF)
     endif()
 
+    # hipfile only ships with ROCm 7.14 and above, disable the option if not found
+    if(USE_CUFILE AND NOT hipfile_FOUND)
+      caffe2_update_option(USE_CUFILE OFF)
+    endif()
+    set(CAFFE2_USE_CUFILE ${USE_CUFILE})
+
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
     # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
