@@ -27,7 +27,7 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Buffer, ChoiceCaller, is_triton, is_unaligned, Layout
+from ..ir import Buffer, ChoiceCaller, is_triton, is_unaligned, Layout, PermuteView
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -598,17 +598,20 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
 
-    flydsl_configs = get_flydsl_mm_template_kwargs(
-        layout, mat1, mat2, static_shape, is_nonzero
-    )
     if out_dtype is None:
-        for flydsl_kwargs in flydsl_configs:
-            flydsl_mm_template.maybe_append_choice(
-                choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
-                **flydsl_kwargs,
-            )
+        flydsl_configs = get_flydsl_mm_template_kwargs(
+            layout, mat1, mat2, static_shape, is_nonzero
+        )
+        if flydsl_configs:
+            flydsl_input_nodes = kernel_inputs.nodes()
+            flydsl_input_nodes[1] = PermuteView.create(flydsl_input_nodes[1], [1, 0])
+            for flydsl_kwargs in flydsl_configs:
+                flydsl_mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=flydsl_input_nodes,
+                    layout=layout,
+                    **flydsl_kwargs,
+                )
 
     if (
         out_dtype is None

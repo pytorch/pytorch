@@ -1,5 +1,6 @@
 import contextlib
 import os
+import threading
 
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
@@ -16,6 +17,7 @@ from torch._inductor.runtime.flydsl_cache import (
 
 _gemm_param = None
 _gemm_executor = None
+_gemm_init_lock = threading.Lock()
 
 
 def _inductor_tensor_arg(tensor):
@@ -42,7 +44,7 @@ def _temporary_env(updates):
     output = {{get_output()}}
     global _gemm_executor, _gemm_param
 {% if MAT2_IS_NK %}
-    # Template generation passes an [N, K] view of the RHS backing storage.
+    # Lowering passes an [N, K] view of the RHS backing storage.
     mat2_nk = mat2
 {% else %}
     mat2_nk = mat2.transpose(0, 1)
@@ -50,65 +52,60 @@ def _temporary_env(updates):
     executor = _gemm_executor
     param = _gemm_param
     if executor is not None:
-        executor(
-            output,
-            mat1,
-            mat2_nk,
-            param,
-            stream,
-        )
+        executor(output, mat1, mat2_nk, param, stream)
         return output
 
-    if param is None:
-        has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
-        if USE_HALF_TILE_INTERLEAVED:
-            has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
-        param = make_gemm_param_and_validate(
-            GEMM_M,
-            GEMM_N,
-            GEMM_K,
-            {
-                "dtype_id": GEMM_DTYPE_ID,
-                "block_m": TILE_M,
-                "block_n": TILE_N,
-                "block_k": TILE_K,
-                "stages": STAGES,
-                "m_waves": BLOCK_M_WARPS,
-                "n_waves": BLOCK_N_WARPS,
-                "group_m": GROUP_M,
-                "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
-                "has_bias": False,
-                "has_k_tail": has_k_tail,
-            },
-        )
-        assert param is not None, "unsupported FlyDSL GEMM shape/config"
-        _gemm_param = param
+    with _gemm_init_lock:
+        executor = _gemm_executor
+        param = _gemm_param
+        if executor is None:
+            if param is None:
+                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
+                if USE_HALF_TILE_INTERLEAVED:
+                    has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
+                param = make_gemm_param_and_validate(
+                    GEMM_M,
+                    GEMM_N,
+                    GEMM_K,
+                    {
+                        "dtype_id": GEMM_DTYPE_ID,
+                        "block_m": TILE_M,
+                        "block_n": TILE_N,
+                        "block_k": TILE_K,
+                        "stages": STAGES,
+                        "m_waves": BLOCK_M_WARPS,
+                        "n_waves": BLOCK_N_WARPS,
+                        "group_m": GROUP_M,
+                        "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
+                        "has_bias": False,
+                        "has_k_tail": has_k_tail,
+                    },
+                )
+                assert param is not None, "unsupported FlyDSL GEMM shape/config"
+                _gemm_param = param
 
-    ensure_flydsl_cache_dir()
-    compile_args = (
-        _inductor_tensor_arg(output),
-        _inductor_tensor_arg(mat1),
-        _inductor_tensor_arg(mat2_nk),
-        param,
-        stream,
-    )
-    if os.environ.get("COMPILE_ONLY"):
-        executor = flyc.compile(launch_gemm_gfx950, *compile_args)
-    else:
-        executor = run_cached_flydsl(
-            launch_gemm_gfx950,
-            *compile_args,
-            constexpr_param=param,
-            compiler=flyc.compile,
-            dispatch_args=(
-                output,
-                mat1,
-                mat2_nk,
+            ensure_flydsl_cache_dir()
+            compile_args = (
+                _inductor_tensor_arg(output),
+                _inductor_tensor_arg(mat1),
+                _inductor_tensor_arg(mat2_nk),
                 param,
                 stream,
-            ),
-        )
-        _gemm_executor = executor
+            )
+            if os.environ.get("COMPILE_ONLY"):
+                flyc.compile(launch_gemm_gfx950, *compile_args)
+            else:
+                executor = run_cached_flydsl(
+                    launch_gemm_gfx950,
+                    *compile_args,
+                    constexpr_param=param,
+                    compiler=flyc.compile,
+                    dispatch_args=(output, mat1, mat2_nk, param, stream),
+                )
+                _gemm_executor = executor
+            return output
+
+    executor(output, mat1, mat2_nk, param, stream)
     return output
 
 
@@ -135,9 +132,7 @@ def {{kernel_name}}_precompile(
 
     env_updates = {"COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
-        # FlyDSL's GEMM factory and backend read different arch env names.
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
-        env_updates["ARCH"] = flydsl_gpu_arch
 
     with _temporary_env(env_updates):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -155,5 +150,6 @@ def {{kernel_name}}_precompile(
                 {{kernel_name}}_main(mat1, mat2, output, stream=0)
             finally:
                 global _gemm_executor, _gemm_param
-                _gemm_executor = None
-                _gemm_param = None
+                with _gemm_init_lock:
+                    _gemm_executor = None
+                    _gemm_param = None

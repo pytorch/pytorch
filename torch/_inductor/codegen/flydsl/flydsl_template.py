@@ -10,15 +10,7 @@ from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import FlyDSLBenchmarkRequest, TensorMeta
-from ...ir import (
-    Buffer,
-    ChoiceCaller,
-    FlyDSLTemplateBuffer,
-    IRNode,
-    Layout,
-    PermuteView,
-    TensorBox,
-)
+from ...ir import Buffer, ChoiceCaller, FlyDSLTemplateBuffer, IRNode, Layout, TensorBox
 from ..common import KernelTemplate
 from .flydsl_kernel import FlyDSLTemplateKernel
 
@@ -38,7 +30,8 @@ class FlyDSLTemplate(KernelTemplate):
         super().__init__(name)
         self.source = source
         self.template = FlyDSLTemplate._template_from_string(source)
-        if name in self.all_templates:
+        existing = self.all_templates.get(name)
+        if existing is not None and existing.source != source:
             raise AssertionError(f"duplicate template name, {name}")
         FlyDSLTemplate.all_templates[name] = self
 
@@ -65,23 +58,20 @@ class FlyDSLTemplate(KernelTemplate):
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
-        if kwargs.get("MAT2_IS_NK") and len(input_nodes) >= 2:
-            input_nodes = [*input_nodes]
-            input_nodes[1] = PermuteView.create(input_nodes[1], [1, 0])
         template_kwargs = dict(kwargs)
         kernel_name = f"flydsl_{self.name}_{next(self.index_counter)}"
 
         if self.template is None:
             raise RuntimeError("Template compilation failed (Jinja2 required)")
 
-        self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
+        output_node = Buffer(name="buf_out", layout=layout)
         with patch.object(
-            V.graph, "get_dtype", KernelTemplate._fake_get_dtype(self.output_node)
+            V.graph, "get_dtype", KernelTemplate._fake_get_dtype(output_node)
         ):
             kernel = self.kernel_type(
                 kernel_name=kernel_name,
                 input_nodes=input_nodes,
-                output_node=self.output_node,
+                output_node=output_node,
             )
             code = kernel.render(self.template, **kwargs)
             log.debug("Generated FlyDSL Code:\n%s", code)
@@ -97,7 +87,7 @@ class FlyDSLTemplate(KernelTemplate):
             with kernel._patch_get_dtype_for_args():
                 arg_defs, call_args, _, _ = kernel.args.python_argdefs()
             expected_args = list(input_call_args)
-            expected_args.append(self.output_node.get_name())
+            expected_args.append(output_node.get_name())
             if list(call_args)[: len(expected_args)] != expected_args:
                 raise RuntimeError(
                     "FlyDSL template benchmark argument order changed. "
@@ -110,7 +100,7 @@ class FlyDSLTemplate(KernelTemplate):
             bmreq = FlyDSLBenchmarkRequest(
                 kernel_name=kernel_name,
                 input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
-                output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
+                output_tensor_meta=TensorMeta.from_irnodes(output_node),
                 extra_args=extra_args,
                 source_code=code,
             )

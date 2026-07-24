@@ -1,7 +1,11 @@
+import logging
 from dataclasses import asdict, dataclass
 from itertools import product
 
 import torch._inductor.config as config
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -150,8 +154,10 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
             config = _config_from_mapping(gemm_config)
             _make_gemm_param(asdict(config))
             valid_configs.append(config)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(
+                "Skipping invalid exhaustive FlyDSL config %s: %s", gemm_config, e
+            )
     return valid_configs
 
 
@@ -205,14 +211,14 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         try:
             _make_gemm_param(asdict(gemm_config))
             valid_configs.append(gemm_config)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Skipping invalid default FlyDSL config %s: %s", gemm_config, e)
     return valid_configs
 
 
 def get_gemm_configs() -> list[dict[str, int | bool]]:
     """
-    Returns the configuration set for the gfx950 FlyDSL HGEMM kernel.
+    Returns the configuration set for the gfx950 FlyDSL GEMM kernel.
 
     Shape compatibility is checked in the lowering before this function is called.
     By default, autotuning is disabled and we return only a single baseline config.
@@ -225,5 +231,9 @@ def get_gemm_configs() -> list[dict[str, int | bool]]:
     elif config.flydsl_enable_autotuning:
         configs = get_default_gemm_configs()
     else:
-        configs = [get_default_gemm_configs()[0]]
+        configs = get_default_gemm_configs()
+        if not configs:
+            log.warning("No valid default FlyDSL GEMM configuration is available")
+            return []
+        configs = configs[:1]
     return [asdict(gemm_config) for gemm_config in configs]

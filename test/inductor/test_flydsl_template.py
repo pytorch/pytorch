@@ -18,8 +18,11 @@ from torch._inductor.test_case import TestCase
 
 
 class _CacheParam:
+    def __init__(self, key="param"):
+        self.key = key
+
     def __cache_signature__(self):
-        return ("param",)
+        return (self.key,)
 
 
 class TestFlyDSLTemplate(TestCase):
@@ -111,6 +114,7 @@ class TestFlyDSLTemplate(TestCase):
                 return_value=mock.Mock(),
             ):
                 FlyDSLTemplate(name=template_name, source="template1")
+                FlyDSLTemplate(name=template_name, source="template1")
                 with self.assertRaisesRegex(
                     AssertionError, f"duplicate template name, {template_name}"
                 ):
@@ -146,13 +150,27 @@ class TestFlyDSLTemplate(TestCase):
             {
                 "FLYDSL_GPU_ARCH": "",
                 "ARCH": "",
-                "HSA_OVERRIDE_GFX_VERSION": "9.5.0",
+                "HSA_OVERRIDE_GFX_VERSION": "9.0.10",
             },
         ):
             self.assertEqual(
                 FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0),
-                "gfx950",
+                "gfx90a",
             )
+
+    def test_scheduling_ignores_generic_arch(self):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "FLYDSL_GPU_ARCH": "",
+                    "HSA_OVERRIDE_GFX_VERSION": "",
+                    "ARCH": "x86_64",
+                },
+            ),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            self.assertIsNone(FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0))
 
     def test_compiled_cache_keys_only_on_param(self):
         jit_func = SimpleNamespace()
@@ -215,6 +233,27 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compile_calls, 1)
         compiled.assert_called_once_with("second")
 
+    def test_compiled_cache_allows_parallel_configs(self):
+        jit_func = SimpleNamespace()
+        compile_barrier = threading.Barrier(2)
+
+        def compiler(*args):
+            compile_barrier.wait(5)
+            return mock.Mock()
+
+        def invoke(key):
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(key),
+                compiler=compiler,
+                dispatch_args=(),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [pool.submit(invoke, key) for key in ("first", "second")]
+            self.assertTrue(all(result.result() is not None for result in results))
+
     def test_compiled_cache_retries_after_failure(self):
         jit_func = SimpleNamespace()
         compiled = mock.Mock()
@@ -243,7 +282,7 @@ class TestFlyDSLTemplate(TestCase):
         result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), a, b)
         assertion = self.assertIn if expect_flydsl else self.assertNotIn
         assertion("async_compile.flydsl", code)
-        torch.testing.assert_close(result, fn(a, b), atol=3e-2, rtol=3e-2)
+        self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
         return code
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
@@ -256,10 +295,16 @@ class TestFlyDSLTemplate(TestCase):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
 
-        for m, n, k in ((32, 128, 128), (32, 256, 128), (48, 96, 96)):
-            with self.subTest(m=m, n=n, k=k):
-                a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-                b = torch.randn(n, k, device="cuda", dtype=torch.bfloat16)
+        cases = (
+            (torch.bfloat16, 32, 128, 128),
+            (torch.float16, 32, 128, 128),
+            (torch.bfloat16, 32, 256, 128),
+            (torch.bfloat16, 48, 96, 96),
+        )
+        for dtype, m, n, k in cases:
+            with self.subTest(dtype=dtype, m=m, n=n, k=k):
+                a = torch.randn(m, k, device="cuda", dtype=dtype)
+                b = torch.randn(n, k, device="cuda", dtype=dtype)
                 code = self._assert_compiled_mm(a, b)
                 self.assertIn(".mark_layout_dynamic()", code)
                 self.assertNotIn(".run(", code)
