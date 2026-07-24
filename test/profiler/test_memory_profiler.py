@@ -1499,10 +1499,6 @@ class TestMemoryProfilerE2EDeviceType(TestCase):
 class TestMemoryProfilerTimeline(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
-    )
     def test_memory_timeline_no_id(self, device) -> None:
         # On CPU the default behavior is to simply forward to malloc. That
         # means that when we free `x` the allocator doesn't actually know how
