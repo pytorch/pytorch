@@ -90,6 +90,21 @@ if has_triton_package():
         values = module_aliased_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
         tl.store(out + offsets, values, mask=mask)
 
+    def repr_for_codegen(*args, **kwargs):
+        return "repr"
+
+    @triton.jit(repr=repr_for_codegen)
+    def global_option_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_global_option_jit_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = global_option_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
 
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
@@ -742,6 +757,21 @@ class TestCodegenTriton(InductorTestCase):
             self.assertEqual(
                 _triton_jit_decorator_from_source(SimpleNamespace(raw_src=raw_src)),
                 "@triton.jit",
+            )
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_rejects_global_jit_decorator_option(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        msg = (
+            "global_option_jit_helper_for_codegen: @triton.jit decorator options "
+            "must be Python literals for Inductor codegen"
+        )
+        with self.assertRaisesRegex(AssertionError, msg):
+            user_defined_triton_kernel_transitive_closure_source_code(
+                root_for_global_option_jit_helper
             )
 
     def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):

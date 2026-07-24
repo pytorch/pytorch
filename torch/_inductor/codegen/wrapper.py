@@ -369,9 +369,26 @@ def _triton_jit_decorator_from_source(symbol) -> str:
                         )
                     return False
 
+                def check_triton_jit_decorator_literals(
+                    decorator: ast.Call,
+                ) -> None:
+                    try:
+                        for arg in decorator.args:
+                            ast.literal_eval(arg)
+                        for keyword in decorator.keywords:
+                            if keyword.arg is None:
+                                raise ValueError
+                            ast.literal_eval(keyword.value)
+                    except ValueError as exc:
+                        raise AssertionError(
+                            f"{symbol.__name__}: @triton.jit decorator options "
+                            "must be Python literals for Inductor codegen"
+                        ) from exc
+
                 for decorator in fn_def.decorator_list:
                     if is_triton_jit(decorator):
                         if isinstance(decorator, ast.Call):
+                            check_triton_jit_decorator_literals(decorator)
                             decorator_src = ast.get_source_segment(src, decorator)
                             func_src = ast.get_source_segment(src, decorator.func)
                             if decorator_src and func_src:
