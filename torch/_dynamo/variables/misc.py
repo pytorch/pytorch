@@ -726,7 +726,12 @@ class ExceptionVariable(VariableTracker):
         self.__traceback__ = val
         return variables.ConstantVariable.create(None)
 
-    def with_traceback(self, tx, args, kwargs):
+    def with_traceback(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         [tb] = args
         if not TracebackVariable.is_valid_traceback(tb):
             raise_type_error(tx, "__traceback__ must be a traceback object or None")
@@ -2746,7 +2751,12 @@ class RandomVariable(VariableTracker):
         RandomVariable.check_state(state_obj)
         return state_obj
 
-    def seed(self, tx, args, kwargs):
+    def seed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tx.output.side_effects.mutation(self)
         self.random.seed(
             *[x.as_python_constant() for x in args],
@@ -2754,15 +2764,30 @@ class RandomVariable(VariableTracker):
         )
         return variables.ConstantVariable.create(None)
 
-    def getstate(self, tx, args, kwargs):
+    def getstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self.wrap_state(self.random.getstate())
 
-    def setstate(self, tx, args, kwargs):
+    def setstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tx.output.side_effects.mutation(self)
         self.random.setstate(self.unwrap_state(args[0]))
         return variables.ConstantVariable.create(None)
 
-    def shuffle(self, tx, args, kwargs):
+    def shuffle(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         name = "shuffle"
         if len(args) != 1 or kwargs:
             raise_args_mismatch(
@@ -2784,7 +2809,12 @@ class RandomVariable(VariableTracker):
         seq.items[:] = [seq.items[i] for i in perm]
         return variables.ConstantVariable.create(None)
 
-    def sample(self, tx, args, kwargs):
+    def sample(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         name = "sample"
         if kwargs or len(args) != 2:
             raise_args_mismatch(
@@ -2828,16 +2858,36 @@ class RandomVariable(VariableTracker):
 
         return call_random_fn(tx, call_random_meth, args, kwargs)
 
-    def _random(self, tx, args, kwargs):
+    def _random(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._call_random(tx, "random", args, kwargs)
 
-    def _randint(self, tx, args, kwargs):
+    def _randint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._call_random(tx, "randint", args, kwargs)
 
-    def _randrange(self, tx, args, kwargs):
+    def _randrange(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._call_random(tx, "randrange", args, kwargs)
 
-    def _uniform(self, tx, args, kwargs):
+    def _uniform(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._call_random(tx, "uniform", args, kwargs)
 
     tp_methods = {

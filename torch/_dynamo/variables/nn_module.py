@@ -877,12 +877,22 @@ class NNModuleVariable(VariableTracker):
             ]
         )
 
-    def _call_impl(self, tx, args, kwargs):
+    def _call_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # Example: `self.layer.__call__(x)`. Dynamo inlines `__call__`,
         # including hooks.
         return self.call_function(tx, args, kwargs)
 
-    def forward(self, tx, args, kwargs):
+    def forward(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # Example: `self.layer.forward(x)`. Dynamo puts a `call_method` node in
         # the FX graph and does not trigger hooks.
         module = tx.output.get_submodule(self.module_key)
@@ -891,7 +901,12 @@ class NNModuleVariable(VariableTracker):
         ):
             return self._generic_call_method_helper(tx, "forward", args, kwargs)
 
-    def _get_item_by_idx(self, tx, args, kwargs):
+    def _get_item_by_idx(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         if not args[1].is_python_constant():
             raise_type_error(
@@ -903,7 +918,7 @@ class NNModuleVariable(VariableTracker):
                 tx,
                 f"``nn.Module`` {module}'s call method _get_item_by_idx requires a tuple as first argument",
             )
-        mod_var = args[0].items[args[1].value]
+        mod_var = args[0].items[args[1].as_python_constant()]
         if isinstance(mod_var, UnspecializedNNModuleVariable):
             return mod_var
         key = mod_var.module_key
@@ -912,7 +927,12 @@ class NNModuleVariable(VariableTracker):
             submod, key, key, source=NNModuleSource(GetItemSource(self.source, key))
         )
 
-    def named_children(self, tx, args, kwargs):
+    def named_children(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
         if args or kwargs:
@@ -927,7 +947,12 @@ class NNModuleVariable(VariableTracker):
             result.append(self._named_embed(tx, n, submod))
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
-    def named_parameters(self, tx, args, kwargs):
+    def named_parameters(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
         kw = self._get_kwargs(tx, "named_parameters", args, kwargs, "prefix", "recurse")
@@ -936,7 +961,12 @@ class NNModuleVariable(VariableTracker):
             result.append(self._named_embed(tx, n, param))
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
-    def named_buffers(self, tx, args, kwargs):
+    def named_buffers(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
         kw = self._get_kwargs(
@@ -947,7 +977,12 @@ class NNModuleVariable(VariableTracker):
             result.append(self._named_embed(tx, n, buffer))
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
-    def named_modules(self, tx, args, kwargs):
+    def named_modules(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
         kw = self._get_kwargs(
@@ -958,7 +993,12 @@ class NNModuleVariable(VariableTracker):
             result.append(self._named_embed(tx, n, submod))
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
-    def children(self, tx, args, kwargs):
+    def children(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
         if args or kwargs:
@@ -970,24 +1010,44 @@ class NNModuleVariable(VariableTracker):
             )
         return self._wrap_values(tx, module.named_children())
 
-    def modules(self, tx, args, kwargs):
+    def modules(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
         return self._wrap_values(tx, module.named_modules())
 
-    def parameters(self, tx, args, kwargs):
+    def parameters(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
         kw = self._get_kwargs(tx, "parameters", args, kwargs, "recurse")
         return self._wrap_values(tx, module.named_parameters(**kw))
 
-    def buffers(self, tx, args, kwargs):
+    def buffers(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
         kw = self._get_kwargs(tx, "buffers", args, kwargs, "recurse")
         return self._wrap_values(tx, module.named_buffers(**kw))
 
-    def keys(self, tx, args, kwargs):
+    def keys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         if args or kwargs:
             raise_args_mismatch(
@@ -1002,7 +1062,12 @@ class NNModuleVariable(VariableTracker):
             result.append(VariableTracker.build(tx, tmp))
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
-    def values(self, tx, args, kwargs):
+    def values(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         if args or kwargs:
             raise_args_mismatch(
@@ -1013,7 +1078,12 @@ class NNModuleVariable(VariableTracker):
             )
         return self._wrap_values(tx, module.items())  # type: ignore[operator]
 
-    def items(self, tx, args, kwargs):
+    def items(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
         if args or kwargs:
             raise_args_mismatch(

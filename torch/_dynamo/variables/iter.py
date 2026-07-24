@@ -455,7 +455,12 @@ class RepeatIteratorVariable(IteratorVariable):
         self.remaining -= 1
         return self.item
 
-    def repeat_length_hint(self, tx, args, kwargs):
+    def repeat_length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # ref: repeat_len in itertoolsmodule.c (exposed as __length_hint__);
         # raises TypeError for the unbounded form ("len() of unsized object").
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
@@ -913,7 +918,12 @@ class DictViewIterator(IteratorVariable):
                 args=[VariableTracker.build(tx, a) for a in e.args],
             )
 
-    def dict_view_iter_length_hint(self, tx, args, kwargs):
+    def dict_view_iter_length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # dictiter_len/setiter_len: __length_hint__ returns the number of
         # not-yet-consumed elements. self._iter is a live Python iterator over
         # the captured items, so its own length hint already reflects any

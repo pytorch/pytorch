@@ -3476,7 +3476,12 @@ class UntypedStorageVariable(VariableTracker):
     def python_type(self) -> type:
         return torch.UntypedStorage
 
-    def method_size(self, tx, args, kwargs):
+    def method_size(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         result = self.example_value.size()
         if not has_free_symbols(result):
             # avoid creating a node in the graph
@@ -3494,7 +3499,12 @@ class UntypedStorageVariable(VariableTracker):
             ),
         )
 
-    def method_resize_(self, tx, args, kwargs):
+    def method_resize_(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tx.output.create_proxy(
             "call_function",
             torch.ops.inductor.resize_storage_bytes_,
