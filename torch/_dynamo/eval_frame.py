@@ -1462,8 +1462,8 @@ class DisableContext(_TorchDynamoContext):
         # rare export path falls back to _disable_wrapper_export_call below,
         # which does the fx_traceback.annotate wrapping.
         #
-        # DisableWrapper does not carry a callback: the stance fallback
-        # (_disable_wrapper_stance_call) assumes disable == no callback and
+        # DisableWrapper does not carry a callback: the slow path
+        # (_disable_wrapper_slow_call) assumes disable == no callback and
         # computes _callback_from_stance(None). Enforce that invariant here so a
         # future DisableContext that carries a real callback fails loudly instead
         # of silently applying the wrong stance callback.
@@ -1529,20 +1529,15 @@ def _disable_wrapper_export_call(
             set_eval_frame(prior)
 
 
-def _disable_wrapper_stance_call(
+def _disable_wrapper_slow_call(
     fn: Callable[..., Any], *args: Any, **kwargs: Any
 ) -> Any:
-    # Fallback for DisableWrapper (torch._C._dynamo.eval_frame) when a non-default
-    # compile stance is active. The C tp_call handles the common default stance
-    # inline, where the disable callback always resolves to "off"; the rarer
-    # stances are routed here so the stance/disable contract is computed in one
-    # place rather than assumed in C. DisableWrapper carries no callback because
-    # disable installs none (DisableContext.callback is None by construction; see
-    # the assert in DisableContext.__call__), so the stance-derived callback is
-    # _callback_from_stance(None): most stances resolve it to None (off, nothing
-    # to install beyond the already-cleared callback), but e.g.
-    # eager_on_recompile resolves to False (run-only) and must be installed
-    # around the body.
+    # DisableWrapper's slow path: the C tp_call handles the common case (default
+    # stance, no active callback) inline and routes here for a non-default stance
+    # or an active callback. disable installs no callback, so the stance callback
+    # is _callback_from_stance(None) -- None for most stances, False (run-only)
+    # for eager_on_recompile. Restore via _maybe_set_eval_frame so a callback is
+    # re-installed only if the enable_compiler_set_eval_frame killswitch allows.
     prior = set_eval_frame(None)
     try:
         callback = _callback_from_stance(None)
@@ -1555,7 +1550,7 @@ def _disable_wrapper_stance_call(
         return fn(*args, **kwargs)
     finally:
         if prior is not None:
-            set_eval_frame(prior)
+            _maybe_set_eval_frame(prior)
 
 
 def _optimize_catch_errors(

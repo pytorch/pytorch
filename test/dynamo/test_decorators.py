@@ -82,10 +82,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 torch.ops.foo.custom = orig_custom
 
     def test_disable_not_traced_and_correct(self):
-        # torch._dynamo.disable must prevent Dynamo from tracing into the
-        # function and return correct results. Exercises the non-export hot
-        # path of DisableContext._fn, where the fn_name/is_exporting annotation
-        # work is skipped.
+        # disable must keep Dynamo from tracing into the function while still
+        # returning correct results (exercises the non-export hot path).
         @torch._dynamo.disable
         def inner(x):
             return x + 1
@@ -103,12 +101,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_disable_under_eager_on_recompile_stance(self):
-        # A disabled function still honors the compile stance for its body:
-        # DisableContext computes _callback_from_stance(None), which under
-        # set_stance("eager_on_recompile") resolves to False (run-only) and is
-        # installed around the body, rather than assuming the callback is fully
-        # off. Pin that a disabled function returns correct results under the
-        # stance.
+        # A disabled function honors the stance for its body: under
+        # eager_on_recompile the stance callback is False (run-only), not fully
+        # off. Pin that it still returns correct results.
         @torch._dynamo.disable
         def inner(x):
             return x + 1
