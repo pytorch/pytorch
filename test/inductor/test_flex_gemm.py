@@ -5429,6 +5429,48 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feed_main_supports_mx_scale(self):
+        m = 128
+        n = 64
+        group = 32
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            scale = mx_e8m0_scale(x.amax(1, keepdim=True)).float()
+            return (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn)
+
+        def high_precision_fn(acc):
+            x = acc.view(-1, group, n)
+            scale = mx_e8m0_scale(x.amax(1, keepdim=True)).float()
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            high_precision_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        self.assertPhysicalFeedMainCode(code, group)
+        FileCheck().check("mx_e8m0_scale_intrinsic").check("feeds_main=True").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_local_m_reduce_feed_main_supports_trailing_pointwise_chain(self):
         m = 128
         n = 64
