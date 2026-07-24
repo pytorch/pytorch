@@ -371,6 +371,38 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(input_tensor.grad, expected_grad)
 
     @parametrize("device", devices)
+    @parametrize("reduce_op", ["min", "max"])
+    def test_all_reduce_nan_backward(self, device, reduce_op):
+        """Test all_reduce backward passes through all-reduced grad for NaN inputs."""
+        shape = (3, 3)
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+
+        input_tensor = torch.full(
+            shape, fill_value=float(rank), requires_grad=True, device=device
+        )
+        # Inject a NaN on rank 0
+        if rank == 0:
+            with torch.no_grad():
+                input_tensor[0, 0] = float("nan")
+
+        output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
+        output.sum().backward()
+
+        grad = input_tensor.grad
+        # NaN elements receive the all-reduced grad (world_size) rather than NaN
+        all_reduced_grad = float(self.world_size)
+        if rank == 0:
+            self.assertEqual(grad[0, 0], all_reduced_grad)
+            # Non-NaN elements on the extremum-holding rank get world_size
+            if reduce_op == "min":
+                self.assertEqual(grad[0, 1], all_reduced_grad)
+            else:
+                self.assertEqual(grad[0, 1], 0.0)
+        else:
+            self.assertFalse(grad.isnan().any())
+
+    @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
     def test_all_gather_tensor_backward(self, device, gather_dim):
         """Test all_gather_tensor backward does reduce_scatter.

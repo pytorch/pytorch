@@ -686,13 +686,19 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     output = torch.ops._c10d_functional.all_reduce(
         grad_output.contiguous(), grad_reduce_op, group_name
     )
+
+    output = wait_tensor(output)
     if _is_min_max(reduce_op):
         fwd_input, fwd_output = ctx.saved_tensors
-        output = torch.ops.aten.where.ScalarOther(
-            fwd_input == fwd_output, wait_tensor(output), 0
+        fwd_input_isnan = fwd_input.isnan()
+        output = torch.ops.aten.where.self(
+            fwd_input_isnan,
+            output,
+            torch.ops.aten.where.ScalarOther(
+                fwd_input == wait_tensor(fwd_output), output, 0
+            ),
         )
-        return output, None, None
-    return wait_tensor(output), None, None
+    return output, None, None
 
 
 def all_reduce_setup_context(ctx, inputs, output):
