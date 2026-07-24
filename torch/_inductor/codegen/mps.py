@@ -22,6 +22,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
+    BackendFeature,
     CSEVariable,
     DeferredLine,
     DTYPE_TO_COMPUTATION_DTYPE,
@@ -1212,6 +1213,11 @@ class MetalKernel(SIMDKernel):
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
+    backend_features = OrderedSet([BackendFeature.DEVICE_ASSERT_ASYNC])
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
+        return cls.backend_features
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)

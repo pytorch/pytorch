@@ -5113,6 +5113,7 @@ class CppScheduling(BaseScheduling):
     MAX_FUSED_KERNEL_ARGS_NUM = 500
     backend_features = OrderedSet(
         [
+            BackendFeature.DEVICE_ASSERT_ASYNC,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
         ]
