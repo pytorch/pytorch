@@ -64,12 +64,20 @@ SIDECAR_VERSION = 1
 
 def _load_by_path(name: str, path: str):
     spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module from {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-from torch._native._spec_grid import expand_specs
+# By file path, not `from torch._native...`: a package import executes
+# torch/__init__.py, but grid expansion (and the tools test suite) must
+# work on a checkout where torch is not built. _spec_grid is torch-free
+# by contract (see its docstring).
+expand_specs = _load_by_path(
+    "_spec_grid", os.path.join(REPO, "torch", "_native", "_spec_grid.py")
+).expand_specs
 
 
 def load_builder(op: str, kernel_module: str):

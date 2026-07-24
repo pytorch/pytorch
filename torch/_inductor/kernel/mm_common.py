@@ -194,6 +194,26 @@ def use_native_matmul(mat1, mat2):
     return True
 
 
+def _use_small_mm_pointwise(m, k, n, layout) -> bool:
+    """Check if mm should be lowered to pointwise ops for small K and N.
+
+    For very small inner dimensions (K < 5 and N < 5) with M >= 64,
+    cuBLAS launch overhead dominates and a fused pointwise kernel is
+    faster (1.2-4.8x on H200).  M >= 64 excludes tiny matrices where
+    pointwise kernel launch overhead negates the benefit.  K,N < 5
+    avoids shapes where Triton codegen quality is unstable (K=5 regresses
+    at large M due to reduction-dimension alignment).  Disabled under
+    max_autotune to preserve template selection.
+    See https://github.com/pytorch/pytorch/issues/186348
+    """
+    if config.max_autotune or config.max_autotune_gemm:
+        return False
+    if layout.device.type in ("cpu", "mps"):
+        return False
+    skt = V.graph.sizevars.statically_known_true
+    return skt(m >= 64) and skt(k < 5) and skt(n < 5)
+
+
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.
