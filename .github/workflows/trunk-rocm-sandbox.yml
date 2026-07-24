@@ -61,7 +61,6 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-py3.12-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
-      sync-tag: rocm-build
       # The amd-vtr experiment routes the gfx942 test shards onto the
       # amd-vtr- prefixed runner scale sets via the dedicated
       # amd-vtr-label-type output (empty when the experiment is disabled, in
