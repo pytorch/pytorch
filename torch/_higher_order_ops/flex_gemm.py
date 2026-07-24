@@ -176,10 +176,22 @@ def mx_e8m0_scale(
     max_value: float = 448.0,
     rounding: str | None = None,
 ) -> torch.Tensor:
-    """Encode an MX scale from an absolute max as biased E8M0.
+    """Encode absolute block maxima as biased E8M0 scales.
+
+    ``"rceil"`` is the FlexGEMM default and matches TorchAO's Blackwell
+    ``cvt.rp.satfinite.ue8m0x2.f32`` path: values at or below ``2**-127``
+    after division by ``max_value`` encode as 0, positive infinity encodes as
+    254, and NaN encodes as 255. ``"floor"`` matches TorchAO's exponent-based
+    FLOOR scale encoding. TorchAO currently chooses FLOOR by default, so callers
+    requiring its default recipe should pass it explicitly.
+
+    This operation returns only the encoded scale. Full TorchAO quantizers may
+    apply additional policy when reconstructing an underflowed code-0 scale;
+    direct callers instead observe the numerical E8M0 value when converting the
+    result back to a wider dtype.
 
     Args:
-        amax: Absolute block maxima to encode.
+        amax: Nonnegative absolute block maxima to encode.
         max_value: Maximum magnitude of the quantized element type.
         rounding: Scale calculation recipe: ``"rceil"`` (the default) or
             ``"floor"``.
@@ -210,12 +222,21 @@ def mx_e8m0_scale(
             scale_e8m0_biased,
         )
     else:
-        target_amax_int32 = (max_abs / max_value).view(torch.int32)
-        scale_e8m0_biased = (
-            torch.bitwise_right_shift(target_amax_int32, mbits_f32) & 0xFF
-        ) + ((target_amax_int32 & 0x7FFFFF) != 0).to(torch.int32)
-        scale_e8m0_biased = torch.clamp(scale_e8m0_biased, min=0, max=255).to(
-            torch.uint8
+        descale = max_abs / max_value
+        descale_int32 = descale.view(torch.int32)
+        exponent = torch.bitwise_right_shift(descale_int32, mbits_f32) & 0xFF
+        mantissa = descale_int32 & 0x7FFFFF
+        scale_e8m0_biased = exponent + (mantissa != 0).to(torch.int32)
+        scale_e8m0_biased = torch.where(
+            (exponent == 0) & (mantissa <= 0x400000),
+            torch.zeros_like(scale_e8m0_biased),
+            scale_e8m0_biased,
+        )
+        scale_e8m0_biased = torch.clamp(scale_e8m0_biased, max=254).to(torch.uint8)
+        scale_e8m0_biased = torch.where(
+            torch.isnan(descale),
+            torch.full_like(scale_e8m0_biased, 255),
+            scale_e8m0_biased,
         )
     return scale_e8m0_biased.view(torch.float8_e8m0fnu)
 
