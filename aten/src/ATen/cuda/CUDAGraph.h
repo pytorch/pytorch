@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <stack>
+#include <utility>
 #include <vector>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -98,6 +99,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraphExec_t raw_cuda_graph_exec();
 
   static CUDAGraph* get_currently_capturing_graph();
+  void begin_capture_to_child_node();
+  void end_capture_to_child_node();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
   void begin_capture_to_while_node(const Tensor& scalar_cuda_pred_tensor);
   void end_capture_to_conditional_node();
@@ -117,6 +120,18 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void begin_capture_to_conditional_node(
       const Tensor& scalar_cuda_pred_tensor,
       cudaGraphConditionalNodeType conditional_type);
+  void end_capture_to_child_or_conditional_node();
+
+  struct ChildGraphNodeParams {
+    cudaGraphNodeParams params;
+    std::optional<cudaGraphConditionalHandle> conditional_handle;
+  };
+
+  template <typename MakeNodeParams, typename GetChildGraph>
+  void begin_capture_to_child_or_conditional_node(
+      const char* func,
+      MakeNodeParams make_node_params,
+      GetChildGraph get_child_graph);
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 
  protected:
@@ -205,10 +220,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
     }
   };
 
-  std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
-  std::stack<CaptureId_t> conditional_graph_capture_ids_;
-  std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
-  std::stack<cudaGraphConditionalHandle> conditional_node_handles_;
+  struct ChildGraphCapture {
+    OwnedCUDAStream raw_stream;
+    c10::cuda::OptionalCUDAStreamGuard stream_guard;
+    CaptureId_t capture_id = 0;
+    std::optional<cudaGraphConditionalHandle> conditional_handle;
+  };
+
+  std::stack<ChildGraphCapture> child_graph_captures_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 

@@ -5157,6 +5157,88 @@ exit(2)
         TEST_WITH_ROCM
         or not torch.version.cuda
         or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for child graph nodes",
+    )
+    def test_cuda_graph_child_node(self):
+        x = torch.zeros((), device="cuda")
+        expected = torch.tensor(6.0, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            x.add_(1.0)
+            g.begin_capture_to_child_node()
+            x.add_(2.0)
+            g.end_capture_to_child_node()
+            x.add_(3.0)
+
+        x.zero_()
+        g.replay()
+        self.assertEqual(x, expected)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for child graph nodes",
+    )
+    def test_cuda_graph_nested_child_nodes(self):
+        x = torch.zeros((), device="cuda")
+        expected = torch.tensor(11.0, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            g.begin_capture_to_child_node()
+            x.add_(1.0)
+            g.begin_capture_to_child_node()
+            x.mul_(2.0)
+            g.end_capture_to_child_node()
+            x.add_(3.0)
+            g.end_capture_to_child_node()
+            x.add_(4.0)
+
+        x.fill_(1.0)
+        g.replay()
+        self.assertEqual(x, expected)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for child graph nodes",
+    )
+    def test_cuda_graph_child_node_end_type_checks(self):
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        expected = torch.tensor(2.0, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            g.begin_capture_to_child_node()
+            with self.assertRaisesRegex(RuntimeError, "cannot end a non-conditional"):
+                g.end_capture_to_conditional_node()
+            x.add_(1.0)
+            g.end_capture_to_child_node()
+
+            g.begin_capture_to_if_node(pred)
+            with self.assertRaisesRegex(RuntimeError, "cannot end a conditional"):
+                g.end_capture_to_child_node()
+            x.add_(1.0)
+            g.end_capture_to_conditional_node()
+
+        x.zero_()
+        g.replay()
+        self.assertEqual(x, expected)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
         "CUDA >= 12.4 required for conditional graph nodes",
     )
     def test_cuda_graph_many_if_nodes_across_graphs(self):
