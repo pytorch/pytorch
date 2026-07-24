@@ -30,18 +30,24 @@
 #   - org2/downstream-repo2
 #
 # L3:
-#   - org3/downstream-repo3: @oncall1,oncall2
+#   <LABEL_NAME>:
+#     org3/downstream-repo3: [@oncall1,@oncall2]
 #
 # L4:
-#   - org4/downstream-repo4: @oncall1,oncall2
+#   - org4/downstream-repo4: [@oncall1,@oncall2]
 
 L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
   - NVIDIA/pytorch-windows-ci
+  - google-pytorch/torch_tpu
 
 L2:
-  # Canonical test repo for CRCR.
-  - pytorch/crcr-test
   - TorchedHat/pytorch-redhat-ci
   - Ascend/pytorch
+  - torch-spyre/torch-spyre
+
+L3:
+  # Canonical test repos for CRCR.
+  crcr-test:
+    pytorch/crcr-test: [atalman, can-gaa-hou, fffrog, jewelkm89, KarhouTam, subinz1]
