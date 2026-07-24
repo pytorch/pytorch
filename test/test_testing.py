@@ -34,6 +34,7 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 import operator
 import string
 
@@ -2950,6 +2951,37 @@ class TestHardwareClassifications(TestCase):
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 instantiate_parametrized_tests(TestImports)
+
+
+class TestSkipIfLtXGpu(TestCase):
+    @unittest.mock.patch("torch.get_device_module")
+    @unittest.mock.patch("torch._C._accelerator_getAccelerator")
+    def test_allow_cpu_with_compile_only_accelerator(
+        self, mock_get_accelerator, mock_get_device_module
+    ):
+        """Regression test: allow_cpu=True must fall back to CPU when PyTorch is
+        compiled with an accelerator but that accelerator is unavailable at runtime.
+
+        Without check_available=True, current_accelerator() returns the compile-time
+        accelerator even if no device is present. In that case acc is not None, but
+        device_module.is_available() is False, so the allow_cpu=True branch that
+        guards the CPU fallback (``acc is None``) is never taken and the test is
+        skipped instead of running on CPU.
+        """
+        mock_device = unittest.mock.MagicMock()
+        mock_device.type = "cuda"
+        mock_get_accelerator.return_value = mock_device
+
+        mock_module = unittest.mock.MagicMock()
+        mock_module.is_available.return_value = False
+        mock_module.device_count.return_value = 0
+        mock_get_device_module.return_value = mock_module
+
+        @skip_if_lt_x_gpu(2, allow_cpu=True)
+        def test_func():
+            return "cpu_fallback"
+
+        self.assertEqual(test_func(), "cpu_fallback")
 
 
 if __name__ == '__main__':
