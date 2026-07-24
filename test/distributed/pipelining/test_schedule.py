@@ -307,10 +307,154 @@ class ScheduleTest(TestCase):
             ScheduleLoopedBFS,
         ],
     )
+    def test_schedule_with_pre_split_inputs(self, ScheduleClass):
+        """
+        Test that schedules can consume pre-split microbatch args, kwargs, and target.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid, batch_size = 16, 8
+            n_stages = 1
+            num_microbatches = 2
+            device = "cpu"
+
+            class KwargModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(d_hid, d_hid)
+
+                def forward(self, x, y):
+                    return self.linear(torch.relu(x + y))
+
+            auto_mod = KwargModule().to(device)
+            pre_split_mod = copy.deepcopy(auto_mod)
+
+            x = torch.randn(batch_size, d_hid, device=device)
+            y = torch.randn(batch_size, d_hid, device=device)
+            target = torch.randn(batch_size, d_hid, device=device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+
+            def make_schedule(mod):
+                stage = PipelineStage(mod, 0, n_stages, device)
+                if issubclass(ScheduleClass, PipelineScheduleSingle):
+                    stages = stage
+                else:
+                    stages = [stage]
+                return ScheduleClass(
+                    stages,
+                    num_microbatches,
+                    loss_fn=loss_fn,
+                    scale_grads=False,
+                )
+
+            auto_schedule = make_schedule(auto_mod)
+            pre_split_schedule = make_schedule(pre_split_mod)
+
+            auto_losses = []
+            auto_out = auto_schedule.step(x, y=y, target=target, losses=auto_losses)
+
+            arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+            kwarg_mbs = [
+                {"y": y_mb} for y_mb in torch.tensor_split(y, num_microbatches)
+            ]
+            target_mbs = list(torch.tensor_split(target, num_microbatches))
+            pre_split_losses = []
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, auto_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(auto_losses))
+
+            for (name, pre_split_param), (auto_name, auto_param) in zip(
+                pre_split_mod.named_parameters(),
+                auto_mod.named_parameters(),
+                strict=True,
+            ):
+                self.assertEqual(name, auto_name)
+                self.assertEqual(
+                    pre_split_param.grad,
+                    auto_param.grad,
+                    msg=f"Gradient mismatch for {name}",
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_schedule_pre_split_validation(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid = 4
+            device = "cpu"
+            x0 = torch.randn(2, d_hid, device=device)
+            x1 = torch.randn(2, d_hid, device=device)
+            stage = PipelineStage(torch.nn.Identity(), 0, 1, device)
+            schedule = ScheduleGPipe(stage, 2)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split positional inputs through arg_mbs",
+            ):
+                schedule.step(x0, arg_mbs=[(x0,), (x1,)])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Unexpected keyword arguments with pre-split inputs: y",
+            ):
+                schedule.step(y=x0, kwarg_mbs=[{}, {}])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split targets through target_mbs",
+            ):
+                schedule.step(target=x0, target_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list"):
+                schedule.step(arg_mbs=(x0,))
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 arg_mbs"):
+                schedule.step(arg_mbs=[])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    kwarg_mbs={"y": x0},
+                )
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list of tuples"):
+                schedule.step(arg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list of dicts"):
+                schedule.step(kwarg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 target_mbs"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    target_mbs=[x0],
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
     def test_schedule_eval_then_train(self, ScheduleClass):
-        """
-        Test that simply runs evaluation followed by training.
-        """
+        """Test full-batch and pre-split evaluation followed by training."""
         store = FakeStore()
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
@@ -339,17 +483,41 @@ class ScheduleTest(TestCase):
 
         # Attach to a schedule
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
-        # Run eval
-        for _ in range(2):
-            # Zero gradients
-            stage_module.zero_grad()
-            losses = []
-            schedule.eval(x, target=target, losses=losses)
-        # Run training
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+
         try:
-            for _ in range(2):
-                losses = []
-                schedule.step(x, target=target, losses=losses)
+            stage_module.zero_grad()
+            full_losses = []
+            full_out = schedule.eval(x, target=target, losses=full_losses)
+            pre_split_losses = []
+            pre_split_out = schedule.eval(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, full_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNone(
+                    parameter.grad,
+                    msg=f"eval unexpectedly produced a gradient for {name}",
+                )
+
+            train_losses = []
+            train_out = schedule.step(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=train_losses,
+            )
+            self.assertEqual(train_out, full_out)
+            self.assertEqual(torch.stack(train_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNotNone(
+                    parameter.grad,
+                    msg=f"training did not produce a gradient for {name}",
+                )
         finally:
             torch.distributed.destroy_process_group()
 
