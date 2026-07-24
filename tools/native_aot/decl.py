@@ -154,6 +154,8 @@ _SM_RE = r"sm_\d+a?"
 
 def _load_by_path(name: str, path: str):
     spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module from {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

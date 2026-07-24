@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -14,11 +15,14 @@ def _load(name: str):
     spec = importlib.util.spec_from_file_location(
         name, os.path.join(TOOLS_DIR, f"{name}.py")
     )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module {name}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
+build_stage2 = _load("build_stage2")
 export = _load("export")
 gen_aot_lib = _load("gen_aot_lib")
 toolchains = _load("toolchains")
@@ -137,7 +141,6 @@ class TestArch(unittest.TestCase):
         self.assertEqual(len(hopper), 0)
         self.assertEqual(len(on_device), 1)
 
-
     def test_sm_number_parsing(self):
         tc = toolchains.Toolchain
         self.assertEqual(tc._sm_number("sm_90a"), 90)
@@ -190,7 +193,6 @@ class TestArch(unittest.TestCase):
         # Shipped arch outside ARCHS is a packaging error.
         with self.assertRaisesRegex(RuntimeError, "supports only"):
             gen_aot_lib._arch_gate(Pinned, [{"arch": "sm_80"}])
-
 
 
 class TestSpecExpansion(unittest.TestCase):
@@ -540,6 +542,58 @@ class TestEndToEndGeneration(unittest.TestCase):
             self.assertTrue(os.path.exists(out))
             with open(out) as f:
                 self.assertIn("fakeop_cuda_aot_kernel", f.read())
+
+
+@unittest.skipIf(shutil.which("zip") is None, "requires the zip CLI")
+class TestWheelPatch(unittest.TestCase):
+    LIB = "torch/lib/libtorch_cuda.so"
+
+    def _make_wheel(self, d: str, record_entry: bool = True) -> str:
+        import base64
+        import hashlib
+        import zipfile
+
+        def rec(name, data):
+            h = base64.urlsafe_b64encode(hashlib.sha256(data).digest())
+            return f"{name},sha256={h.rstrip(b'=').decode()},{len(data)}"
+
+        whl = os.path.join(d, "torch-0.0-cp310-linux_x86_64.whl")
+        record = "torch-0.0.dist-info/RECORD"
+        lines = [rec("torch/__init__.py", b"x"), f"{record},,"]
+        if record_entry:
+            lines.insert(0, rec(self.LIB, b"OLD"))
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(self.LIB, b"OLD")
+            zf.writestr("torch/__init__.py", b"x")
+            zf.writestr(record, "\n".join(lines) + "\n")
+        return whl
+
+    def test_replaces_lib_and_record(self):
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            whl = self._make_wheel(d)
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW" * 64)
+            build_stage2.patch_wheel(whl, lib)
+            with zipfile.ZipFile(whl) as zf:
+                self.assertEqual(zf.read(self.LIB), b"NEW" * 64)
+                lines = zf.read("torch-0.0.dist-info/RECORD").decode().splitlines()
+                digest, size = build_stage2._wheel_hash_and_size(lib)
+                self.assertIn(f"{self.LIB},{digest},{size}", lines)
+                # untouched members keep their RECORD entries; no dup names
+                self.assertTrue(any(x.startswith("torch/__init__.py,") for x in lines))
+                self.assertEqual(len(zf.namelist()), len(set(zf.namelist())))
+
+    def test_missing_record_entry_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            whl = self._make_wheel(d, record_entry=False)
+            lib = os.path.join(d, "libtorch_cuda.so")
+            with open(lib, "wb") as f:
+                f.write(b"NEW")
+            with self.assertRaisesRegex(RuntimeError, "RECORD has no entry"):
+                build_stage2.patch_wheel(whl, lib)
 
 
 if __name__ == "__main__":

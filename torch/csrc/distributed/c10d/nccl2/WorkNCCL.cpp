@@ -8,7 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceGuard.h>
 
-#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -22,7 +22,8 @@ WorkNCCL::WorkNCCL(
     const std::vector<at::Tensor>& inputTensors)
     : inputTensors_(inputTensors),
       comm_(comm),
-      stream_(stream),
+      stream_(
+          at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       timeout_ms_(timeout_ms) {
   start_event_ = comm_->getEvent();
   end_event_ = comm_->getEvent();
@@ -32,10 +33,11 @@ WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
-    const at::Tensor& inputTensor)
-    : inputTensor_(inputTensor),
+    at::Tensor inputTensor)
+    : inputTensor_(std::move(inputTensor)),
       comm_(comm),
-      stream_(stream),
+      stream_(
+          at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       timeout_ms_(timeout_ms) {
   start_event_ = comm_->getEvent();
   end_event_ = comm_->getEvent();
@@ -45,8 +47,8 @@ WorkNCCL::~WorkNCCL() {
   if (!comm_) {
     return;
   }
-  comm_->returnEvent(start_event_);
-  comm_->returnEvent(end_event_);
+  comm_->returnEvent(std::move(start_event_));
+  comm_->returnEvent(std::move(end_event_));
 }
 
 void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
@@ -74,18 +76,11 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
 
 void WorkNCCL::recordStart(std::string_view coll_name) {
   recordFunctionStart(coll_name);
-
-  CUDA_CHECK(
-      comm_->getCudaApi(),
-      comm_->getCudaApi()->eventRecord(start_event_, stream_),
-      "Failed to record start event");
+  start_event_->record(stream_);
 }
 
 void WorkNCCL::recordEnd() {
-  CUDA_CHECK(
-      comm_->getCudaApi(),
-      comm_->getCudaApi()->eventRecord(end_event_, stream_),
-      "Failed to record end event");
+  end_event_->record(stream_);
 
   if (recordFunction_ && recordFunction_->isActive()) {
     recordFunction_->end();
@@ -99,15 +94,14 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
   }
 
   if (!start_completed_time_.has_value()) {
-    cudaError_t start_status = comm_->getCudaApi()->eventQuery(start_event_);
-
-    if (start_status == cudaSuccess) {
-      start_completed_time_ = std::chrono::steady_clock::now();
-      setStatus(WorkStatus::INPROGRESS);
-    } else if (start_status != cudaErrorNotReady) {
+    try {
+      if (start_event_->query()) {
+        start_completed_time_ = std::chrono::steady_clock::now();
+        setStatus(WorkStatus::INPROGRESS);
+      }
+    } catch (const std::exception& e) {
       TC_LOG(ERROR, comm_) << "CUDA error during start event query: "
-                           << comm_->getCudaApi()->getErrorString(start_status)
-                           << " (" << start_status << ")";
+                           << e.what();
       setStatus(WorkStatus::ERROR);
     }
   }
@@ -115,13 +109,18 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
     return status();
   }
 
-  cudaError_t end_status = comm_->getCudaApi()->eventQuery(end_event_);
+  bool end_completed = false;
+  try {
+    end_completed = end_event_->query();
+  } catch (const std::exception& e) {
+    TC_LOG(ERROR, comm_) << "CUDA error during end event query: " << e.what();
+    setStatus(WorkStatus::ERROR);
+    return status();
+  }
 
-  if (end_status == cudaSuccess) {
+  if (end_completed) {
     setStatus(WorkStatus::COMPLETED);
-    inputTensors_.clear();
-    inputTensor_.reset();
-  } else if (end_status == cudaErrorNotReady) {
+  } else {
     auto current_time = std::chrono::steady_clock::now();
     auto elapsed_milliseconds =
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -132,11 +131,6 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
                            << elapsed_milliseconds.count() << " ms";
       setStatus(WorkStatus::TIMEDOUT);
     }
-  } else {
-    TC_LOG(ERROR, comm_) << "CUDA error during end event query: "
-                         << comm_->getCudaApi()->getErrorString(end_status)
-                         << " (" << end_status << ")";
-    setStatus(WorkStatus::ERROR);
   }
   return status();
 }
@@ -165,12 +159,9 @@ void WorkNCCL::synchronizeInternal() {
 
   // Make the current stream wait for the end event recorded on the work's
   // stream, ordering subsequent current-stream ops after this collective.
-  cudaStream_t current_stream =
-      comm_->getCudaApi()->getCurrentCUDAStream(comm_->getDevice().index());
-  CUDA_CHECK(
-      comm_->getCudaApi(),
-      comm_->getCudaApi()->streamWaitEvent(current_stream, end_event_, 0),
-      "Failed to make stream wait for event");
+  auto current_stream =
+      at::cuda::getCurrentCUDAStream(comm_->getDevice().index());
+  end_event_->block(current_stream);
 
   // Release tensor references. The CUDA caching allocator manages stream
   // semantics and will not reclaim memory until the stream operations complete.
@@ -182,12 +173,16 @@ bool WorkNCCL::wait(std::chrono::milliseconds /*timeout*/) {
   // Unlike c10d's default wait(), this does not block the CPU: for CUDA work it
   // is sufficient (and matches upstream torchcomms) to order the current stream
   // after the collective. The timeout arg is honored by the watchdog, not here.
-  synchronizeInternal();
+  synchronize();
   return true;
 }
 
 void WorkNCCL::synchronize() {
   synchronizeInternal();
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<WorkNCCL>::unsafe_reclaim_from_nonowning(this));
+  }
 }
 
 std::vector<at::Tensor> WorkNCCL::result() {
@@ -211,7 +206,7 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
 
   // Order the current stream after the collective before completing the future
   // so consumers observing the future see correct results.
-  synchronizeInternal();
+  synchronize();
 
   if (!outputs_.empty() && !devices.empty()) {
     c10::OptionalDeviceGuard guard(outputs_[0].device());
