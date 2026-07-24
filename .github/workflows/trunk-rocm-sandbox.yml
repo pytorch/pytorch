@@ -6,6 +6,13 @@ on:
   #  branches:
   #    - main
   #    - release/*
+  # TEMPORARY: revert before merge - trigger this workflow off the existing
+  # registered ciflow/trunk push tag so the amd-vtr determinator change can be
+  # exercised on the PR (trunk-rocm-sandbox has no registered ciflow tag of its
+  # own). Remove this push block before merging.
+  push:
+    tags:
+      - ciflow/trunk/*
   workflow_dispatch:
   schedule:
     - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
@@ -32,7 +39,11 @@ jobs:
 
   get-label-type:
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    # TEMPORARY: revert to @main before merge - reference the PR's own reusable
+    # workflow so the new amd-vtr-label-type output resolves (it does not exist
+    # on @main yet). Restore pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    # before merging.
+    uses: ./.github/workflows/_runner-determinator.yml
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
