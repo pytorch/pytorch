@@ -813,6 +813,45 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_local_reduce_cache_specialization(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _local_reduce_specialization,
+        )
+
+        base = {
+            "local_reduce_group": 4,
+            "local_reduce_axis": 1,
+            "local_reduce_type": "mean",
+            "local_reduce_source": "identity",
+            "local_reduce_feeds_main": False,
+            "local_reduce_secondary_feed_type": None,
+        }
+        specialization = _local_reduce_specialization(base)
+        for key, value in (
+            ("local_reduce_group", 8),
+            ("local_reduce_axis", 0),
+            ("local_reduce_feeds_main", True),
+            ("local_reduce_secondary_feed_type", "direct_bool_gt_zero"),
+        ):
+            variant = dict(base)
+            variant[key] = value
+            self.assertNotEqual(specialization, _local_reduce_specialization(variant))
+
+    def test_local_reduce_plan_deduplicates_outputs(self):
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+
+        plan = GemmReductionPlan(
+            reduction_output="aux",
+            group=4,
+            axis=1,
+            reduction_type="sum",
+            source_type="identity",
+            primary_output="output",
+            feed_output="aux",
+            secondary_feed_output="output",
+        )
+        self.assertEqual(plan.auxiliary_outputs, ("aux",))
+
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
         kernel = MagicMock()
