@@ -26,7 +26,6 @@ struct Stats {
       _max = std::max(_max, value);
     }
     ++_n;
-    _sum += value;
     const double delta = value - _mean;
     _mean += delta / static_cast<double>(_n);
     _M2 += delta * (value - _mean);
@@ -43,7 +42,6 @@ struct Stats {
   size_t _n = 0;
   double _mean = 0.0;
   double _M2 = 0.0;
-  double _sum = 0.0;
   double _min = 0.0;
   double _max = 0.0;
 };

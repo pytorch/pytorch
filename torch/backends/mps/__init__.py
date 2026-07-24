@@ -38,7 +38,6 @@ class AutotuneTrace:
         self.wait_until_completed = wait_until_completed
         self.records: list[dict[str, Any]] = []
         self.dropped = 0
-        self.schema_version = 1
 
     def __enter__(self) -> "AutotuneTrace":
         if not is_available():
@@ -56,7 +55,7 @@ class AutotuneTrace:
             if self.wait_until_completed and exc_type is None:
                 torch.mps.synchronize()
         finally:
-            snapshot = torch._C._mps_stop_autotune_trace(self.wait_until_completed)
+            snapshot = torch._C._mps_stop_autotune_trace()
             self.records = snapshot["records"]
             self.dropped = snapshot["dropped"]
             self.schema_version = snapshot["schema_version"]

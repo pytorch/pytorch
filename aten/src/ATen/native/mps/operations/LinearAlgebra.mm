@@ -165,13 +165,6 @@ bool same_gemv_config(const GemvConfig& a, const GemvConfig& b) {
   return a.vec == b.vec;
 }
 
-GemvConfig make_t2d_config(int kq) {
-  GemvConfig config{16, 1};
-  config.kq = kq;
-  config.kernel = GemvKernel::T2D;
-  return config;
-}
-
 std::optional<GemvConfig> normalize_gemv_config(GemvConfig config,
                                                 c10::ScalarType dt,
                                                 bool use_t,
@@ -215,7 +208,7 @@ std::vector<GemvConfig> gemv_benchmark_candidates(c10::ScalarType dt,
         add(GemvConfig{nsimd, vec});
       }
     }
-    add(make_t2d_config(tuning.t2d_kq));
+    add(GemvConfig{16, 1, tuning.t2d_kq, GemvKernel::T2D});
   } else {
     for (int nsimd : {tuning.nt_nsimd_lo, tuning.nt_nsimd_hi}) {
       for (int vec = 1; vec <= tuning.nt_vec; vec *= 2) {
@@ -524,16 +517,12 @@ void dispatch_gemv(const Tensor& A,
   std::vector<std::string> candidate_kernels;
   if (trace_enabled || forced.has_value()) {
     ensure_candidates();
-    if (trace_enabled || forced.has_value()) {
-      candidate_ids.reserve(candidates.size());
-    }
+    candidate_ids.reserve(candidates.size());
     if (trace_enabled) {
       candidate_kernels.reserve(candidates.size());
     }
     for (const auto& candidate : candidates) {
-      if (trace_enabled || forced.has_value()) {
-        candidate_ids.push_back(gemv_config_id(candidate));
-      }
+      candidate_ids.push_back(gemv_config_id(candidate));
       if (trace_enabled) {
         candidate_kernels.push_back(
             gemv_kernel_name(dt_str, candidate, epi, gemv_use_t, matrix_contiguous, idx64, vec_xs, vec_offset));

@@ -11,7 +11,6 @@ namespace at::mps {
 namespace {
 
 struct MPSAutotuneTraceState {
-  std::atomic<bool> enabled{false};
   std::atomic<bool> recording{false};
   std::mutex mutex;
   std::deque<MPSAutotuneRecord> records;
@@ -41,7 +40,7 @@ std::atomic<uint64_t> cache_generation{0};
 } // namespace
 
 bool isMPSAutotuneTraceEnabled() {
-  return traceState().enabled.load(std::memory_order_acquire);
+  return traceState().recording.load(std::memory_order_acquire);
 }
 
 void startMPSAutotuneTrace(size_t max_entries) {
@@ -55,27 +54,23 @@ void startMPSAutotuneTrace(size_t max_entries) {
   state.dropped = 0;
   state.sequence = 0;
   state.recording.store(true, std::memory_order_release);
-  state.enabled.store(true, std::memory_order_release);
 }
 
 MPSAutotuneSnapshot stopMPSAutotuneTrace() {
   auto& state = traceState();
   std::unique_lock<std::mutex> guard(state.mutex);
   TORCH_CHECK(state.recording.load(), "no MPS autotune trace is active");
-  state.enabled.store(false, std::memory_order_release);
   state.recording.store(false, std::memory_order_release);
   return {{state.records.begin(), state.records.end()}, state.dropped};
 }
 
 void recordMPSAutotuneEvent(MPSAutotuneRecord record) {
   auto& state = traceState();
-  if (!state.recording.load(std::memory_order_acquire) ||
-      !state.enabled.load(std::memory_order_acquire)) {
+  if (!state.recording.load(std::memory_order_acquire)) {
     return;
   }
   std::lock_guard<std::mutex> guard(state.mutex);
-  if (!state.recording.load(std::memory_order_relaxed) ||
-      !state.enabled.load(std::memory_order_relaxed)) {
+  if (!state.recording.load(std::memory_order_relaxed)) {
     return;
   }
   record.sequence = ++state.sequence;

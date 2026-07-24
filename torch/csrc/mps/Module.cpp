@@ -631,7 +631,7 @@ void initModule(PyObject* module) {
     pybind11::gil_scoped_release no_gil;
     at::mps::startMPSAutotuneTrace(max_entries);
   });
-  m.def("_mps_stop_autotune_trace", [](bool /*wait_until_completed*/) {
+  m.def("_mps_stop_autotune_trace", []() {
     at::mps::MPSAutotuneSnapshot snapshot;
     {
       pybind11::gil_scoped_release no_gil;
