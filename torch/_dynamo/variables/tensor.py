@@ -76,10 +76,10 @@ from ..utils import (
 )
 from .base import (
     _check_method_arity,
+    _derive_method_flags,
     AttributeMutationNew,
     GetSet,
     Method,
-    MethodFlags,
     ValueMutationNew,
     VariableTracker,
 )
@@ -962,13 +962,15 @@ class TensorVariable(VariableTracker):
             )
 
         # Declarative named-method dispatch (tp_methods). Mirrors CPython's
-        # tp_methods table: `flags` drives centralized arity via
-        # _check_method_arity, then the handler runs with its native Python
-        # signature. A handler returning None declines and falls through to the
-        # generic proxy path below, matching the old per-handler fall-through.
+        # tp_methods table: arity (derived from CPython's ml_flags) is checked
+        # centrally via _check_method_arity, then the handler runs with its
+        # native Python signature. A handler returning None declines and falls
+        # through to the generic proxy path below, matching the old per-handler
+        # fall-through.
         method = self.tp_methods.get(name)
         if method is not None:
-            _check_method_arity(self, tx, name, method.flags, args, kwargs)
+            flags = _derive_method_flags(self, method.name)
+            _check_method_arity(self, tx, name, flags, args, kwargs)
             # Realize any LazyVariableTracker in kwargs before calling handler.
             realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
             try:
@@ -2358,71 +2360,62 @@ class TensorVariable(VariableTracker):
     # `flags` (ml_flags) drive centralized arity checking. Tensor methods
     # without an entry fall through to the generic FX-proxy path in call_method.
     tp_methods = {
-        "size": Method(method_size, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "stride": Method(method_stride, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "numel": Method(method_numel, MethodFlags.NOARGS),
-        "nelement": Method(method_nelement, MethodFlags.NOARGS),
-        "dim": Method(method_dim, MethodFlags.NOARGS),
-        "ndimension": Method(method_ndimension, MethodFlags.NOARGS),
-        "is_floating_point": Method(method_is_floating_point, MethodFlags.NOARGS),
-        "is_inference": Method(method_is_inference, MethodFlags.NOARGS),
-        "is_complex": Method(method_is_complex, MethodFlags.NOARGS),
-        "is_contiguous": Method(
-            method_is_contiguous, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "type": Method(method_type, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "as_subclass": Method(method_as_subclass, MethodFlags.O),
-        "get_device": Method(method_get_device, MethodFlags.NOARGS),
-        "element_size": Method(method_element_size, MethodFlags.NOARGS),
-        "numpy": Method(method_numpy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "tolist": Method(method_tolist, MethodFlags.NOARGS),
-        "backward": Method(method_backward, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "data_ptr": Method(method_data_ptr, MethodFlags.NOARGS),
-        "const_data_ptr": Method(method_const_data_ptr, MethodFlags.NOARGS),
-        "record_stream": Method(method_record_stream, MethodFlags.O),
-        "item": Method(method_item, MethodFlags.NOARGS),
-        "__int__": Method(method___int__, MethodFlags.NOARGS),
-        "__float__": Method(method___float__, MethodFlags.NOARGS),
-        "__neg__": Method(method___neg__, MethodFlags.NOARGS),
-        "__pos__": Method(method___pos__, MethodFlags.NOARGS),
-        "__abs__": Method(method___abs__, MethodFlags.NOARGS),
-        "__invert__": Method(method___invert__, MethodFlags.NOARGS),
-        "__getitem__": Method(method___getitem__, MethodFlags.O),
-        "__len__": Method(method___len__, MethodFlags.NOARGS),
-        "__iter__": Method(method___iter__, MethodFlags.NOARGS),
-        "__setitem__": Method(method___setitem__, MethodFlags.VARARGS),
-        "__contains__": Method(method___contains__, MethodFlags.O),
-        "addcmul_": Method(method_addcmul_, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "addcdiv_": Method(method_addcdiv_, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "add_": Method(method_add_, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "resize_": Method(method_resize_, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "resize_as_": Method(
-            method_resize_as_, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "sparse_resize_": Method(
-            method_sparse_resize_, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
+        "size": Method(method_size, "size"),
+        "stride": Method(method_stride, "stride"),
+        "numel": Method(method_numel, "numel"),
+        "nelement": Method(method_nelement, "nelement"),
+        "dim": Method(method_dim, "dim"),
+        "ndimension": Method(method_ndimension, "ndimension"),
+        "is_floating_point": Method(method_is_floating_point, "is_floating_point"),
+        "is_inference": Method(method_is_inference, "is_inference"),
+        "is_complex": Method(method_is_complex, "is_complex"),
+        "is_contiguous": Method(method_is_contiguous, "is_contiguous"),
+        "type": Method(method_type, "type"),
+        "as_subclass": Method(method_as_subclass, "as_subclass"),
+        "get_device": Method(method_get_device, "get_device"),
+        "element_size": Method(method_element_size, "element_size"),
+        "numpy": Method(method_numpy, "numpy"),
+        "tolist": Method(method_tolist, "tolist"),
+        "backward": Method(method_backward, "backward"),
+        "data_ptr": Method(method_data_ptr, "data_ptr"),
+        "const_data_ptr": Method(method_const_data_ptr, "const_data_ptr"),
+        "record_stream": Method(method_record_stream, "record_stream"),
+        "item": Method(method_item, "item"),
+        "__int__": Method(method___int__, "__int__"),
+        "__float__": Method(method___float__, "__float__"),
+        "__neg__": Method(method___neg__, "__neg__"),
+        "__pos__": Method(method___pos__, "__pos__"),
+        "__abs__": Method(method___abs__, "__abs__"),
+        "__invert__": Method(method___invert__, "__invert__"),
+        "__getitem__": Method(method___getitem__, "__getitem__"),
+        "__len__": Method(method___len__, "__len__"),
+        "__iter__": Method(method___iter__, "__iter__"),
+        "__setitem__": Method(method___setitem__, "__setitem__"),
+        "__contains__": Method(method___contains__, "__contains__"),
+        "addcmul_": Method(method_addcmul_, "addcmul_"),
+        "addcdiv_": Method(method_addcdiv_, "addcdiv_"),
+        "add_": Method(method_add_, "add_"),
+        "resize_": Method(method_resize_, "resize_"),
+        "resize_as_": Method(method_resize_as_, "resize_as_"),
+        "sparse_resize_": Method(method_sparse_resize_, "sparse_resize_"),
         "sparse_resize_and_clear_": Method(
-            method_sparse_resize_and_clear_, MethodFlags.VARARGS | MethodFlags.KEYWORDS
+            method_sparse_resize_and_clear_, "sparse_resize_and_clear_"
         ),
-        "set_": Method(method_set_, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "register_hook": Method(method_register_hook, MethodFlags.O),
+        "set_": Method(method_set_, "set_"),
+        "register_hook": Method(method_register_hook, "register_hook"),
         "register_post_accumulate_grad_hook": Method(
-            method_register_post_accumulate_grad_hook, MethodFlags.O
+            method_register_post_accumulate_grad_hook,
+            "register_post_accumulate_grad_hook",
         ),
-        "requires_grad_": Method(
-            method_requires_grad_, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "detach_": Method(method_detach_, MethodFlags.NOARGS),
-        "share_memory_": Method(method_share_memory_, MethodFlags.NOARGS),
-        "new": Method(method_new, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "new_tensor": Method(
-            method_new_tensor, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "untyped_storage": Method(method_untyped_storage, MethodFlags.NOARGS),
-        "wait": Method(method_wait, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "random_": Method(method_random_, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "uniform_": Method(method_uniform_, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "requires_grad_": Method(method_requires_grad_, "requires_grad_"),
+        "detach_": Method(method_detach_, "detach_"),
+        "share_memory_": Method(method_share_memory_, "share_memory_"),
+        "new": Method(method_new, "new"),
+        "new_tensor": Method(method_new_tensor, "new_tensor"),
+        "untyped_storage": Method(method_untyped_storage, "untyped_storage"),
+        "wait": Method(method_wait, "wait"),
+        "random_": Method(method_random_, "random_"),
+        "uniform_": Method(method_uniform_, "uniform_"),
     }
 
     def set_name_hint(self, name: str) -> None:
@@ -3511,8 +3504,8 @@ class UntypedStorageVariable(VariableTracker):
         return self
 
     tp_methods = {
-        "size": Method(method_size, MethodFlags.NOARGS),
-        "resize_": Method(method_resize_, MethodFlags.O),
+        "size": Method(method_size, "size"),
+        "resize_": Method(method_resize_, "resize_"),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

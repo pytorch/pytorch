@@ -1028,21 +1028,21 @@ class NNModuleVariable(VariableTracker):
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
     tp_methods = {
-        "_call_impl": Method(_call_impl),
-        "_wrapped_call_impl": Method(_call_impl),
-        "forward": Method(forward),
-        "_get_item_by_idx": Method(_get_item_by_idx),
-        "named_children": Method(named_children),
-        "named_parameters": Method(named_parameters),
-        "named_buffers": Method(named_buffers),
-        "named_modules": Method(named_modules),
-        "children": Method(children),
-        "modules": Method(modules),
-        "parameters": Method(parameters),
-        "buffers": Method(buffers),
-        "keys": Method(keys),
-        "values": Method(values),
-        "items": Method(items),
+        "_call_impl": Method(_call_impl, "_call_impl"),
+        "_wrapped_call_impl": Method(_call_impl, "_wrapped_call_impl"),
+        "forward": Method(forward, "forward"),
+        "_get_item_by_idx": Method(_get_item_by_idx, "_get_item_by_idx"),
+        "named_children": Method(named_children, "named_children"),
+        "named_parameters": Method(named_parameters, "named_parameters"),
+        "named_buffers": Method(named_buffers, "named_buffers"),
+        "named_modules": Method(named_modules, "named_modules"),
+        "children": Method(children, "children"),
+        "modules": Method(modules, "modules"),
+        "parameters": Method(parameters, "parameters"),
+        "buffers": Method(buffers, "buffers"),
+        "keys": Method(keys, "keys"),
+        "values": Method(values, "values"),
+        "items": Method(items, "items"),
     }
 
     def call_method(

@@ -2336,6 +2336,16 @@
       ]
     }
   ],
+  "GB2412": [
+    {
+      "Gb_type": "Unsupported attribute",
+      "Context": "attr_unsupported {vt} {name}",
+      "Explanation": "{type(vt).__name__} does not support attribute '{name}'",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0156": [
     {
       "Gb_type": "Unsupported method call",
