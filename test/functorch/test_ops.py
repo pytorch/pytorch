@@ -1349,9 +1349,7 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            arg_values = [sample.input] + list(sample.args)
             kwarg_values = sample.kwargs
-            args = tuple(arg_values) + tuple(kwarg_values)
             fn, args = get_jvp_variant_primals_tangents(op, sample)
             is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
             generator = get_fallback_and_vmap_exhaustive(
@@ -1412,9 +1410,7 @@ class TestOperators(TestCase):
 
         def test():
             for sample in samples:
-                arg_values = [sample.input] + list(sample.args)
                 kwarg_values = sample.kwargs
-                args = tuple(arg_values) + tuple(kwarg_values)
                 fn, args = get_jvp_variant_primals_tangents(op, sample)
                 is_batch_norm_and_training = is_batch_norm_training(
                     op.name, kwarg_values
@@ -2370,7 +2366,6 @@ class TestOperators(TestCase):
             tol1(
                 "nn.functional.conv2d",
                 {torch.float32: tol(atol=5e-05, rtol=5e-05)},
-                device_type="cuda",
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),

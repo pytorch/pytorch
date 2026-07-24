@@ -16,7 +16,16 @@ except ImportError:
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Uint8, Int32, Int64, Float16, BFloat16, Float32
+from cutlass import (
+    BFloat16,
+    Float16,
+    Float32,
+    Float8E4M3FN,
+    Float8E8M0FNU,
+    Int32,
+    Int64,
+    Uint8,
+)
 from cutlass.base_dsl.tvm_ffi_builder import spec
 from cutlass.cutlass_dsl import NumericMeta
 
@@ -59,6 +68,8 @@ torch2cute_dtype_map = {
     torch.float16: Float16,
     torch.bfloat16: BFloat16,
     torch.float32: Float32,
+    torch.float8_e4m3fn: Float8E4M3FN,
+    torch.float8_e8m0fnu: Float8E8M0FNU,
     torch.int32: Int32,
     torch.int64: Int64,
 }

@@ -383,7 +383,7 @@ ReluCompileError:""",
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 
@@ -445,7 +445,7 @@ Failed Source Expressions:
     def test_trigger_bisect_on_error(self):
         from torch.fx.experimental.validator import BisectValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 

@@ -99,6 +99,8 @@ TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
 def _load_sibling(name: str):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name + ".py")
     spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module from {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
