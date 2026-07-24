@@ -1550,7 +1550,7 @@ class PrecompiledModule:
         return buf.getvalue()
 
 
-def _make_inlined_forward(python_code: str) -> Callable[..., object]:
+def _make_inlined_forward(python_code: str, warn: bool = True) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
     ``python_code`` needs no cache -- the kernels (inductor) or graph (eager) are
@@ -1559,13 +1559,16 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     inputs)."""
     # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
     # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
-    # warning_once) before the exec so the inlined fallback is never silent about it.
-    log.warning(
-        "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
-        "executable input (it runs inlined kernels / graph code). Only exec python_code "
-        "you produced or otherwise trust (Note [precompile programming model], "
-        "invariant 7)."
-    )
+    # warning_once) before the exec so the inlined fallback is never silent about it,
+    # but only when warn is True -- callers that exec artifacts they produced themselves
+    # (e.g. export_python) pass warn=False to suppress the untrusted-exec warning.
+    if warn:
+        log.warning(
+            "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
+            "executable input (it runs inlined kernels / graph code). Only exec python_code "
+            "you produced or otherwise trust (Note [precompile programming model], "
+            "invariant 7)."
+        )
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
