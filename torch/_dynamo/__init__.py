@@ -80,6 +80,13 @@ from .utils import (
 from .polyfills import loader as _  # usort: skip
 
 
+# torch._guards must not import torch._dynamo; register the live config getter it
+# needs here (used by GuardSource.is_specialized_nn_module).
+torch._guards.register_skip_fsdp_module_guards_getter(
+    lambda: config._unsafe_skip_fsdp_module_guards
+)
+
+
 __all__ = [
     "allow_c_slot",
     "allow_in_graph",

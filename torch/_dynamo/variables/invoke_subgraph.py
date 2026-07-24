@@ -1159,7 +1159,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         previously_installed_submodules = []
         if invoke_subgraph_cache:
             previously_installed_submodules = (
-                invoke_subgraph_cache.get_dynamo_installed_submodules(fn_code)
+                invoke_subgraph_cache.get_installed_submodules(fn_code)
             )
             current_mod = body_gmod
             # NB - reverse is more likely to cause a hit sooner because first
@@ -1194,7 +1194,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             len(previously_installed_submodules) + 1,
         )
         if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_dynamo_installed_submodule(fn_code, body_name)
+            invoke_subgraph_cache.add_installed_submodule(fn_code, body_name)
 
         return body_name
 
