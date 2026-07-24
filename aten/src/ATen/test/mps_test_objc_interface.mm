@@ -56,6 +56,40 @@ TEST(MPSObjCInterfaceTest, MPSPlacementHeapCoalescing) {
   allocator->emptyCache();
 }
 
+TEST(MPSObjCInterfaceTest, MPSPlacementHeapSplitting) {
+  ASSERT_TRUE(torch::mps::is_available());
+
+  auto* allocator = at::mps::getIMPSAllocator();
+  allocator->emptyCache();
+  const size_t reserved = allocator->getTotalAllocatedMemory();
+
+  // small allocations are placed by the allocator as well
+  auto small = allocator->allocate(4096);
+  ASSERT_EQ([[getMTLBuffer(small) heap] type], MTLHeapTypePlacement);
+
+  // a free range larger than the request is cut down to it, and the remainder
+  // stays available for the next allocation
+  constexpr size_t block_size = 8 * 1024 * 1024;
+  auto whole = allocator->allocate(block_size);
+  id<MTLHeap> heap = [getMTLBuffer(whole) heap];
+  const NSUInteger offset = [getMTLBuffer(whole) heapOffset];
+  whole.clear();
+
+  auto head = allocator->allocate(block_size / 2);
+  auto tail = allocator->allocate(block_size / 2);
+  ASSERT_EQ([getMTLBuffer(head) heap], heap);
+  ASSERT_EQ([getMTLBuffer(head) heapOffset], offset);
+  ASSERT_EQ([getMTLBuffer(tail) heap], heap);
+  ASSERT_EQ([getMTLBuffer(tail) heapOffset], offset + block_size / 2);
+
+  // heaps are handed back to the system once no allocation is left in them
+  small.clear();
+  head.clear();
+  tail.clear();
+  allocator->emptyCache();
+  ASSERT_EQ(allocator->getTotalAllocatedMemory(), reserved);
+}
+
 TEST(MPSObjCInterfaceTest, MPSCustomKernel) {
   const unsigned int tensor_length = 100000UL;
 
