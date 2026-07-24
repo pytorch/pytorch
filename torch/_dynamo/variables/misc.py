@@ -66,7 +66,6 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
-    cmp_name_to_op_mapping,
     identity,
     istype,
     proxy_args_kwargs,
@@ -78,6 +77,7 @@ from .base import (
     GetSet,
     getset_build,
     getset_read,
+    getset_unsupported,
     Member,
     Method,
     MethodFlags,
@@ -540,17 +540,10 @@ class TracebackVariable(VariableTracker):
         "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
     }
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "tb_lasti":
-            unimplemented(
-                gb_type="traceback.tb_lasti not supported",
-                context=f"{self} accessing 'tb_lasti'",
-                explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return super().getattro_impl(tx, name)
+    # ref: CPython Objects/traceback.c tb_memberlist.
+    tp_members = {
+        "tb_lasti": Member(getset_unsupported("tb_lasti")),
+    }
 
     def richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -814,12 +807,10 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "value":
-            return self.value
-        return super().getattro_impl(tx, name)
+    # ref: StopIteration_members in CPython Objects/exceptions.c
+    tp_members = {
+        "value": Member(getset_read(lambda s: s.value)),
+    }
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -842,13 +833,6 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name in self._attrs:
-            return self._attrs[name]
-        return super().getattro_impl(tx, name)
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
         for name, val in self._attrs.items():
@@ -862,11 +846,16 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
 class AttributeErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#AttributeError
     _kwarg_attrs = ("name", "obj")
+    tp_members = {
+        "name": Member(getset_read(lambda s: s._attrs["name"])),
+        "obj": Member(getset_read(lambda s: s._attrs["obj"])),
+    }
 
 
 class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
+    tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
 
 
 class UnknownVariable(VariableTracker):
@@ -1862,11 +1851,6 @@ class TypingVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
 
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.value, name))
-            )
-
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
@@ -2402,17 +2386,12 @@ class LoggingLoggerVariable(VariableTracker):
         if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
 
-        logger_cls = type(self.value)
-        logger_cls_name = f"{logger_cls.__module__}.{logger_cls.__qualname__}"
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
             context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
             explanation="logging.Logger methods are not supported for non-export cases.",
             hints=[
-                "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.",
-                f"For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
-                f"Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`{name}`) is checked against the ignore set. Ignoring a method that `{name}` calls internally has no effect.",
-                "If you need the log side effect to run, then you can try one of (1) `torch._higher_order_ops.print(...)`, (2) wrap the logging call in a custom op (marked as mutable), or (3) preserve the logging contents and move the logging call outside the compiled region.",
+                "Add the logging method to `torch._dynamo.config.ignore_logging_functions`.",
             ],
         )
 
