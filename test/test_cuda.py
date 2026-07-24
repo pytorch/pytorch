@@ -2960,7 +2960,7 @@ torch.cuda.synchronize()
     def test_philox_cuda_state_eager(self):
         g = torch.Generator(device="cuda")
         g.manual_seed(123)
-        seed_t, off_t, intra_t = g._philox_cuda_state(8)
+        seed_t, off_t, intra_t = g.philox_cuda_state(8)
         self.assertEqual(seed_t.item(), g.initial_seed())
         self.assertEqual(off_t.item(), 0)
         self.assertEqual(intra_t.item(), 0)
@@ -2971,16 +2971,16 @@ torch.cuda.synchronize()
         self.assertEqual(off_t.device.type, "cuda")
         self.assertEqual(intra_t.device.type, "cpu")
         self.assertEqual(g.get_offset(), 8)
-        _, off_t, _ = g._philox_cuda_state(8)
+        _, off_t, _ = g.philox_cuda_state(8)
         self.assertEqual(off_t.item(), 8)
         self.assertEqual(g.get_offset(), 16)
 
     def test_philox_cuda_state_rounds_increment_to_multiple_of_4(self):
         g = torch.Generator(device="cuda")
         g.manual_seed(0)
-        g._philox_cuda_state(1)
+        g.philox_cuda_state(1)
         self.assertEqual(g.get_offset(), 4)
-        g._philox_cuda_state(5)
+        g.philox_cuda_state(5)
         self.assertEqual(g.get_offset(), 12)
 
     def test_philox_cuda_state_large_seed_reinterpreted_as_int64(self):
@@ -2988,8 +2988,19 @@ torch.cuda.synchronize()
         g = torch.Generator(device="cuda")
         seed = (1 << 64) - 3
         g.manual_seed(seed)
-        seed_t, _, _ = g._philox_cuda_state(4)
+        seed_t, _, _ = g.philox_cuda_state(4)
         self.assertEqual(seed_t.item() & ((1 << 64) - 1), seed)
+
+    def test_philox_cuda_state_offset_overflows_int64(self):
+        # Offsets >= 2**63 come back reinterpreted as negative int64, and
+        # the internal uint64 offset wraps on advancement past 2**64.
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        big = (1 << 64) - 4
+        g.set_offset(big)
+        _, off_t, _ = g.philox_cuda_state(4)
+        self.assertEqual(off_t.item() & ((1 << 64) - 1), big)
+        self.assertEqual(g.get_offset(), 0)
 
     def test_philox_cuda_state_composes_with_eager_ops(self):
         # A reservation must consume the same Philox stream positions an
@@ -2999,7 +3010,7 @@ torch.cuda.synchronize()
         g.manual_seed(0)
         torch.rand(1000, device="cuda", generator=g)
         off = g.get_offset()
-        g._philox_cuda_state(4)
+        g.philox_cuda_state(4)
         b = torch.rand(1000, device="cuda", generator=g)
         g.manual_seed(0)
         g.set_offset(off + 4)
@@ -3007,20 +3018,20 @@ torch.cuda.synchronize()
 
     def test_philox_cuda_state_errors(self):
         cpu_gen = torch.Generator()
-        with self.assertRaisesRegex(NotImplementedError, "_philox_cuda_state"):
-            cpu_gen._philox_cuda_state(4)
+        with self.assertRaisesRegex(NotImplementedError, "philox_cuda_state"):
+            cpu_gen.philox_cuda_state(4)
         g = torch.Generator(device="cuda")
         with self.assertRaisesRegex(OverflowError, "negative"):
-            g._philox_cuda_state(-1)
+            g.philox_cuda_state(-1)
         with self.assertRaisesRegex(RuntimeError, "expected an int"):
-            g._philox_cuda_state(1.5)
+            g.philox_cuda_state(1.5)
 
     def test_philox_cuda_state_graphsafe_shared_state(self):
         g = torch.Generator(device="cuda")
         g.manual_seed(0)
         new_state = g.clone_state()
         g.graphsafe_set_state(new_state)
-        g._philox_cuda_state(8)
+        g.philox_cuda_state(8)
         self.assertEqual(new_state.get_offset(), 8)
 
     @unittest.skipIf(
@@ -3035,9 +3046,9 @@ torch.cuda.synchronize()
         x = torch.zeros(1, device="cuda")
         with torch.cuda.stream(s):
             graph.capture_begin()
-            seed_t, off_t, intra_t0 = g._philox_cuda_state(4)
+            seed_t, off_t, intra_t0 = g.philox_cuda_state(4)
             x += 1
-            _, _, intra_t1 = g._philox_cuda_state(4)
+            _, _, intra_t1 = g.philox_cuda_state(4)
             graph.capture_end()
         torch.cuda.current_stream().wait_stream(s)
 

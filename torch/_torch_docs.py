@@ -14403,6 +14403,51 @@ Example:
 )
 
 add_docstr(
+    torch.Generator.philox_cuda_state,
+    r"""
+Generator.philox_cuda_state(increment) -> tuple[Tensor, Tensor, Tensor]
+
+Reserves ``increment`` values from this CUDA generator's Philox stream and
+returns the reserved position as ``(seed, offset, intragraph_offset)``, three
+1-element ``int64`` tensors. A kernel launched now should consume the Philox
+inputs ``(seed, offset + intragraph_offset)``; this is the same reservation
+protocol aten's CUDA kernels use, so kernels built on it draw from the same
+stream as (and compose with) the built-in random operations.
+
+``increment`` must be at least the number of Philox outputs (32-bit random
+values) any single thread of the consuming kernel generates. It is rounded up
+to a multiple of 4, and the generator's offset advances by the rounded amount.
+
+The values are returned as tensors rather than integers so the same code is
+safe under CUDA graph capture. Outside capture, ``seed`` and ``offset`` are
+device tensors holding the current values and ``intragraph_offset`` is a CPU
+tensor holding 0. During capture, ``seed`` and ``offset`` alias generator
+state that each :meth:`torch.cuda.CUDAGraph.replay` refills with the values
+current at replay time, and ``intragraph_offset`` holds this reservation's
+position within the graph; a kernel that loads ``seed`` and ``offset`` from
+the tensors at run time therefore replays correctly with no capture-specific
+code.
+
+.. note::
+    The seed and offset are unsigned 64-bit values reinterpreted as ``int64``;
+    values at or above ``2**63`` appear negative.
+
+.. warning::
+    Tensors returned during capture alias the capture's state: their contents
+    are undefined until the first replay and they must not be used after the
+    graph is destroyed.
+
+Arguments:
+    increment (int): Number of Philox outputs to reserve; must be
+        non-negative.
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> seed, offset, intragraph = g_cuda.philox_cuda_state(4)
+""",
+)
+
+add_docstr(
     torch.Generator.clone_state,
     r"""
 Generator.clone_state() -> torch.Generator
