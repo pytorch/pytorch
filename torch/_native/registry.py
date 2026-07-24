@@ -923,7 +923,24 @@ def _register_overrides_from_graph(
     # Inductor reuses the default lowering rather than recursing.
     _NO_MATCH = object()  # sentinel; impl return values of None would be valid outputs
 
+    # Calls covered by AOT kernels embedded in the aten implementation
+    # (see torch/_native/ops/<op>/aot.py) must decline the JIT route:
+    # the router's no-match fallback lands in the aten kernel, whose
+    # native-AOT stub serves them. Checked once per call here rather
+    # than per cond -- every override of the op would get the same
+    # answer for the same arguments, and ops with several paths (e.g.
+    # scatter_add's TMA + vec-scatter) would pay covers() N times.
+    # Applies to unconditional overrides too. None when the op has no
+    # AOT declaration, so uncovered ops pay nothing.
+    from . import aot_manifest
+
+    coverage = aot_manifest.get_coverage(op_symbol, dispatch_key)
+
     def _dispatch(args, kwargs, swallow_cond_exceptions: bool):
+        # covers() degrades covered_axes exceptions to "uncovered", so
+        # this is safe under FakeTensor in the compile router too.
+        if coverage is not None and coverage.covers(args, kwargs):
+            return _NO_MATCH
         for cond, impl_name in cond_impl:
             try:
                 matched = cond(*args, **kwargs)
