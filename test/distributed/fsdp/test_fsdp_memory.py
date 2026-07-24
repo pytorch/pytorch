@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_CUDA,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
@@ -162,7 +161,7 @@ class TestFSDPMemory(FSDPTest):
         output = cmp(results, expected)
         self.assertEqual(output, "")
 
-    @unittest.skipIf(TEST_HPU, "Memory will be different for CUDA and HPU, skipping")
+    @unittest.skipIf(not TEST_CUDA, "Memory expectations are CUDA-specific")
     @skip_if_lt_x_gpu(2)
     @parametrize("ckpt", ["no_ckpt", "ckpt"])
     def test_fsdp_memory(self, ckpt):
