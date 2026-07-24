@@ -58,7 +58,6 @@ from .base import (
     GetSet,
     getset_read,
     Method,
-    MethodFlags,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
@@ -680,19 +679,17 @@ class ConstDictVariable(VariableTracker):
         )
 
     tp_methods = {
-        "items": Method(dict_items, MethodFlags.NOARGS),
-        "keys": Method(dict_keys, MethodFlags.NOARGS),
-        "values": Method(dict_values, MethodFlags.NOARGS),
-        "copy": Method(dict_copy, MethodFlags.NOARGS),
-        "clear": Method(dict_clear, MethodFlags.NOARGS),
-        "get": Method(dict_get, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "pop": Method(dict_pop, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "popitem": Method(dict_popitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "update": Method(dict_update, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "setdefault": Method(
-            dict_setdefault, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "__reversed__": Method(dict_reversed, MethodFlags.NOARGS),
+        "items": Method(dict_items, "items"),
+        "keys": Method(dict_keys, "keys"),
+        "values": Method(dict_values, "values"),
+        "copy": Method(dict_copy, "copy"),
+        "clear": Method(dict_clear, "clear"),
+        "get": Method(dict_get, "get"),
+        "pop": Method(dict_pop, "pop"),
+        "popitem": Method(dict_popitem, "popitem"),
+        "update": Method(dict_update, "update"),
+        "setdefault": Method(dict_setdefault, "setdefault"),
+        "__reversed__": Method(dict_reversed, "__reversed__"),
     }
 
     def unpack_var_sequence(
@@ -1096,7 +1093,7 @@ class DictViewVariable(VariableTracker):
         )
 
     tp_methods = {
-        "__reversed__": Method(dict_view_reversed, MethodFlags.NOARGS),
+        "__reversed__": Method(dict_view_reversed, "__reversed__"),
     }
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1583,7 +1580,7 @@ class DunderDictVariable(ConstDictVariable):
         )
 
     tp_methods = {
-        "copy": Method(dict_copy, MethodFlags.NOARGS),
+        "copy": Method(dict_copy, "copy"),
     }
 
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),

@@ -57,7 +57,6 @@ from .base import (
     getset_read,
     Member,
     Method,
-    MethodFlags,
     ValueMutationNew,
     VariableTracker,
 )
@@ -723,9 +722,9 @@ class BaseListVariable(VariableTracker):
         )
 
     tp_methods = {
-        "index": Method(list_index, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "count": Method(list_count, MethodFlags.O),
-        "__reversed__": Method(list_reversed, MethodFlags.NOARGS),
+        "index": Method(list_index, "index"),
+        "count": Method(list_count, "count"),
+        "__reversed__": Method(list_reversed, "__reversed__"),
     }
 
 
@@ -1074,9 +1073,9 @@ class RangeVariable(BaseListVariable):
         return RangeIteratorVariable(new_start, 0, new_step, length)
 
     tp_methods = {
-        "count": Method(count, MethodFlags.O),
-        "index": Method(index, MethodFlags.O),
-        "__reversed__": Method(range_reversed, MethodFlags.NOARGS),
+        "count": Method(count, "count"),
+        "index": Method(index, "index"),
+        "__reversed__": Method(range_reversed, "__reversed__"),
     }
 
     # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
@@ -1316,31 +1315,15 @@ class ListVariable(BaseListVariable):
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     tp_methods = {
-        "append": Method(
-            BaseListVariable.list_append, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "extend": Method(
-            BaseListVariable.list_extend, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "insert": Method(
-            BaseListVariable.list_insert, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "pop": Method(
-            BaseListVariable.list_pop, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "clear": Method(
-            BaseListVariable.list_clear, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "copy": Method(BaseListVariable.list_copy, MethodFlags.NOARGS),
-        "reverse": Method(
-            BaseListVariable.list_reverse, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "remove": Method(
-            BaseListVariable.list_remove, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "sort": Method(
-            BaseListVariable.list_sort, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
+        "append": Method(BaseListVariable.list_append, "append"),
+        "extend": Method(BaseListVariable.list_extend, "extend"),
+        "insert": Method(BaseListVariable.list_insert, "insert"),
+        "pop": Method(BaseListVariable.list_pop, "pop"),
+        "clear": Method(BaseListVariable.list_clear, "clear"),
+        "copy": Method(BaseListVariable.list_copy, "copy"),
+        "reverse": Method(BaseListVariable.list_reverse, "reverse"),
+        "remove": Method(BaseListVariable.list_remove, "remove"),
+        "sort": Method(BaseListVariable.list_sort, "sort"),
     }
 
 
@@ -1736,23 +1719,19 @@ class DequeVariable(BaseListVariable):
     tp_methods = {
         # append/extend clamp right; appendleft/extendleft clamp left; the rest
         # are the shared list handlers (they don't grow, so need no clamp).
-        "append": Method(append, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "extend": Method(extend, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "appendleft": Method(appendleft, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "extendleft": Method(extendleft, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "insert": Method(insert, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "pop": Method(pop, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "popleft": Method(popleft, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "clear": Method(clear, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "reverse": Method(
-            BaseListVariable.list_reverse, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "remove": Method(
-            BaseListVariable.list_remove, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "copy": Method(copy, MethodFlags.NOARGS),
-        "__copy__": Method(copy, MethodFlags.NOARGS),
-        "__reversed__": Method(deque_reversed, MethodFlags.NOARGS),
+        "append": Method(append, "append"),
+        "extend": Method(extend, "extend"),
+        "appendleft": Method(appendleft, "appendleft"),
+        "extendleft": Method(extendleft, "extendleft"),
+        "insert": Method(insert, "insert"),
+        "pop": Method(pop, "pop"),
+        "popleft": Method(popleft, "popleft"),
+        "clear": Method(clear, "clear"),
+        "reverse": Method(BaseListVariable.list_reverse, "reverse"),
+        "remove": Method(BaseListVariable.list_remove, "remove"),
+        "copy": Method(copy, "copy"),
+        "__copy__": Method(copy, "__copy__"),
+        "__reversed__": Method(deque_reversed, "__reversed__"),
     }
 
 
@@ -1995,7 +1974,7 @@ class SizeVariable(TupleVariable):
         return result
 
     tp_methods = {
-        "numel": Method(numel, MethodFlags.NOARGS),
+        "numel": Method(numel, "numel"),
     }
 
     def mp_subscript_impl(
@@ -2235,7 +2214,7 @@ class SliceVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         return VariableTracker.build(tx, result)
 
-    tp_methods = {"indices": Method(indices, MethodFlags.O)}
+    tp_methods = {"indices": Method(indices, "indices")}
 
 
 class ListIteratorVariable(IteratorVariable):
@@ -2410,8 +2389,8 @@ class RangeIteratorVariable(IteratorVariable):
         return ConstantVariable.create(self.len)
 
     tp_methods = {
-        "__setstate__": Method(setstate, MethodFlags.O),
-        "__length_hint__": Method(length_hint, MethodFlags.NOARGS),
+        "__setstate__": Method(setstate, "__setstate__"),
+        "__length_hint__": Method(length_hint, "__length_hint__"),
     }
 
     def python_type(self) -> type:
