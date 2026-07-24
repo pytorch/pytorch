@@ -234,7 +234,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
   // current communicator generation (if any) and bootstraps a fresh ncclComm
   // over the surviving/new members. Implemented in
-  // ProcessGroupNCCLReconfigure.cpp.
+  // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
     return true;
   }
@@ -255,7 +255,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const std::optional<at::Tensor>& tensor = std::nullopt) override;
 
   // Caching-allocator segment registration (called by
-  // NcclCachingAllocatorHook, potentially from allocator threads).
+  // NCCLCachingAllocatorHook, potentially from allocator threads).
   void register_address(void* addr, size_t len);
   void deregister_address(void* addr);
   // Returns {window handle, byte offset of ptr within the segment}, or
