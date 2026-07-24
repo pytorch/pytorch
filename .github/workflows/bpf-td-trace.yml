@@ -31,19 +31,17 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       check_experiments: lf
 
-  # Prior EC2 run settled it: a bare (no job-level container) job schedules on
-  # the unprefixed linux.4xlarge pool (real EC2 instance, c5.4xlarge). Host-side
-  # bpftrace is out (the host AMI has no apt and no preinstalled bpftrace), and
-  # docker run --privileged failed only at "tracepoint not found" because a
-  # privileged container does not auto-mount tracefs. Unlike ARC, a real
-  # docker-on-VM host lets a privileged container mount debugfs/tracefs itself
-  # (it has CAP_SYS_ADMIN). This canary proves that recipe end to end.
+  # Prior EC2 run got further: the privileged container self-mounted tracefs
+  # fine (tracepoint present), then failed because Ubuntu 22.04's bpftrace 0.14
+  # does BCC-style header compilation and needs linux/types.h (absent). Fix:
+  # use the upstream static bpftrace binary (BTF/CO-RE, no kernel headers) --
+  # the same mechanism the jammy test container will use via run_traced.sh.
   canary:
     name: canary
     runs-on: linux.4xlarge
     timeout-minutes: 20
     steps:
-      - name: docker run --privileged, self-mount tracefs, attach bpftrace
+      - name: docker run --privileged, self-mount tracefs, static bpftrace attach
         run: |
           set -eux
           docker run --rm --privileged --security-opt seccomp=unconfined ubuntu:22.04 \
@@ -51,9 +49,12 @@ jobs:
               set -eux
               mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
               mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
-              ls /sys/kernel/debug/tracing/events/syscalls/sys_enter_openat \
-                || ls /sys/kernel/tracing/events/syscalls/sys_enter_openat
-              apt-get update -qq && apt-get install -qq -y bpftrace
+              apt-get update -qq && apt-get install -qq -y curl ca-certificates
+              curl -fsSL -o /usr/local/bin/bpftrace \
+                https://github.com/bpftrace/bpftrace/releases/download/v0.26.1/bpftrace
+              chmod +x /usr/local/bin/bpftrace
+              bpftrace --version
+              ls /sys/kernel/btf/vmlinux
               timeout 30 bpftrace -e \
                 "tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }"
             '
