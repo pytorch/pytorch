@@ -693,7 +693,13 @@ class TestInstrumentationCoverage(TestCase):
         ops_dir = os.path.join(os.path.dirname(torch._native.__file__), "ops")
         for root, _, files in os.walk(ops_dir):
             for name in files:
-                if name.endswith(".py"):
+                # aot_kernel.py modules are exempt: their kernels are
+                # compiled at EXPORT time by tools/native_aot (no runtime
+                # compile to instrument). triton.tools.compile also needs
+                # to find a plain JITFunction by name, which a wrapper
+                # would hide. aot.py declaration modules are stdlib-only
+                # metadata (torchgen loads them pre-build).
+                if name.endswith(".py") and name not in ("aot_kernel.py", "aot.py"):
                     yield os.path.join(root, name)
 
     def test_required_decorators_exist(self):

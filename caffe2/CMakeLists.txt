@@ -1014,6 +1014,63 @@ elseif(USE_CUDA)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
+  # Embed exported native-AOT DSL kernels directly into torch_cuda
+  # (stage-2 artifacts from tools/native_aot/export.py + gen_aot_lib.py).
+  # An empty artifacts dir degrades gracefully: no sources, no kernels
+  # registered, stock aten behavior -- so the main build never depends
+  # on stage 2 having run. CONFIGURE_DEPENDS so a later export + ninja
+  # picks up new artifacts and relinks (~3s incremental).
+  set(NATIVE_AOT_ARTIFACTS_DIR "${CMAKE_BINARY_DIR}/native_aot"
+      CACHE PATH "Exported native-AOT kernel artifacts")
+  file(GLOB NATIVE_AOT_GEN_SRCS CONFIGURE_DEPENDS
+       "${NATIVE_AOT_ARTIFACTS_DIR}/*/aot_*.cpp")
+  file(GLOB NATIVE_AOT_KERNEL_SRCS CONFIGURE_DEPENDS
+       "${NATIVE_AOT_ARTIFACTS_DIR}/*/*.c")
+  file(GLOB NATIVE_AOT_KERNEL_OBJS CONFIGURE_DEPENDS
+       "${NATIVE_AOT_ARTIFACTS_DIR}/*/*.o")
+  if(NATIVE_AOT_GEN_SRCS)
+    message(STATUS "native-AOT embedded: ${NATIVE_AOT_ARTIFACTS_DIR}")
+    set_source_files_properties(${NATIVE_AOT_KERNEL_OBJS} PROPERTIES
+        EXTERNAL_OBJECT TRUE GENERATED TRUE)
+    target_sources(torch_cuda PRIVATE
+        ${NATIVE_AOT_GEN_SRCS} ${NATIVE_AOT_KERNEL_SRCS} ${NATIVE_AOT_KERNEL_OBJS})
+    # Per-op include dirs for the exported CuTeDSL ABI headers.
+    file(GLOB _native_aot_op_dirs LIST_DIRECTORIES true
+         "${NATIVE_AOT_ARTIFACTS_DIR}/*")
+    foreach(_dir ${_native_aot_op_dirs})
+      if(IS_DIRECTORY ${_dir})
+        target_include_directories(torch_cuda PRIVATE ${_dir})
+      endif()
+    endforeach()
+    if(NOT NATIVE_AOT_DSL_RUNTIME_STATIC)
+      # CuTeDSL kernel objects need libcuda_dialect_runtime_static.a
+      # from the DSL wheel (a NAMESPACE package: __path__, not __file__).
+      execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c
+          "import nvidia_cutlass_dsl; print(list(nvidia_cutlass_dsl.__path__)[0])"
+        OUTPUT_VARIABLE _dsl_root OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+      if(_dsl_root)
+        set(NATIVE_AOT_DSL_RUNTIME_STATIC
+            "${_dsl_root}/lib/libcuda_dialect_runtime_static.a"
+            CACHE FILEPATH "CuTeDSL dialect runtime static archive")
+      endif()
+    endif()
+    if(NATIVE_AOT_DSL_RUNTIME_STATIC AND EXISTS "${NATIVE_AOT_DSL_RUNTIME_STATIC}")
+      # whole-archive is NOT needed (kernels reference it directly) and
+      # exclude-libs keeps its symbols out of torch_cuda's export table.
+      target_link_libraries(torch_cuda PRIVATE
+          ${NATIVE_AOT_DSL_RUNTIME_STATIC})
+      target_link_options(torch_cuda PRIVATE
+          "LINKER:--exclude-libs,libcuda_dialect_runtime_static.a")
+    else()
+      message(WARNING "native-AOT embedded: DSL runtime archive not found; CuTeDSL kernels will fail to link")
+    endif()
+    target_link_libraries(torch_cuda PRIVATE CUDA::cuda_driver)
+  else()
+    message(STATUS "native-AOT embedded: no artifacts under ${NATIVE_AOT_ARTIFACTS_DIR} (build proceeds without)")
+  endif()
+
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)
     target_compile_definitions(torch_cuda PRIVATE USE_CUFILE)
