@@ -31,46 +31,55 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       check_experiments: lf
 
-  # Prior run settled two questions: a plain job-level container schedules and
-  # runs on this label (control passed), and a bare no-container job is
-  # forbidden here ("Jobs without a job container are forbidden on this
-  # runner"), so a job-level container is mandatory. The cap-add container also
-  # scheduled and started fine -- scheduling was never the blocker. It failed
-  # only at "tracepoint not found: syscalls:sys_enter_openat", i.e. tracefs is
-  # not visible in the pod. This canary mounts host tracefs/debugfs and dumps
-  # caps + tracefs + attach state in one shot, so a single round-trip tells us
-  # whether in-container bpftrace is viable on these ARC runners at all.
-  canary-capadd:
-    name: canary-capadd
-    needs: get-label-type
-    runs-on: ${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128
+  # The ARC/k8s fleet is a dead end: its container hook silently ignores
+  # container cap-add options and hostPath volume mounts (effective caps came
+  # back as the stock docker default, no tracefs mounted). Per Eli, the classic
+  # EC2 docker-on-VM pool still exists behind the UNPREFIXED linux.4xlarge label
+  # (only prefixed labels route to ARC). This canary runs bare (no job-level
+  # container) on that pool and tests both attach paths in one shot:
+  #   1. host-side: sudo bpftrace directly on the runner VM (simplest wiring).
+  #   2. docker run --privileged: bpftrace inside a privileged container.
+  # Each is best-effort with a clear verdict line; the job fails only if both
+  # fail so a total dead end is visible.
+  canary:
+    name: canary
+    runs-on: linux.4xlarge
     timeout-minutes: 20
-    container:
-      image: ubuntu:22.04
-      options: "--cap-add=SYS_ADMIN --cap-add=PERFMON --cap-add=BPF --security-opt seccomp=unconfined"
-      volumes:
-        - /sys/kernel/debug:/sys/kernel/debug:rw
-        - /sys/kernel/tracing:/sys/kernel/tracing:rw
     steps:
-      - name: Diagnose caps + tracefs, then attach bpftrace
+      - name: host-side sudo bpftrace
+        id: host
+        continue-on-error: true
         run: |
-          set -ux
-          apt-get update -y && apt-get install -y bpftrace
-          echo "=== effective caps ==="; grep Cap /proc/self/status || true
-          echo "=== tracefs/debugfs mounts ==="; mount | grep -E "tracefs|debugfs" || true
-          echo "=== syscall tracepoint present? ==="
-          ls -la /sys/kernel/debug/tracing/events/syscalls/sys_enter_openat 2>&1 || true
-          ls -la /sys/kernel/tracing/events/syscalls/sys_enter_openat 2>&1 || true
-          echo "=== bpftrace --info (probe support) ==="; bpftrace --info 2>&1 | head -30 || true
-          echo "=== attach attempt (this is the gate) ==="
-          timeout 30 bpftrace -e \
+          set -x
+          sudo apt-get update -y && sudo apt-get install -y bpftrace
+          sudo timeout 30 bpftrace -e \
             'tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }'
+          echo "HOST_BPFTRACE=pass"
+      - name: docker run --privileged bpftrace
+        id: docker
+        continue-on-error: true
+        run: |
+          set -x
+          docker run --rm --privileged --security-opt seccomp=unconfined ubuntu:22.04 \
+            bash -c "apt-get update -qq && apt-get install -qq -y bpftrace && \
+              timeout 30 bpftrace -e \
+              'tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }'"
+          echo "DOCKER_BPFTRACE=pass"
+      - name: Verdict
+        run: |
+          echo "host=${{ steps.host.outcome }} docker=${{ steps.docker.outcome }}"
+          [ "${{ steps.host.outcome }}" = "success" ] || \
+            [ "${{ steps.docker.outcome }}" = "success" ]
 
   build:
     name: linux-jammy-py3.10-gcc11
+    # Disabled this round: build+test would ARC-map to l-x86iavx512 and can't
+    # trace. Re-enable once the EC2 routing (skip-arc-mapping) lands, after the
+    # canary confirms which attach path works.
+    if: false
     needs:
       - get-label-type
-      - canary-capadd
+      - canary
     uses: ./.github/workflows/_linux-build.yml
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
