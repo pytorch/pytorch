@@ -56,6 +56,49 @@ class GemmReductionGeometry:
     def needs_physical_callbacks(self) -> bool:
         return self.axis == 0 or self.group > 32
 
+    @property
+    def group_size(self) -> int:
+        return self.group
+
+    @classmethod
+    def from_output_shape(
+        cls, output_shape: Sequence[Any], gemm_shape: Sequence[Any]
+    ) -> "GemmReductionGeometry | None":
+        if len(output_shape) != 3 or len(gemm_shape) != 2:
+            return None
+        for axis, group_dim in ((0, 1), (1, 2)):
+            try:
+                group = V.graph.sizevars.optimization_hint(output_shape[group_dim])
+            except Exception:
+                continue
+            geometry = cls(group=group, axis=axis)
+            if geometry.matches_output_shape(output_shape, gemm_shape):
+                return geometry
+        return None
+
+    @property
+    def reduce_dims(self) -> tuple[int, ...]:
+        return (-1, 2) if self.axis == 1 else (-2, 1)
+
+    def matches_reduction_dim(self, dim: Any) -> bool:
+        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
+        return len(dims) == 1 and dims[0] in self.reduce_dims
+
+    def matches_output_shape(
+        self, output_shape: Sequence[Any], gemm_shape: Sequence[Any]
+    ) -> bool:
+        if len(gemm_shape) != 2:
+            return False
+        m, n = gemm_shape
+        grouped = (
+            (m, n // self.group, self.group)
+            if self.axis == 1
+            else (m // self.group, self.group, n)
+        )
+        return statically_known_shape_equal(
+            output_shape, (m, n)
+        ) or statically_known_shape_equal(output_shape, grouped)
+
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionConfig:
@@ -66,6 +109,10 @@ class GemmReductionConfig:
     axis: int
     reduction_type: str
     source_type: str
+
+    @property
+    def geometry(self) -> GemmReductionGeometry:
+        return GemmReductionGeometry(self.group, self.axis)
 
     @property
     def contract(self) -> tuple[int, int, str, str]:
@@ -104,70 +151,25 @@ class GemmReductionPlan:
     secondary_feed_type: str | None = None
 
     @property
-    def geometry(self) -> tuple[int, int]:
-        return self.group, self.axis
+    def geometry(self) -> GemmReductionGeometry:
+        return GemmReductionGeometry(self.group, self.axis)
 
     @property
     def auxiliary_outputs(self) -> tuple[str, ...]:
         return tuple(
-            output
-            for output in (
-                self.reduction_output,
-                self.feed_output,
-                self.secondary_feed_output,
+            OrderedSet(
+                output
+                for output in (
+                    self.reduction_output,
+                    self.feed_output,
+                    self.secondary_feed_output,
+                )
+                if output is not None and output != self.primary_output
             )
-            if output is not None
         )
 
     def with_primary_output(self, output: str) -> "GemmReductionPlan":
         return dataclasses.replace(self, primary_output=output)
-
-
-@dataclasses.dataclass(frozen=True)
-class GroupedReductionLayout:
-    """Describe a grouped view over one axis of a two-dimensional GEMM output."""
-
-    axis: int
-    group_size: int
-
-    @classmethod
-    def from_output_shape(
-        cls, output_shape: Sequence[Any], gemm_shape: Sequence[Any]
-    ) -> "GroupedReductionLayout | None":
-        if len(output_shape) != 3 or len(gemm_shape) != 2:
-            return None
-        for axis, group_dim in ((0, 1), (1, 2)):
-            try:
-                group = V.graph.sizevars.optimization_hint(output_shape[group_dim])
-            except Exception:
-                continue
-            layout = cls(axis, group)
-            if layout.matches_output_shape(output_shape, gemm_shape):
-                return layout
-        return None
-
-    @property
-    def reduce_dims(self) -> tuple[int, ...]:
-        return (-1, 2) if self.axis == 1 else (-2, 1)
-
-    def matches_reduction_dim(self, dim: Any) -> bool:
-        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
-        return len(dims) == 1 and dims[0] in self.reduce_dims
-
-    def matches_output_shape(
-        self, output_shape: Sequence[Any], gemm_shape: Sequence[Any]
-    ) -> bool:
-        if len(gemm_shape) != 2:
-            return False
-        m, n = gemm_shape
-        grouped = (
-            (m, n // self.group_size, self.group_size)
-            if self.axis == 1
-            else (m // self.group_size, self.group_size, n)
-        )
-        return statically_known_shape_equal(
-            output_shape, (m, n)
-        ) or statically_known_shape_equal(output_shape, grouped)
 
 
 def iter_fx_node_inputs(value: Any) -> Iterator[torch.fx.Node]:

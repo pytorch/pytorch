@@ -18,10 +18,6 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
-from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
-    VendoredDenseBlockScaledGemmEFC,
-    VendoredDenseBlockScaledGemmKernel,
-)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -388,6 +384,11 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     cheaper than the manifest. Falls back to the manifest if the provider is
     unavailable or nothing matches (e.g. a future non-block-scaled scaled dtype).
     """
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+        VendoredDenseBlockScaledGemmEFC,
+        VendoredDenseBlockScaledGemmKernel,
+    )
+
     manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
     if manifest.operators:
         out = manifest.filter_operators(
@@ -568,7 +569,7 @@ def ensure_cache_initialized() -> None:
     _get_kernel_cache()
 
 
-_efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
+_efc_epilogue_cache: dict[tuple[str, str, tuple, tuple], Any] = {}
 
 
 def clear_cache() -> None:
@@ -651,6 +652,7 @@ def get_efc_kernel_with_epilogue(
     epilogue_args: Any,
     epilogue_source: str = "",
     base_kernel: Any | None = None,
+    specialization: tuple = (),
 ) -> Any:
     """Get (or create and cache) an EFC kernel bound to a specific epilogue.
 
@@ -667,6 +669,7 @@ def get_efc_kernel_with_epilogue(
         efc_kernel_name,
         epilogue_source,
         _epilogue_args_signature(epilogue_args),
+        specialization,
     )
 
     with _cache_lock:

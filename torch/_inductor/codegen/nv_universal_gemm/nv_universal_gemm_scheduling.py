@@ -30,8 +30,8 @@ from ...ir import (
 )
 from ...kernel.gemm_epilogue import (
     GemmReductionConfig,
+    GemmReductionGeometry,
     GemmReductionPlan,
-    GroupedReductionLayout,
 )
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_ir,
@@ -592,7 +592,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             group, axis = reductions[0].group, reductions[0].axis
             if axis != 0 or group > 64:
                 return None
-            layout = GroupedReductionLayout(axis, group)
+            layout = GemmReductionGeometry(group=group, axis=axis)
             finalizers = [
                 buffer
                 for buffer in buffers
@@ -745,7 +745,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         buffer.get_name(), group, 1, "online_softmax", "identity"
                     )
             if isinstance(buffer.data, Pointwise):
-                layout = GroupedReductionLayout.from_output_shape(
+                layout = GemmReductionGeometry.from_output_shape(
                     buffer.get_size(), gemm_node.get_size()
                 )
                 if layout is None or layout.axis != 1:
@@ -872,7 +872,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     if scheduler_node is not None
                     else []
                 )
-                layout = GroupedReductionLayout.from_output_shape(
+                layout = GemmReductionGeometry.from_output_shape(
                     buffer.get_size(), gemm_node.get_size()
                 )
                 if layout is not None:
@@ -906,7 +906,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if consumer_type is None:
                 continue
             max_group = 32 if axis == 1 else 64
-            layout = GroupedReductionLayout(axis, group)
+            layout = GemmReductionGeometry(group=group, axis=axis)
             if group <= max_group and layout.matches_output_shape(
                 buffer.get_size(), gemm_node.get_size()
             ):
@@ -957,7 +957,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         for buffer in buffers:
             if not isinstance(buffer.data, Pointwise):
                 continue
-            layout = GroupedReductionLayout.from_output_shape(
+            layout = GemmReductionGeometry.from_output_shape(
                 buffer.get_size(), gemm_node.get_size()
             )
             if layout is None or layout.axis != 1:
@@ -987,27 +987,20 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     @classmethod
     def _feed_main_config_from_nodes(
-        cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
+        cls,
+        gemm_node: Buffer,
+        nodes: Sequence[BaseSchedulerNode],
+        *,
+        allow_softmax: bool = True,
     ) -> GemmReductionConfig | None:
-        for matcher in (
-            cls._grouped_reduce_feeds_main_config_from_nodes,
-            cls._grouped_softmax_config_from_nodes,
-            cls._grouped_sum_normalize_config_from_nodes,
-            cls._grouped_absmax_normalize_config_from_nodes,
-        ):
-            if (config := matcher(gemm_node, nodes)) is not None:
-                return config
-        return None
-
-    @classmethod
-    def _grouped_reduction_chain_config_from_nodes(
-        cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
-    ) -> GemmReductionConfig | None:
-        for matcher in (
+        matchers = [
             cls._grouped_reduce_feeds_main_config_from_nodes,
             cls._grouped_sum_normalize_config_from_nodes,
             cls._grouped_absmax_normalize_config_from_nodes,
-        ):
+        ]
+        if allow_softmax:
+            matchers.insert(1, cls._grouped_softmax_config_from_nodes)
+        for matcher in matchers:
             if (config := matcher(gemm_node, nodes)) is not None:
                 return config
         return None
@@ -1497,8 +1490,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 continue
             combined_nodes = [*node1.get_nodes(), *node2.get_nodes()]
             return bool(
-                self._grouped_reduction_chain_config_from_nodes(
-                    producer, combined_nodes
+                self._feed_main_config_from_nodes(
+                    producer, combined_nodes, allow_softmax=False
                 )
             )
         return False
@@ -1543,8 +1536,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
             ) or self._has_nvgemm_choice(producer_buffer)
             if has_nvgemm_producer and isinstance(producer_buffer, Buffer):
                 combined_nodes = [*node1.get_nodes(), *node2.get_nodes()]
-                if self._grouped_reduction_chain_config_from_nodes(
-                    producer_buffer, combined_nodes
+                if self._feed_main_config_from_nodes(
+                    producer_buffer, combined_nodes, allow_softmax=False
                 ):
                     return 0
                 combined_reductions, combined_reduction_nodes = (
@@ -1805,7 +1798,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     reduce_output = (
                         local_reduce.reduction_output
                         if local_reduce is not None
-                        and local_reduce.geometry == (group, axis)
+                        and local_reduce.geometry == GemmReductionGeometry(group, axis)
                         else None
                     )
                     feed_fused_names = OrderedSet(
@@ -1842,7 +1835,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     equivalent_feed_outputs = []
                     secondary_feed_output = None
                     secondary_feed_type = None
-                    feed_layout = GroupedReductionLayout(axis, group)
+                    feed_layout = GemmReductionGeometry(group=group, axis=axis)
 
                     for epilogue_node in epilogue_nodes:
                         for scheduler_node in epilogue_node.get_nodes():
