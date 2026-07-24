@@ -163,9 +163,10 @@ jobs:
           if command -v nvidia-smi; then
             DEVICE_NAME=cuda
             nvidia-smi
-          elif command -v rocm-smi; then
+          elif command -v amd-smi; then
             DEVICE_NAME=rocm
-            rocm-smi
+            amd-smi monitor -ptumv
+            amd-smi list
           elif command -v hl-smi; then
             DEVICE_NAME=hpu
             hl-smi
