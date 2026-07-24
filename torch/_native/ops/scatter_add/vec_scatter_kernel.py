@@ -17,7 +17,6 @@ per lane per step) and issue atomics into ``out[ind, :]``:
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
-import cutlass.cute.testing as cute_testing
 from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64
 from cutlass._mlir import ir
 from cutlass._mlir.dialects import llvm, vector as mlir_vector
@@ -26,7 +25,7 @@ from cutlass.cutlass_dsl import dsl_user_op, T
 import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
-from ._ptx import make_packed_half_atomic_add
+from ._ptx import make_packed_half_atomic_add, trap_if_oob
 
 
 _WARPS_PER_BLOCK = 8
@@ -116,11 +115,10 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int, contig: bool):
             if entry_id < num_entries:
                 r = Int64(mIndex[entry_id])
                 # Bounds check: out-of-range ``r`` would make the
-                # atomicAdd below corrupt unrelated memory. Compiling
-                # with ``--enable-assertions`` turns this into a
-                # device-side trap; otherwise it folds away.
-                cute_testing.assert_(r >= Int64(0))
-                cute_testing.assert_(r < Int64(mOut.shape[0]))
+                # atomicAdd below corrupt unrelated memory. Predicated
+                # PTX trap (same mechanism as aten's
+                # CUDA_KERNEL_ASSERT) -- free on the happy path.
+                trap_if_oob(r, Int64(mOut.shape[0]))
 
                 lane_offset = lane * Int32(vec_elems)
                 stride_elems = Int32(32 * vec_elems)
@@ -224,12 +222,10 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, contig: bool):
         Int32(0),
         Int64(0),
         Int64(0),
-        # ``--enable-assertions`` keeps the ``cute_testing.assert_``
-        # bounds checks on ``r`` live in production. Cost is roughly
-        # +1-10% (geomean +7.7%) on most shapes; the safety net is
-        # worth it because an OOB ``r`` would otherwise silently
-        # corrupt unrelated gmem via the per-element ``atomicAdd``.
-        options="--enable-tvm-ffi --enable-assertions",
+        # Bounds checks on ``r`` are always-on predicated PTX traps in
+        # the kernel body (``_ptx.trap_if_oob``) -- effectively free,
+        # unlike ``--enable-assertions`` (~10% device time).
+        options="--enable-tvm-ffi",
     )
 
 

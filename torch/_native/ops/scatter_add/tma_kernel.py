@@ -8,37 +8,11 @@ chunk-index range): a tile-mode TMA bulk load (``cute.copy`` with
 ``cp.reduce.async.bulk.global.shared::cta.bulk_group.add`` deposits the
 reduction into ``out[index[i], d_start:d_end]``.
 
-Using the tile-mode TMA with a descriptor over the full ``(M_src, N)``
-source tensor lets TMA clamp out-of-range column reads to zero, so the
-final partial chunk (when ``N`` isn't a multiple of ``chunk_elems``) is
-handled natively -- we just reduce only the valid byte count on the
-store side. That widens coverage to any ``row_bytes`` that's 16-byte
-aligned (the ``cp.reduce.async.bulk`` gmem operand requirement).
-
-Synchronization between the load and the reduce uses
-``cutlass.pipeline.PipelineTmaAsync`` with ``num_stages=2``: producer
-``acquire``/``commit`` guards the TMA issue, consumer ``wait``/``release``
-guards the reduce. Producer and consumer cooperative groups are both
-``Agent.Thread, size=1`` -- the single driver thread inside the warp
-does both roles. ``PipelineState.advance()`` handles the stage index +
-phase bit.
-
-The pipeline is software-pipelined across the flat sequence of
-``(entry, chunk)`` pairs: each loop iteration issues the TMA load for
-the current pair and consumes the previous one, keeping one TMA load
-in flight alongside an in-progress bulk-reduce. An epilogue drains
-the final outstanding load.
-
-Chunks along D at a compile-time ``chunk_elems``: small rows travel as
-a single chunk, large rows chunk at 512 B. The TMA descriptor OOB-clamp
-handles rows whose length isn't a multiple of ``chunk_elems``.
-
-Grid layout is 2D to maintain SM utilization for shapes with small N
-and large D: ``(grid_x, grid_y)``, where ``grid_y`` partitions the
-chunk-index axis. When N is large the host sets ``grid_y = 1`` so the
-inner chunk loop recovers the classic schedule. When N is tiny (say
-100 rows, D=640K), ``grid_y`` grows so the grid still fills the
-machine.
+One module serves both routes: the JIT wrapper (instrumented compile
+cache + torch host function) and the AOT ``build(spec)`` entry point
+compile the same ``_make_kernel`` body, so same-kernel is by
+construction. The AOT export tool imports this module as a package
+import with the built torch available (two-stage build).
 
 Restrictions (enforced by the host cond in ``cutedsl_impl.py``):
   - sm_90+ (cp.reduce.async.bulk availability)
@@ -54,14 +28,13 @@ import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
 import cutlass.cute.nvgpu.cpasync as cpasync
-import cutlass.cute.testing as cute_testing
 import cutlass.pipeline as pipeline
 from cutlass import BFloat16, Float16, Float32, Int32, Int64
 
 import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
-from ._ptx import cvta_smem, make_bulk_reduce_add
+from ._ptx import cvta_smem, make_bulk_reduce_add, trap_if_oob
 
 
 _MAX_CHUNK_BYTES = 512
@@ -72,13 +45,6 @@ _SMEM_ALIGN_BYTES = 128
 
 def _round_up(x: int, m: int) -> int:
     return (x + m - 1) // m * m
-
-
-_TORCH_TO_CUTE = {
-    torch.float32: Float32,
-    torch.float16: Float16,
-    torch.bfloat16: BFloat16,
-}
 
 
 _bulk_reduce_add_f32 = make_bulk_reduce_add("f32")
@@ -216,13 +182,14 @@ def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
             while chunk_idx < chunk_end:
                 if tidx == Int32(0):
                     r = Int64(mIndex[entry_id])
-                    # Bounds check: index values must be valid output
-                    # rows. Compiling with ``--enable-assertions`` turns
-                    # this into a device-side trap; otherwise it folds
-                    # away. Driver thread only -- no need to replicate
-                    # the check across all 32 lanes.
-                    cute_testing.assert_(r >= Int64(0))
-                    cute_testing.assert_(r < Int64(mOut.shape[0]))
+                    # Bounds check: an OOB index would corrupt unrelated
+                    # gmem via cp.reduce.async.bulk. Predicated PTX trap
+                    # (same mechanism as aten's CUDA_KERNEL_ASSERT in
+                    # TmaScatterAddKernel.cu) -- free on the happy path,
+                    # unlike --enable-assertions (~10% device time).
+                    # Driver thread only -- no need to replicate the
+                    # check across all 32 lanes.
+                    trap_if_oob(r, Int64(mOut.shape[0]))
 
                     pipe.producer_acquire(producer_state)
                     cute.copy(
@@ -288,13 +255,13 @@ def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
         mSrc: cute.Tensor,
         mIndex: cute.Tensor,
         mOut: cute.Tensor,
-        stream: cuda.CUstream,
         N: Int32,
         num_chunks: Int32,
         chunks_per_cta: Int32,
         grid_x: Int32,
         grid_y: Int32,
         out_row_stride: Int64,
+        stream: cuda.CUstream,
     ):
         # Build the tile-mode TMA descriptor over the (M_src, N) source.
         # Both global dims are dynamic; the ``(1, chunk_elems)`` box is
@@ -325,15 +292,91 @@ def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
     return _launch
 
 
-def _chunk_elems_for(torch_dtype: torch.dtype) -> int:
+_DTYPES = {"float32": Float32, "float16": Float16, "bfloat16": BFloat16}
+_DTYPE_SHORT = {"float32": "f32", "float16": "f16", "bfloat16": "bf16"}
+
+
+def chunk_elems_for(dtype_name: str) -> int:
     """Compile-time ``chunk_elems`` (the static TMA box dim): always
-    ``_MAX_CHUNK_BYTES // elem_bytes``. Since ``N`` is now a runtime arg
+    ``_MAX_CHUNK_BYTES // elem_bytes``. Since ``N`` is a runtime arg
     the box can't shrink to fit small rows -- instead a short row loads
     one box and the TMA descriptor OOB-clamps the tail to 0, and the
     reduce writes only ``min(chunk_elems, N)`` valid elements. 512 B is
     a multiple of 16 for every supported dtype, so the box always meets
     the reduce's 16-byte alignment."""
-    return _MAX_CHUNK_BYTES // torch_dtype.itemsize
+    dtype = _DTYPES[dtype_name]
+    return _MAX_CHUNK_BYTES // (dtype.width // 8)
+
+
+def build(spec: dict) -> dict:
+    """One manifest spec point -> compile inputs + marshalling sidecar.
+
+    ``spec`` carries {"dtype": "float32"|"float16"|"bfloat16", ...};
+    everything else about the call (shapes, strides, grid) is a runtime
+    argument, so the grid is one kernel per dtype. Index bounds checks
+    are always-on predicated PTX traps (``trap_if_oob``); no
+    ``--enable-assertions`` needed.
+    """
+    dtype = _DTYPES[spec["dtype"]]
+    elem_bytes = dtype.width // 8
+    chunk_elems = chunk_elems_for(spec["dtype"])
+    launcher = _make_kernel(dtype, elem_bytes, chunk_elems, _reduce_op_for(dtype))
+
+    src_fake = cute.runtime.make_fake_tensor(
+        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
+    )
+    # Index is contiguous int64 (the C++ prelude enforces both); fix
+    # stride=1 so `mIndex[i]` doesn't emit a runtime stride multiply.
+    idx_fake = cute.runtime.make_fake_tensor(Int64, (cute.sym_int(),), stride=(1,))
+    out_fake = cute.runtime.make_fake_tensor(
+        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
+    )
+    prefix = f"scatter_add_tma_{_DTYPE_SHORT[spec['dtype']]}"
+    return {
+        "prefix": prefix,
+        "fn": launcher,
+        "fake_args": [
+            src_fake,
+            idx_fake,
+            out_fake,
+            Int32(0),  # N
+            Int32(0),  # num_chunks
+            Int32(0),  # chunks_per_cta
+            Int32(0),  # grid_x
+            Int32(0),  # grid_y
+            Int64(0),  # out_row_stride
+            cute.runtime.make_fake_stream(),
+        ],
+        "tensor_args": [
+            {
+                "name": "mSrc",
+                "dynamic_sizes": [0, 1],
+                "dynamic_strides": [0],
+                "read_only": True,
+            },
+            {"name": "mIndex", "dynamic_sizes": [0], "read_only": True},
+            {"name": "mOut", "dynamic_sizes": [0, 1], "dynamic_strides": [0]},
+        ],
+        "scalar_args": [
+            {"name": "N", "ctype": "int32_t"},
+            {"name": "num_chunks", "ctype": "int32_t"},
+            {"name": "chunks_per_cta", "ctype": "int32_t"},
+            {"name": "grid_x", "ctype": "int32_t"},
+            {"name": "grid_y", "ctype": "int32_t"},
+            {"name": "out_row_stride", "ctype": "int64_t"},
+        ],
+    }
+
+
+_TORCH_TO_NAME = {
+    torch.float32: "float32",
+    torch.float16: "float16",
+    torch.bfloat16: "bfloat16",
+}
+
+
+def _chunk_elems_for(torch_dtype: torch.dtype) -> int:
+    return chunk_elems_for(_TORCH_TO_NAME[torch_dtype])
 
 
 @instrumented_cutedsl_cache(
@@ -344,11 +387,11 @@ def _compile_tma_scatter(torch_dtype: torch.dtype):
     # N and num_chunks are runtime args, so one compile per dtype serves
     # every row length. chunk_elems (the static TMA box) depends only on
     # the dtype's element size.
-    dtype = _TORCH_TO_CUTE[torch_dtype]
+    name = _TORCH_TO_NAME[torch_dtype]
+    dtype = _DTYPES[name]
     elem_bytes = dtype.width // 8
-    chunk_elems = _chunk_elems_for(torch_dtype)
-    reduce_op = _reduce_op_for(dtype)
-    launcher = _make_kernel(dtype, elem_bytes, chunk_elems, reduce_op)
+    chunk_elems = chunk_elems_for(name)
+    launcher = _make_kernel(dtype, elem_bytes, chunk_elems, _reduce_op_for(dtype))
 
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
@@ -364,19 +407,17 @@ def _compile_tma_scatter(torch_dtype: torch.dtype):
         mSrc_fake,
         mIndex_fake,
         mOut_fake,
-        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
         Int32(0),  # N
         Int32(0),  # num_chunks
         Int32(0),  # chunks_per_cta
         Int32(0),  # grid_x
         Int32(0),  # grid_y
         Int64(0),  # out_row_stride
-        # ``--enable-assertions`` keeps the ``cute_testing.assert_``
-        # bounds checks on ``r`` live in production. Cost is roughly
-        # +1-10% (geomean +7.7%) on most shapes; the safety net is
-        # worth it because an OOB ``r`` would otherwise silently
-        # corrupt unrelated gmem via ``cp.reduce.async.bulk``.
-        options="--enable-tvm-ffi --enable-assertions",
+        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
+        # Bounds checks on ``r`` are always-on predicated PTX traps in
+        # the kernel body (``trap_if_oob``) -- effectively free,
+        # unlike ``--enable-assertions`` (~10% device time).
+        options="--enable-tvm-ffi",
     )
 
 
