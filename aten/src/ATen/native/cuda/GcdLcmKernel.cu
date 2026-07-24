@@ -1,3 +1,5 @@
+#include <numeric>
+
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
@@ -26,7 +28,7 @@ void gcd_kernel_cuda(TensorIteratorBase& iter) {
   #else
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "gcd_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        return calc_gcd(a, b);
+        return std::gcd(a, b);
       });
     });
   #endif // AT_USE_JITERATOR()
@@ -45,8 +47,7 @@ void lcm_kernel_cuda(TensorIteratorBase& iter) {
   #else
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        scalar_t g = calc_gcd(a, b);
-        return (g == 0) ? 0 : ::abs(a / g * b);
+        return std::lcm(a, b);
       });
     });
   #endif // AT_USE_JITERATOR()
