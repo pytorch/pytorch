@@ -41,7 +41,7 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX, unpack_iterable
-from .base import VariableTracker
+from .base import GetSet, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
@@ -144,34 +144,33 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # Note: this allows us to intercept the call in call_method
-        # in the typical case, we return a UserMethodVariable
-        # which will directly inline
-        if name in ("_init_group"):
-            if not self.source:
-                raise AssertionError(
-                    "OptimizerVariable requires a source for getattro_impl"
-                )
-            return GetAttrVariable(
-                self,
-                name,
-                py_type=type(getattr(self.value, name)),
-                source=AttrSource(self.source, name),
-            )
+    # _init_group resolves to a GetAttrVariable so the call is intercepted in
+    # call_method (in the typical case, a UserMethodVariable would inline it).
+    def _get_init_group(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if not self.source:
+            raise AssertionError("OptimizerVariable requires a source for _init_group")
+        name = "_init_group"
+        py_type = type(getattr(self.value, name))
+        return GetAttrVariable(
+            self, name, py_type=py_type, source=AttrSource(self.source, name)
+        )
 
-        if name == "param_groups":
-            from ..decorators import mark_static_address
+    # param_groups only runs setup side effects (static addresses, capturable
+    # guards) and declines, falling through to the generic protocol.
+    def _get_param_groups(self, tx: "InstructionTranslatorBase") -> None:
+        from ..decorators import mark_static_address
 
-            for group in self.value.param_groups:
-                for p in group["params"]:
-                    mark_static_address(p, guard=True)
+        for group in self.value.param_groups:
+            for p in group["params"]:
+                mark_static_address(p, guard=True)
 
-            self._set_capturable(tx)
+        self._set_capturable(tx)
+        return None
 
-        return super().getattro_impl(tx, name)
+    tp_getset = {
+        "_init_group": GetSet(_get_init_group),
+        "param_groups": GetSet(_get_param_groups),
+    }
 
     def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
         # If there are pending mutations on a parameter (due to using closure)
