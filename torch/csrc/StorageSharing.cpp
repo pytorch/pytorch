@@ -653,6 +653,8 @@ namespace {
 inline constexpr int64_t XPU_IPC_REF_COUNTER_FILE_SIZE = 10000;
 inline constexpr int64_t XPU_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
 
+class XpuIpcEvent;
+
 struct XpuIPCRefCountersFile final {
   XpuIPCRefCountersFile(std::string handle, uint64_t size, at::DataPtr data_ptr)
       : size_(size), handle_(std::move(handle)), refcounted_shared_mem_(std::move(data_ptr)) {}
@@ -728,6 +730,9 @@ class XpuIPCSentData final {
   void set_original_ptr(at::DataPtr data_ptr) {
     original_ptr_ = std::move(data_ptr);
   }
+  void set_ipc_event(std::shared_ptr<XpuIpcEvent> ipc_event) {
+    ipc_event_ = std::move(ipc_event);
+  }
 
  private:
   std::string handle_;
@@ -735,6 +740,7 @@ class XpuIPCSentData final {
   uint64_t* counter_ptr_;
   at::DataPtr original_ptr_;
   at::Device device_;
+  std::shared_ptr<XpuIpcEvent> ipc_event_;
 };
 
 struct XpuIPCSentDataLimbo final {
@@ -986,9 +992,24 @@ class XpuIpcEvent {
 #endif
   }
 
+  void wait() const {
+#ifndef _WIN32
+    const auto& ze = at::detail::getXPUHooks().level_zero();
+    TORCH_CHECK(event_, "XPU IPC event is not initialized");
+    TORCH_CHECK(
+        ze.zeEventHostSynchronize(event_, UINT64_MAX) == ZE_RESULT_SUCCESS,
+        "Failed to wait on XPU IPC event");
+#endif
+  }
+
  private:
   void cleanup() {
 #ifndef _WIN32
+    if (!XpuIPCGlobalEntities::alive) {
+      release();
+      return;
+    }
+
     const auto& ze = at::detail::getXPUHooks().level_zero();
     if (event_) {
       ze.zeEventDestroy(event_);
@@ -1116,13 +1137,7 @@ THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
     offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
 
     c10::xpu::getCurrentXPUStream(storage.device().index()).synchronize();
-    try {
-      ipc_event->signal();
-    } catch (const c10::Error& e) {
-      TORCH_WARN("XPU IPC event host signal failed: ", e.msg());
-    } catch (const std::exception& e) {
-      TORCH_WARN("XPU IPC event host signal failed: ", e.what());
-    }
+    ipc_event->signal();
 
     at::DataPtr sent_data_ptr =
         GetNewRefCountedXpuSentData(storage.mutable_data(), storage.device());
@@ -1130,6 +1145,7 @@ THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
     auto sent_data =
         static_cast<XpuIPCSentData*>(storage.data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
+    sent_data->set_ipc_event(std::move(ipc_event));
     ref_counter = PyBytes_FromString(sent_data->handle().c_str());
     ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
   }
@@ -1206,18 +1222,17 @@ bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
 
 c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
     const XpuSharedStorageArgs& args) {
-  XpuIpcEventRefGuard event_guard;
+  // Synchronously wait for producer-signaled event before importing storage.
+  // After wait, event/pool handle can be safely closed; producer can destroy.
   if (!args.event.empty()) {
     XpuIpcEvent event = XpuIpcEvent::open(args.device, args.event);
-    event_guard = XpuIpcEventRefGuard(std::move(event));
-    event_guard.wait_on_stream(c10::xpu::getCurrentXPUStream(args.device));
+    event.wait();  // synchronous wait; event destroyed at scope end
   }
   auto base_ptr =
       c10::xpu::XPUCachingAllocator::getIpcDevPtr(args.handle, args.device);
 
   struct XpuIpcDeleterContext {
     std::shared_ptr<void> base_ptr;
-    XpuIpcEventRefGuard event_guard;
     std::string ref_counter_handle;
     ptrdiff_t ref_counter_offset{0};
     c10::DeviceIndex device{-1};
@@ -1225,7 +1240,6 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
 
   auto ctx = std::make_unique<XpuIpcDeleterContext>();
   ctx->base_ptr = std::move(base_ptr);
-  ctx->event_guard = std::move(event_guard);
   ctx->ref_counter_handle = args.ref_counter_handle;
   ctx->ref_counter_offset = args.ref_counter_offset;
   ctx->device = args.device;
@@ -1239,20 +1253,7 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
       +[](void* ctx_) {
         std::unique_ptr<XpuIpcDeleterContext> ctx(
             static_cast<XpuIpcDeleterContext*>(ctx_));
-        if (ctx->device >= 0) {
-          try {
-            c10::xpu::getCurrentXPUStream(ctx->device).synchronize();
-          } catch (const std::exception& e) {
-            TORCH_WARN(
-                "XPU IPC deleter synchronize failed: ",
-                e.what(),
-                ". This is a defensive fallback; once Copy.cpp reports/handles "
-                "device-lost cleanly, this warning path should stop triggering.");
-          }
-        }
-
         ctx->base_ptr.reset();
-
         ReleaseXpuIPCRefCounter(
             ctx->ref_counter_handle, ctx->ref_counter_offset);
       },
