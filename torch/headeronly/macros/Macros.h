@@ -555,37 +555,43 @@ __host__ __device__
   }
 #else
 #if defined(USE_ROCM)
-template <unsigned N>
+template <unsigned N, unsigned F, unsigned M>
 __device__ __attribute__((flatten)) void c10_rocm_assert_literal(
-    const char (&msg)[N]) {
+    const char (&prefix)[N],
+    const char (&func)[F],
+    const char (&suffix)[M]) {
   auto d = __ockl_fprintf_stderr_begin();
-  __ockl_fprintf_append_string_n(d, msg, N - 1, 1);
+  __ockl_fprintf_append_string_n(d, prefix, N - 1, 1);
+  __ockl_fprintf_append_string_n(d, func, F - 1, 1);
+  __ockl_fprintf_append_string_n(d, suffix, M - 1, 1);
   __builtin_trap();
 }
 
-template <unsigned N>
+template <unsigned P, unsigned S>
 __host__ inline void c10_rocm_kernel_assert(
     const char* cond,
     const char* file,
     unsigned int line,
     const char* func,
-    const char (&msg)[N]) {
-  (void)msg;
+    const char (&prefix)[P],
+    const char (&suffix)[S]) {
+  (void)prefix;
+  (void)suffix;
   __assert_fail(cond, file, line, func);
 }
 
-template <unsigned N>
+template <unsigned P, unsigned F, unsigned S>
 __device__ inline void c10_rocm_kernel_assert(
     const char* cond,
     const char* file,
     unsigned int line,
-    const char* func,
-    const char (&msg)[N]) {
+    const char (&func)[F],
+    const char (&prefix)[P],
+    const char (&suffix)[S]) {
   (void)cond;
   (void)file;
   (void)line;
-  (void)func;
-  c10_rocm_assert_literal(msg);
+  c10_rocm_assert_literal(prefix, func, suffix);
 }
 
 #define CUDA_KERNEL_ASSERT(cond)                                          \
@@ -593,7 +599,7 @@ __device__ inline void c10_rocm_kernel_assert(
     if C10_UNLIKELY(!(cond)) {                                            \
       c10_rocm_kernel_assert(                                             \
           #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__, \
-          __FILE__ ":" C10_STRINGIZE(__LINE__)                            \
+          __FILE__ ":" C10_STRINGIZE(__LINE__) ":",                       \
           ": Device-side assertion " #cond " failed.\n");                  \
     }                                                                     \
   } while (0)
