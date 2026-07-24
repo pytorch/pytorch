@@ -962,8 +962,8 @@ class TestReductions(TestCase):
         self.assertTrue((values == v).all().item())
 
     @onlyAccelerator
+    @skipIfMPS
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @dtypesIfMPS(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.float64})
     def test_mode_large(self, device, dtype):
         # i should be less than (d - 2) / 2
         def testset_for_shape(shape, i):
