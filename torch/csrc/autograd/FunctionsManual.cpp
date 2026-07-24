@@ -5525,15 +5525,21 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_dispatcher(
           drstd.view_symint({N, group, 1});
     }
 
-    dX = var_mean_backward(
-             dvar,
-             dmean.defined() ? dmean.reshape_symint({N, group, 1}) : dmean,
-             X.reshape_symint({N, group, C / group * HxW}),
-             {2},
-             0,
-             true)
-             .reshape(X.sizes()) +
-        (dX.defined() ? dX : at::_efficientzerotensor(X.sizes(), X.options()));
+    auto getVarMean{[&]() -> Tensor {
+      return var_mean_backward(
+                 dvar,
+                 dmean.defined() ? dmean.reshape_symint({N, group, 1}) : dmean,
+                 X.reshape_symint({N, group, C / group * HxW}),
+                 {2},
+                 0,
+                 true)
+          .reshape(X.sizes());
+    }};
+    if (dX.defined()) {
+      dX = dX + getVarMean();
+    } else {
+      dX = getVarMean();
+    }
   }
 
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
