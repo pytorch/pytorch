@@ -12,11 +12,14 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
-    get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if not dist.is_available():
@@ -30,10 +33,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.device(get_devtype())
-
 
 class TestApply(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # FSDP v1 has reference cycles that prevent GC from freeing model tensors,
     # causing false positives in the CUDA memory leak checker.
     _do_cuda_memory_leak_check = False
@@ -76,10 +79,10 @@ class TestApply(FSDPTestContinuous):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_nested_module_apply(self):
+    def test_nested_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on a
         non-FSDP-root nested FSDP-wrapped model."""
-        fsdp_kwargs = {"device_id": device_type.type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -89,10 +92,10 @@ class TestApply(FSDPTestContinuous):
         self._check_apply(nested_wrapped_module)
 
     @skip_if_lt_x_gpu(2)
-    def test_transformer_module_apply(self):
+    def test_transformer_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on an
         FSDP-wrapped transformer model with shared parameters."""
-        fsdp_kwargs = {"device_id": device_type.type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -102,10 +105,10 @@ class TestApply(FSDPTestContinuous):
         self._check_apply(transformer)
 
     @skip_if_lt_x_gpu(2)
-    def test_apply_in_summon_raises_error(self):
+    def test_apply_in_summon_raises_error(self, device):
         """Tests that calling ``apply()`` on an FSDP instance inside the
         ``summon_full_params()`` context raises an error."""
-        fsdp_kwargs = {"device_id": device_type.type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -117,7 +120,6 @@ class TestApply(FSDPTestContinuous):
                 transformer.apply(self._init_linear_weights)
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestApply, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestApply, globals(), except_for=("cpu",), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
