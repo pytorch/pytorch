@@ -975,6 +975,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
+
     def test_flex_gemm_pointwise_epilogue_fusion(self):
         dtype = torch.bfloat16
         a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
@@ -1023,17 +1024,17 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
         )
-        b = torch.randint(
-            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
-        ).view(torch.float4_e2m1fn_x2)
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
         b = b.T
         padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(
-            _round_up(m, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
-        scale_b = torch.rand(
-            _round_up(n, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
@@ -1050,6 +1051,18 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         )
         torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
         self.assertTrue(epilogue_fused, "multiply was NOT fused into scaled epilogue")
+
+    def test_matmul_single_store_epilogue_chain(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return torch.relu((a @ b).float()) + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertNotIn("out_ptr1", code)
 
     def test_scaled_mm_multi_store_epilogue_fusion(self):
         m, n, k = self.M, self.N, self.K
