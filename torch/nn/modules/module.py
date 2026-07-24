@@ -2667,6 +2667,10 @@ class Module:
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Return an iterator over module parameters.
 
+        The exact order of the returned parameters is unspecified, but repeated
+        calls to the ``parameters()`` method of an unchanged module return the
+        parameters in the same order.
+
         This is typically passed to an optimizer.
 
         Args:
