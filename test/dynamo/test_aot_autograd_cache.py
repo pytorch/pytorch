@@ -4258,9 +4258,14 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         pickler = AOTAutogradCachePickler(gm)
 
-        wvd = weakref.WeakValueDictionary()
-        wkd = weakref.WeakKeyDictionary()
-        ws = weakref.WeakSet()
+        class _V:
+            pass
+
+        v1, v2, v3 = _V(), _V(), _V()
+
+        wvd = weakref.WeakValueDictionary({"k": v1})
+        wkd = weakref.WeakKeyDictionary({v2: "val"})
+        ws = weakref.WeakSet([v3])
 
         metadata = {"wvd": wvd, "wkd": wkd, "ws": ws, "normal": "value"}
         result = pickler._stabilize_tensor_subclass_metadata(metadata)
@@ -4268,9 +4273,11 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result["wvd"], dict)
         self.assertIsInstance(result["wkd"], dict)
         self.assertIsInstance(result["ws"], set)
+        self.assertEqual(len(result["wvd"]), 1)
+        self.assertEqual(len(result["wkd"]), 1)
+        self.assertEqual(len(result["ws"]), 1)
         self.assertEqual(result["normal"], "value")
 
-        # Verify the stabilized result is picklable
         pickle.dumps(result)
 
     def test_tensor_subclass_with_weakref_metadata_cache_key(self):
@@ -4322,9 +4329,15 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     return return_and_correct_aliasing(func, args, kwargs, out_wrapped)
                 return out_wrapped
 
+        class _V:
+            pass
+
+        v = _V()
+        weak_meta = weakref.WeakValueDictionary({"k": v})
+
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         pickler = AOTAutogradCachePickler(gm)
-        t = WeakRefMetaTensor(torch.randn(4, 4))
+        t = WeakRefMetaTensor(torch.randn(4, 4), weak_meta=weak_meta)
 
         hash_val = pickler._default_stable_hash_for_caching(t)
         self.assertIsInstance(hash_val, str)
