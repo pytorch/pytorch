@@ -4112,8 +4112,8 @@ def _handle_combo_kernel_per_subkernel_blocks(
     if "stitched_launch_candidates" in combo_meta or stitched_warps is not None:
         # Compile-time autotune emits the distinct winner launch configs (kwargs, num_warps,
         # num_stages) -> combo autotunes kernel-level knobs over them; the chosen block sizes
-        # are passed as args via default_config. No-bench mode has no candidates and bakes its
-        # blocks into the body, so its config carries only backend kwargs (no block args).
+        # are passed as args via default_config. No-bench mode has no candidates and reuses
+        # default_config for any block args present in the signature.
         # Must use the same key-presence check as _combo_has_reduction_subkernel.
         if "stitched_launch_candidates" in combo_meta:
             launch_candidates = combo_meta["stitched_launch_candidates"]
@@ -4122,9 +4122,15 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
                 for kwargs, nw, ns in launch_candidates
             ]
+        signature_keys = OrderedSet(triton_meta.get("signature", ()))
+        block_config = {
+            k: v
+            for k, v in (combo_meta.get("default_config") or {}).items()
+            if k in signature_keys
+        }
         return [
             triton.Config(
-                combo_meta["stitched_backend_kwargs"],
+                {**block_config, **combo_meta["stitched_backend_kwargs"]},
                 num_warps=stitched_warps,
                 num_stages=combo_meta["stitched_num_stages"],
             )
@@ -4995,15 +5001,22 @@ def foreach(
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
     configs = []
+    combo_meta = inductor_meta.get("combo_grid_meta") or {}
+    signature_keys = OrderedSet(triton_meta.get("signature", ()))
+    default_config = {
+        k: v
+        for k, v in (combo_meta.get("default_config") or {}).items()
+        if k in signature_keys
+    }
 
     # Naive autotuning path for num_warps
     if not (
         inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
     ):
-        configs.append(triton.Config({}, num_stages=1, num_warps=8))
+        configs.append(triton.Config(default_config, num_stages=1, num_warps=8))
     else:
         for warps in [1, 2, 4, 8]:
-            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
+            configs.append(triton.Config(default_config, num_stages=1, num_warps=warps))
 
     return cached_autotune(
         None,
