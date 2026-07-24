@@ -79,7 +79,6 @@ from ..source import (
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
-    cmp_name_to_op_mapping,
     FrameState,
     identity,
     is_function,
@@ -799,15 +798,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         "__module__": Member(lambda s, tx: s._fn_getattr(tx, "__module__")),
         "__closure__": Member(lambda s, tx: s._fn_getattr(tx, "__closure__")),
     }
-
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.fn, name))
-            )
-        return fn_getattro_impl(tx, self.fn, self.get_source(), name)
 
     def tp_descr_get_impl(
         self,
@@ -2594,16 +2584,6 @@ class SkipFunctionVariable(VariableTracker):
             "Python codegen not implemented for sourceless SkipFunctionVariable"
         )
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.value, name))
-            )
-
-        return fn_getattro_impl(tx, self.value, self.source, name)
-
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
@@ -3118,13 +3098,10 @@ class FunctoolsPartialVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(functools.partial, name))
-            )
-        if name in self.tp_members:
+        try:
             return super().getattro_impl(tx, name)
-        raise_observed_exception(AttributeError, tx)
+        except NotImplementedError:
+            raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self) -> Any:
         return functools.partial(
