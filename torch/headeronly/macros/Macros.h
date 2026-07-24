@@ -561,8 +561,8 @@ __device__ __attribute__((flatten)) void c10_rocm_assert_literal(
     const char (&func)[F],
     const char (&suffix)[M]) {
   auto d = __ockl_fprintf_stderr_begin();
-  __ockl_fprintf_append_string_n(d, prefix, N - 1, 1);
-  __ockl_fprintf_append_string_n(d, func, F - 1, 1);
+  __ockl_fprintf_append_string_n(d, prefix, N - 1, 0);
+  __ockl_fprintf_append_string_n(d, func, F - 1, 0);
   __ockl_fprintf_append_string_n(d, suffix, M - 1, 1);
   __builtin_trap();
 }
