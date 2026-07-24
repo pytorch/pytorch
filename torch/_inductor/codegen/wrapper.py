@@ -347,14 +347,37 @@ def _triton_jit_decorator_from_source(symbol) -> str:
         # Triton .src strips decorators; raw_src preserves them in current Triton.
         # Joining handles both string raw_src and list-of-lines raw_src variants.
         try:
+            import triton
+
             src = textwrap.dedent("".join(raw_src))
             fn_def = ast.parse(src).body[0]
             if isinstance(fn_def, ast.FunctionDef):
+                global_symbols = getattr(getattr(symbol, "fn", None), "__globals__", {})
+
+                def is_triton_jit(decorator: ast.expr) -> bool:
+                    if isinstance(decorator, ast.Call):
+                        decorator = decorator.func
+                    if isinstance(decorator, ast.Name):
+                        return global_symbols.get(decorator.id) is triton.jit
+                    if isinstance(decorator, ast.Attribute):
+                        base = decorator.value
+                        return (
+                            decorator.attr == "jit"
+                            and isinstance(base, ast.Name)
+                            and getattr(global_symbols.get(base.id), "jit", None)
+                            is triton.jit
+                        )
+                    return False
+
                 for decorator in fn_def.decorator_list:
-                    decorator_src = ast.get_source_segment(src, decorator)
-                    if decorator_src and decorator_src.startswith("triton.jit"):
-                        return f"@{decorator_src}"
-        except (IndexError, SyntaxError, TypeError, ValueError):
+                    if is_triton_jit(decorator):
+                        if isinstance(decorator, ast.Call):
+                            decorator_src = ast.get_source_segment(src, decorator)
+                            func_src = ast.get_source_segment(src, decorator.func)
+                            if decorator_src and func_src:
+                                return f"@triton.jit{decorator_src[len(func_src) :]}"
+                        return "@triton.jit"
+        except (ImportError, IndexError, SyntaxError, TypeError, ValueError):
             pass
     return "@triton.jit"
 

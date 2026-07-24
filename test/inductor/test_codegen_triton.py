@@ -44,7 +44,9 @@ from torch.utils._triton import has_triton_package
 
 if has_triton_package():
     import triton
+    import triton as triton_alias
     import triton.language as tl
+    from triton import jit as triton_jit
 
     @triton.jit(
         noinline=True,
@@ -60,6 +62,32 @@ if has_triton_package():
         offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         mask = offsets < n_elements
         values = noinline_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+    @triton_jit(noinline=True, debug=True)
+    def aliased_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_aliased_jit_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = aliased_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+    @triton_alias.jit(noinline=True, debug=True)
+    def module_aliased_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_module_aliased_jit_helper(
+        x, out, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = module_aliased_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
         tl.store(out + offsets, values, mask=mask)
 
 
@@ -685,6 +713,27 @@ class TestCodegenTriton(InductorTestCase):
         self.assertIn("noinline=True", source)
         self.assertIn("debug=True", source)
         self.assertIn('do_not_specialize=["x"]', source)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_preserves_aliased_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        test_cases = (
+            (root_for_aliased_jit_helper, "def aliased_jit_helper_for_codegen"),
+            (
+                root_for_module_aliased_jit_helper,
+                "def module_aliased_jit_helper_for_codegen",
+            ),
+        )
+        for root, helper_def in test_cases:
+            source = user_defined_triton_kernel_transitive_closure_source_code(root)
+            decorator_idx = source.index("@triton.jit(")
+            helper_idx = source.index(helper_def)
+            self.assertLess(decorator_idx, helper_idx)
+            self.assertIn("noinline=True", source)
+            self.assertIn("debug=True", source)
 
     def test_user_defined_triton_kernel_jit_decorator_parse_failure_falls_back(self):
         from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
