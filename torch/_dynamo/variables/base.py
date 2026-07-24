@@ -624,6 +624,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
+    def get_value_for_setattr(self) -> object | None:
+        """Return the wrapped Python object for generic STORE_ATTR mutation,
+        or None to decline.  Only override for VTs with __dict__ and
+        standard __setattr__."""
+        return None
+
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
@@ -645,6 +651,105 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
         """
         return None
+
+    def lookup_type_attr(self, tx: InstructionTranslatorBase, name: str) -> object:
+        """Step 1 of GenericGetAttr: MRO walk on the Python type.
+
+        Base uses mro_lookup(python_type(), name).  UDOV overrides with a
+        cached version that also unpatches nn.Module.__init__.
+        """
+        from .object_protocol import mro_lookup, NO_SUCH_SUBOBJ
+
+        try:
+            py_type = self.python_type()
+        except NotImplementedError:
+            return NO_SUCH_SUBOBJ
+        return mro_lookup(py_type, name)
+
+    def resolve_data_descriptor(
+        self,
+        tx: InstructionTranslatorBase,
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Step 2 of GenericGetAttr: invoke a data descriptor.
+
+        Base wraps _resolve_descriptor_get.  UDOV overrides with
+        source management via get_source_by_walking_mro and side-effects
+        checks for member/getset descriptors.
+        """
+        from .object_protocol import _resolve_descriptor_get, _UnhandledDescriptorError
+
+        py_type = self.python_type()
+        class_vt = VariableTracker.build(tx, py_type)
+        result = _resolve_descriptor_get(tx, type_attr, self, class_vt, source)
+        if result is not None:
+            return result
+        raise _UnhandledDescriptorError(
+            f"resolve_data_descriptor: unhandled data descriptor "
+            f"{type(type_attr)} for {name}"
+        )
+
+    def resolve_type_attr(
+        self,
+        tx: InstructionTranslatorBase,
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Steps 4-5 of GenericGetAttr: non-data descriptor or plain class var.
+
+        Base handles the CallMethodVariable shortcut for VTs with custom
+        call_method, then wraps _resolve_descriptor_get, then falls through
+        to VariableTracker.build for plain class variables.
+
+        UDOV overrides with source management via get_source_by_walking_mro,
+        _torchdynamo_inline unwrapping, lru_cache, cython, and user-defined
+        descriptor handling.
+        """
+        from .object_protocol import (
+            _has_custom_call_method,
+            _is_method_type,
+            _resolve_descriptor_get,
+            _UnhandledDescriptorError,
+        )
+
+        if hasattr(type(type_attr), "__get__"):
+            if _is_method_type(type_attr) and _has_custom_call_method(self):
+                return variables.CallMethodVariable(self, name, source=source)
+
+            py_type = self.python_type()
+            class_vt = VariableTracker.build(tx, py_type)
+            result = _resolve_descriptor_get(tx, type_attr, self, class_vt, source)
+            if result is not None:
+                return result
+            raise _UnhandledDescriptorError(
+                f"resolve_type_attr: unhandled non-data descriptor "
+                f"{type(type_attr)} for {name}"
+            )
+
+        return VariableTracker.build(tx, type_attr, source)
+
+    def dynamic_getattr_fallback(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Step 5b of GenericGetAttr: fallback for attrs not on MRO or
+        instance dict (e.g. threading.local per-thread storage).
+
+        Base returns None.  UDOV overrides to try
+        type(self.value).__getattribute__(self.value, name).
+        """
+        return None
+
+    def call_getattribute(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """Called for obj.__getattribute__(name).  The base delegates to
+        getattro_impl, which already implements GenericGetAttr without
+        __getattr__ fallback.  UDOV overrides to handle custom
+        __getattribute__ and to pass skip_getattr_fallback=True."""
+        return self.getattro_impl(tx, name)
 
     def getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
@@ -739,6 +844,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> list[VariableTracker]:
         raise NotImplementedError
 
+    def _hasattr_check_side_effects(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> ConstantVariable | None:
+        """If *name* has a pending mutation, return the hasattr result; else None."""
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(value, variables.DeletedVariable)
+            )
+        return None
+
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
@@ -749,6 +865,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         True/False.
         https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
         """
+        result = self._hasattr_check_side_effects(tx, name)
+        if result is not None:
+            return result
+
         try:
             self.getattro_impl(tx, name)
             return variables.ConstantVariable.create(True)
@@ -1005,25 +1125,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and args[0].is_python_constant()
             and not kwargs
         ):
-            # TODO(tp_getattro): In CPython, obj.__getattr__("foo") calls only
-            # the type's __getattr__ method, not the full attribute resolution.
-            # Currently we dispatch through getattro_impl which does the full
-            # GenericGetAttr + __getattr__ fallback. Fix in a follow-up to
-            # call __getattr__ directly for UDOV types.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            attr_name = args[0].as_python_constant()
+            result = self.call_getattr_fallback(tx, attr_name)
+            if result is not None:
+                return result
+            try:
+                type_name = self.python_type().__name__
+            except NotImplementedError:
+                type_name = type(self).__name__
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'{type_name}' object has no attribute '__getattr__'"],
+            )
         elif (
             name == "__getattribute__"
             and len(args) == 1
             and args[0].is_python_constant()
             and not kwargs
         ):
-            # TODO(tp_getattro): In CPython, obj.__getattribute__("foo")
-            # calls GenericGetAttr WITHOUT the __getattr__ fallback.
-            # Currently we route through getattro_impl which, for UDOV,
-            # includes __getattr__. Fix in a follow-up to have UDOV
-            # override this to call generic_getattr (the inner helper)
-            # directly, skipping __getattr__.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            return self.call_getattribute(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
         elif name == "__int__" and not args and not kwargs:
