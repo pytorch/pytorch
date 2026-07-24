@@ -51,16 +51,17 @@ from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
-    cast,
     ClassVar,
     Generic,
     Literal,
     NoReturn,
-    overload,
     TypeAlias,
     TypeGuard,
     TypeVar,
+    cast,
+    overload,
 )
+
 from typing_extensions import ParamSpec, TypeIs
 
 import torch
@@ -94,7 +95,6 @@ from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
 from .graph_utils import _get_flat_args
-
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
@@ -803,7 +803,7 @@ def dynamo_timed(
 
     cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
-        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        wc_name = waitcounter_name_override or key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
@@ -1339,8 +1339,8 @@ def lazily_unpack(
     tx: InstructionTranslatorBase,
     iterable: VariableTracker,
 ):
-    from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+    from .exc import ObservedUserStopIteration, handle_observed_exception
+    from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
@@ -1349,7 +1349,7 @@ def lazily_unpack(
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -4008,7 +4008,7 @@ def _get_fake_value_impl(
     from torch.utils._sympy.value_ranges import ValueRangeError
 
     from . import graph_break_hints
-    from .exc import unimplemented, Unsupported, UserError, UserErrorType
+    from .exc import Unsupported, UserError, UserErrorType, unimplemented
 
     op = node.op
 

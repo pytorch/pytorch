@@ -25,7 +25,6 @@ optimization of PyTorch programs.
 from __future__ import annotations
 
 import _warnings
-
 import contextlib
 import copy
 import dataclasses
@@ -45,18 +44,19 @@ import traceback
 import types
 import weakref
 from collections import defaultdict, deque
-from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Any, NoReturn, TypeAlias, TypeVar, cast
+
 from typing_extensions import TypeIs
 
 import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import (
-    get_dynamo_observed_exception,
     ObservedException,
     TensorifyScalarRestartAnalysis,
+    get_dynamo_observed_exception,
 )
-from torch._guards import InlinedCodeCache, tracing, TracingContext
+from torch._guards import InlinedCodeCache, TracingContext, tracing
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -65,17 +65,20 @@ from . import (
     config,
     exc,
     graph_break_hints,
-    logging as torchdynamo_logging,
     trace_rules,
     variables,
 )
+from . import (
+    logging as torchdynamo_logging,
+)
 from .bytecode_analysis import (
-    get_indexof,
     JUMP_OPNAMES,
+    get_indexof,
     livevars_analysis,
     propagate_line_nums,
 )
 from .bytecode_transformation import (
+    Instruction,
     cleaned_instructions,
     create_binary_slice,
     create_call_function,
@@ -88,7 +91,6 @@ from .bytecode_transformation import (
     create_swap,
     get_call_callable_depth,
     get_code_keys,
-    Instruction,
     is_generator,
     is_jump_absolute,
     unique_id,
@@ -97,18 +99,18 @@ from .code_context import code_context
 from .codegen import PyCodegen
 from .comprehension_graph_break import maybe_setup_comprehension_speculation
 from .exc import (
-    augment_exc_message_with_hop_name,
     BackendCompilerFailed,
+    ResumePrologueTracingError,
+    StepUnsupported,
+    Unsupported,
+    UserError,
+    augment_exc_message_with_hop_name,
     collapse_resume_frames,
     format_frame_info,
     get_stack_above_dynamo,
     raise_observed_exception,
     raise_value_error,
-    ResumePrologueTracingError,
-    StepUnsupported,
     unimplemented,
-    Unsupported,
-    UserError,
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
@@ -126,8 +128,8 @@ from .polyfills import (
 )
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
-    ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
+    ContinueExecutionCache,
     ReenterWith,
 )
 from .source import (
@@ -142,20 +144,20 @@ from .source import (
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
+    FrameState,
+    LazyString,
+    PySendResult,
     _get_error_on_graph_break,
     counters,
-    FrameState,
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
     graph_break_dup_warning_checker,
     istype,
-    LazyString,
     proxy_args_kwargs,
-    PySendResult,
     unpack_iterable,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import SourceLocation, ValueMutationNew, VariableTracker, typestr
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -167,9 +169,9 @@ from .variables.ctx_manager import (
 )
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
-    BaseUserFunctionVariable,
     CO_VARARGS,
     CO_VARKEYWORDS,
+    BaseUserFunctionVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -194,17 +196,17 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
-    generic_bool,
-    generic_contains,
     generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_is_true,
     generic_setitem,
     pyiter_send,
+    pysequence_contains,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import SymNodeVariable, TensorVariable, supported_comparison_ops
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -216,7 +218,6 @@ from .variables.user_defined import (
     UserDefinedExceptionObjectVariable,
     UserDefinedObjectVariable,
 )
-
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -958,7 +959,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():
                 if truth_fn(result.as_python_constant()):
                     if push:
@@ -997,7 +998,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif not value.is_tensor():
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if truth_fn(result):
                 if push:
                     self.push(value)
@@ -4431,7 +4432,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
+        self.push(pysequence_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 
