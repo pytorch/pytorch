@@ -32,6 +32,9 @@ class Benchmark(BenchmarkBase):
 
     def name(self):
         prefix = f"{self.category()}_{self.backend()}"
+        # Disambiguate non-cuda variants; keep existing cuda names unchanged.
+        if self.device() != "cuda":
+            prefix += f"_{self.device()}"
         if self._requires_grad:
             prefix += "_requires_grad"
         if self._inference_mode:
@@ -117,6 +120,17 @@ def main():
             dynamic=False,
             backend="eager",
             device="cpu",
+        ),
+        # cuda + eager: on an accelerator the ambient current stream is
+        # registered per call, so this catches the stream-free reconstruction
+        # elision (name: runtime_overhead_eager).
+        Benchmark(
+            requires_grad=False,
+            inference_mode=False,
+            backward=False,
+            dynamic=False,
+            backend="eager",
+            device="cuda",
         ),
     ]
 
