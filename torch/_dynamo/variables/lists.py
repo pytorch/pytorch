@@ -771,8 +771,10 @@ class RangeVariable(BaseListVariable):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
-        return VariableTracker.build(tx, self.range_count(item))
+        # range_contains: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/rangeobject.c#L482-L490
+        if maybe_get_python_type(item) in (int, bool):
+            return VariableTracker.build(tx, bool(self.range_count(item)))
+        return iter_contains(self.unpack_var_sequence(tx), item, tx)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
@@ -1534,10 +1536,10 @@ class DequeVariable(CommonListMethodsVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
-            return VariableTracker.build(tx, f"deque([{items}])")
+            return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
             tx,
-            f"deque([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
+            f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
     def as_python_constant(self) -> collections.deque[Any]:

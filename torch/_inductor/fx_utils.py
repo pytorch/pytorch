@@ -350,6 +350,11 @@ def _extract_subgraphs_and_args(
         subgraph_args = (*args[2], *args[3])
         yield args[0], subgraph_args
         yield args[1], subgraph_args
+    elif node.target is torch.ops.higher_order.switch:
+        # args: (index, [branch_gm_0, ...], operands)
+        subgraph_args = tuple(args[2])
+        for branch_gm in args[1]:
+            yield branch_gm, subgraph_args
     elif node.target is control_deps:
         if kwargs:
             raise AssertionError(

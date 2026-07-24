@@ -1370,6 +1370,54 @@ class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), [0, 1, 2, 3, 4])
 
 
+class TestRangeContains(torch._dynamo.test_case.TestCase):
+    # range.__contains__ uses the arithmetic fast path only for exact int/bool
+    # operands; everything else falls back to an __eq__ linear scan, matching
+    # CPython range_contains / _PySequence_IterSearch.
+    def test_non_int_members(self):
+        class AlwaysEq:
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        class IntSubclassEq(int):
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                1.0 in range(3),
+                True in range(3),
+                (1 + 0j) in range(3),
+                AlwaysEq() in range(3),
+                IntSubclassEq(11) in range(10),
+                5 in range(3),
+                2.5 in range(3),
+            )
+
+        self.assertEqual(fn(), (True, True, True, True, True, False, False))
+
+    def test_negative_step_and_strided(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                -1 in range(0, -20, -1),
+                1.0 in range(0, -20, -1),
+                2 in range(0, 101, 2),
+                1 in range(0, 101, 2),
+                2.0 in range(0, 101, 2),
+                100.0 in range(0, 101, 2),
+            )
+
+        self.assertEqual(fn(), (True, False, True, False, True, True))
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
