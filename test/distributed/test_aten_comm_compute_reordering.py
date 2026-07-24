@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import functools
+import re
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +10,7 @@ import torch._dynamo.logging
 import torch._dynamo.test_case
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
+import torch.distributed as dist
 import torch.distributed._functional_collectives as _functional_collectives
 import torch.fx as fx
 from torch._C import FileCheck
@@ -29,7 +32,6 @@ from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
-import functools
 
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import skipIfRocm
@@ -99,6 +101,31 @@ def get_patches():
         # interferes with testing, / custom estimation
         "test_configs.assume_bucketing_reduces_latency": False,
     }
+
+
+def get_overlap_deps_codegen_patches(insert_overlap_deps=True, impl="meta"):
+    return {
+        **get_patches(),
+        "aten_distributed_optimizations.enable_overlap_scheduling": True,
+        "aten_distributed_optimizations.collective_bucketing": True,
+        "aten_distributed_optimizations.insert_overlap_deps": insert_overlap_deps,
+        "aten_distributed_optimizations.insert_overlap_deps_impl": impl,
+        "aten_distributed_optimizations.collective_estimator": "analytical",
+        "aten_distributed_optimizations.compute_estimator": "analytical",
+        "aten_distributed_optimizations.pre_bucketing_fsdp_collectives": False,
+        "reorder_for_compute_comm_overlap": False,
+        "reorder_for_compute_comm_overlap_passes": [],
+        "fx_graph_cache": False,
+        "fx_graph_remote_cache": False,
+    }
+
+
+def get_compiled_call_body(code):
+    return code.split("def call(args):", 1)[-1]
+
+
+def get_triton_kernel_names(code):
+    return set(re.findall(r"async_compile\.triton\('([^']+)'", code))
 
 
 @requires_accelerator_dist_backend()
@@ -585,6 +612,120 @@ graph():
                 correct = func(inputs_a, inputs_b)
                 self.assertTrue(same(out, correct))
                 self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+
+
+@requires_accelerator_dist_backend()
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+@skipIfRocm
+class TestMetaOverlapDepsMultiProc(DynamoDistributedMultiProcTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_meta_overlap_deps_preserve_matmul_overlap_after_fusion(self):
+        class WaitThenMatmul(torch.nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(n, n))
+
+            def forward(self, x, y):
+                a = _functional_collectives.all_to_all_single(
+                    x.contiguous(), None, None, group=dist.group.WORLD
+                )
+                z = a + 1
+                h = y @ self.w
+                return z, h
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            torch.manual_seed(0)
+            n = 128
+            model = WaitThenMatmul(n).to(device_type).eval()
+            x = torch.randn(self.world_size * 32, n, device=device_type)
+            y = torch.randn(n, n, device=device_type)
+
+            with (
+                torch.no_grad(),
+                torch._inductor.config.patch(get_overlap_deps_codegen_patches()),
+            ):
+                out, (code,) = run_and_get_code(
+                    torch.compile(model, dynamic=False), x, y
+                )
+                correct = model(x, y)
+
+            self.assertTrue(same(out, correct))
+            (
+                FileCheck()
+                .check("all_to_all_single.default")
+                .check("extern_kernels.mm")
+                .check("wait_tensor.default")
+                .run(get_compiled_call_body(code))
+            )
+
+    def test_meta_overlap_deps_preserve_issue_186084_layer_norm_fusion(self):
+        class Issue186084(torch.nn.Module):
+            def __init__(self, c_in=16, c_out=32):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(c_in, c_out, 3, padding=1)
+                self.ln1 = torch.nn.LayerNorm(c_out)
+                self.ln2 = torch.nn.LayerNorm(c_out)
+
+            def forward(self, x_a2a, y):
+                a = _functional_collectives.all_to_all_single(
+                    x_a2a.contiguous(), None, None, group=dist.group.WORLD
+                )
+                h = self.conv(y).permute(0, 2, 3, 1).contiguous()
+                h = self.ln1(h)
+                h = h + h.mean(dim=-1, keepdim=True)
+                return self.ln2(a.reshape(h.shape) + h)
+
+        def run_mode(model, x_a2a, y, insert_overlap_deps, impl):
+            patches = get_overlap_deps_codegen_patches(insert_overlap_deps, impl)
+            with torch.no_grad(), torch._inductor.config.patch(patches):
+                out, (code,) = run_and_get_code(
+                    torch.compile(model, dynamic=False), x_a2a, y
+                )
+            return out, get_triton_kernel_names(code)
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            torch.manual_seed(0)
+            model = Issue186084().to(device_type).eval()
+            y = torch.randn(1, 16, 16, 16, device=device_type)
+            x_a2a = torch.randn(self.world_size * 16, 256, device=device_type)
+
+            meta_out, meta_kernels = run_mode(model, x_a2a, y, True, "meta")
+            false_out, false_kernels = run_mode(model, x_a2a, y, False, "control_deps")
+            _, control_deps_kernels = run_mode(model, x_a2a, y, True, "control_deps")
+
+        meta_layer_norms = {
+            name for name in meta_kernels if "native_layer_norm" in name
+        }
+        false_layer_norms = {
+            name for name in false_kernels if "native_layer_norm" in name
+        }
+        control_deps_layer_norms = {
+            name for name in control_deps_kernels if "native_layer_norm" in name
+        }
+
+        self.assertTrue(same(meta_out, false_out))
+        self.assertEqual(meta_kernels, false_kernels)
+        self.assertEqual(len(meta_layer_norms), 1)
+        self.assertEqual(meta_layer_norms, false_layer_norms)
+        self.assertGreater(len(control_deps_layer_norms), len(meta_layer_norms))
 
 
 def get_bucket_patches(compute_multiplier=1.0):

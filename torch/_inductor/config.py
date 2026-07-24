@@ -1274,6 +1274,14 @@ class aten_distributed_optimizations:
     # compiling with inductor, or for subsequent passes before removing the ops prior to execution
     insert_overlap_deps: bool | None = None
 
+    # Implementation used when insert_overlap_deps is enabled.
+    #
+    # "control_deps" preserves the existing behavior by wrapping dependent
+    # FX nodes in the control_deps HOP.
+    # "meta" records the ordering constraints as FX metadata and applies them
+    # to scheduler nodes after fusion.
+    insert_overlap_deps_impl: Literal["control_deps", "meta"] = "control_deps"
+
     # Maximum compute node prefetch distance for overlap scheduling
     max_compute_pre_fetch: int | None = None
 

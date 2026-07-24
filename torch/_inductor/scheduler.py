@@ -4286,6 +4286,7 @@ class Scheduler:
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
+        self._apply_post_fusion_overlap_deps()
 
         if any(
             isinstance(node, FusedExternTritonKernelSchedulerNode)
@@ -4685,6 +4686,82 @@ class Scheduler:
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
         ] + list(fe_nodes)
+
+    def _refresh_name_to_fused_node(self) -> None:
+        self.name_to_fused_node = {
+            name: node for node in self.nodes for name in node.get_operation_names()
+        }
+
+    def _add_fake_order_dep(self, node: BaseSchedulerNode, dep_name: str) -> bool:
+        dep = WeakDep(dep_name, node.get_name(), is_fake=True)
+        if dep in node.read_writes.reads:
+            return False
+        node.set_read_writes(node.read_writes.with_read(dep))
+        return True
+
+    def _has_post_fusion_dep_path(
+        self,
+        start: BaseSchedulerNode,
+        target: BaseSchedulerNode,
+        live_buffer_to_node: dict[str, BaseSchedulerNode],
+    ) -> bool:
+        seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
+        stack = [start]
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            for dep in node.unmet_dependencies:
+                dep_node = live_buffer_to_node.get(dep.name)
+                if dep_node is None or dep_node is node:
+                    continue
+                if dep_node is target:
+                    return True
+                stack.append(dep_node)
+        return False
+
+    def _apply_post_fusion_overlap_deps(self) -> None:
+        overlap_deps = V.graph.post_fusion_overlap_deps
+        if not overlap_deps:
+            return
+
+        self._refresh_name_to_fused_node()
+        live_buffer_to_node = {
+            name: node for node in self.nodes for name in node.get_buffer_names()
+        }
+        changed = False
+        for op_name, dep_op_names in overlap_deps.items():
+            node = self.name_to_fused_node.get(op_name)
+            if node is None:
+                continue
+
+            for dep_op_name in dep_op_names:
+                dep_node = self.name_to_fused_node.get(dep_op_name)
+                if dep_node is None or dep_node is node:
+                    continue
+
+                dep_name = next(iter(dep_node.get_buffer_names()), None)
+                if dep_name is None:
+                    continue
+
+                if self._has_post_fusion_dep_path(node, dep_node, live_buffer_to_node):
+                    continue
+                if self._has_post_fusion_dep_path(dep_node, node, live_buffer_to_node):
+                    log.debug(
+                        "Skipping post-fusion overlap dep %s -> %s due to cycle",
+                        dep_name,
+                        node.get_name(),
+                    )
+                    continue
+
+                if self._add_fake_order_dep(node, dep_name):
+                    changed = True
+
+        if changed:
+            self.nodes = self.topological_sort_schedule(self.nodes)
+            self.compute_ancestors()
+            self.compute_input_distances()
 
     def compute_dependencies(self) -> None:
         """
@@ -5204,6 +5281,8 @@ class Scheduler:
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
+            for op_name in node.get_operation_names():
+                name_to_ancestors[op_name] = ancestors
             node.ancestors = ancestors
 
         for order, node in enumerate(self.nodes):
@@ -5235,6 +5314,9 @@ class Scheduler:
                 max_dist = max(name_to_max_distance[op] + 1 for op in dep_ops)
             name_to_min_distance[node.get_name()] = min_dist
             name_to_max_distance[node.get_name()] = max_dist
+            for op_name in node.get_operation_names():
+                name_to_min_distance[op_name] = min_dist
+                name_to_max_distance[op_name] = max_dist
             node.min_input_distance = min_dist
             node.max_input_distance = max_dist
 

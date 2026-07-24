@@ -354,10 +354,10 @@ class OverlapPreservingBucketer:
 
             if filtered_deps:
                 from torch._inductor.fx_passes.control_dependencies import (
-                    preserve_node_ordering,
+                    preserve_node_ordering_from_config,
                 )
 
-                preserve_node_ordering(self.graph, filtered_deps)
+                preserve_node_ordering_from_config(self.graph, filtered_deps)
 
     def bucket_collectives(self) -> None:
         """Run the full bucketing and dep application flow."""
@@ -1030,6 +1030,12 @@ class OverlapPreservingBucketer:
 
             for n in fused_convert_dtypes:
                 erased_to_new[n] = replacement
+
+        from torch._inductor.fx_passes.control_dependencies import (
+            transfer_meta_overlap_deps,
+        )
+
+        transfer_meta_overlap_deps(self.graph, erased_to_new)
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
