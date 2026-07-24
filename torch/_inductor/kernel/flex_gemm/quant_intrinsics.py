@@ -25,23 +25,19 @@ def convert_packed_e8m0_pair_to_f32(packed: ir.Value) -> tuple[ir.Value, ir.Valu
     )
 
 
-def prepare_e8m0_input(
-    value: ir.Value, rounding: str, floor_inf_value: float | None
+def prepare_floor_e8m0_input(
+    value: ir.Value, floor_inf_value: float | None
 ) -> ir.Value:
-    """Apply the eager-compatible RCEIL/FLOOR edge fixups."""
+    """Replace infinity when FLOOR encoding must preserve exponent extraction."""
     value = cutlass.Float32(value)
-    if rounding == "rceil":
-        positive = value > 0.0
-        clamped = cutlass.max(value, 2.0**-126)
-        return arith.select(positive.ir_value(), clamped.ir_value(), value.ir_value())
-    if floor_inf_value is not None:
-        is_inf = value == float("inf")
-        return arith.select(
-            is_inf.ir_value(),
-            cutlass.Float32(floor_inf_value).ir_value(),
-            value.ir_value(),
-        )
-    return value.ir_value()
+    if floor_inf_value is None:
+        return value.ir_value()
+    is_inf = value == float("inf")
+    return arith.select(
+        is_inf.ir_value(),
+        cutlass.Float32(floor_inf_value).ir_value(),
+        value.ir_value(),
+    )
 
 
 def convert_e8m0_pair(
@@ -53,10 +49,11 @@ def convert_e8m0_pair(
     """Convert two Float32 values to E8M0 and reconstruct them as Float32."""
     instruction = {
         "floor": "cvt.rz.ue8m0x2.f32",
-        "rceil": "cvt.rp.ue8m0x2.f32",
+        "rceil": "cvt.rp.satfinite.ue8m0x2.f32",
     }[rounding]
-    low = prepare_e8m0_input(low, rounding, floor_inf_value)
-    high = prepare_e8m0_input(high, rounding, floor_inf_value)
+    if rounding == "floor":
+        low = prepare_floor_e8m0_input(low, floor_inf_value)
+        high = prepare_floor_e8m0_input(high, floor_inf_value)
     packed = llvm.inline_asm(
         T.i32(),
         [low, high],
@@ -107,9 +104,10 @@ def mx_e8m0_scale_intrinsic(
 ):
     """Encode an MX scale with exact packed SM100 E8M0 conversion.
 
-    CuTeDSL's public conversion is saturating and does not expose FLOOR/RZ.
-    The MLIR boundary preserves non-saturating edge semantics while emitting
-    one packed E8M0 encode per pair and rebuilding the original TensorSSA.
+    CuTeDSL's public conversion does not support every fragment width or expose
+    FLOOR/RZ. The MLIR boundary emits TorchAO-compatible saturating RCEIL or
+    exponent-compatible FLOOR conversion per pair, then rebuilds the original
+    TensorSSA.
     """
     max_power = math.floor(math.log2(max_value))
     scaled = source / max_value if rounding == "rceil" else source * 2.0**-max_power
