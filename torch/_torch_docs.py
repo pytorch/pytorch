@@ -241,6 +241,15 @@ Example::
 )
 
 add_docstr(
+    torch.abs_,
+    r"""
+abs_(input) -> Tensor
+
+In-place version of :func:`torch.abs`
+""",
+)
+
+add_docstr(
     torch.absolute,
     r"""
 absolute(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -277,11 +286,29 @@ Example::
 )
 
 add_docstr(
+    torch.acos_,
+    r"""
+acos_(input) -> Tensor
+
+In-place version of :func:`torch.acos`
+""",
+)
+
+add_docstr(
     torch.arccos,
     r"""
 arccos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.acos`.
+""",
+)
+
+add_docstr(
+    torch.arccos_,
+    r"""
+arccos_(input) -> Tensor
+
+In-place version of :func:`torch.arccos`
 """,
 )
 
@@ -317,11 +344,29 @@ Example::
 )
 
 add_docstr(
+    torch.acosh_,
+    r"""
+acosh_(input) -> Tensor
+
+In-place version of :func:`torch.acosh`
+""",
+)
+
+add_docstr(
     torch.arccosh,
     r"""
 arccosh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.acosh`.
+""",
+)
+
+add_docstr(
+    torch.arccosh_,
+    r"""
+arccosh_(input) -> Tensor
+
+In-place version of :func:`torch.arccosh`
 """,
 )
 
@@ -731,6 +776,15 @@ Example::
 )
 
 add_docstr(
+    torch.addmv_,
+    r"""
+addmv_(input, mat, vec, *, beta=1, alpha=1) -> Tensor
+
+In-place version of :func:`torch.addmv`
+""",
+)
+
+add_docstr(
     torch.addr,
     r"""
 addr(input, vec1, vec2, *, beta=1, alpha=1, out=None) -> Tensor
@@ -1006,6 +1060,24 @@ Example::
 )
 
 add_docstr(
+    torch.alpha_dropout_,
+    r"""
+alpha_dropout_(input, p, train) -> Tensor
+
+In-place version of :func:`torch.alpha_dropout`
+""",
+)
+
+add_docstr(
+    torch.as_strided_,
+    r"""
+as_strided_(input, size, stride, storage_offset=None) -> Tensor
+
+In-place version of :func:`torch.as_strided`
+""",
+)
+
+add_docstr(
     torch.as_tensor,
     r"""
 as_tensor(data: Any, *, dtype: Optional[dtype] = None, device: Optional[DeviceLikeType]) -> Tensor
@@ -1086,11 +1158,29 @@ Example::
 )
 
 add_docstr(
+    torch.asin_,
+    r"""
+asin_(input) -> Tensor
+
+In-place version of :func:`torch.asin`
+""",
+)
+
+add_docstr(
     torch.arcsin,
     r"""
 arcsin(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.asin`.
+""",
+)
+
+add_docstr(
+    torch.arcsin_,
+    r"""
+arcsin_(input) -> Tensor
+
+In-place version of :func:`torch.arcsin`
 """,
 )
 
@@ -1122,11 +1212,29 @@ Example::
 )
 
 add_docstr(
+    torch.asinh_,
+    r"""
+asinh_(input) -> Tensor
+
+In-place version of :func:`torch.asinh`
+""",
+)
+
+add_docstr(
     torch.arcsinh,
     r"""
 arcsinh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.asinh`.
+""",
+)
+
+add_docstr(
+    torch.arcsinh_,
+    r"""
+arcsinh_(input) -> Tensor
+
+In-place version of :func:`torch.arcsinh`
 """,
 )
 
@@ -1158,11 +1266,29 @@ Example::
 )
 
 add_docstr(
+    torch.atan_,
+    r"""
+atan_(input) -> Tensor
+
+In-place version of :func:`torch.atan`
+""",
+)
+
+add_docstr(
     torch.arctan,
     r"""
 arctan(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.atan`.
+""",
+)
+
+add_docstr(
+    torch.arctan_,
+    r"""
+arctan_(input) -> Tensor
+
+In-place version of :func:`torch.arctan`
 """,
 )
 
@@ -1239,11 +1365,29 @@ Example::
 )
 
 add_docstr(
+    torch.atanh_,
+    r"""
+atanh_(input) -> Tensor
+
+In-place version of :func:`torch.atanh`
+""",
+)
+
+add_docstr(
     torch.arctanh,
     r"""
 arctanh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.atanh`.
+""",
+)
+
+add_docstr(
+    torch.arctanh_,
+    r"""
+arctanh_(input) -> Tensor
+
+In-place version of :func:`torch.arctanh`
 """,
 )
 
@@ -2482,6 +2626,15 @@ Example::
 )
 
 add_docstr(
+    torch.ceil_,
+    r"""
+ceil_(input) -> Tensor
+
+In-place version of :func:`torch.ceil`
+""",
+)
+
+add_docstr(
     torch.real,
     r"""
 real(input) -> Tensor
@@ -2621,6 +2774,15 @@ Example::
     >>> torch.reciprocal(a)
     tensor([-2.1763, -0.4713, -0.6986,  1.3702])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.reciprocal_,
+    r"""
+reciprocal_(input) -> Tensor
+
+In-place version of :func:`torch.reciprocal`
+""",
 )
 
 add_docstr(
@@ -2815,11 +2977,29 @@ Example::
 )
 
 add_docstr(
+    torch.clamp_,
+    r"""
+clamp_(input, min=None, max=None) -> Tensor
+
+In-place version of :func:`torch.clamp`
+""",
+)
+
+add_docstr(
     torch.clip,
     r"""
 clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
+""",
+)
+
+add_docstr(
+    torch.clip_,
+    r"""
+clip_(input, min=None, max=None) -> Tensor
+
+In-place version of :func:`torch.clip`
 """,
 )
 
@@ -2963,6 +3143,15 @@ Example::
     >>> torch.conj_physical(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.conj_physical_,
+    r"""
+conj_physical_(input) -> Tensor
+
+In-place version of :func:`torch.conj_physical`
+""",
 )
 
 add_docstr(
@@ -3132,6 +3321,15 @@ Example::
 )
 
 add_docstr(
+    torch.cos_,
+    r"""
+cos_(input) -> Tensor
+
+In-place version of :func:`torch.cos`
+""",
+)
+
+add_docstr(
     torch.cosh,
     r"""
 cosh(input, *, out=None) -> Tensor
@@ -3158,6 +3356,15 @@ Example::
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.cosh_,
+    r"""
+cosh_(input) -> Tensor
+
+In-place version of :func:`torch.cosh`
+""",
 )
 
 add_docstr(
@@ -4065,11 +4272,29 @@ Alias for :func:`torch.special.erf`.
 )
 
 add_docstr(
+    torch.erf_,
+    r"""
+erf_(input) -> Tensor
+
+In-place version of :func:`torch.erf`
+""",
+)
+
+add_docstr(
     torch.erfc,
     r"""
 erfc(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.erfc`.
+""",
+)
+
+add_docstr(
+    torch.erfc_,
+    r"""
+erfc_(input) -> Tensor
+
+In-place version of :func:`torch.erfc`
 """,
 )
 
@@ -4108,6 +4333,15 @@ Example::
 )
 
 add_docstr(
+    torch.exp_,
+    r"""
+exp_(input) -> Tensor
+
+In-place version of :func:`torch.exp`
+""",
+)
+
+add_docstr(
     torch.exp2,
     r"""
 exp2(input, *, out=None) -> Tensor
@@ -4117,11 +4351,29 @@ Alias for :func:`torch.special.exp2`.
 )
 
 add_docstr(
+    torch.exp2_,
+    r"""
+exp2_(input) -> Tensor
+
+In-place version of :func:`torch.exp2`
+""",
+)
+
+add_docstr(
     torch.expm1,
     r"""
 expm1(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.expm1`.
+""",
+)
+
+add_docstr(
+    torch.expm1_,
+    r"""
+expm1_(input) -> Tensor
+
+In-place version of :func:`torch.expm1`
 """,
 )
 
@@ -4184,6 +4436,15 @@ Example::
     >>> torch.floor(a)
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.floor_,
+    r"""
+floor_(input) -> Tensor
+
+In-place version of :func:`torch.floor`
+""",
 )
 
 add_docstr(
@@ -4291,6 +4552,15 @@ Example::
 
     >>> torch.frac(torch.tensor([1, 2.5, -3.2]))
     tensor([ 0.0000,  0.5000, -0.2000])
+""",
+)
+
+add_docstr(
+    torch.frac_,
+    r"""
+frac_(input) -> Tensor
+
+In-place version of :func:`torch.frac`
 """,
 )
 
@@ -4608,6 +4878,15 @@ Example::
     >>> torch.gcd(a, c)
     tensor([1, 1, 3])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.gcd_,
+    r"""
+gcd_(input, other) -> Tensor
+
+In-place version of :func:`torch.gcd`
+""",
 )
 
 add_docstr(
@@ -5255,6 +5534,15 @@ Alias for :func:`torch.special.i0`.
 )
 
 add_docstr(
+    torch.i0_,
+    r"""
+i0_(input) -> Tensor
+
+In-place version of :func:`torch.i0`
+""",
+)
+
+add_docstr(
     torch.igamma,
     r"""
 igamma(input, other, *, out=None) -> Tensor
@@ -5796,6 +6084,15 @@ Example::
 )
 
 add_docstr(
+    torch.lcm_,
+    r"""
+lcm_(input, other) -> Tensor
+
+In-place version of :func:`torch.lcm`
+""",
+)
+
+add_docstr(
     torch.ldexp,
     r"""
 ldexp(input, other, *, out=None) -> Tensor
@@ -5827,6 +6124,15 @@ Example::
 
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.ldexp_,
+    r"""
+ldexp_(input, other) -> Tensor
+
+In-place version of :func:`torch.ldexp`
+""",
 )
 
 add_docstr(
@@ -6010,6 +6316,15 @@ Example::
 )
 
 add_docstr(
+    torch.log_,
+    r"""
+log_(input) -> Tensor
+
+In-place version of :func:`torch.log`
+""",
+)
+
+add_docstr(
     torch.log10,
     r"""
 log10(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -6039,6 +6354,15 @@ Example::
     tensor([-0.2820, -0.0290, -0.1392, -0.8857, -0.6476])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.log10_,
+    r"""
+log10_(input) -> Tensor
+
+In-place version of :func:`torch.log10`
+""",
 )
 
 add_docstr(
@@ -6072,6 +6396,15 @@ Example::
 )
 
 add_docstr(
+    torch.log1p_,
+    r"""
+log1p_(input) -> Tensor
+
+In-place version of :func:`torch.log1p`
+""",
+)
+
+add_docstr(
     torch.log2,
     r"""
 log2(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -6101,6 +6434,15 @@ Example::
     tensor([-0.2483, -0.3213, -0.0042, -0.9196, -4.3504])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.log2_,
+    r"""
+log2_(input) -> Tensor
+
+In-place version of :func:`torch.log2`
+""",
 )
 
 add_docstr(
@@ -6162,6 +6504,15 @@ add_docstr(
 xlogy(input, other, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.xlogy`.
+""",
+)
+
+add_docstr(
+    torch.xlogy_,
+    r"""
+xlogy_(input, other) -> Tensor
+
+In-place version of :func:`torch.xlogy`
 """,
 )
 
@@ -8099,6 +8450,15 @@ Example::
 )
 
 add_docstr(
+    torch.nan_to_num_,
+    r"""
+nan_to_num_(input, nan=0.0, posinf=None, neginf=None) -> Tensor
+
+In-place version of :func:`torch.nan_to_num`
+""",
+)
+
+add_docstr(
     torch.ne,
     r"""
 ne(input, other, *, out=None) -> Tensor
@@ -8164,11 +8524,29 @@ Example::
 )
 
 add_docstr(
+    torch.neg_,
+    r"""
+neg_(input) -> Tensor
+
+In-place version of :func:`torch.neg`
+""",
+)
+
+add_docstr(
     torch.negative,
     r"""
 negative(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.neg`
+""",
+)
+
+add_docstr(
+    torch.negative_,
+    r"""
+negative_(input) -> Tensor
+
+In-place version of :func:`torch.negative`
 """,
 )
 
@@ -8871,6 +9249,15 @@ Example::
 )
 
 add_docstr(
+    torch.rad2deg_,
+    r"""
+rad2deg_(input) -> Tensor
+
+In-place version of :func:`torch.rad2deg`
+""",
+)
+
+add_docstr(
     torch.deg2rad,
     r"""
 deg2rad(input, *, out=None) -> Tensor
@@ -8893,6 +9280,15 @@ Example::
             [ 1.5708, -1.5708]])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.deg2rad_,
+    r"""
+deg2rad_(input) -> Tensor
+
+In-place version of :func:`torch.deg2rad`
+""",
 )
 
 add_docstr(
@@ -9555,6 +9951,15 @@ Example::
 )
 
 add_docstr(
+    torch.round_,
+    r"""
+round_(input, *, decimals=0) -> Tensor
+
+In-place version of :func:`torch.round`
+""",
+)
+
+add_docstr(
     torch.rsqrt,
     r"""
 rsqrt(input, *, out=None) -> Tensor
@@ -9580,6 +9985,15 @@ Example::
     >>> torch.rsqrt(a)
     tensor([    nan,  1.8351,  0.8053,     nan])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.rsqrt_,
+    r"""
+rsqrt_(input) -> Tensor
+
+In-place version of :func:`torch.rsqrt`
+""",
 )
 
 add_docstr(
@@ -9804,11 +10218,29 @@ Alias for :func:`torch.special.expit`.
 )
 
 add_docstr(
+    torch.sigmoid_,
+    r"""
+sigmoid_(input) -> Tensor
+
+In-place version of :func:`torch.sigmoid`
+""",
+)
+
+add_docstr(
     torch.logit,
     r"""
 logit(input, eps=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.logit`.
+""",
+)
+
+add_docstr(
+    torch.logit_,
+    r"""
+logit_(input, eps=None) -> Tensor
+
+In-place version of :func:`torch.logit`
 """,
 )
 
@@ -9929,11 +10361,29 @@ Example::
 )
 
 add_docstr(
+    torch.sin_,
+    r"""
+sin_(input) -> Tensor
+
+In-place version of :func:`torch.sin`
+""",
+)
+
+add_docstr(
     torch.sinc,
     r"""
 sinc(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.sinc`.
+""",
+)
+
+add_docstr(
+    torch.sinc_,
+    r"""
+sinc_(input) -> Tensor
+
+In-place version of :func:`torch.sinc`
 """,
 )
 
@@ -9964,6 +10414,15 @@ Example::
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.sinh_,
+    r"""
+sinh_(input) -> Tensor
+
+In-place version of :func:`torch.sinh`
+""",
 )
 
 add_docstr(
@@ -10561,6 +11020,15 @@ Example::
 )
 
 add_docstr(
+    torch.sqrt_,
+    r"""
+sqrt_(input) -> Tensor
+
+In-place version of :func:`torch.sqrt`
+""",
+)
+
+add_docstr(
     torch.square,
     r"""
 square(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -10581,6 +11049,15 @@ Example::
     >>> torch.square(a)
     tensor([ 4.3077,  1.0457,  0.0069,  0.2310])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.square_,
+    r"""
+square_(input) -> Tensor
+
+In-place version of :func:`torch.square`
+""",
 )
 
 add_docstr(
@@ -11342,6 +11819,15 @@ Example::
 )
 
 add_docstr(
+    torch.tan_,
+    r"""
+tan_(input) -> Tensor
+
+In-place version of :func:`torch.tan`
+""",
+)
+
+add_docstr(
     torch.tanh,
     r"""
 tanh(input, *, out=None) -> Tensor
@@ -11367,6 +11853,15 @@ Example::
     >>> torch.tanh(a)
     tensor([ 0.7156, -0.6218,  0.8257,  0.2553])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.tanh_,
+    r"""
+tanh_(input) -> Tensor
+
+In-place version of :func:`torch.tanh`
+""",
 )
 
 add_docstr(
@@ -11847,6 +12342,15 @@ Example::
 )
 
 add_docstr(
+    torch.trunc_,
+    r"""
+trunc_(input) -> Tensor
+
+In-place version of :func:`torch.trunc`
+""",
+)
+
+add_docstr(
     torch.fake_quantize_per_tensor_affine,
     r"""
 fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
@@ -11942,11 +12446,29 @@ Example::
 )
 
 add_docstr(
+    torch.fill_,
+    r"""
+fill_(input, value) -> Tensor
+
+In-place version of :func:`torch.fill`
+""",
+)
+
+add_docstr(
     torch.fix,
     r"""
 fix(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.trunc`
+""",
+)
+
+add_docstr(
+    torch.fix_,
+    r"""
+fix_(input) -> Tensor
+
+In-place version of :func:`torch.fix`
 """,
 )
 
@@ -14360,3 +14882,30 @@ Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
 Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
         """,
         )
+
+add_docstr(
+    torch.detach_,
+    r"""
+detach_(input) -> Tensor
+
+In-place version of :func:`torch.detach`
+""",
+)
+
+add_docstr(
+    torch.feature_alpha_dropout_,
+    r"""
+feature_alpha_dropout_(input, p, train) -> Tensor
+
+In-place version of :func:`torch.feature_alpha_dropout`
+""",
+)
+
+add_docstr(
+    torch.feature_dropout_,
+    r"""
+feature_dropout_(input, p, train) -> Tensor
+
+In-place version of :func:`torch.feature_dropout`
+""",
+)
