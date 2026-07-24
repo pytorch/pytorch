@@ -915,23 +915,26 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         first_tree = tree_map_args[1]
         rest = tree_map_args[2:]
 
-        if is_tree_map_with_path:
-            return first_tree.call_tree_map_with_path(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-                keypath=(),
-            )
-        else:
-            return first_tree.call_tree_map(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-            )
+        # The tree_map fast path doesn't create an InliningIT for tree_map,
+        # so NGB resume functions would miss the tree_map continuation.
+        with torch._dynamo.disable_nested_graph_breaks():
+            if is_tree_map_with_path:
+                return first_tree.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                    keypath=(),
+                )
+            else:
+                return first_tree.call_tree_map(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                )
 
     def _is_tree_map_function(self) -> bool:
         return (
