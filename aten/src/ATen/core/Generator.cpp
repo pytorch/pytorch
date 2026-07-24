@@ -21,4 +21,13 @@ Generator Generator::graphsafe_get_state() const {
   return Generator(this->impl_->graphsafe_get_state());
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> Generator::philox_state(
+    uint64_t increment) {
+  auto [seed, offset, intragraph] = this->impl_->philox_state(increment);
+  return {
+      at::Tensor::wrap_tensor_impl(std::move(seed)),
+      at::Tensor::wrap_tensor_impl(std::move(offset)),
+      at::Tensor::wrap_tensor_impl(std::move(intragraph))};
+}
+
 } // namespace at
