@@ -264,15 +264,11 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
-# Ops whose result type depends only on operand types (excludes pow: 2**-1 is a float)
 _COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
     [
         operator.add,
         operator.sub,
         operator.mul,
-        operator.truediv,
-        operator.floordiv,
-        operator.mod,
     ]
 )
 
@@ -283,6 +279,7 @@ def _try_computed_lazy_constant(
     """Build a ComputedLazyConstantVariable for fn(*args), or None to fall back."""
     from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
 
+    fn = IN_PLACE_DESUGARING_MAP.get(fn, fn)
     if fn not in _COMPUTED_LAZY_CONSTANT_OPS or len(args) != 2:
         return None
     any_unrealized = False
@@ -296,10 +293,7 @@ def _try_computed_lazy_constant(
             return None
     if not any_unrealized:
         return None
-    try:
-        return ComputedLazyConstantVariable.create(fn, args)
-    except (TypeError, ArithmeticError):
-        return None
+    return ComputedLazyConstantVariable.create(fn, args)
 
 
 def populate_builtin_to_tensor_fn_map() -> None:

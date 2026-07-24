@@ -563,15 +563,37 @@ class ComputedLazyConstantTests(TestCase):
         cases = [
             (lambda t, a, b: (t.sin(), a - b), [(t, 5, 2), (t, 9, 3)]),
             (lambda t, a, b: (t.sin(), a * b), [(t, 5, 2), (t, 9, 3)]),
-            (lambda t, a, b: (t.sin(), a / b), [(t, 5, 2), (t, 9, 3)]),
-            (lambda t, a, b: (t.sin(), a // b), [(t, 5, 2), (t, 9, 3)]),
-            (lambda t, a, b: (t.sin(), a % b), [(t, 5, 2), (t, 9, 3)]),
             (lambda t, a, b: (t.sin(), a + b), [(t, "x", "y"), (t, "p", "q")]),
         ]
         for i, (fn, arg_sets) in enumerate(cases):
             with self.subTest(case=i):
                 torch._dynamo.reset()
                 self._check(fn, arg_sets, expected_frames=1)
+
+    def test_unused_computed_inplace_op_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            a += b
+            return t.sin(), a
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=1)
+
+    def test_unused_division_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a / b
+
+        self._check(fn, [(t, 4, 2), (t, 9, 3)], expected_frames=2)
+
+    def test_operand_type_change_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 1.5, 2.5)], expected_frames=2)
 
     def test_chained_computed_constants_do_not_recompile(self):
         t = torch.ones(2)

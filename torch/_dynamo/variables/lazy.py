@@ -563,8 +563,8 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     def create(  # pyrefly: ignore[bad-param-name-override, bad-override]
         op: Callable[..., Any],
         args: list[VariableTracker],
-    ) -> VariableTracker:
-        """Compute op(*args) eagerly; raises if the result is not a base literal."""
+    ) -> VariableTracker | None:
+        """Compute op(*args) eagerly; returns None to fall back to realization."""
         from .constant import ConstantVariable
 
         lazy_vars: list[LazyConstantVariable] = []
@@ -578,11 +578,13 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
                 return arg.peek_value()
             return arg.as_python_constant()
 
-        value = op(*[get_value(arg) for arg in args])
+        values = [get_value(arg) for arg in args]
+        try:
+            value = op(*values)
+        except Exception:
+            return None
         if not ConstantVariable.is_base_literal(value):
-            raise TypeError(
-                f"ComputedLazyConstantVariable cannot wrap value of type {type(value)}"
-            )
+            return None
         if not lazy_vars:
             return ConstantVariable.create(value)
         return ComputedLazyConstantVariable(

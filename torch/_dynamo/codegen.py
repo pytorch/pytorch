@@ -309,6 +309,9 @@ class PyCodegen:
             # Recompute from the operands at runtime instead of burning in the value
             self.uses[value] += 1
             self.call_reconstruct(value)
+            if allow_cache and value in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(value)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
