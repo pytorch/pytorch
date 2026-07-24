@@ -40,6 +40,13 @@ on:
         default: ""
         type: string
         description: Prefix for runner label
+      skip-arc-mapping:
+        required: false
+        default: ""
+        type: string
+        description: |
+          If "true", pass the test matrix through unmapped (keep EC2 labels
+          like linux.4xlarge) instead of rewriting them to ARC equivalents.
       runner:
         required: false
         type: string
@@ -163,7 +170,7 @@ jobs:
     timeout-minutes: 480
     outputs:
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
-      test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
+      test-matrix: ${{ inputs.skip-arc-mapping == 'true' && steps.filter.outputs.test-matrix || steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -199,6 +206,7 @@ jobs:
 
       - name: Map EC2 runners to ARC runners
         id: map-runners
+        if: inputs.skip-arc-mapping != 'true'
         env:
           FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
           RUNNER_PREFIX: ${{ inputs.runner_prefix }}
