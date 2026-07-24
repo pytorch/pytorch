@@ -1339,8 +1339,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):
-            c = torch.ones(2, 2)
-            d = torch.ones(2, 2)
+            c = torch.ones(2, 2, device=device_type)
+            d = torch.ones(2, 2, device=device_type)
             e = torch.matmul(a, c)
             g_loss = torch.abs(e - d).mean()
             g_loss.backward()
