@@ -519,6 +519,10 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
+
         result = False
 
         if name in fn_known_dunder_attrs or name == "__dict__":
@@ -567,6 +571,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
+
+    def get_value_for_setattr(self) -> object | None:
+        return self.fn
 
     def __init__(
         self,
@@ -734,9 +741,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             source = source and AttrSource(source, "__get__")
             return VariableTracker.build(tx, self.fn.__get__, source)
         elif name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.fn, name))
-            )
+            return variables.CallMethodVariable(self, name)
         source = self.get_source()
         return fn_getattro_impl(tx, self.fn, source, name)
 
@@ -1318,9 +1323,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
@@ -2081,9 +2084,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             d = getattr(self, "defaults", None)
             return d.as_python_constant() if d else ConstantVariable.create(None)
         elif name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(types.FunctionType, name))
-            )
+            return variables.CallMethodVariable(self, name)
         else:
             return super().getattro_impl(tx, name)
 
@@ -2279,6 +2280,12 @@ class SkipFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
+
+    def get_value_for_setattr(self) -> object | None:
+        mod = getattr(self.value, "__module__", None) or ""
+        if mod == "torch" or mod.startswith(("torch.", "torch_")):
+            return None
+        return self.value
 
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
@@ -2550,9 +2557,7 @@ class SkipFunctionVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.value, name))
-            )
+            return variables.CallMethodVariable(self, name)
 
         return fn_getattro_impl(tx, self.value, self.source, name)
 
@@ -3044,7 +3049,6 @@ class FunctoolsPartialVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        # functools.partial uses slots, so attributes are constant
         return VariableTracker.build(tx, hasattr(functools.partial(identity), name))
 
     def getattro_impl(
@@ -3060,9 +3064,7 @@ class FunctoolsPartialVariable(VariableTracker):
             items = {VariableTracker.build(tx, k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
         if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(functools.partial, name))
-            )
+            return variables.CallMethodVariable(self, name)
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self) -> Any:
@@ -3105,6 +3107,9 @@ class PolyfilledFunctionVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
+
+    def get_value_for_setattr(self) -> object | None:
+        return self.fn
 
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -4267,6 +4272,13 @@ class BoundBuiltinMethodVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        if name == "__name__":
+            return variables.ConstantVariable.create(self.descriptor.__name__)
+        return super().getattro_impl(tx, name)
 
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()

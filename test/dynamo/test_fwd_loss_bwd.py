@@ -1178,7 +1178,7 @@ class GraphModule(torch.nn.Module):
 
         Note: We test autograd.grad directly. Using backward() would also test our fix
         for leaf tensor detection, but fails later in accumulate_grad because dynamo
-        represents w.grad as GetAttrVariable (not TensorVariable) for in-graph params.
+        cannot resolve w.grad to a TensorVariable for in-graph params.
         """
 
         def fn(x):
@@ -1238,8 +1238,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 4)
 
         # This is existing issue (https://github.com/pytorch/pytorch/issues/171204)
-        # w is created in-graph, so Dynamo creates a generic GetAttrVariable for w.grad
-        # which cannot be used in tensor operations.
+        # w is created in-graph, so Dynamo cannot resolve w.grad to a TensorVariable,
+        # which means it cannot be used in tensor operations.
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
             re.escape(
