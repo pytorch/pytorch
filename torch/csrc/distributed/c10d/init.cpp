@@ -4740,8 +4740,9 @@ Attach a NaN check hook to a process group. Input (send) buffers of
 collectives issued through the group are checked for NaNs, regardless of
 whether the backend has a native NaN checker (ProcessGroupNCCL's
 TORCH_NCCL_NAN_CHECK). Receive buffers are not checked. On CPU a NaN raises
-a RuntimeError; on CUDA it triggers a device-side assert. The hook detaches
-when remove() is called or the returned handle is garbage collected.)")
+a RuntimeError; on CUDA it triggers a device-side assert. The process group
+owns the hook, so the returned handle only has to be kept if the check should
+be removed again via remove().)")
       .def("remove", &::c10d::NanCheckHook::remove);
 
   module.def(
