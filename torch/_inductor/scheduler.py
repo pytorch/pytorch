@@ -87,7 +87,9 @@ from .sizevars import SimplifyIndexing
 from .utils import (
     _unstable_customized_partition_wrapper,
     cache_on_self,
+    cache_on_self_and_args,
     cmp,
+    decompose_index,
     device_need_guard,
     get_current_backend,
     get_device_tflops,
@@ -1370,6 +1372,7 @@ class BaseSchedulerNode:
 
     def clear_read_writes_dependent_caches(self) -> None:
         self.get_coalesce_analysis.clear_cache(self)
+        typing.cast(Any, self.get_tiling).clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -1378,6 +1381,14 @@ class BaseSchedulerNode:
         if not isinstance(self, (SchedulerNode, FusedSchedulerNode)):
             return None
         return _analyze_memory_coalescing(self)
+
+    @cache_on_self_and_args("BaseSchedulerNode")
+    def get_tiling(
+        self, numel: sympy.Expr, rnumel: sympy.Expr
+    ) -> dict[str, sympy.Expr]:
+        from .codegen.simd import SIMDScheduling
+
+        return SIMDScheduling.select_tiling(self.get_nodes(), numel, rnumel)
 
     def set_last_usage(
         self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
@@ -2393,6 +2404,13 @@ class SchedulerNode(BaseSchedulerNode):
     def _before_loop_state_mutation(self) -> None:
         if self._loop_mutation_listener is not None:
             self._loop_mutation_listener(self)
+
+    def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> None:
+        if self._body is None:
+            raise AssertionError("expected a loop body")
+        self._before_loop_state_mutation()
+        self._body = self._body.with_indexing_exprs(replacements)
+        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._before_loop_state_mutation()
@@ -4363,9 +4381,9 @@ class Scheduler:
             ):
                 self.create_combo_kernel_nodes(num_ck_nodes=None)
 
-        # torch.cond can contain arbitrary subgraphs, which can contain collectives
-        # reordering these can cause a nccl hang
-        self._enforce_conditional_ordering()
+        # torch.cond and torch.switch can contain arbitrary subgraphs with collectives;
+        # reordering them can cause an nccl hang.
+        self._enforce_switch_ordering()
 
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
@@ -5180,10 +5198,8 @@ class Scheduler:
             visit(node)
         return result
 
-    def _enforce_conditional_ordering(self) -> None:
-        conditional_nodes = [
-            n for n in self.nodes if isinstance(n.node, ir.Conditional)
-        ]
+    def _enforce_switch_ordering(self) -> None:
+        conditional_nodes = [n for n in self.nodes if isinstance(n.node, ir.Switch)]
         for i in range(1, len(conditional_nodes)):
             mutating_buf = next(iter(conditional_nodes[i].get_buffer_names()))
             prev_buf = next(iter(conditional_nodes[i - 1].get_buffer_names()))
@@ -7233,6 +7249,52 @@ class Scheduler:
 
         return str(reasons)
 
+    def _can_reindex_consumer_for_index_inversion(
+        self,
+        producer_write: MemoryDep,
+        consumer_read: MemoryDep,
+        consumer_write: MemoryDep,
+        consumer: SchedulerNode,
+        read_expr: sympy.Expr,
+    ) -> bool:
+        """Return whether flattening the consumer produces an invertible read."""
+        if consumer.is_reduction() or consumer_read.size != consumer_write.size:
+            return False
+
+        flat_size = sympy_product(producer_write.size)
+        if not V.graph.sizevars.statically_known_equals(
+            sympy_product(consumer_read.size), flat_size
+        ) or not V.graph.sizevars.statically_known_equals(
+            sympy_product(consumer._sizes[0]), flat_size
+        ):
+            return False
+        if tuple(consumer._sizes[0]) == (flat_size,):
+            return False
+
+        body = consumer._body
+        if body is None or not consumer_write.normalize().is_contiguous():
+            return False
+
+        iter_vars = body.vars[0]
+        iter_sizes = body.sizes[0]
+        if len(iter_vars) != len(iter_sizes):
+            return False
+
+        # A flat reindex decomposes one new loop variable into the old loop domain.
+        # Apply that substitution to the read without rebuilding the LoopBody.
+        flat_var = sympy.Dummy("reindex_flat", integer=True, nonnegative=True)
+        flattened_read = sympy_subs(
+            read_expr,
+            dict(zip(iter_vars, decompose_index(flat_var, iter_sizes))),
+        )
+        flattened_read = V.graph.sizevars.simplify_with_ranges(
+            sympy.expand(flattened_read), {flat_var: flat_size}
+        )
+
+        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+
+        return generate_inverse_formula(flattened_read, flat_var, flat_size) is not None
+
     def shared_data_after_inverting_indexing(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -7257,6 +7319,13 @@ class Scheduler:
 
         if any(n.is_cpu() for n in [node1, node2]):
             return -1
+        if not isinstance(node2, SchedulerNode):
+            return -1
+        if not isinstance(node2.node, ir.ComputedBuffer):
+            return -1
+        body = node2._body
+        if body is None:
+            return -1
 
         # Check for shared buffers between nodes
         node1_buffer_names = node1.read_writes.buffer_names()
@@ -7277,7 +7346,7 @@ class Scheduler:
             return -1
 
         # Currently only handle single read/write operations
-        if len(node2.read_writes.reads) > 1 or len(node2.read_writes.writes) > 1:
+        if len(node2.read_writes.reads) != 1 or len(node2.read_writes.writes) != 1:
             return -1
 
         node2_read = next(iter(node2.read_writes.reads))
@@ -7288,13 +7357,37 @@ class Scheduler:
         ):
             return -1
 
-        node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
-        if node2_read.name not in node1_writes:
+        matching_node1_writes = [
+            dep for dep in node1.read_writes.writes if dep.name == node2_read.name
+        ]
+        if len(matching_node1_writes) != 1:
             return -1
 
-        node1_write = node1_writes[node2_read.name]
+        node1_write = matching_node1_writes[0]
 
         if not isinstance(node1_write, MemoryDep):
+            return -1
+
+        # Index inversion supports one read and one write expression without subblocks.
+        if len(body.indexing_exprs) != 2 or body.subblocks:
+            return -1
+        node2_read_exprs = OrderedSet(body.get_read_exprs())
+        if len(node2_read_exprs) != 1:
+            return -1
+        read_expr = next(iter(node2_read_exprs))
+
+        # Check the flattened read before rebuilding the consumer LoopBody.
+        if self._can_reindex_consumer_for_index_inversion(
+            node1_write, node2_read, node2_write, node2, read_expr
+        ):
+            reindex_snapshot = _LoopStateSnapshot.create((node2,))
+            node2.apply_loop_reindexing([sympy_product(node1_write.size)])
+            score = self.shared_data_after_inverting_indexing(node1, node2)
+            if score < 0:
+                reindex_snapshot.restore()
+            return score
+
+        if not node2_write.is_contiguous():
             return -1
 
         # We are checking for compatibility with the normalized node1 write
@@ -7312,51 +7405,28 @@ class Scheduler:
         if node2_read.size != node2_write.size or len(node2_read.var_names) != 1:
             return -1
 
-        # Verify we have exactly two indexing expressions (one read, one write)
-        if len(node2._body.indexing_exprs) != 2:  # type: ignore[attr-defined]
-            return -1
-
-        # No subblocks allowed for this optimization
-        if node2._body.subblocks:  # type: ignore[attr-defined]
-            return -1
-
-        if not (
-            "index0" in node2._body.indexing_exprs  # type: ignore[attr-defined]
-            and "index1" in node2._body.indexing_exprs  # type: ignore[attr-defined]
-        ):
+        if not ("index0" in body.indexing_exprs and "index1" in body.indexing_exprs):
             raise AssertionError("expected index0 and index1 in node2 indexing_exprs")
 
-        # Extract and verify single read expression
-        node2_read_exprs = OrderedSet(expr for expr in node2._body.get_read_exprs())  # type: ignore[attr-defined]
-        if len(node2_read_exprs) != 1:
-            return -1
-
-        read_expr = next(iter(node2_read_exprs))
-
         # Determine which index is for reading vs writing
-        if read_expr == node2._body.indexing_exprs["index0"]:  # type: ignore[attr-defined]
+        if read_expr == body.indexing_exprs["index0"]:
             read_expr_index = "index0"
             write_expr_index = "index1"
         else:
-            if read_expr != node2._body.indexing_exprs["index1"]:  # type: ignore[attr-defined]
+            if read_expr != body.indexing_exprs["index1"]:
                 raise AssertionError("expected read_expr to match node2 index1 expr")
             read_expr_index = "index1"
             write_expr_index = "index0"
 
-        from torch._inductor.invert_expr_analysis import generate_inverse_formula
-
-        index_vars = node2._body.vars[0]  # type: ignore[attr-defined]
+        index_vars = body.vars[0]
         if len(index_vars) != 1:
             return -1
 
-        simplified_terms = []
-        for term in sympy.Add.make_args(read_expr):
-            simplified_terms.append(
-                V.graph.sizevars.combine_modular_indexing_pairs(term)
-            )
-        simplified_read_expr = sum(simplified_terms)
+        from torch._inductor.invert_expr_analysis import generate_inverse_formula
 
-        inverse_formula = generate_inverse_formula(simplified_read_expr, index_vars[0])
+        inverse_formula = generate_inverse_formula(
+            read_expr, index_vars[0], node2_read.size[0]
+        )
 
         # formula is not invertible
         if inverse_formula is None:
@@ -7365,16 +7435,19 @@ class Scheduler:
         # === Apply Inversion ===
 
         # Swap the indexing expressions using the inverse formula
-        node2._body.indexing_exprs[read_expr_index] = node2._body.indexing_exprs[  # type: ignore[attr-defined]
-            write_expr_index
-        ]
-        node2._body.indexing_exprs[write_expr_index] = inverse_formula  # type: ignore[attr-defined]
+        node2.apply_indexing_exprs(
+            {
+                read_expr_index: body.indexing_exprs[write_expr_index],
+                write_expr_index: inverse_formula,
+            }
+        )
 
-        # Refresh dependencies and calculate fusion score
-        node2.refresh_dependencies(True, False)  # type: ignore[attr-defined]
+        # Calculate fusion score
         score = self.score_fusion_memory(node1, node2)
         if not isinstance(score, int):
             raise AssertionError("expected score to be an int")
+        if score == 0:
+            score = self._score_fusion_memory_by_fusable_read_write(node1, node2)
 
         fusion_log.info("Shared memory after inversion: %d", score)
         return score
@@ -9180,8 +9253,8 @@ class Scheduler:
         if isinstance(node.node, ir.DeviceCopy):
             return "DeviceCopy ops"
 
-        if isinstance(node.node, ir.Conditional):
-            return "Conditional ops"
+        if isinstance(node.node, ir.Switch):
+            return "Switch ops"
 
         if getattr(node.node, "unbacked_bindings", None):
             return "unbacked binding ops"
