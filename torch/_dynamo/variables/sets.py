@@ -1001,7 +1001,7 @@ class FrozensetVariable(SetVariable):
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
     tp_methods = {
-        "copy": Method(copy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "copy": Method(copy, MethodFlags.NOARGS),
         "difference": Method(difference, MethodFlags.VARARGS),
         "intersection": Method(intersection, MethodFlags.VARARGS),
         "symmetric_difference": Method(symmetric_difference, MethodFlags.O),
