@@ -31,45 +31,32 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       check_experiments: lf
 
-  # The ARC/k8s fleet is a dead end: its container hook silently ignores
-  # container cap-add options and hostPath volume mounts (effective caps came
-  # back as the stock docker default, no tracefs mounted). Per Eli, the classic
-  # EC2 docker-on-VM pool still exists behind the UNPREFIXED linux.4xlarge label
-  # (only prefixed labels route to ARC). This canary runs bare (no job-level
-  # container) on that pool and tests both attach paths in one shot:
-  #   1. host-side: sudo bpftrace directly on the runner VM (simplest wiring).
-  #   2. docker run --privileged: bpftrace inside a privileged container.
-  # Each is best-effort with a clear verdict line; the job fails only if both
-  # fail so a total dead end is visible.
+  # Prior EC2 run settled it: a bare (no job-level container) job schedules on
+  # the unprefixed linux.4xlarge pool (real EC2 instance, c5.4xlarge). Host-side
+  # bpftrace is out (the host AMI has no apt and no preinstalled bpftrace), and
+  # docker run --privileged failed only at "tracepoint not found" because a
+  # privileged container does not auto-mount tracefs. Unlike ARC, a real
+  # docker-on-VM host lets a privileged container mount debugfs/tracefs itself
+  # (it has CAP_SYS_ADMIN). This canary proves that recipe end to end.
   canary:
     name: canary
     runs-on: linux.4xlarge
     timeout-minutes: 20
     steps:
-      - name: host-side sudo bpftrace
-        id: host
-        continue-on-error: true
+      - name: docker run --privileged, self-mount tracefs, attach bpftrace
         run: |
-          set -x
-          sudo apt-get update -y && sudo apt-get install -y bpftrace
-          sudo timeout 30 bpftrace -e \
-            'tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }'
-          echo "HOST_BPFTRACE=pass"
-      - name: docker run --privileged bpftrace
-        id: docker
-        continue-on-error: true
-        run: |
-          set -x
+          set -eux
           docker run --rm --privileged --security-opt seccomp=unconfined ubuntu:22.04 \
-            bash -c "apt-get update -qq && apt-get install -qq -y bpftrace && \
+            bash -c '
+              set -eux
+              mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+              mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
+              ls /sys/kernel/debug/tracing/events/syscalls/sys_enter_openat \
+                || ls /sys/kernel/tracing/events/syscalls/sys_enter_openat
+              apt-get update -qq && apt-get install -qq -y bpftrace
               timeout 30 bpftrace -e \
-              'tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }'"
-          echo "DOCKER_BPFTRACE=pass"
-      - name: Verdict
-        run: |
-          echo "host=${{ steps.host.outcome }} docker=${{ steps.docker.outcome }}"
-          [ "${{ steps.host.outcome }}" = "success" ] || \
-            [ "${{ steps.docker.outcome }}" = "success" ]
+                "tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }"
+            '
 
   build:
     name: linux-jammy-py3.10-gcc11
