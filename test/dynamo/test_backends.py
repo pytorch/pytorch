@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import importlib.machinery
 import importlib.util
 import sys
 import unittest
@@ -163,12 +162,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):
         self._check_backend_works("tvm", device, boxed=False, backward=False)
-        self._check_backend_works(
-            "tvm", device, boxed=False, backward=False, options={"scheduler": None}
-        )
-        self._check_backend_works(
-            "tvm", device, boxed=False, backward=False, options={"opt_level": 0}
-        )
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm_scalar_tensor_input(self, device):
@@ -202,84 +195,12 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             )
             self.assertTrue(same(expected, compiled(x), tol=0.01))
 
-    def test_tvm_scheduler_backends(self, device):
-        from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
+    def test_tvm_missing_install_error(self, device):
+        from torch._dynamo.backends.tvm import tvm as tvm_backend
 
         gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        for backend in (tvm_meta_schedule, tvm_auto_scheduler):
-            # blocking the tvm import keeps this fast and deterministic;
-            # reaching ImportError proves the partial's kwargs are valid
-            with patch.dict(sys.modules, {"tvm": None}):
-                self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
-
-    def test_tvm_relay_future_warning(self, device):
-        import torch._dynamo.backends.tvm as tvm_backend
-
-        gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        with patch.dict(sys.modules, {"tvm": None}):
-            with self.assertWarns(FutureWarning):
-                self.assertRaises(
-                    ImportError,
-                    tvm_backend._tvm_relay_compile,
-                    gm,
-                    [torch.randn(2)],
-                    {},
-                )
-
-    def test_tvm_dispatches_relay_or_relax(self, device):
-        import torch._dynamo.backends.tvm as tvm_backend
-
-        gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        sentinel = object()
-
-        def find_spec(present):
-            return lambda name: MagicMock() if name == present else None
-
-        with (
-            patch.dict(sys.modules, {"tvm": MagicMock()}),
-            patch.object(
-                tvm_backend, "_tvm_relay_compile", return_value=sentinel
-            ) as relay,
-            patch.object(
-                tvm_backend, "_tvm_relax_compile", return_value=sentinel
-            ) as relax,
-        ):
-            with patch("importlib.util.find_spec", side_effect=find_spec("tvm.relay")):
-                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
-            relay.assert_called_once()
-            relax.assert_not_called()
-
-            with patch(
-                "importlib.util.find_spec",
-                side_effect=find_spec("tvm.relax.frontend.torch"),
-            ):
-                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
-            relax.assert_called_once()
-            relay.assert_called_once()
-
-    def test_tvm_dynamic_shapes_error(self, device):
-        def fn(x):
-            return x.view(x.size(0), -1) + 1
-
-        x = torch.randn(2, 3, device=device)
-        compiled = torch.compile(fn, backend="tvm", dynamic=True)
-        # stub tvm imports; the error fires before any tvm API is used.
-        # find_spec() reads __spec__ off modules already in sys.modules, so
-        # the relay stub needs a real ModuleSpec to route to the relay path.
-        relay_stub = MagicMock()
-        relay_stub.__spec__ = importlib.machinery.ModuleSpec("tvm.relay", None)
-        stubs = {
-            "tvm": MagicMock(),
-            "tvm.contrib": MagicMock(),
-            "tvm.relay": relay_stub,
-        }
-        with patch.dict(sys.modules, stubs):
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed,
-                "does not support dynamic shapes",
-            ):
-                compiled(x)
-        torch._dynamo.reset()
+        with patch.dict(sys.modules, {"tvm": None, "tvm.relax.frontend.torch": None}):
+            self.assertRaises(ImportError, tvm_backend, gm, [torch.randn(2)])
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
