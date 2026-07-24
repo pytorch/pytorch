@@ -674,7 +674,7 @@ bool plan_errata_exception(
                       "operation"           : "ConvFwd",
                       "engine"              : 5,
                       "cudnn_version_start" : 92301,
-                      "cudnn_version_end"   : -1
+                      "cudnn_version_end"   : 92400
                     }
                 ]
             })");

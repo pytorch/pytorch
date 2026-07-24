@@ -62,7 +62,12 @@ def use_fa4():
 
 
 def _use_backend(backend):
-    return {"fa2": nullcontext, "fa3": use_fa3, "fa4": use_fa4}[backend]()
+    return {
+        "fa2": nullcontext,
+        "fa3": use_fa3,
+        "fa4": use_fa4,
+        "cudnn": nullcontext,
+    }[backend]()
 
 
 def _check_cudnn_varlen_supported(device):
@@ -842,11 +847,17 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater else [])
+        + ["cudnn"],
     )
     def test_batch_invariance(
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
+        use_cudnn = backend == "cudnn"
+        if use_cudnn and (window_size != (-1, -1) or num_splits is not None):
+            self.skipTest("cuDNN does not support window_size or num_splits")
         if TEST_WITH_ROCM:
             if num_splits is not None:
                 self.skipTest("num_splits is not supported on ROCm")
@@ -890,8 +901,22 @@ class TestVarlenAttention(NNTestCase):
         all_k = torch.cat([target_k, extra_k], dim=0)
         all_v = torch.cat([target_v, extra_v], dim=0)
 
-        # fa4 is batch invariant (num_splits=1) by default
-        with _use_backend(backend), torch.no_grad():
+        forward_context = (
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_forward",
+                wraps=torch.ops.aten._cudnn_attention_forward,
+            )
+            if use_cudnn
+            else nullcontext()
+        )
+        # fa4 and cuDNN are batch invariant by default
+        with (
+            _use_backend(backend),
+            _use_cudnn_varlen(use_cudnn, device),
+            forward_context as cudnn_forward,
+            torch.no_grad(),
+        ):
             solo_output = varlen_attn(
                 target_q,
                 target_k,
@@ -947,10 +972,18 @@ class TestVarlenAttention(NNTestCase):
                 self.assertEqual(solo_output, batched_output[:target_seq_len])
                 self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
                 self.assertEqual(solo_output, solo_out_buf)
+            elif use_cudnn:
+                self.assertEqual(solo_output, batched_output[:target_seq_len])
+                self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
             else:
                 if backend == "fa3":
                     self.assertNotEqual(solo_output, batched_output[:target_seq_len])
                     self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
+
+        if use_cudnn and cudnn_forward.call_count == 0:
+            raise AssertionError(
+                "cuDNN varlen attention forward should have been called"
+            )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -1110,6 +1143,15 @@ class TestVarlenAttention(NNTestCase):
     ):
         if backend == "fa2" and page_size % 256 != 0:
             self.skipTest("FA2 paged KV requires page_size divisible by 256")
+
+        # varlen_attn lives in a Dynamo skipfile, so torch.compile wraps it onto
+        # the process-global wrap_inline "inner" frame - the same code object the
+        # fa3/fa4 aten-op compile below uses. Compiling this whole matrix in one
+        # process accumulates recompiles on that shared cache until it hits
+        # recompile_limit; the non-fullgraph aten-op compile then pins "inner" to
+        # RUN_ONLY, and a later fullgraph compile silently finds no compiled
+        # frames. Reset per parametrization so each stays independent.
+        torch._dynamo.reset()
 
         torch.manual_seed(42)
 
