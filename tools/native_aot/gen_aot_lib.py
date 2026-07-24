@@ -95,6 +95,7 @@ TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
 }}
 """
 
+
 def _load_sibling(name: str):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name + ".py")
     spec = importlib.util.spec_from_file_location(name, path)
@@ -141,7 +142,10 @@ def gen_op(
     if covers is not None:
         covers_params, covers_schema, covers_body = covers
         covers_fn = COVERS_FN_TMPL.format(
-            op=op, key_lc=key.lower(), params=covers_params, body=indent(covers_body, "  ")
+            op=op,
+            key_lc=key.lower(),
+            params=covers_params,
+            body=indent(covers_body, "  "),
         )
         covers_reg = COVERS_REG_TMPL.format(
             op=op, key_lc=key.lower(), schema=covers_schema
@@ -197,7 +201,11 @@ def _structured_group(op: str):
         # kernel signature must come from the STRUCTURED group. Qualified
         # ops ("gt.Tensor") match the exact functional overload name.
         if isinstance(g, NativeFunctionsGroup) and g.structured:
-            name = str(g.functional.func.name) if "." in op else g.functional.func.name.name.base
+            name = (
+                str(g.functional.func.name)
+                if "." in op
+                else g.functional.func.name.name.base
+            )
             if name == op:
                 return g
     raise RuntimeError(f"no structured group for {op}")

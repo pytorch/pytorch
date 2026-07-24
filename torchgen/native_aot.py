@@ -80,7 +80,7 @@ def parse_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest] = {}
     if not os.path.isdir(ops_dir):
         return manifests
-    for (key_str, op), _decl in _decl_module().discover_declarations(ops_dir).items():
+    for key_str, op in _decl_module().discover_declarations(ops_dir):
         key = DispatchKey.parse(key_str)
         manifests[(key, op)] = NativeAotManifest(op=op, dispatch_key=key)
     return manifests
@@ -142,7 +142,7 @@ def validate_native_aot_manifests(
             structured_by_base[g.functional.func.name.name.base].append(
                 str(g.functional.func.name)
             )
-    for (key, op), _m in manifests.items():
+    for key, op in manifests:
         base = op.split(".")[0]
         names = structured_by_base.get(base, [])
         if "." in op:
