@@ -63,9 +63,7 @@ struct HeapBlock;
 
 struct BufferBlock {
   id<MTLBuffer> buffer;
-  // the buffer's unified-memory contents address; this is the data pointer
-  // handed out to Storage and the key of m_allocated_buffers
-  void* cpu_ptr = nullptr;
+  void* cpu_ptr = nullptr; // stores the pointer to CPU mapping of a Shared MTLBuffer
   size_t size; // size after alignment
   size_t requested_size; // requested size (before alignment)
   // buffer shape is used for retrieving base of views in cached graphs
@@ -80,6 +78,8 @@ struct BufferBlock {
   static uint64_t buffer_counter;
   // Metal events used to sync GPU/CPU operations on the shared-storage buffers
   MPSEventPtr event;
+  // Stream for which this buffer was allocated.
+  MPSStream* stream = nullptr;
 
   BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr)
       : buffer(Buffer), size(Size), requested_size(RequestedSize), heap(Heap), buf_id(Buffer ? ++buffer_counter : 0) {}
@@ -262,6 +262,11 @@ struct BufferPool {
   std::set<HeapBlock*, HeapComparison> heaps;
   // list of only "available" buffers in the pool (i.e., buffers not in-use)
   std::set<BufferBlock*, BufferComparison> available_buffers;
+  // List of available buffers partitioned by which stream allocated them.
+  // Buffers can only be reused by the same stream. Allowing buffers to be used
+  // by a different stream would require an expensive cross-stream
+  // synchronization.
+  ska::flat_hash_map<MPSStream*, std::set<BufferBlock*, BufferComparison>> available_buffers_by_stream;
   // list of buffers that are in a state of "limbo" where they've already been freed
   // from PyTorch-side, but were not returned to pool due to still being
   // in-use by command buffers with retainCount > 1. In this state, the buffer is
@@ -285,15 +290,10 @@ class MPSHeapAllocatorImpl {
   ~MPSHeapAllocatorImpl() {
     emptyCache();
   }
-  // interface exposed to at::Allocator; returns the unified-memory base
-  // address of the allocation (the MTLBuffer's contents pointer). All the
-  // `const void* ptr` keyed methods below take this data pointer.
-  void* malloc(size_t size, uint32_t usage);
+  // interface exposed to at::Allocator
+  id<MTLBuffer> malloc(size_t size, uint32_t usage);
   // frees a buffer and returns it into buffer pool
   void free(void* ptr);
-  // returns the MTLBuffer backing a data pointer handed out by malloc
-  // (nil if the pointer was not allocated here)
-  id<MTLBuffer> bufferForData(const void* ptr);
   // releases all the cached buffers and their associated heaps
   void emptyCache();
   // free inactive buffers that are pending to be freed
@@ -308,9 +308,8 @@ class MPSHeapAllocatorImpl {
   IntArrayRef getBufferShape(const void* ptr);
   // get the unique ID of the buffer
   id_t getBufferId(const void* ptr);
-  // allocate a buffer from a specialized pool to import CPU scalars into GPU;
-  // returns the unified-memory data pointer (as malloc does)
-  void* allocScalarBufferWithValue(void* value, size_t size);
+  // allocate a buffer from a specialized pool to import CPU scalars into GPU
+  id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // returns a CPU-mapping of the input buffer and its retainCount,
   // if only it has Shared storage-mode and allocated on MPSAllocator
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* buffer);
@@ -319,11 +318,11 @@ class MPSHeapAllocatorImpl {
   // source MPS storage alive for its lifetime. Raises if `mps_storage` is
   // not MPS-allocated or not shared-storage.
   c10::Storage getHostAliasStorage(const c10::Storage& mps_storage);
-  // records events for allocator data pointers (list is used to lock the mutex once)
+  // records events for a list of MTLBuffers (list is used to lock the mutex once)
   // returns true if records any event (given if passed buffers exist and are shared-storage)
   bool recordEvents(c10::ArrayRef<const void*> buffers);
   // waits for the event to signal the completion of GPU execution
-  // on the passed shared-buffer data pointers (list is used to lock the mutex once)
+  // on the passed shared buffers (list is used to lock the mutex once)
   // returns true if actually waited on any event
   bool waitForEvents(c10::ArrayRef<const void*> buffers);
   // this indicates how far (in Megabytes) the current total allocations are from the
@@ -385,8 +384,7 @@ class MPSHeapAllocatorImpl {
 
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
-  // buffer blocks keyed by the data pointer handed out to Storage
-  // (the buffer's unified-memory contents address)
+  // allocated buffers by device pointer
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;
@@ -432,6 +430,12 @@ class MPSHeapAllocatorImpl {
   void free_buffer(BufferBlock* buffer_block);
   // returns true if the container heap is also released
   bool release_buffer(BufferBlock* buffer_block, bool remove_empty_heap = true);
+  // adds/removes a buffer in both `pool.available_buffers` and
+  // `pool.available_buffers_by_stream[buffer_block->stream]`, so the two stay
+  // in sync. `insert_available_buffer` returns whether the buffer was newly
+  // inserted.
+  bool insert_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
+  void erase_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(AllocParams& params);
   bool release_cached_buffers();
