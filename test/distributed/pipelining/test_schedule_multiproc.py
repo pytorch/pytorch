@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from model_registry import (
     ConditionalGradStack,
+    FlexAttentionTransformer,
     ModelWithKwargs,
     MultiMLP,
     MultiMLPKwargs,
@@ -44,7 +45,7 @@ from torch.distributed.pipelining.schedules import (
     OVERLAP_F_B,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase  # noqa: TC002
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -62,13 +63,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-compiled_flex_attention = torch.compile(flex_attention)
-flex_attention_kernel_options = {
-    "BACKEND": "TRITON",
-    "PRESCALE_QK": False,
-    "ROWS_GUARANTEED_SAFE": True,
-    "BLOCKS_ARE_CONTIGUOUS": True,
-}
 logger = logging.getLogger(__name__)
 
 d_hid = 512
@@ -305,58 +299,22 @@ def step_with_optional_pre_split(
     return schedule.step(**step_kwargs)
 
 
-class FlexAttentionBlock(torch.nn.Module):
-    def __init__(self, dim, use_flex_attention=False):
-        super().__init__()
-        self.use_flex_attention = use_flex_attention
-        self.q_proj = torch.nn.Linear(dim, dim)
-        self.k_proj = torch.nn.Linear(dim, dim)
-        self.v_proj = torch.nn.Linear(dim, dim)
-        self.out_proj = torch.nn.Linear(dim, dim)
-        self.linear = torch.nn.Linear(dim, dim)
+def create_packed_document_block_mask(
+    positions: torch.Tensor, num_heads: int
+) -> BlockMask:
+    doc_ids = torch.cumsum((positions == 0).int(), dim=1) - 1
 
-    def forward(self, x, block_mask=None):
-        if not self.use_flex_attention:
-            return torch.relu(self.linear(x))
-        if block_mask is None:
-            raise RuntimeError("block_mask is required")
-        out = compiled_flex_attention(
-            self.q_proj(x),
-            self.k_proj(x),
-            self.v_proj(x),
-            block_mask=block_mask,
-            kernel_options=flex_attention_kernel_options,
-        )
-        return self.out_proj(out)
+    def document_causal_mask(b, h, q_idx, kv_idx):
+        return (q_idx >= kv_idx) & (doc_ids[b, q_idx] == doc_ids[b, kv_idx])
 
-
-class FlexAttentionStack(torch.nn.Module):
-    def __init__(self, dim, n_layers):
-        super().__init__()
-        self.layers = torch.nn.ModuleList(
-            [
-                FlexAttentionBlock(dim, use_flex_attention=(i == 0))
-                for i in range(n_layers)
-            ]
-        )
-
-    def forward(self, x, block_mask):
-        for layer in self.layers:
-            x = layer(x, block_mask=block_mask)
-        return x
-
-
-def create_causal_block_mask(batch, heads, seq_len, device):
-    def causal_mask(b, h, q_idx, kv_idx):
-        return q_idx >= kv_idx
-
+    batch_size, seq_len = positions.shape
     return create_block_mask(
-        causal_mask,
-        B=batch,
-        H=heads,
+        document_causal_mask,
+        B=batch_size,
+        H=num_heads,
         Q_LEN=seq_len,
         KV_LEN=seq_len,
-        device=device,
+        device=positions.device,
         compute_dq_write_order=True,
         dq_kv_order=True,
     )
@@ -872,23 +830,56 @@ class ScheduleTest(MultiProcContinuousTest):
         n_stages = stages_per_rank * self.world_size
         num_microbatches = 8
         batch = 8
-        heads = 1
         seq_len = 64
-        dim = 16
+        model_dim = 32
+        num_heads = 2
+        ffn_dim = 64
 
-        auto_mod = FlexAttentionStack(dim, n_stages).to(self.device)
+        auto_mod = FlexAttentionTransformer(model_dim, num_heads, ffn_dim, n_stages).to(
+            self.device
+        )
         pre_split_mod = copy.deepcopy(auto_mod)
-        x = torch.randn(batch, heads, seq_len, dim, device=self.device)
+        ref_mod = copy.deepcopy(auto_mod)
+        x = torch.randn(batch, seq_len, model_dim, device=self.device)
         target = torch.randn_like(x)
-        block_mask = create_causal_block_mask(batch, heads, seq_len, self.device)
+        positions = torch.stack(
+            [
+                torch.arange(seq_len, device=self.device) % (8 * (i % 4 + 1))
+                for i in range(batch)
+            ]
+        )
+        block_mask = create_packed_document_block_mask(positions, num_heads)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        auto_stages, auto_stage_modules, _ = create_multi_stage_pipeline(
+        auto_stages, auto_stage_modules, submod_names = create_multi_stage_pipeline(
             self.config, auto_mod, stages_per_rank, n_stages
         )
-        pre_split_stages, pre_split_stage_modules, _ = create_multi_stage_pipeline(
-            self.config, pre_split_mod, stages_per_rank, n_stages
+        pre_split_stages, pre_split_stage_modules, pre_split_submod_names = (
+            create_multi_stage_pipeline(
+                self.config, pre_split_mod, stages_per_rank, n_stages
+            )
         )
+        self.assertEqual(pre_split_submod_names, submod_names)
+
+        has_first_stage = any(stage.is_first for stage in auto_stages)
+        has_last_stage = any(stage.is_last for stage in auto_stages)
+        self.assertEqual(
+            has_first_stage,
+            any(stage.is_first for stage in pre_split_stages),
+        )
+        self.assertEqual(
+            has_last_stage,
+            any(stage.is_last for stage in pre_split_stages),
+        )
+
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+        position_mbs = torch.tensor_split(positions, num_microbatches)
+        kwarg_mbs = [
+            {"block_mask": create_packed_document_block_mask(positions_mb, num_heads)}
+            for positions_mb in position_mbs
+        ]
+
         auto_schedule = ScheduleInterleaved1F1B(
             auto_stages,
             num_microbatches,
@@ -907,64 +898,43 @@ class ScheduleTest(MultiProcContinuousTest):
         pre_split_out = None
         pre_split_losses = []
         with DeterministicGuard(True):
+            ref_out, ref_loss = run_reference_model(
+                ref_mod,
+                x,
+                target,
+                loss_fn,
+                num_iterations=1,
+                block_mask=block_mask,
+            )
+
             zero_gradients(auto_stage_modules)
-            if self.rank == 0:
-                step_with_optional_pre_split(
-                    auto_schedule,
-                    num_microbatches,
-                    args=(x,),
-                    kwargs={"block_mask": block_mask},
-                    pre_split=False,
-                )
-            elif self.rank == self.world_size - 1:
-                auto_out = step_with_optional_pre_split(
-                    auto_schedule,
-                    num_microbatches,
-                    target=target,
-                    losses=auto_losses,
-                    pre_split=False,
-                )
-            else:
-                step_with_optional_pre_split(
-                    auto_schedule,
-                    num_microbatches,
-                    pre_split=False,
-                )
+            auto_out = auto_schedule.step(
+                *((x,) if has_first_stage else ()),
+                block_mask=block_mask,
+                target=target if has_last_stage else None,
+                losses=auto_losses if has_last_stage else None,
+            )
 
             dist.barrier()
 
             zero_gradients(pre_split_stage_modules)
-            if self.rank == 0:
-                step_with_optional_pre_split(
-                    pre_split_schedule,
-                    num_microbatches,
-                    args=(x,),
-                    kwargs={"block_mask": block_mask},
-                    pre_split=True,
-                )
-            elif self.rank == self.world_size - 1:
-                pre_split_out = step_with_optional_pre_split(
-                    pre_split_schedule,
-                    num_microbatches,
-                    target=target,
-                    losses=pre_split_losses,
-                    pre_split=True,
-                )
-            else:
-                step_with_optional_pre_split(
-                    pre_split_schedule,
-                    num_microbatches,
-                    pre_split=True,
-                )
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs if has_first_stage else None,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs if has_last_stage else None,
+                losses=pre_split_losses if has_last_stage else None,
+            )
 
             dist.barrier()
 
-        if self.rank == self.world_size - 1:
+        if has_last_stage:
             self.assertEqual(pre_split_out, auto_out)
             self.assertEqual(
                 torch.stack(pre_split_losses),
                 torch.stack(auto_losses),
             )
+            self.assertEqual(auto_out, ref_out)
+            self.assertEqual(sum(auto_losses), ref_loss)
 
         for auto_stage_module, pre_split_stage_module in zip(
             auto_stage_modules,
@@ -978,6 +948,9 @@ class ScheduleTest(MultiProcContinuousTest):
             ):
                 self.assertEqual(auto_name, pre_split_name)
                 self.assertEqual(pre_split_param.grad, auto_param.grad)
+
+        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
+        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
