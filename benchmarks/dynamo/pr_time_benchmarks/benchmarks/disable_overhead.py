@@ -6,12 +6,8 @@ import torch
 
 
 class _DisableOverheadBase(BenchmarkBase):
-    # Shared skeleton for the torch._dynamo.disable family of per-call overhead
-    # microbenchmarks. A subclass sets _CATEGORY/_DESCRIPTION and implements
-    # _setup() to assign the callable(s) it measures; _work() invokes the target
-    # with a single tensor arg. Kept as separate subclasses (rather than one
-    # parametrized instance) so each reports its own instruction count on the
-    # pr_time dashboard.
+    # Base for torch._dynamo.disable per-call overhead microbenchmarks: a
+    # subclass sets _CATEGORY/_DESCRIPTION and _setup() to assign self._fn.
     def __init__(self):
         super().__init__(
             category=self._CATEGORY,
@@ -41,10 +37,8 @@ class _DisableOverheadBase(BenchmarkBase):
 
 
 class Benchmark(_DisableOverheadBase):
-    # torch._dynamo.disable is used on hot paths (e.g. around custom operators),
-    # so the per-call overhead of its wrapper -- toggling the eval-frame handler
-    # off and back on around the call -- matters. Measure it with a trivial
-    # callee so the count reflects the wrapper, not the callee body.
+    # Per-call overhead of the disable wrapper (toggling the eval-frame handler),
+    # measured with a trivial callee so the count reflects the wrapper.
     _CATEGORY = "disable_overhead"
     _DESCRIPTION = "per-call overhead of torch._dynamo.disable with a trivial callee"
 
