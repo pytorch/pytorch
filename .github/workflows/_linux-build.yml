@@ -124,6 +124,13 @@ on:
         type: string
         default: ""
         description: CUDA version to use for the OSDC build.
+      bpf-td-extract-build-graph:
+        description: |
+          If set to "1", extract the ninja source -> artifact graph into
+          dist/build_graph_map.json so it travels inside the build artifact.
+        required: false
+        type: string
+        default: ""
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -261,6 +268,16 @@ jobs:
             mkdir -p "dist/$(dirname "$src")"
             mv "$src" "dist/$(dirname "$src")/"
           fi
+
+      - name: Extract BPF-TD build graph
+        if: inputs.bpf-td-extract-build-graph == '1' && steps.build.outcome != 'skipped'
+        shell: bash
+        run: |
+          mkdir -p dist
+          python3 tools/testing/bpf_td/extract_build_graph.py \
+            --build-dir build \
+            --repo-root "$(pwd)" \
+            --out dist/build_graph_map.json
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && steps.use-old-whl.outputs.reuse != 'true'

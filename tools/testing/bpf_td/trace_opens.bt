@@ -1,0 +1,47 @@
+#!/usr/bin/env bpftrace
+//
+// System-wide syscall tracer for BPF-based target determination.
+//
+// Emits line-oriented events to stdout so build_mapping.py can reconstruct
+// per-test pid trees and attribute opened files to the owning test file:
+//
+//   F <nsecs> <parent_pid> <child_pid>     process fork
+//   E <nsecs> <pid> <path>                 process exec (new image)
+//   O <nsecs> <pid> <path>                 openat / openat2 (absolute paths only)
+//
+// <nsecs> is CLOCK_MONOTONIC nanoseconds (bpf_ktime_get_ns), matching the
+// time.clock_gettime(CLOCK_MONOTONIC) timestamps recorded by run_test.py.
+//
+// In-kernel we keep only absolute-path opens (str(,2) is a 1-char string --
+// bpftrace's length arg includes the null terminator) and drop the /proc,
+// /sys, /dev firehose. Relative (dirfd-based) opens are intentionally dropped;
+// reconstructing them is out of scope for phase 1 and Python/compiler tooling
+// opens via absolute paths. build_mapping.py does the final repo/torch filter.
+
+tracepoint:sched:sched_process_fork
+{
+    printf("F %llu %d %d\n", nsecs, args->parent_pid, args->child_pid);
+}
+
+tracepoint:sched:sched_process_exec
+{
+    printf("E %llu %d %s\n", nsecs, pid, str(args->filename));
+}
+
+tracepoint:syscalls:sys_enter_openat
+/str(args->filename, 2) == "/" &&
+ strncmp(str(args->filename), "/proc", 5) != 0 &&
+ strncmp(str(args->filename), "/sys", 4) != 0 &&
+ strncmp(str(args->filename), "/dev", 4) != 0/
+{
+    printf("O %llu %d %s\n", nsecs, pid, str(args->filename));
+}
+
+tracepoint:syscalls:sys_enter_openat2
+/str(args->filename, 2) == "/" &&
+ strncmp(str(args->filename), "/proc", 5) != 0 &&
+ strncmp(str(args->filename), "/sys", 4) != 0 &&
+ strncmp(str(args->filename), "/dev", 4) != 0/
+{
+    printf("O %llu %d %s\n", nsecs, pid, str(args->filename));
+}
