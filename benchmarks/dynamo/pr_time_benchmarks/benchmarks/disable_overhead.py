@@ -5,26 +5,29 @@ from benchmark_base import BenchmarkBase
 import torch
 
 
-class _DisableOverheadBase(BenchmarkBase):
-    # Base for torch._dynamo.disable per-call overhead microbenchmarks: a
-    # subclass sets _CATEGORY/_DESCRIPTION and _setup() to assign self._fn.
-    def __init__(self):
-        super().__init__(
-            category=self._CATEGORY,
-            device="cpu",
-        )
+def _trivial(x):
+    return x
+
+
+class Benchmark(BenchmarkBase):
+    # Per-call overhead of a disable-style wrapper around a trivial callee, so
+    # the instruction count reflects the wrapper, not the callee body. `wrap` is
+    # the decorator under test, applied to _trivial.
+    def __init__(self, category, description, wrap):
+        self._description = description
+        self._wrap = wrap
+        super().__init__(category=category, device="cpu")
 
     def name(self):
         return self.category()
 
     def description(self):
-        return self._DESCRIPTION
+        return self._description
 
     def _prepare_once(self):
         torch._dynamo.reset()
-        self._setup()
+        self._fn = self._wrap(_trivial)
         self.a = torch.ones(1)
-
         # warm up
         for _ in range(10):
             self._work()
@@ -36,22 +39,20 @@ class _DisableOverheadBase(BenchmarkBase):
         self._fn(self.a)
 
 
-class Benchmark(_DisableOverheadBase):
-    # Per-call overhead of the disable wrapper (toggling the eval-frame handler),
-    # measured with a trivial callee so the count reflects the wrapper.
-    _CATEGORY = "disable_overhead"
-    _DESCRIPTION = "per-call overhead of torch._dynamo.disable with a trivial callee"
-
-    def _setup(self):
-        def f(x):
-            return x
-
-        self._fn = torch._dynamo.disable(f)
+def _benchmarks():
+    return [
+        Benchmark(
+            "disable_overhead",
+            "per-call overhead of torch._dynamo.disable with a trivial callee",
+            torch._dynamo.disable,
+        ),
+    ]
 
 
 def main():
     result_path = sys.argv[1]
-    Benchmark().enable_instruction_count().collect_all().append_results(result_path)
+    for benchmark in _benchmarks():
+        benchmark.enable_instruction_count().collect_all().append_results(result_path)
 
 
 if __name__ == "__main__":
