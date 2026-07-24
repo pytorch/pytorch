@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import itertools
 import logging
 from collections.abc import Callable, Generator  # noqa: TC003
@@ -129,13 +130,20 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if alpha is None:
             alpha = _ones_alpha()
 
-        epilogue_op = lambda v: v
+        def epilogue_op(v):
+            return v
+
         if getattr(args, "epilogue", None) is not None:
             epilogue_op = args.epilogue.epilogue_fn
             if isinstance(epilogue_op, str):
+                fn_name = next(
+                    node.name
+                    for node in ast.parse(epilogue_op).body
+                    if isinstance(node, ast.FunctionDef)
+                )
                 scope = {}
                 exec(epilogue_op, {}, scope)
-                epilogue_op = next(value for value in scope.values() if callable(value))
+                epilogue_op = scope[fn_name]
         return self.cute_compile(
             self.impl,
             args.A.tensor,
