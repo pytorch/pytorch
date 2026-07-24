@@ -2186,6 +2186,42 @@ except RuntimeError as e:
             )
 
 
+@unittest.skipIf(
+    sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+    "Cpython limited API not available, see https://github.com/python/cpython/issues/111506",
+)
+class TestLibtorchAgnosticMetal(TestCase):
+    """MPS tests for versioned libtorch_agnostic extensions."""
+
+    @classmethod
+    def setUpClass(cls):
+        base_dir = Path(__file__).parent
+
+        try:
+            import libtorch_agn_2_14  # noqa: F401
+        except Exception:
+            install_cpp_extension(
+                extension_root=base_dir / "libtorch_agn_2_14_extension"
+            )
+
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_mps_set_arg_bytes(self, device):
+        import libtorch_agn_2_14
+
+        x = torch.randn(1000, device=device, dtype=torch.float32)
+        low, high = -0.25, 0.9
+        for scale, negate in ((0.5, False), (2.0, True)):
+            out = libtorch_agn_2_14.ops.my_mps_scale_negate_clamp(
+                x, scale, negate, low, high
+            )
+            expected = (x * scale * (-1.0 if negate else 1.0)).clamp(low, high)
+            self.assertEqual(out, expected)
+
+
+instantiate_device_type_tests(
+    TestLibtorchAgnosticMetal, globals(), allow_mps=True, only_for="mps"
+)
+
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

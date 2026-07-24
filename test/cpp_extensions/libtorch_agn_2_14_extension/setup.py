@@ -75,6 +75,11 @@ def get_extension():
         for prev_dir in PREV_CSRC_DIRS:
             sources.extend(prev_dir.glob("**/*.cu"))
 
+    if torch.backends.mps.is_available():
+        sources.extend(CSRC_DIR.glob("**/*.mm"))
+        for prev_dir in PREV_CSRC_DIRS:
+            sources.extend(prev_dir.glob("**/*.mm"))
+
     return [
         extension(
             "libtorch_agn_2_14._C",
