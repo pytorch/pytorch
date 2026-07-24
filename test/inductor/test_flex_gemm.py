@@ -401,6 +401,16 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     torch.device("cuda")
                 )
 
+    def test_grouped_main_output_device_validation(self):
+        from torch._vendor.quack.gemm_act import validate_grouped_n_contract_device
+
+        for capability in (10, 11):
+            validate_grouped_n_contract_device(4, (capability, 0))
+        with self.assertRaisesRegex(NotImplementedError, "not yet supported on SM120"):
+            validate_grouped_n_contract_device(2, (12, 0))
+        with self.assertRaisesRegex(NotImplementedError, "SM100 and SM110"):
+            validate_grouped_n_contract_device(4, (9, 0))
+
     def test_explicit_dense_config_supports_partial_constraints(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
@@ -500,18 +510,32 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 return_value=[dataclasses.replace(supported, swap_ab=True)],
             ),
             V.set_graph_handler(fake_graph),
-            self.assertRaisesRegex(
-                NotImplementedError, "incompatible with local reduction"
-            ),
         ):
-            flex_gemm_config_keys(
-                device,
-                128,
-                128,
-                (FlexGemmLocalReduceGeometry(group=16, axis=1),),
-                tuned=False,
-                explicit_config=swap_config,
+            self.assertEqual(
+                flex_gemm_config_keys(
+                    device,
+                    128,
+                    128,
+                    (FlexGemmLocalReduceGeometry(group=16, axis=1),),
+                    tuned=False,
+                    explicit_config=swap_config,
+                ),
+                (
+                    flex_gemm_heuristics.gemm_config_key(
+                        dataclasses.replace(supported, swap_ab=True)
+                    ),
+                ),
             )
+            with self.assertRaisesRegex(NotImplementedError, "feed-main"):
+                flex_gemm_config_keys(
+                    device,
+                    128,
+                    128,
+                    (FlexGemmLocalReduceGeometry(group=16, axis=1),),
+                    tuned=False,
+                    explicit_config=swap_config,
+                    local_reduce_feeds_main=True,
+                )
 
     def test_swap_ab_alignment_filters_tuned_and_explicit_configs(self):
         from torch._inductor.heuristics.template.flex_gemm import gemm_config_key
@@ -566,6 +590,38 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     explicit_config={"swap_ab": True},
                     swap_ab_alignment=8,
                 )
+
+        import sympy
+
+        from torch._inductor.virtualized import V
+
+        symbolic_n = sympy.Symbol("n", integer=True, positive=True)
+        alignment_guard = mock.Mock(return_value=True)
+        fake_graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                statically_known_true=lambda _: False,
+                guard_or_false=alignment_guard,
+            )
+        )
+        with (
+            mock.patch(
+                "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
+                return_value=(swap,),
+            ),
+            V.set_graph_handler(fake_graph),
+        ):
+            self.assertEqual(
+                flex_gemm_config_keys(
+                    device,
+                    128,
+                    symbolic_n,
+                    (),
+                    tuned=True,
+                    swap_ab_alignment=8,
+                ),
+                (gemm_config_key(swap),),
+            )
+        alignment_guard.assert_called_once_with(sympy.Eq(symbolic_n % 8, 0))
 
     def test_multi_cta_local_reduce_full_tile_follows_n_warp_topology(self):
         """Allow full-N groups only when one epilogue warp partition owns N."""
@@ -1502,9 +1558,8 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertIsNone(FlexGemmEpilogueEmitter.aux_result(None, {}))
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_swap_ab_rejects_local_reduce_aux(self):
+    def test_swap_ab_local_reduce_requires_callbacks(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmLocalReduceCallbacks,
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
@@ -1522,39 +1577,17 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         swap_key, _ = self.swapAndNonSwapConfigKeys(a.device)
 
         with self.assertRaisesRegex(
-            NotImplementedError, "swap_ab local reductions require groups larger"
+            NotImplementedError, "swap_ab local reductions require physical callbacks"
         ):
             gemm_epilogue(
                 a,
                 b,
                 self.relu_epilogue,
-                "test_flex_gemm_swap_ab_local_reduce_rejects",
+                "test_flex_gemm_swap_ab_local_reduce_requires_callbacks",
                 out_dtype=torch.float32,
                 local_reduce=FlexGemmRuntimeLocalReducePlan(
                     FlexGemmLocalReduceGeometry(group, 1),
                     out=local_reduce_out,
-                ),
-                config_key=swap_key,
-            )
-
-        local_reduce_out = torch.empty_strided(
-            (m // group, n), (1, m // group), device="cuda", dtype=torch.float32
-        )
-        with self.assertRaisesRegex(
-            NotImplementedError, "swap_ab local reductions require groups larger"
-        ):
-            gemm_epilogue(
-                a,
-                b,
-                self.relu_epilogue,
-                "test_flex_gemm_swap_ab_small_physical_local_reduce_rejects",
-                out_dtype=torch.float32,
-                local_reduce=FlexGemmRuntimeLocalReducePlan(
-                    FlexGemmLocalReduceGeometry(group, 0),
-                    out=local_reduce_out,
-                    callbacks=FlexGemmLocalReduceCallbacks(
-                        physical_group_sum_combine, physical_group_sum_finalize
-                    ),
                 ),
                 config_key=swap_key,
             )
@@ -3283,7 +3316,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertTrue(configs)
         self.assertTrue(
             all(
-                config.tile_n <= 128
+                not config.swap_ab
+                and config.tile_n <= 128
                 and config.cluster_n == 1
                 and (
                     config.cluster_m == 1
@@ -3310,6 +3344,17 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 tuned=True,
                 main_transform=FlexGemmGroupedMainOutputTransform(group=2),
                 explicit_config=dict(gemm_config_key(unsafe_config)),
+            )
+        swap_config = next(config for config in candidates if config.swap_ab)
+        with self.assertRaisesRegex(NotImplementedError, "do not support swap_ab"):
+            flex_gemm_config_keys(
+                device,
+                64,
+                128,
+                (),
+                tuned=True,
+                main_transform=FlexGemmGroupedMainOutputTransform(group=2),
+                explicit_config=dict(gemm_config_key(swap_config)),
             )
         with mock.patch("torch.cuda.get_device_capability", return_value=(12, 0)):
             with self.assertRaisesRegex(
@@ -7071,6 +7116,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         (
             ("local_m_g64", 0, 64, 256, 512, True),
             ("local_m_g128_nonpersistent", 0, 128, 256, 512, False),
+            ("local_n_g16", 1, 16, 512, 256, True),
             ("local_n_g64", 1, 64, 512, 256, True),
             ("local_n_g128_nonpersistent", 1, 128, 512, 256, False),
         ),

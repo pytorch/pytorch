@@ -38,13 +38,19 @@ class FlexGemmEpilogueLocalReduceConfig:
 
     @classmethod
     def from_output_plan(
-        cls, local_reduce: Any | None, out_index: int | None
+        cls,
+        local_reduce: Any | None,
+        out_index: int | None,
+        *,
+        swap_ab: bool = False,
     ) -> "FlexGemmEpilogueLocalReduceConfig | None":
         """Translate lowering's output-consumer plan into template metadata."""
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.match.geometry, out_index, local_reduce.feeds_main
+            dataclasses.replace(local_reduce.match.geometry, swapped=swap_ab),
+            out_index,
+            local_reduce.feeds_main,
         )
 
     @property

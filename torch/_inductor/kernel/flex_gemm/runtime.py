@@ -17,7 +17,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_FINALIZE_KEY_SUFFIX,
-    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
     validate_local_reduce_feed_main_capability,
@@ -292,9 +291,7 @@ def validate_runtime_local_reduce(
     """Validate local-reduce runtime tensor shapes and unsupported consumers."""
     if plan is None:
         return
-    if swap_ab and (
-        plan.group <= LOCAL_REDUCE_FRAGMENT_WIDTH or plan.callbacks is None
-    ):
+    if swap_ab and plan.callbacks is None:
         raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
     validate_local_reduce_runtime_dense_mm(a.ndim)
     validate_local_reduce_selected_dim_divisible(expected_shape, plan.group, plan.axis)

@@ -67,8 +67,7 @@ LOCAL_REDUCE_C_ALPHA_BETA_ERROR = (
     "FlexGEMM local reductions cannot be combined with C/alpha/beta yet"
 )
 LOCAL_REDUCE_SWAP_AB_ERROR = (
-    "FlexGEMM swap_ab local reductions require groups larger than one fragment "
-    "and physical callbacks"
+    "FlexGEMM swap_ab local reductions require physical callbacks"
 )
 LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
     "FlexGEMM local-reduce aux output must be produced by a grouped TensorSSA reduction"
@@ -324,9 +323,9 @@ def validate_flex_gemm_local_reduce_config(
     """Return whether a QuACK config has a validated grouped-reduction layout.
 
     Swap-ab transposes the physical accumulator, so the logical reduction axis
-    is reversed before checking tile ownership. Small TensorSSA reductions do
-    not carry the generated callbacks needed after that reorientation; physical
-    groups larger than one fragment do and can therefore use swapped configs.
+    is reversed before checking tile ownership. The generated epilogue emits
+    physical callbacks for the transposed reduction geometry, including groups
+    that fit within one fragment before reorientation.
 
     This matches ``GemmConfig`` fields against layout families covered by forced
     kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
@@ -352,7 +351,7 @@ def validate_flex_gemm_local_reduce_config(
         return False
     swapped = config.swap_ab
     if swapped:
-        if not allow_swap_ab or group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+        if not allow_swap_ab or (group <= LOCAL_REDUCE_FRAGMENT_WIDTH and axis != 1):
             return False
         axis = 1 - axis
     tile = config.tile_m if axis == 0 else config.tile_n

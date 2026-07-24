@@ -97,8 +97,11 @@ def _cudnn_supports_d256_attention():
         return False
     cudnn_version = torch.backends.cudnn.version() or 0
     device_capability = torch.cuda.get_device_capability()
-    is_sm90_or_sm10x = device_capability == (9, 0) or device_capability[0] == 10
-    return is_sm90_or_sm10x and cudnn_version > 92200
+    is_unsupported_sm107 = device_capability == (10, 7) and cudnn_version <= 92500
+    supports_d256 = (
+        device_capability == (9, 0) or device_capability[0] == 10
+    ) and not is_unsupported_sm107
+    return supports_d256 and cudnn_version > 92200
 
 
 def _cudnn_d256_mixed_head_dim_bprop_unsupported():
@@ -872,6 +875,43 @@ class TestTransformers(NNTestCase):
         compiled_out = compiled_model(x)
 
         self.assertEqual(eager_out, compiled_out)
+
+    def test_transformer_encoder_layer_fwd_unbacked(self, device):
+        # Regression for a data-dependent error in the meta rule for
+        # _transformer_encoder_layer_fwd. The rule used to test
+        # `src.numel() == 0` directly, which raises GuardOnDataDependentSymNode
+        # when src has an unbacked (data-dependent) size during fake-tensor
+        # tracing. Routing that check through guard_or_false lets an undecidable
+        # size trace instead of erroring. Drive the fused op's meta with an
+        # unbacked leading dim and assert it traces.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(n_t):
+            n = n_t.item()
+            torch._check(n >= 0)
+            embed_dim, num_heads = 16, 2
+            src = torch.randn(n, 10, embed_dim, device=device)
+            qkv_weight = torch.randn(3 * embed_dim, embed_dim, device=device)
+            qkv_bias = torch.randn(3 * embed_dim, device=device)
+            proj_weight = torch.randn(embed_dim, embed_dim, device=device)
+            proj_bias = torch.randn(embed_dim, device=device)
+            norm_weight_1 = torch.randn(embed_dim, device=device)
+            norm_bias_1 = torch.randn(embed_dim, device=device)
+            norm_weight_2 = torch.randn(embed_dim, device=device)
+            norm_bias_2 = torch.randn(embed_dim, device=device)
+            ffn_weight_1 = torch.randn(4 * embed_dim, embed_dim, device=device)
+            ffn_bias_1 = torch.randn(4 * embed_dim, device=device)
+            ffn_weight_2 = torch.randn(embed_dim, 4 * embed_dim, device=device)
+            ffn_bias_2 = torch.randn(embed_dim, device=device)
+            return torch.ops.aten._transformer_encoder_layer_fwd(
+                src, embed_dim, num_heads, qkv_weight, qkv_bias,
+                proj_weight, proj_bias, False, False, 1e-5,
+                norm_weight_1, norm_bias_1, norm_weight_2, norm_bias_2,
+                ffn_weight_1, ffn_bias_1, ffn_weight_2, ffn_bias_2, None, None,
+            )
+
+        # Without the fix this raises GuardOnDataDependentSymNode while tracing.
+        make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
 
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/101787")
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
@@ -3065,9 +3105,14 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_dense_d256_sm90_sm10x(self, device):
-        if not _cudnn_supports_d256_attention():
+        cudnn_version = torch.backends.cudnn.version() or 0
+        is_unsupported_sm107 = (
+            torch.cuda.get_device_capability() == (10, 7)
+            and cudnn_version <= 92500
+        )
+        if not is_unsupported_sm107 and not _cudnn_supports_d256_attention():
             self.skipTest(
-                "head_dim=256 cuDNN attention requires SM90 or SM10.x with cuDNN > 9.22.0"
+                "head_dim=256 cuDNN attention requires SM90 or supported SM10.x with cuDNN > 9.22.0"
             )
 
         dtype = torch.bfloat16
@@ -3076,8 +3121,14 @@ class TestSDPACudaOnly(NNTestCase):
         key = torch.randn(batch, num_heads, seq_len, head_dim, device=device, dtype=dtype, requires_grad=True)
         value = torch.randn(batch, num_heads, seq_len, head_dim, device=device, dtype=dtype, requires_grad=True)
 
-        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-            if torch._fused_sdp_choice(query, key, value) != SDPBackend.CUDNN_ATTENTION.value:
+        backends = [SDPBackend.CUDNN_ATTENTION]
+        if is_unsupported_sm107:
+            backends.extend([SDPBackend.FLASH_ATTENTION, SDPBackend.MATH])
+        with sdpa_kernel(backends=backends, set_priority=is_unsupported_sm107):
+            backend = torch._fused_sdp_choice(query, key, value)
+            if is_unsupported_sm107:
+                self.assertNotEqual(backend, SDPBackend.CUDNN_ATTENTION.value)
+            elif backend != SDPBackend.CUDNN_ATTENTION.value:
                 self.skipTest("head_dim=256 cuDNN attention requires cuDNN frontend support")
             actual = F.scaled_dot_product_attention(query, key, value)
             actual.backward(torch.randn_like(actual))

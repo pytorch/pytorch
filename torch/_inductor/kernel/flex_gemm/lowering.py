@@ -24,6 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
+from ...virtualized import V
 from .constraints import (
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     flex_gemm_local_reduce_config_error,
@@ -214,6 +215,7 @@ def flex_gemm_config_keys(
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
     explicit_config: dict[str, Any] | None = None,
     swap_ab_alignment: int = 1,
+    local_reduce_feeds_main: bool = False,
 ) -> tuple[tuple[Any, ...], ...]:
     """Select QuACK config keys after applying grouped-layout config constraints.
 
@@ -257,15 +259,43 @@ def flex_gemm_config_keys(
         if explicit_config is None
         else explicit_gemm_configs_for_device(explicit_config, device)
     )
+    swap_ab_aligned = statically_known_multiple(n, swap_ab_alignment)
+    requires_swap_ab = explicit_config_swaps_ab(explicit_config) or (
+        bool(candidate_configs) and all(config.swap_ab for config in candidate_configs)
+    )
+    if (
+        not swap_ab_aligned
+        and requires_swap_ab
+        and isinstance(n, sympy.Expr)
+        and n.free_symbols
+    ):
+        swap_ab_aligned = V.graph.sizevars.guard_or_false(
+            sympy.Eq(n % swap_ab_alignment, 0)
+        )
     candidate_configs = tuple(
-        config
-        for config in candidate_configs
-        if not config.swap_ab or statically_known_multiple(n, swap_ab_alignment)
+        config for config in candidate_configs if not config.swap_ab or swap_ab_aligned
     )
     if not candidate_configs:
         raise NotImplementedError(
-            "FlexGEMM explicit QUACK swap_ab constraints require output N "
+            "FlexGEMM QUACK swap_ab configs require output N "
             f"divisible by {swap_ab_alignment}"
+        )
+    if main_transform is not None:
+        candidate_configs = tuple(
+            config for config in candidate_configs if not config.swap_ab
+        )
+        if not candidate_configs:
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs do not support swap_ab configs"
+            )
+    candidate_configs = tuple(
+        config
+        for config in candidate_configs
+        if not local_reduce_feeds_main or not config.swap_ab
+    )
+    if not candidate_configs:
+        raise NotImplementedError(
+            "FlexGEMM feed-main local reductions do not support swap_ab configs"
         )
     allow_local_reduce_swap_ab = explicit_config_swaps_ab(explicit_config)
     if not tuned:
@@ -515,7 +545,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         gemm_op, epilogue_input_nodes, physical_output_size
     )
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce, local_reduce_out_index
+        outputs.local_reduce, local_reduce_out_index, swap_ab=explicit_swap_ab
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
@@ -534,6 +564,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         main_transform,
         explicit_config,
         swap_ab_alignment=swap_ab_alignment,
+        local_reduce_feeds_main=(
+            outputs.local_reduce is not None and outputs.local_reduce.feeds_main
+        ),
     )
     epilogue_arg_indices = tuple(
         range(
