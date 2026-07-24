@@ -178,6 +178,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **Use run_tests** - Test file ends with `if __name__ == "__main__": run_tests()`
 - [ ] **Use assertEqual for tensors** - Tensor comparisons use `assertEqual`, not raw assertions or `torch.allclose`
 - [ ] **Device generic** - Any test checking compute result should happen in a device-generic test class (taking device as an argument) via `instantiate_device_type_tests`. Device-specific tests should be very rare and in device-specific test files
+- [ ] **No device-agnostic tests in accelerator-specific files** - A regression test added to `test_mps.py`/`test_cuda.py`/`test_xpu.py`/... must exercise an accelerator-specific API or behavior. If it would pass verbatim on any backend, move it to a device-generic test (a generic test file using `instantiate_device_type_tests`, or an existing OpInfo/ModuleInfo). A hardcoded `device=`, `.to()`/`.cuda()`, or `torch.<device>.synchronize()` is incidental and does not count as accelerator-specific
 - [ ] **Use @dtypes** - PR writes separate test methods per dtype or manual `for dtype in [...]` loops instead of using the `@dtypes(...)` decorator from `common_device_type.py`
 - [ ] **Use @parametrize** - PR duplicates test methods that differ only in a parameter instead of using `@parametrize` from `common_utils.py`
 - [ ] **Use @ops for operator tests** - PR writes manual per-operator test iterations instead of using the `@ops(op_db)` decorator which automatically parametrizes tests over OpInfo entries

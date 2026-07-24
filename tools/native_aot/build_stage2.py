@@ -1,10 +1,17 @@
 """Stage-2 driver for the standard torch build: export AOT kernels,
 generate the stub sources, and relink torch_cuda with them embedded.
 
-Invoked by tools/build_pytorch_libs.py after the main cmake build (the
-kernel builders package-import torch, so torch must be built first;
-the source tree plus the freshly installed torch/lib is importable at
-that point, for both editable and wheel builds).
+The kernel builders package-import torch, so stage 2 needs a BUILT,
+INSTALLED torch -- and scikit-build-core has no post-build hook inside
+the PEP 517 backend (the wheel is assembled before torch is ever
+importable). Stage 2 is therefore a post-install step:
+
+  * CI: .ci/pytorch/build.sh runs it after installing the built wheel,
+    then reassembles the wheel (incremental, via the persistent build
+    dir) so the artifact shipped to test jobs embeds the kernels
+  * dev: `spin develop` / `spin install` chain it after the pip
+    install; after a raw `pip install -e .`, run it manually:
+    python tools/native_aot/build_stage2.py
 
 Skips -- leaving a normal artifacts-free build -- when any prerequisite
 is missing, so the standard build NEVER hard-depends on the DSL stack:
@@ -77,7 +84,82 @@ def should_run() -> bool:
     return True
 
 
-def main() -> int:
+def _installed_lib_dir() -> str:
+    """The lib/ directory of the INSTALLED torch package. Anchored on
+    the compiled _C extension rather than torch.__file__: editable
+    redirect installs serve Python from the source tree while compiled
+    artifacts live in site-packages (same trick as _load_dll_libraries
+    in torch/__init__.py). Wheel installs resolve both to the same dir."""
+    import importlib.util
+
+    spec = importlib.util.find_spec("torch._C")
+    if spec is None or not spec.origin:
+        raise RuntimeError("cannot locate installed torch._C")
+    return os.path.join(os.path.dirname(spec.origin), "lib")
+
+
+def _wheel_hash_and_size(path: str) -> tuple[str, int]:
+    import base64
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    digest = base64.urlsafe_b64encode(h.digest()).rstrip(b"=").decode()
+    return f"sha256={digest}", os.path.getsize(path)
+
+
+def patch_wheel(wheel_path: str, lib_path: str) -> None:
+    """Replace torch/lib/libtorch_cuda.so inside an already-built wheel
+    and fix its RECORD entry. The zip CLI updates members in place
+    without recompressing the rest of the archive (~30s vs several
+    minutes for a full `python -m build` reassembly, which would also
+    re-walk the whole cmake install manifest)."""
+    import shutil
+    import tempfile
+    import zipfile
+
+    if shutil.which("zip") is None:
+        raise RuntimeError("--wheel requires the zip CLI (in-place member update)")
+    lib_rel = "torch/lib/libtorch_cuda.so"
+    with zipfile.ZipFile(wheel_path) as zf:
+        records = [n for n in zf.namelist() if n.endswith(".dist-info/RECORD")]
+        if lib_rel not in zf.namelist() or len(records) != 1:
+            raise RuntimeError(f"{wheel_path}: not a torch wheel ({lib_rel}/RECORD)")
+        record_rel = records[0]
+        record_lines = zf.read(record_rel).decode().splitlines()
+
+    digest, size = _wheel_hash_and_size(lib_path)
+    for i, line in enumerate(record_lines):
+        if line.startswith(lib_rel + ","):
+            record_lines[i] = f"{lib_rel},{digest},{size}"
+            break
+    else:
+        raise RuntimeError(f"{wheel_path}: RECORD has no entry for {lib_rel}")
+
+    with tempfile.TemporaryDirectory() as td:
+        os.makedirs(os.path.join(td, os.path.dirname(lib_rel)))
+        os.makedirs(os.path.join(td, os.path.dirname(record_rel)))
+        shutil.copy2(lib_path, os.path.join(td, lib_rel))
+        with open(os.path.join(td, record_rel), "w") as f:
+            f.write("\n".join(record_lines) + "\n")
+        subprocess.check_call(
+            ["zip", "-q", os.path.abspath(wheel_path), lib_rel, record_rel], cwd=td
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--wheel",
+        default=None,
+        help="also embed the relinked libtorch_cuda into this built wheel "
+        "(CI: the dist/*.whl handed to test jobs must carry the kernels)",
+    )
+    args = parser.parse_args(argv)
     if not should_run():
         return 0
     py = sys.executable
@@ -88,10 +170,9 @@ def main() -> int:
     # Relink JUST torch_cuda: the embedded glob (CONFIGURE_DEPENDS)
     # picks up the new artifacts. A full `--target install` would also
     # work but walks the whole install manifest (~15 min); the targeted
-    # relink is seconds. The hand copy into torch/lib (what both wheel
-    # packaging and editable installs ship from) is exactly what
-    # install would do for this file: verified byte-identical, no
-    # RPATH/install-time fixup applies to torch_cuda.
+    # relink is seconds. The hand copy into the installed torch/lib is
+    # exactly what install would do for this file: verified
+    # byte-identical, no RPATH/install-time fixup applies to torch_cuda.
     _report("relinking torch_cuda with embedded kernels")
     build_dir = os.path.join(REPO, "build")
     subprocess.check_call(
@@ -100,11 +181,15 @@ def main() -> int:
     import shutil
 
     built = os.path.join(build_dir, "lib", "libtorch_cuda.so")
-    installed = os.path.join(REPO, "torch", "lib", "libtorch_cuda.so")
     if not os.path.exists(built):
         raise RuntimeError(f"expected relinked library at {built}")
+    installed = os.path.join(_installed_lib_dir(), "libtorch_cuda.so")
     shutil.copy2(built, installed)
-    _report(f"done ({os.path.getsize(built) >> 20} MiB relinked into torch/lib)")
+    _report(f"{os.path.getsize(built) >> 20} MiB relinked into {installed}")
+    if args.wheel:
+        _report(f"embedding into {args.wheel}")
+        patch_wheel(args.wheel, built)
+    _report("done")
     return 0
 
 

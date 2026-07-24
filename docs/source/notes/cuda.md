@@ -345,6 +345,8 @@ As an exception, several functions such as {meth}`~torch.Tensor.to` and
 which lets the caller bypass synchronization when it is unnecessary.
 Another exception is CUDA streams, explained below.
 
+(cuda-stream-semantics)=
+
 ### CUDA streams
 
 A [CUDA stream](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams) is a linear sequence of execution that belongs to a specific
