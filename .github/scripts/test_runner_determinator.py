@@ -795,6 +795,70 @@ class TestRunnerDeterminatorAmdDoExperiment(TestCase):
         self.assertEqual("amd-do-", result.amd_do_prefix)
 
 
+class TestRunnerDeterminatorAmdVtrExperiment(TestCase):
+    AMD_VTR_SETTINGS = """
+        experiments:
+            amd-vtr:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,amd-vtr
+        @User2,lf
+
+        """
+
+    def test_amd_vtr_opted_in_returns_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_VTR_SETTINGS, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-vtr-", result.amd_vtr_prefix)
+        # amd-vtr is exposed via its own output; the base prefix is the default fleet
+        self.assertEqual("mt-", result.prefix)
+
+    def test_amd_vtr_not_enabled_returns_default_fleet(self) -> None:
+        # User2 opts into lf, but lf is not defined here, so it falls back to Meta
+        result = rd.get_runner_prefix(self.AMD_VTR_SETTINGS, ["User2"], USER_BRANCH)
+        self.assertEqual("", result.amd_vtr_prefix)
+        self.assertEqual("mt-", result.prefix)
+
+    def test_amd_vtr_with_lf_keeps_both(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            amd-vtr:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,amd-vtr
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf-", result.prefix)
+        self.assertEqual("amd-vtr-", result.amd_vtr_prefix)
+
+    def test_amd_vtr_and_amd_do_are_independent(self) -> None:
+        settings_text = """
+        experiments:
+            amd-do:
+                rollout_perc: 0
+            amd-vtr:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,amd-vtr
+        @User2,amd-do
+
+        """
+        vtr_only = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-vtr-", vtr_only.amd_vtr_prefix)
+        self.assertEqual("", vtr_only.amd_do_prefix)
+        do_only = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
+        self.assertEqual("amd-do-", do_only.amd_do_prefix)
+        self.assertEqual("", do_only.amd_vtr_prefix)
+
+
 class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
     """no-runner-experiments opts out of lf, so the run stays on the default Meta fleet."""
 

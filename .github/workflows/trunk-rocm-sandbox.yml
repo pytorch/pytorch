@@ -39,44 +39,48 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: amd-vtr
 
-  linux-jammy-rocm-py3_10-build:
-    name: linux-jammy-rocm-py3.10
+  linux-noble-rocm-py3_12-build:
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-jammy-rocm-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      build-environment: linux-noble-rocm-py3.12-mi300
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       sync-tag: rocm-build
+      # The amd-vtr experiment routes the gfx942 test shards onto the
+      # amd-vtr- prefixed runner scale sets via the dedicated
+      # amd-vtr-label-type output (empty when the experiment is disabled, in
+      # which case the canonical linux.rocm.gpu.gfx942.* labels are used).
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 2, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 3, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 4, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 5, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 6, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 7, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 8, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 9, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "default", shard: 10, num_shards: 10, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "inductor", shard: 1, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "inductor", shard: 2, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "inductor", shard: 3, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "inductor", shard: 4, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.1" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-vtr-label-type }}linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-test:
-    name: linux-jammy-rocm-py3.10
+  linux-noble-rocm-py3_12-test:
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-jammy-rocm-py3_10-build
+      - linux-noble-rocm-py3_12-build
       - target-determination
     with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
     secrets: inherit
