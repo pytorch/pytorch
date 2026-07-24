@@ -186,11 +186,7 @@ def signature_to_meta(
         # If the triton metadata is for a template, don't use tl.int64 index.
         # Templates like flex attention/decoding use hand-written block pointers
         # which do not support 64 bit indexing.
-        if (
-            not is_template
-            and isinstance(arg, SizeArg)
-            and arg.name.startswith("ks")
-        ):
+        if not is_template and isinstance(arg, SizeArg) and arg.name.startswith("ks"):
             return "tl.int64"
         return size_dtype
 

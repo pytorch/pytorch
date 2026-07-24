@@ -6394,20 +6394,12 @@ for dtype in (torch.int32, torch.int64):
         # only activation is channels_last
         self.common(
             m,
-            (
-                torch.randn([2, 3, 16, 16, 16]).to(
-                    memory_format=torch.channels_last_3d
-                ),
-            ),
+            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
         )
         # activation and weight are all channels_last
         self.common(
             m.to(memory_format=torch.channels_last_3d),
-            (
-                torch.randn([2, 3, 16, 16, 16]).to(
-                    memory_format=torch.channels_last_3d
-                ),
-            ),
+            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
         )
 
     @skip_if_gpu_halide  # slow
