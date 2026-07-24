@@ -1,9 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 #
-# Basic sanity checks for the in-tree torchcomms NCCL backend
-# (c10d::nccl2::ProcessGroupNCCL), selected via init_process_group(
-# backend="nccl2"). Modeled on the torchcomms c10d tests; exercises the core
-# collectives / point-to-point over real NCCL on multiple GPUs.
+# Tests specific to the in-tree torchcomms NCCL backends.
+
+import time
 
 import torch
 import torch.distributed as dist
@@ -13,18 +12,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
-
-
-# The "nccl2" backend is normally discovered via the torch.distributed.backends
-# entry point. Register it explicitly here too so the test is self-contained
-# under editable installs, where a stale repo egg-info can shadow the dist-info
-# entry points. _ensure_backend_registered short-circuits if already present.
-try:
-    from torch.distributed.distributed_c10d import _register_builtin_nccl2_backend
-
-    _register_builtin_nccl2_backend()
-except Exception:
-    pass
 
 
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
@@ -38,7 +25,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        return torch.device("cuda", self.rank)
 
     def setUp(self) -> None:
         super().setUp()
@@ -46,79 +33,79 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_allreduce(self) -> None:
-        t = torch.full((10,), float(self.rank + 1), device=self.device)
-        dist.all_reduce(t)
-        expected = float(sum(range(1, self.world_size + 1)))
-        self.assertEqual(t, torch.full((10,), expected, device=self.device))
+    def test_watchdog_does_not_release_python_backed_tensor(self) -> None:
+        class TensorSubclass(torch.Tensor):
+            pass
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_broadcast(self) -> None:
-        t = torch.full((10,), float(self.rank + 1), device=self.device)
-        dist.broadcast(t, src=0)
-        self.assertEqual(t, torch.full((10,), 1.0, device=self.device))
+        tensor = torch.ones(4, device=self.device).as_subclass(TensorSubclass)
+        outputs = [torch.empty(4, device=self.device) for _ in range(self.world_size)]
+        work = dist.all_gather(outputs, tensor, async_op=True)
+        del tensor
+        del work
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_all_gather(self) -> None:
-        t = torch.full((4,), float(self.rank), device=self.device)
-        out = [torch.empty((4,), device=self.device) for _ in range(self.world_size)]
-        dist.all_gather(out, t)
-        for r in range(self.world_size):
-            self.assertEqual(out[r], torch.full((4,), float(r), device=self.device))
+        torch.cuda.synchronize()
+        time.sleep(2)
+        dist.barrier()
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_all_gather_into_tensor(self) -> None:
-        t = torch.full((4,), float(self.rank), device=self.device)
-        out = torch.empty((4 * self.world_size,), device=self.device)
-        dist.all_gather_into_tensor(out, t)
-        expected = torch.cat(
-            [
-                torch.full((4,), float(r), device=self.device)
-                for r in range(self.world_size)
-            ]
-        )
-        self.assertEqual(out, expected)
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor(self) -> None:
-        inp = torch.arange(4 * self.world_size, dtype=torch.float32, device=self.device)
-        out = torch.empty((4,), device=self.device)
-        dist.reduce_scatter_tensor(out, inp)
-        base = torch.arange(
-            4 * self.world_size, dtype=torch.float32, device=self.device
-        )
-        chunk = base[self.rank * 4 : (self.rank + 1) * 4]
-        self.assertEqual(out, chunk * self.world_size)
+class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_all_to_all_single(self) -> None:
-        inp = torch.full((self.world_size,), float(self.rank), device=self.device)
-        out = torch.empty((self.world_size,), device=self.device)
-        dist.all_to_all_single(out, inp)
-        # Rank r receives, at position s, the value sent by rank s -> float(s).
-        self.assertEqual(
-            out,
-            torch.arange(self.world_size, dtype=torch.float32, device=self.device),
-        )
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_barrier(self) -> None:
-        # Bind this rank's device first (barrier has no tensor to infer it from).
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def setUp(self) -> None:
+        super().setUp()
         torch.cuda.set_device(self.rank)
-        dist.barrier()  # should not hang or raise
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
+        super()._init_pg(rank, world_size, rdvz_file)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_send_recv(self) -> None:
-        # Ring: rank r sends to r+1, receives from r-1.
-        send_t = torch.full((8,), float(self.rank), device=self.device)
-        recv_t = torch.empty((8,), device=self.device)
+    def test_large_in_place_all_gather(self) -> None:
+        numel = 16 * 1024 * 1024
+        output = torch.empty(
+            self.world_size * numel, dtype=torch.bfloat16, device=self.device
+        )
+        input = output.narrow(0, self.rank * numel, numel)
+        input.fill_(self.rank)
+        self.assertTrue(
+            any(segment["is_expandable"] for segment in torch.cuda.memory_snapshot())
+        )
+
+        dist.all_gather_single(output, input)
+
+        for rank, chunk in enumerate(output.chunk(self.world_size)):
+            self.assertEqual(chunk, torch.full_like(chunk, rank))
+
+
+class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_lazy_pair_channels(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        before_collective = backend._num_active_channels()
+        t = torch.full((4,), 1.0, device=self.device)
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        self.assertEqual(backend._num_active_channels(), before_collective)
+
+        send_t = torch.full((4,), float(self.rank), device=self.device)
+        recv_t = torch.empty((4,), device=self.device)
         nxt = (self.rank + 1) % self.world_size
         prev = (self.rank - 1) % self.world_size
         if self.rank % 2 == 0:
@@ -127,23 +114,11 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         else:
             dist.recv(recv_t, prev)
             dist.send(send_t, nxt)
-        self.assertEqual(recv_t, torch.full((8,), float(prev), device=self.device))
+        torch.cuda.synchronize()
+        self.assertEqual(recv_t, torch.full((4,), float(prev), device=self.device))
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_batch_isend_irecv(self) -> None:
-        # Mixed batch on a single PG (the PP 1F1B pattern that needs coalescing).
-        send_t = torch.full((1,), float(self.rank), device=self.device)
-        recv_t = torch.empty((1,), device=self.device)
-        nxt = (self.rank + 1) % self.world_size
-        prev = (self.rank - 1) % self.world_size
-        ops = [
-            dist.P2POp(dist.isend, send_t, nxt),
-            dist.P2POp(dist.irecv, recv_t, prev),
-        ]
-        for w in dist.batch_isend_irecv(ops):
-            w.wait()
-        self.assertEqual(recv_t, torch.full((1,), float(prev), device=self.device))
+        expected = 1 if nxt == prev else 2
+        self.assertGreaterEqual(backend._num_active_channels(), expected)
 
 
 if __name__ == "__main__":
