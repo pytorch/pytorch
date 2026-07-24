@@ -94,11 +94,50 @@ def pytest_addoption(parser: Parser) -> None:
         "Emit XML for schema: one of legacy|xunit1|xunit2",
         default="xunit2",
     )
+    parser.addoption(
+        "--hw-classification",
+        nargs="+",
+        default=None,
+        metavar="SCOPE",
+        dest="hw_classification",
+        type=str.upper,
+        help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
+    )
     shard_addoptions(parser)
+
+
+class HardwareClassificationPytestPlugin:
+    """Pytest plugin to filter collected tests by hw_classification."""
+
+    def __init__(self, hw_classification):
+        self.hw_classification = self._resolve_hw_classification(hw_classification)
+
+    @staticmethod
+    def _resolve_hw_classification(hw_classification):
+        if hw_classification is None:
+            return None
+        from torch.testing._internal.common_utils import HardwareClassification
+
+        return {HardwareClassification[name] for name in hw_classification}
+
+    def pytest_collection_modifyitems(self, items):
+        if self.hw_classification is None:
+            return
+        import torch.testing._internal.common_utils as _cu
+
+        filtered = []
+        _cu.filter_by_hw_classification(
+            items,
+            self.hw_classification,
+            get_class=lambda item: getattr(item, "cls", None),
+            on_match=filtered.append,
+        )
+        items[:] = filtered
 
 
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
@@ -121,6 +160,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("hw_classification"):
+        config.pluginmanager.register(
+            HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
+            "hw_classification_plugin",
+        )
 
 
 def pytest_unconfigure(config: Config) -> None:

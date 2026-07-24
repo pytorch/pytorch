@@ -101,6 +101,10 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy.SRC_KIND,
         Memcpy.DST_KIND,
         Memcpy.FLAGS,
+        # Copies run on their own channel (CUPTI_CHANNEL_TYPE_ASYNC_MEMCPY), distinct from the
+        # compute channel kernels use -- select it like the kernel path does.
+        Memcpy.CHANNEL_ID,
+        Memcpy.CHANNEL_TYPE,
     },
     # Peer-to-peer / cross-device copies (e.g. tensor.to(other_gpu), pipeline sends). CUPTI
     # records these under MEMCPY2, NOT MEMCPY, so without this they never appear as GPU spans
@@ -120,6 +124,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy2.SRC_KIND,
         Memcpy2.DST_KIND,
         Memcpy2.FLAGS,
+        Memcpy2.CHANNEL_ID,
+        Memcpy2.CHANNEL_TYPE,
     },
     ActivityKind.MEMSET: {
         Memset.START,
@@ -134,6 +140,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memset.VALUE,
         Memset.MEMORY_KIND,
         Memset.FLAGS,
+        Memset.CHANNEL_ID,
+        Memset.CHANNEL_TYPE,
     },
     ActivityKind.RUNTIME: {
         Api.CBID,
@@ -287,9 +295,20 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if spec is None:
                 continue
             kind_str, builder, is_timed = spec
-            frame = builder(cols, convert, self._resolver)
+            frame = builder(cols, convert, self._annotation_resolver)
             if frame is None or _named_len(frame) == 0:
                 continue
+            # Pluggable graphed-op lane assignment: attach (logical_lane, lane_name) columns
+            # for work kinds so the trace builder can reassign graphed ops onto a dedicated
+            # lane. No-op when no resolver is installed.
+            if (
+                self._lane_resolver is not None
+                and "graph_node_id" in frame
+                and "stream_id" in frame
+            ):
+                frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
+                    self._lane_resolver, frame
+                )
             (timed if is_timed else ext).append((kind_str, frame))
         if not timed and not ext:
             return
@@ -518,9 +537,6 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 # resolution -- on the worker thread while the active-id chain is live.
 
 
-_ANNOTATION_MISS = object()
-
-
 def _named_len(frame: dict[str, Any]) -> int:
     for col in frame.values():
         return len(col)
@@ -605,20 +621,39 @@ def _demangle_column(names: Any) -> Any:
 
 
 def _resolve_annotation_column(resolver, gnid: Any) -> Any:
-    """Per-row graph annotation as an object column, memoized over distinct graph_node_ids.
-    None resolver -> all-None column, no calls."""
+    """Per-row graph annotation as an object column. None resolver -> all-None column, no
+    calls. The resolver is memoized per graph_node_id by the observer (see
+    CuptiMonitorObserver._annotation_resolver), so distinct nodes resolve once for its
+    lifetime."""
     n = len(gnid)
     out = np.empty(n, dtype=object)
     if resolver is None:
         out[:] = None
         return out
-    cache: dict[int, Any] = {}
     for i, g in enumerate(gnid.tolist()):
-        val = cache.get(g, _ANNOTATION_MISS)
-        if val is _ANNOTATION_MISS:
-            val = cache[g] = resolver(g)
-        out[i] = val
+        out[i] = resolver(g)
     return out
+
+
+def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
+    """Per-row (logical_lane, lane_name) for graphed ops. Graphed rows (graph_node_id != 0)
+    get the resolver's (lane, name), or keep their CUDA stream when it returns None; eager rows
+    keep their CUDA stream and no name (the monitor names those "stream N"). The resolver is
+    keyed and memoized on graph_node_id by the observer (see CuptiMonitorObserver._lane_resolver),
+    so distinct nodes resolve once for its lifetime."""
+    gnid = frame["graph_node_id"]
+    n = len(gnid)
+    logical = np.array(
+        frame["stream_id"], dtype=np.int64
+    )  # default: the op's CUDA stream
+    names = np.full(n, None, dtype=object)
+    for i, g in enumerate(gnid.tolist()):
+        if not g:
+            continue
+        res = lane_resolver(g)
+        if res is not None:
+            logical[i], names[i] = res
+    return logical, names
 
 
 def _kernel_columns(cols, convert, resolver):
@@ -669,6 +704,8 @@ def _memcpy_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -694,6 +731,8 @@ def _memcpy2_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy2.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy2.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy2.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy2.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy2.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -714,6 +753,8 @@ def _memset_columns(cols, convert, resolver):
         "value": cols[Memset.VALUE.id].astype(np.int64),
         "memory_kind": cols[Memset.MEMORY_KIND.id].astype(np.int64),
         "flags": cols[Memset.FLAGS.id].astype(np.int64),
+        "channel": cols[Memset.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memset.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
