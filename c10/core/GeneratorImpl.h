@@ -80,8 +80,8 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const;
   // Reserves `increment` Philox outputs and returns 1-element int64 tensors
   // (seed, offset, intragraph_offset); the values a kernel launched now should
-  // consume are (seed, offset + intragraph_offset). Only supported by
-  // Philox-based generators.
+  // consume are (seed, offset + intragraph_offset), with the uint64 seed and
+  // offset reinterpreted as int64. Only supported by Philox-based generators.
   virtual std::tuple<
       c10::intrusive_ptr<c10::TensorImpl>,
       c10::intrusive_ptr<c10::TensorImpl>,
