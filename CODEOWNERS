@@ -24,16 +24,15 @@
 /.github/merge_rules.yaml @albanD @malfet
 
 # Architecture Optimization (quantization, sparsity, etc.)
-/aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/ao_sparse @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cuda @jerryzh168
 /aten/src/ATen/native/quantized/cudnn @jerryzh168
 /test/test_quantization.py @jerryzh168
-/test/ao/ @jerryzh168 @hdcharles
+/test/ao/ @jerryzh168
 /test/quantization/ @jerryzh168
 /torch/quantization/ @jerryzh168
-ao/sparisty/ @hdcharles
 ao/quantization/ @jerryzh168
 nn/intrinsic/ @jerryzh168
 nn/quantized/ @jerryzh168
@@ -41,8 +40,8 @@ nn/quantizable/ @jerryzh168
 nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
 
 # Distributed
 # c10d backend APIs
@@ -82,7 +81,7 @@ nn/qat/ @jerryzh168
 /.ci/docker/common/install_miopen.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
