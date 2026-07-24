@@ -17286,7 +17286,6 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(opt(), "1:2:3")
 
     @unittest.skipIf(sys.version_info >= (3, 12), "comprehensions inlined in 3.12+")
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_listcomp_implicit_iterator_survives_graph_break(self):
         """Regression test: the implicit .0 iterator in a list comprehension
         must survive graph breaks under NGB.
@@ -17314,7 +17313,6 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt(x)
         self.assertTrue(torch.all(result > x))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_module_hooks_dict_reconstructed_as_ordered_dict(self):
         """Empty hooks dicts on nn.Module must be reconstructed as OrderedDict,
         not plain dict, so that weakref.ref() works in RemovableHandle.
