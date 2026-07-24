@@ -496,6 +496,31 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
+  # ║ linux-jammy-cuda13.2-cudnn9-py3.10-clang18 (build only)              ║
+  # ╠══════════════════════════════════════════════════════════════════════╣
+
+  linux-jammy-cuda13_2-cudnn9-py3_10-clang18-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.2-cudnn9-py3.10-clang18 ') }}
+    name: linux-jammy-cuda13.2-cudnn9-py3.10-clang18
+    uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-label-type
+      - job-filter
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda13.2-cudnn9-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+      python-version: "3.10"
+      compiler: clang18
+      cuda-version: "13.2"
+    secrets: inherit
+
+  # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch (build only)    ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
