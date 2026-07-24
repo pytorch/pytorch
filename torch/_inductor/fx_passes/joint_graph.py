@@ -2,6 +2,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 import typing
 from collections import Counter
@@ -123,6 +124,26 @@ def remove_no_ops(
         def isScalarValue(arg):
             return isinstance(arg, (int, float))
 
+        def is_negative_zero(arg):
+            value = arg
+            if isinstance(arg, torch.fx.Node):
+                val = arg.meta.get("val")
+                if not (
+                    arg in zeros
+                    and arg.op == "call_function"
+                    and arg.target is aten.full.default
+                    and len(arg.args) == 2
+                    and isinstance(val, torch.Tensor)
+                    and val.dtype.is_floating_point
+                ):
+                    return False
+                value = arg.args[1]
+            return (
+                isinstance(value, float)
+                and value == 0.0
+                and math.copysign(1.0, value) < 0
+            )
+
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
 
@@ -179,8 +200,16 @@ def remove_no_ops(
                 replacement = node.args[replace_index]
                 if isinstance(replacement, torch.fx.Node):
                     val = replacement.meta.get("val")
-                    if isinstance(val, torch.Tensor) and val.is_conj():
-                        continue
+                    if isinstance(val, torch.Tensor):
+                        if val.is_conj():
+                            continue
+                        # Adding +0.0 to -0.0 produces +0.0, so +0.0 is not an
+                        # identity for real floating tensors. Adding -0.0 does
+                        # preserve both signed zeros, so signed-zero semantics
+                        # do not block the existing no-op replacement.
+                        zero = node.args[1 - replace_index]
+                        if val.dtype.is_floating_point and not is_negative_zero(zero):
+                            continue
                 replace_no_op(node, replace_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):

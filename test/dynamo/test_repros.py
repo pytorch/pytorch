@@ -9506,7 +9506,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             x.copy_(src)
 
         def fn(b):
-            zeros = torch.zeros_like(b)
+            zeros = torch.full_like(b, -0.0)
             result = b + zeros
             mutate_tensor(b, zeros)
             return result

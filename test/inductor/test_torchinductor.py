@@ -8649,11 +8649,13 @@ for dtype in (torch.int32, torch.int64):
 
         # test no-op
         fns = (
-            lambda x: x + torch.zeros([256, 256], dtype=torch.float32, device=x.device),
+            lambda x: (
+                x + torch.full([256, 256], -0.0, dtype=torch.float32, device=x.device)
+            ),
             lambda x: x - torch.zeros([256, 256], dtype=torch.float32, device=x.device),
             lambda x: x * torch.ones([256, 256], dtype=torch.float32, device=x.device),
             lambda x: x / torch.ones([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x + 0,
+            lambda x: torch.add(x, -0.0),
             lambda x: x - 0,
             lambda x: x * 1,
             lambda x: x / 1,
@@ -8693,6 +8695,85 @@ for dtype in (torch.int32, torch.int64):
             self.assertEqual(
                 out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
             )
+
+    @parametrize("dtype", (torch.float32, torch.float64))
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    def test_add_positive_zero_signed_zero(self, dtype):
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(f"{dtype} is not supported on {self.device}")
+
+        def fn(x):
+            zero = torch.zeros_like(x)
+            integer_zero = torch.full(
+                x.shape,
+                -0.0,
+                dtype=torch.int32,
+                device=x.device,
+            )
+            outputs = (
+                x + 0.0,
+                0.0 + x,
+                x + zero,
+                zero + x,
+                x + integer_zero,
+                integer_zero + x,
+            )
+            return tuple((torch.reciprocal(y), torch.signbit(y)) for y in outputs)
+
+        compiled = torch.compile(
+            fn,
+            backend="inductor",
+            fullgraph=True,
+        )
+        inputs = [
+            torch.tensor(
+                [-0.0, +0.0, -1.0, +1.0],
+                dtype=dtype,
+                device=self.device,
+            )
+        ]
+        if is_dynamic_shape_enabled():
+            inputs.append(
+                torch.tensor(
+                    [-0.0, +0.0, -2.0, +2.0, +3.0],
+                    dtype=dtype,
+                    device=self.device,
+                )
+            )
+
+        post_grad_graph = get_post_grad_graph(compiled, (inputs[0],))
+        FileCheck().check("torch.ops.aten.add.Tensor").run(post_grad_graph)
+
+        int_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for x in inputs:
+            expected = fn(x)
+            actual = compiled(x)
+            for expected_group, actual_group in zip(expected, actual, strict=True):
+                expected_reciprocal, expected_signbit = expected_group
+                actual_reciprocal, actual_signbit = actual_group
+                self.assertEqual(
+                    actual_reciprocal.cpu().view(int_dtype),
+                    expected_reciprocal.cpu().view(int_dtype),
+                )
+                self.assertEqual(actual_signbit, expected_signbit)
+
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    def test_remove_no_ops_add_zero_integral(self):
+        def fn(x):
+            zero = torch.zeros_like(x)
+            outputs = (x + zero, zero + x, x + 0, 0 + x)
+            return tuple(torch.logical_not(y) for y in outputs)
+
+        for dtype in (torch.bool, torch.int32):
+            x = torch.tensor(
+                [0, 1, 1, 0],
+                dtype=dtype,
+                device=self.device,
+            )
+            compiled = torch.compile(fn, fullgraph=True)
+            post_grad_graph = get_post_grad_graph(compiled, (x,))
+            FileCheck().check_not("torch.ops.aten.add.Tensor").run(post_grad_graph)
+            self.assertEqual(compiled(x), fn(x))
 
     def test_remove_noop_copy(self):
         def fn(x, y):

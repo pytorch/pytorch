@@ -51,6 +51,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     CommonTemplate,
     copy_tests,
+    get_post_grad_graph,
     TestFailure,
 )
 
@@ -222,10 +223,10 @@ class TestInductorDynamic(DynamicShapesTestCase):
         torch._dynamo.reset()
 
     def test_constant_fold_uniform_value_dynamic(self, device):
-        def full_add_zero(x):
-            a = torch.full(x.shape, 1, dtype=x.dtype, device=x.device)
-            b = a - 1
-            return x + b
+        def full_add_negative_zero(x):
+            a = torch.full(x.shape, 0.0, dtype=x.dtype, device=x.device)
+            b = -a
+            return torch.sin(x + b)
 
         def full_mul_one(x):
             a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
@@ -242,7 +243,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             b = 2 + a
             return b * x.shape[0]
 
-        fns = (full_add_zero, full_mul_one, full_view_op)
+        fns = (full_add_negative_zero, full_mul_one, full_view_op)
 
         x = torch.randn((2, 4), device=device)
         y = torch.randn((3, 4), device=device)
@@ -253,9 +254,14 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 ref = fn(x)
                 fn_c = torch.compile(fn, dynamic=dynamic)
 
-                actual, source_codes = run_and_get_code(fn_c, x)
-
-                if fn is not full_mul_symint:
+                if fn is full_add_negative_zero:
+                    post_grad_graph = get_post_grad_graph(fn_c, (x,))
+                    FileCheck().check_not("torch.ops.aten.add.Tensor").run(
+                        post_grad_graph
+                    )
+                    actual = fn_c(x)
+                else:
+                    actual, source_codes = run_and_get_code(fn_c, x)
                     # due to constant folding, fn returns x directly.
                     if device == "cpu":
                         FileCheck().check_not("cpp_fused").run(source_codes[0])
