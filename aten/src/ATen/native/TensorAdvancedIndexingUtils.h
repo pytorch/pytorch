@@ -18,7 +18,7 @@ inline std::string shapes_as_str(TensorList tensors) {
       first = false;
     }
   }
-  return os.str();
+  return std::move(os).str();
 }
 #endif
 } // anonymous namespace
@@ -85,6 +85,7 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
         shapes_as_str(indices));
   }
   // add missing null Tensors so that it matches self.dim()
+  indices.reserve(self.dim());
   while (indices.size() < (size_t)self.dim()) {
     indices.emplace_back();
   }

@@ -1164,14 +1164,15 @@ class SequentialLR(LRScheduler):
         # "Undo" the step performed by other schedulers
         self.recursive_undo()
 
-        # Perform the initial step for only the first scheduler
-        self._schedulers[0]._initial_step()
+        # Perform the initial step for only the scheduler meant to run at step 0.
+        idx = bisect_right(self._milestones, 0)
+        self._schedulers[idx]._initial_step()
 
-        self._last_lr = schedulers[0].get_last_lr()
+        self._last_lr = schedulers[idx].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
-        Recursively undo any step performed by the initialisation of
+        Recursively undo any step performed by the initialization of
         schedulers.
         """
         scheds = self if sched is None else sched
@@ -1610,11 +1611,18 @@ class ReduceLROnPlateau(LRScheduler):
             Default: 10.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
-        threshold_mode (str): One of `rel`, `abs`. In `rel` mode,
-            dynamic_threshold = best * ( 1 + threshold ) in 'max'
-            mode or best * ( 1 - threshold ) in `min` mode.
-            In `abs` mode, dynamic_threshold = best + threshold in
-            `max` mode or best - threshold in `min` mode. Default: 'rel'.
+        threshold_mode (str): One of `rel`, `abs`.
+            In `rel` mode, the dynamic threshold is computed as:
+
+            * best * (1 + threshold) if mode == 'max'
+            * best * (1 - threshold) if mode == 'min'
+
+            In `abs` mode, the dynamic threshold is computed as:
+
+            * best + threshold if mode == 'max'
+            * best - threshold if mode == 'min'
+
+            Default: 'rel'.
         cooldown (int): Number of epochs to wait before resuming
             normal operation after lr has been reduced. Default: 0.
         min_lr (float or list): A scalar or a list of scalars. A

@@ -84,7 +84,8 @@ class AOTCompilePickler(pickle.Pickler):
         def _() -> object:
             return val
 
-        assert _.__closure__ is not None
+        if _.__closure__ is None:
+            raise AssertionError("closure must not be None")
         return _.__closure__[0]
 
     @classmethod
@@ -197,9 +198,10 @@ class AOTCompiledFunction:
         f_locals: dict[str, object] = {}
         env = self._artifacts.runtime_env
         if env.closure:
-            assert env.bytecode.co_freevars and len(env.closure) == len(
+            if not env.bytecode.co_freevars or len(env.closure) != len(
                 env.bytecode.co_freevars
-            )
+            ):
+                raise AssertionError("closure length must match co_freevars length")
             f_locals = {
                 name: cell.cell_contents
                 for name, cell in zip(env.bytecode.co_freevars, env.closure)
@@ -209,7 +211,8 @@ class AOTCompiledFunction:
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = self.prepare_f_locals(*args, **kwargs)
-        assert self._artifacts.guard_manager is not None
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
         return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
@@ -232,7 +235,8 @@ class AOTCompiledFunction:
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        assert self._artifacts.guard_manager is not None
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
@@ -339,7 +343,8 @@ def aot_compile_fullgraph(
     ):
         capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
         graph_capture_output = capture_output.graph_capture_output
-        assert graph_capture_output.output_graph is not None
+        if graph_capture_output.output_graph is None:
+            raise AssertionError("output_graph must not be None")
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
@@ -363,13 +368,17 @@ def aot_compile_fullgraph(
         fn, _ = convert_frame.get_traced_fn(model)
 
         backend_input = capture_output.backend_input
-        assert backend_input is not None
+        if backend_input is None:
+            raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         device_type = _graph_device_type(backend_input.graph_module.graph)
-        assert (
+        if (
             backend_input.fake_mode.shape_env
-            is graph_capture_output.output_graph.shape_env
-        )
+            is not graph_capture_output.output_graph.shape_env
+        ):
+            raise AssertionError(
+                "fake_mode.shape_env must be the same as output_graph.shape_env"
+            )
         tracing_context = TracingContext(backend_input.fake_mode)
         tracing_context.tensor_to_context = backend_input.tensor_to_context
         with (
@@ -427,7 +436,8 @@ def aot_compile_fullgraph(
                 fn.__code__, hooks=hooks, save=True, strict_error=True
             )
 
-        assert check_fn.guards_state is not None
+        if check_fn.guards_state is None:
+            raise AssertionError("guards_state must not be None")
 
         source_info = SourceInfo(inlined_sources=set())
         for traced_code in graph_capture_output.traced_code:
@@ -534,6 +544,7 @@ def aot_compile_module(
         log.info("Compiling input %s..", model_input)
         compiled_results.append(compile_single_graph(model_input))
 
-    assert len(compiled_results) > 0
+    if len(compiled_results) == 0:
+        raise AssertionError("Expected at least one compiled result")
 
     return AOTCompiledModel(model, compiled_results)

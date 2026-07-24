@@ -3,6 +3,7 @@ from collections import defaultdict
 
 import torch
 import torch.fx as fx
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -22,7 +23,7 @@ class AugmentedGraphHelper:
     def __init__(
         self,
         graph: fx.Graph,
-        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
+        node_ancestors: BitsetAncestors | None = None,
     ):
         # Each node starts in its own singleton set
         self.graph = graph
@@ -52,7 +53,10 @@ class AugmentedGraphHelper:
         """
         existing_set = self.merge_sets[existing_node]
         new_set = self.merge_sets[new_node]
-        assert len(new_set) == 1
+        if len(new_set) != 1:
+            raise AssertionError(
+                f"new_node must be a singleton set, got size {len(new_set)}"
+            )
 
         # Add all nodes from new_set to existing_set
         existing_set.update(new_set)
@@ -114,7 +118,8 @@ class AugmentedGraphHelper:
     def has_path(self, source: fx.Node, target: fx.Node) -> bool:
         """Check if there's a path from source to target."""
         # we should not be checking path from node to itself
-        assert self.merge_sets[source] is not self.merge_sets[target]
+        if self.merge_sets[source] is self.merge_sets[target]:
+            raise AssertionError("source and target must not be in the same merge set")
 
         # search backwards from target to source
         visited: OrderedSet[fx.Node] = OrderedSet()
@@ -138,7 +143,7 @@ class AugmentedGraphHelper:
                 if self.node_ancestors:
                     source_set = self.merge_sets[source]
                     is_ancestor_of_source = any(
-                        dep in self.node_ancestors[s] for s in source_set
+                        self.node_ancestors.is_ancestor(dep, s) for s in source_set
                     )
                     # Add to visited to avoid recomputing this check if we see dep again
                     if is_ancestor_of_source:

@@ -44,7 +44,7 @@
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
-    "If on, static runtime may use use optimizations that cause accuracy loss "
+    "If on, static runtime may use optimizations that cause accuracy loss "
     "vs the jit interpreter")
 
 namespace at::native {
@@ -163,7 +163,7 @@ static at::Tensor& flatten_copy_out(
 
 namespace {
 
-// This is annoying and sily, but it's solving a real problem: the
+// This is annoying and silly, but it's solving a real problem: the
 // _MSC_VER version causes an ICE on our old clang5 builds. The
 // non-_MSC_VER version is a syntax error according to MSVC. Use the
 // appropriate version depending on if we're MSVC or not.

@@ -102,6 +102,22 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     const char* device_str,
     const char* cubin_dir);
 
+// Creates an AOTInductor model container with externally-provided weights.
+// No weights are loaded from the .so: the provided constants are used directly
+// (zero-copy of tensor storage, user retains ownership). Constant folding runs
+// at creation time so the container is ready for inference immediately.
+// Constants are passed as a flat array of ABI-stable
+// AOTInductorConstantMapEntry (name -> AtenTensorHandle) rather than
+// AOTInductorConstantMapHandle, which is not ABI stable across the DSO
+// boundary.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir,
+    const AOTInductorConstantMapEntry* constant_entries,
+    size_t num_constant_entries);
+
 // Deletes the AOTInductor model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle);
@@ -188,9 +204,23 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
     size_t* data_size);
 
 // Extract the constants that is being used in the container.
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerExtractConstantsMapEntries.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive);
+
+// C-ABI-safe variant of AOTInductorModelContainerExtractConstantsMap.
+// On success, `entries` points to `num_entries` container-owned entries.
+// The returned array and each `entries[i].name` are valid until the next
+// AOTInductorModelContainerExtractConstantsMapEntries call on the same
+// container, until the container's constants are mutated, or until the
+// container is deleted. Callers that need to retain names should copy them.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry** entries,
+    size_t* num_entries,
     bool use_inactive);
 
 // Setup the constant buffer in model container with provided ConstantMap.
@@ -215,17 +245,58 @@ AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
 // validate_full_update checks if all constants are included in the ConstantMap
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerUpdateConstantBufferPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
     bool use_inactive,
     bool validate_full_update);
 
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBuffer.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
+// Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
+// allowed to pass CPU tensors even when the model lives on a non-CPU device.
+// CPU tensors are silently copied to the model's device.
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateConstantBufferFromCpuPairs.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBufferFromCpu.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateInactiveConstantBufferPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateInactiveConstantBuffer.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateInactiveConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs);
 
 // Free the inactive constant buffer in model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
@@ -271,9 +342,19 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetOutputName(
 //
 // constant_map_handle is an opaque type to satisfy the C ABI.  It should be a
 // std::unordered_map<std::string, at::Tensor*>*.
+//
+// DEPRECATED: V1 API; see AOTInductorModelCreateV2.
 AOTI_API AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// C-ABI-safe variant of AOTInductorModelCreate.
+// Pass `pairs == nullptr` (or `num_pairs == 0`) to load constants from the
+// embedded blob instead of an externally provided map.
+AOTI_API AOTIRuntimeError AOTInductorModelCreateV2(
+    AOTInductorModelHandle* model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs);
 
 // Run an AOTInductorModel (see AOTInductorModelCreate for when one should use
 // this function versus AOTInductorModelContainerRun).
@@ -288,10 +369,24 @@ AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
+// C-ABI-safe variant of AOTInductorModelUpdateConstantsMap.
+// Uses an array of (name, handle) pairs instead of an opaque pointer to
+// std::unordered_map, so the host and DSO can use different C++ standard
+// libraries without ABI conflicts.
+AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMapV2(
+    AOTInductorModelHandle model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    int32_t num_pairs);
+
 // Get the size of the constant blob
 AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
     AOTInductorModelContainerHandle container_handle,
     uint64_t* ret_size);
+
+// Returns whether the container's model invoked load_constants().
+AOTI_API AOTIRuntimeError AOTInductorModelContainerDidCallLoadConstants(
+    AOTInductorModelContainerHandle container_handle,
+    bool* did_call_load_constants);
 
 // Load weights from a single blob in weight_blob_ptr
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
@@ -310,6 +405,21 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     AOTInductorModelContainerHandle container_handle,
     const char** in_spec,
     const char** out_spec);
+
+// Enables or disables pinned async H2D copies for constant loading and updates.
+// Call before creating a model/container to affect embedded constant loading.
+AOTI_API AOTIRuntimeError
+AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
+
+// Sets bytes per pinned async staging buffer. Pass 0 to use
+// AOTI_COPY_STAGE_BUFFER_BYTES or the runtime default.
+AOTI_API AOTIRuntimeError
+AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
+
+// Retrieves the error message from the last failed AOTI runtime call on the
+// current thread. The returned pointer is valid until the next AOTI runtime
+// call on the same thread. Returns an empty string if the last call succeeded.
+AOTI_API AOTIRuntimeError AOTInductorGetLastError(const char** error_msg);
 
 // ---------------------------------------------------------------------------
 // C-ABI-safe variant of AOTInductorModelRunMinimalArrayrefInterface.

@@ -61,7 +61,7 @@ def sharded_embedding(types, args, kwargs, pg):
        be re-normed so mask IDs whose embeddings are not stored in current
        rank will to an extra row will ensure max_norm still works as expected.
     3. If max_norm is specified, the extra row guarantees that the mask ID will
-       not affect the behavior of weigh re-norm.
+       not affect the behavior of weight re-norm.
 
     COLWISE SHARDING
     ================

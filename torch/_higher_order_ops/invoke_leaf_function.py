@@ -7,8 +7,9 @@ from typing import Any, NamedTuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
+from torch._custom_class_base import CustomClassBase
 from torch._higher_order_ops.utils import register_fake
-from torch._library.opaque_object import OpaqueBase, register_opaque_type
+from torch._library.opaque_object import register_custom_class
 from torch._ops import HigherOrderOperator
 from torch.autograd.graph import get_gradient_edge
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -48,7 +49,7 @@ def reset_makefx_module_storage() -> None:
     _makefx_module_storage.clear()
 
 
-class _LeafCallable(OpaqueBase):
+class _LeafCallable(CustomClassBase):
     def __init__(self, fn: Callable) -> None:
         self._fn = fn
 
@@ -56,7 +57,7 @@ class _LeafCallable(OpaqueBase):
         return self._fn(*args, **kwargs)
 
 
-register_opaque_type(_LeafCallable, typ="reference")
+register_custom_class(_LeafCallable, typ="symbolic")
 
 
 def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:
@@ -209,7 +210,7 @@ def check_escaped_gradients(
     requires_grad_indices: set[int],
 ) -> None:
     """
-    Check if autograd graph depends on tensors that not passed as explicit inputs.
+    Check if autograd graph depends on tensors that are not passed as explicit inputs.
 
     Controlled by torch._dynamo.config.leaf_function_check_escaped_gradients.
     """
@@ -896,6 +897,20 @@ def invoke_leaf_function_fake(
         return fake_fn_callable(*args, **kwargs)
 
 
+def _detach_with_grad_dtype(arg):
+    # Tensor.detach() resets grad_dtype to the tensor's own dtype, dropping
+    # any caller-set grad_dtype (e.g. param.grad_dtype = torch.float32 on a
+    # bf16 weight). Propagate it back so the inner autograd graph accumulates
+    # the kernel's gradient at the requested dtype. grad_dtype is only
+    # meaningful on leaf tensors.
+    if not isinstance(arg, torch.Tensor):
+        return arg
+    detached = arg.detach()
+    if arg is not detached and arg.is_leaf and arg.grad_dtype != detached.grad_dtype:
+        detached.grad_dtype = arg.grad_dtype
+    return detached
+
+
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
 def invoke_leaf_function_dense(
     real_fn_callable,
@@ -911,9 +926,7 @@ def invoke_leaf_function_dense(
         arg._version if isinstance(arg, torch.Tensor) else 0 for arg in flat_args
     ]
 
-    flat_args = tuple(
-        arg.detach() if isinstance(arg, torch.Tensor) else arg for arg in flat_args
-    )
+    flat_args = tuple(_detach_with_grad_dtype(arg) for arg in flat_args)
     requires_grad_indices_set = _parse_mutated_arg_indices(requires_grad_indices)
     flat_args = tuple(
         arg.requires_grad_(True) if idx in requires_grad_indices_set else arg

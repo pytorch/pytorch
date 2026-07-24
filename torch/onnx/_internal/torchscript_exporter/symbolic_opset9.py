@@ -1147,7 +1147,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
                 + "Axis is converted to "
                 + str(squeeze_dim + rank)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect.",
+                + "Passing a tensor of different rank in execution will be incorrect.",
                 stacklevel=2,
             )
             squeeze_dim += rank
@@ -1473,7 +1473,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # so the values in indices are in [0, N x C x D1 x ... x Dn).
         # To convert the indices to the same format used by Pytorch,
         # we first execute a maxpool with a kernel and stride of 1 on the same input.
-        # This will result in a tensor of indices in which each index will have it's own value.
+        # This will result in a tensor of indices in which each index will have its own value.
         # Using this tensor as a reference, we extract the first index of each axis and subtract
         # it from each index of this axis in the indices to convert.
         # This step will result in a tensor were each dimension has values of indices within
@@ -3064,16 +3064,17 @@ def type_as(g: jit_utils.GraphContext, self, other):
 
 
 @_onnx_symbolic("aten::cosine_similarity")
-@symbolic_helper.parse_args("v", "v", "i", "f")
-def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps):
+@symbolic_helper.parse_args("v", "v", "i", "f", "b")
+def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps, keepdim):
+    keepdims = 1 if keepdim else 0
     cross = symbolic_helper._reducesum_helper(
-        g, mul(g, x1, x2), axes_i=[dim], keepdims_i=0
+        g, mul(g, x1, x2), axes_i=[dim], keepdims_i=keepdims
     )
     x1_l2 = symbolic_helper._reducesum_helper(
-        g, mul(g, x1, x1), axes_i=[dim], keepdims_i=0
+        g, mul(g, x1, x1), axes_i=[dim], keepdims_i=keepdims
     )
     x2_l2 = symbolic_helper._reducesum_helper(
-        g, mul(g, x2, x2), axes_i=[dim], keepdims_i=0
+        g, mul(g, x2, x2), axes_i=[dim], keepdims_i=keepdims
     )
     # pyrefly: ignore [no-matching-overload]
     div_tens = max(
@@ -3825,7 +3826,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
                 + "Axis is converted to "
                 + str(dim + rank + 1)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect.",
+                + "Passing a tensor of different rank in execution will be incorrect.",
                 stacklevel=2,
             )
             dim = dim + rank + 1

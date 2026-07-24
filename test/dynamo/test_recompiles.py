@@ -7,6 +7,10 @@ import torch._dynamo.testing
 from torch._dynamo import config as dc
 
 
+_GLOBAL_SPLIT_SIZE = 0
+_MISSING = object()
+
+
 class RecompileTests(torch._dynamo.test_case.TestCase):
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
@@ -163,6 +167,51 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with_automatic = run_with_automatic()
         self.assertEqual(with_automatic.frame_count, 3)
         self.assertEqual(with_automatic.op_count, 3)
+
+    def test_automatic_dynamic_unspecializes_global_int_split_size(self):
+        global _GLOBAL_SPLIT_SIZE
+
+        def foo(hidden_states):
+            hidden_states_t = hidden_states.transpose(0, 1)
+            _, prefill = torch.split(hidden_states_t, [0, _GLOBAL_SPLIT_SIZE], dim=-1)
+            return prefill.transpose(0, 1).sin()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=counter, fullgraph=True)
+
+        old_split_size = _GLOBAL_SPLIT_SIZE
+        try:
+            for split_size in [8, 4, 3, 2, 6]:
+                _GLOBAL_SPLIT_SIZE = split_size
+                opt(torch.randn(split_size, 4))
+        finally:
+            _GLOBAL_SPLIT_SIZE = old_split_size
+
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_automatic_dynamic_keeps_torch_module_int_attrs_static(self):
+        attr_name = "_dynamo_test_int"
+        old_value = getattr(torch, attr_name, _MISSING)
+
+        def foo(x):
+            import torch
+
+            return x * torch._dynamo_test_int
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=counter, fullgraph=True)
+
+        try:
+            for value in [2, 3, 4]:
+                setattr(torch, attr_name, value)
+                opt(torch.randn(2))
+        finally:
+            if old_value is _MISSING:
+                delattr(torch, attr_name)
+            else:
+                setattr(torch, attr_name, old_value)
+
+        self.assertEqual(counter.frame_count, 3)
 
     def test_aliasing_guard_failures(self):
         def foo(a, b, c):
@@ -419,6 +468,52 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         f(torch.randn(0))
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
+
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_mul_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        def scaling_step(update, dummy_tensor, lr):
+            dummy_tensor.mul_(0.5 * lr)
+
+            r, c = update.size(-2), update.size(-1)
+            scaling_factor = max(1, r / c) ** 0.5
+            update.mul_(scaling_factor * lr)
+
+            return update
+
+        compiled = torch.compile(scaling_step, backend=counter, fullgraph=True)
+        base_update = torch.randn(128, 128)
+        base_dummy = torch.randn(324, 64)
+
+        for i in range(8):
+            lr = 1e-4 * (i + 1)
+            self.assertEqual(
+                compiled(base_update.clone(), base_dummy.clone(), lr),
+                scaling_step(base_update.clone(), base_dummy.clone(), lr),
+            )
+
+        self.assertLessEqual(counter.frame_count, 2)
+
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_pow_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        def step_param(v_t, bc2):
+            eps = 1e-8
+            return v_t.sqrt().div_(bc2**0.5).add_(eps)
+
+        compiled = torch.compile(step_param, backend=counter, fullgraph=True)
+        base_v_t = torch.randn(64, 1280)
+
+        for step in range(1, 9):
+            bc2 = 1.0 - 0.999**step
+            self.assertEqual(
+                compiled(base_v_t.clone(), bc2),
+                step_param(base_v_t.clone(), bc2),
+            )
+
+        self.assertLessEqual(counter.frame_count, 2)
 
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)

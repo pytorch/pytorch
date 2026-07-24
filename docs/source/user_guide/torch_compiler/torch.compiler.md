@@ -34,6 +34,13 @@ In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
 :::
 
+`torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. It
+captures a whole computation `fn(*example_inputs)` -- with the model(s) passed among
+`example_inputs`, e.g. `precompile(lambda model, x: model(x), model, x)` -- and lowers it
+to a self-contained, runnable Python source string plus an acceleration cache. Reload the
+artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
+the model again at runtime. See the {ref}`API reference <torch.compiler_api>` for details.
+
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.
 
@@ -74,7 +81,7 @@ Some of the most commonly used backends include:
    * - ``torch.compile(m, backend="inductor")``
      - Uses the TorchInductor backend. `Read more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
    * - ``torch.compile(m, backend="cudagraphs")``
-     - CUDA graphs with AOT Autograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
+     - CUDA graphs with AOT Autograd. `Read more <https://pytorch.org/docs/stable/torch.compiler_cudagraph_trees.html>`__
    * - ``torch.compile(m, backend="ipex")``
      - Uses IPEX on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
 ```

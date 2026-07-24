@@ -30,13 +30,13 @@ def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
 
     if quant_min < quant_min_lower_bound:
         raise AssertionError(
-            "quant_min out of bound for dtype, "
+            "quant_min out of bounds for dtype, "
             f"quant_min_lower_bound: {quant_min_lower_bound} quant_min: {quant_min}"
         )
 
     if quant_max > quant_max_upper_bound:
         raise AssertionError(
-            "quant_max out of bound for dtype, "
+            "quant_max out of bounds for dtype, "
             f"quant_max_upper_bound: {quant_max_upper_bound} quant_max: {quant_max}"
         )
 
@@ -1093,7 +1093,7 @@ def quantize_per_channel_group_meta(
     dtype: torch.dtype,
     group_size=128,
 ):
-    """Groupwise quantization within each channel for an 2-d Tensor using the quantization parameters
+    """Groupwise quantization within each channel for a 2-d Tensor using the quantization parameters
     to map from floating point to quantized values. This means for each row of a 2-d Tensor
     (M, N), we calculate scales/zero_points for each `group_size` elements
     and quantize every `group_size` elements with the same quantization parameter.
@@ -1145,7 +1145,7 @@ def dequantize_per_channel_group(
     group_size: int = 128,
     output_dtype: torch.dtype = torch.float32,
 ):
-    """Groupwise dequantization within each channel for an 2-d Tensor using the quantization parameters
+    """Groupwise dequantization within each channel for a 2-d Tensor using the quantization parameters
     to map from floating point to quantized values. This means for each row of a 2-d Tensor
     (M, N), we calculate scales/zero_points for each `group_size` elements
     and quantize every `group_size` elements with the same quantization parameter.

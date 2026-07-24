@@ -52,15 +52,15 @@ Tensor& addmm_out(
       " != ",
       mat2.dtype())
 
+  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
+  result.resize_(result_shape);
+
   // complex case
   if (self.is_complex()) {
     at::native::addmm_complex_out_xpu(self, mat1, mat2, beta, alpha, result);
 
     return result;
   }
-
-  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
-  result.resize_(result_shape);
 
   IntArrayRef result_sizes = result.sizes();
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
@@ -84,6 +84,15 @@ Tensor& addmm_out(
       result_shape,
       " but got:",
       self.sizes());
+
+  TORCH_CHECK(
+      result_shape.size() >= (size_t)self.dim(),
+      "The number of sizes provided (",
+      result_shape.size(),
+      ") ",
+      "must be greater or equal to the number of dimensions in the tensor (",
+      self.dim(),
+      ")");
 
   // Bypass OneDNN optimization path for float64 due to lack of full double
   // precision support.
@@ -372,16 +381,24 @@ Tensor& addmv_out(
 
   bool is_float64 =
       mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
-  bool is_inplace = self.is_same(out);
-  if (is_float64 && is_inplace) {
-    Tensor self_v_copy = self_v.clone();
-    at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
-    out.resize_({mat.size(0)});
-    return out;
+  bool need_preserve_strides =
+      out.dim() == 1 && out.stride(0) != 1 && out.numel() > 0;
+
+  if (is_float64 && self.is_same(out) && !need_preserve_strides) {
+    self_v = self_v.clone();
   }
 
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+  // addmm_out resizes its output to 2D, destroying stride information.
+  // When out has noncontiguous strides, compute into a temporary and copy back.
+  if (need_preserve_strides) {
+    Tensor tmp = at::empty({mat.size(0)}, out.options());
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, tmp);
+    tmp.resize_({mat.size(0)});
+    out.copy_(tmp);
+  } else {
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+    out.resize_({mat.size(0)});
+  }
   return out;
 }
 
@@ -567,13 +584,17 @@ Tensor& _int_mm_out_xpu(
       mat2.size(0));
 
   TORCH_CHECK(
-      self.dtype() == at::kChar,
-      "Expected self dtype to be of type int8 but got ",
-      self.dtype());
+      self.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      self.scalar_type());
   TORCH_CHECK(
-      mat2.dtype() == at::kChar,
-      "Expected mat2 dtype to be of type int8 but got ",
-      mat2.dtype());
+      mat2.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      mat2.scalar_type());
   TORCH_CHECK(
       result.dtype() == at::kInt,
       "Expected result dtype to be of type kInt but got ",

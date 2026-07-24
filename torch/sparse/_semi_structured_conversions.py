@@ -104,7 +104,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     # Thus, lower two bits in the encoding are index of the True value
     # at the lowest index in the quadruple, and the higher two bits in
     # the encoding are index of the other True value in the quadruple.
-    # In case there are less than two True values, than False value or
+    # In case there are less than two True values, then False value or
     # values at some index or indices are considered True for the
     # encoding.  In case there are more than two True values, then the
     # excess True value(s) at some indices are considered False for
@@ -216,7 +216,7 @@ def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
     meta_nrows, meta_ncols = meta_reordered.shape
     if meta_nrows != m:
         raise RuntimeError(
-            f"Number of rows of meta matrix {meta_nrows} must be equal to number of columns of spase matrix {m}"
+            f"Number of rows of meta matrix {meta_nrows} must be equal to number of columns of sparse matrix {m}"
         )
     if meta_ncols * ksparse * quadbits_per_meta_elem != 2 * k:
         raise RuntimeError(

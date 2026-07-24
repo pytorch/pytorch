@@ -3,11 +3,10 @@ import dataclasses
 import unittest.mock
 
 import torch
-import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TestCase
 
 
 try:
@@ -30,7 +29,7 @@ def maybe_skip(fn):
     return fn
 
 
-class TestHFPretrained(torch._dynamo.test_case.TestCase):
+class TestHFPretrained(TestCase):
     @maybe_skip
     def test_pretrained(self):
         def fn(a, tmp):
@@ -63,7 +62,7 @@ class TestHFPretrained(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
 
-class TestModelOutput(torch._dynamo.test_case.TestCase):
+class TestModelOutput(TestCase):
     @maybe_skip
     def test_mo_create(self):
         def fn(a, b):
@@ -362,6 +361,4 @@ class TestModelOutputBert(TestCase):
 instantiate_device_type_tests(TestModelOutputBert, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

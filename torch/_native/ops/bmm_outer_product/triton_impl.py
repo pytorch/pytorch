@@ -1,17 +1,6 @@
-import functools
-import importlib.util
-
 import torch
 
 from ... import triton_utils as tu
-
-
-@functools.cache
-def _has_triton() -> bool:
-    try:
-        return importlib.util.find_spec("triton") is not None
-    except ModuleNotFoundError:
-        return False
 
 
 def _is_outer_product(a: torch.Tensor, b: torch.Tensor) -> bool:
@@ -27,36 +16,48 @@ def _is_outer_product(a: torch.Tensor, b: torch.Tensor) -> bool:
 
 
 def _bmm_outer_product_impl(
-    dispatch_keys: torch.DispatchKeySet,
     a: torch.Tensor,
     b: torch.Tensor,
-    *,
-    fallback_kernel,
+    *args,
+    **kwargs,
 ) -> torch.Tensor:
-    a_is_cow = torch._C._is_cow_tensor(a)  # pyrefly: ignore[missing-attribute]
-    b_is_cow = torch._C._is_cow_tensor(b)  # pyrefly: ignore[missing-attribute]
-    if _has_triton() and _is_outer_product(a, b) and not (a_is_cow or b_is_cow):
-        from .triton_kernels import bmm_outer_product
+    from .triton_kernels import bmm_outer_product
 
+    with torch.accelerator.device_index(a.get_device()):
         return bmm_outer_product(a, b)
-    return fallback_kernel.call_boxed(dispatch_keys, a, b)
+
+
+def _is_acc_tensor(t: torch.Tensor) -> bool:
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and acc.type == t.device.type
+
+
+def _bmm_outer_product_cond(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    *args,
+    **kwargs,
+) -> bool:
+    # a and b are read-only here: the kernel wraps them in ConstTensorWrapper and
+    # reads through const_data_ptr(), so copy-on-write inputs are not
+    # materialized and need not be excluded.
+    if _is_acc_tensor(a) and a.device == b.device and _is_outer_product(a, b):
+        return True
+    return False
 
 
 def _register_for_dispatch_key(dispatch_key: str) -> None:
-    fallback_kernel = torch.library.get_kernel("aten::bmm", dispatch_key)
     tu.register_op_override(
         "aten",
         "bmm",
         dispatch_key,
-        functools.partial(_bmm_outer_product_impl, fallback_kernel=fallback_kernel),
+        cond=_bmm_outer_product_cond,
+        impl=_bmm_outer_product_impl,
         allow_multiple_override=True,
     )
 
 
 def register_to_dispatch() -> None:
-    if not _has_triton():
-        return
-
     _register_for_dispatch_key("CUDA")
     if torch.xpu._is_compiled():
         _register_for_dispatch_key("XPU")

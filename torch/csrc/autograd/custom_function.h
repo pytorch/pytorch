@@ -27,6 +27,17 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const _view_as_self_fn_t& view_as_self_fn,
     bool pure_view);
 
+TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
+    at::ArrayRef<const Variable*> input_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
+    const c10::intrusive_ptr<Node>& cdata,
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view);
+
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
@@ -283,8 +294,9 @@ struct CppNode : public Node {
   std::vector<VariableInfo> output_info_;
 
   void release_variables() override;
+  void release_resources() override;
 
-  void set_ctx_grad_fn(const c10::intrusive_ptr<Node>& node);
+  void set_ctx_grad_fn(c10::intrusive_ptr<Node> node);
   void save_variables_to_ctx();
 
   void compiled_args(CompiledNodeArgs& args) const override {
@@ -568,13 +580,22 @@ void CppNode<T>::release_variables() {
 }
 
 template <class T>
+void CppNode<T>::release_resources() {
+  Node::release_resources();
+
+  // AutogradContext deletes copy/move, so destroy and reconstruct in place.
+  ctx_.~AutogradContext();
+  new (&ctx_) AutogradContext();
+}
+
+template <class T>
 void CppNode<T>::save_variables_to_ctx() {
   ctx_.save_variables();
 }
 
 template <class T>
-void CppNode<T>::set_ctx_grad_fn(const c10::intrusive_ptr<Node>& node) {
-  ctx_.grad_fn_ = node;
+void CppNode<T>::set_ctx_grad_fn(c10::intrusive_ptr<Node> node) {
+  ctx_.grad_fn_ = std::move(node);
 }
 
 } // namespace torch::autograd

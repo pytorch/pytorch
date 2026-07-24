@@ -202,7 +202,7 @@ class UpsamplingNearest2d(Upsample):
     r"""Applies a 2D nearest neighbor upsampling to an input signal composed of several input channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
-    as it's constructor argument.
+    as its constructor argument.
 
     When :attr:`size` is given, it is the output size of the image `(h, w)`.
 
@@ -251,7 +251,7 @@ class UpsamplingBilinear2d(Upsample):
     r"""Applies a 2D bilinear upsampling to an input signal composed of several input channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
-    as it's constructor argument.
+    as its constructor argument.
 
     When :attr:`size` is given, it is the output size of the image `(h, w)`.
 

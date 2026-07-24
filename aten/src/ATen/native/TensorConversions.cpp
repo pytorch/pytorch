@@ -585,6 +585,7 @@ Tensor to(
 // across tensors.
 std::vector<Tensor> _to_cpu(TensorList tensors) {
   std::vector<Tensor> cpu_tensors;
+  cpu_tensors.reserve(tensors.size());
   for (const auto& t : tensors) {
     cpu_tensors.push_back(t.cpu());
   }
@@ -751,7 +752,20 @@ Tensor sparse_compressed_to_dense(
     dense_reshaped_sizes.erase(
         dense_reshaped_sizes.begin(), dense_reshaped_sizes.begin() + 2);
   } else {
+    TORCH_CHECK(
+        values.dim() >= 4,
+        "sparse_compressed_to_dense: expected values to have at least 4 dimensions, but got ",
+        values.dim());
+
     std::array<int64_t, 2> blocksize = {values.size(2), values.size(3)};
+
+    TORCH_CHECK(
+        blocksize[0] > 0 && blocksize[1] > 0,
+        "sparse_compressed_to_dense: expected block sizes to be strictly positive, but got ",
+        blocksize[0],
+        " and ",
+        blocksize[1]);
+
     nrows = self.size(batch_ndim) / blocksize[0];
     ncols = self.size(batch_ndim + 1) / blocksize[1];
     dense_reshaped_sizes[1] = blocksize[0];
@@ -2165,9 +2179,9 @@ static Tensor _compressed_to_block_compressed_cpu(
                   compressed_blocksize,
                   plain_blocksize,
                   n_dense,
-                  input_compressed_indices.data_ptr<index_t>(),
-                  input_plain_indices.data_ptr<index_t>(),
-                  input_values.data_ptr<scalar_t>(),
+                  input_compressed_indices.const_data_ptr<index_t>(),
+                  input_plain_indices.const_data_ptr<index_t>(),
+                  input_values.const_data_ptr<scalar_t>(),
                   result_compressed_indices.data_ptr<index_t>(),
                   result_plain_indices.data_ptr<index_t>(),
                   result_values.data_ptr<scalar_t>());

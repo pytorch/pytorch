@@ -47,7 +47,7 @@ class StorageWriter(abc.ABC):
         """
         Calls to indicates a brand new checkpoint write is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
-        this checkpoint write. The meaning of the checkpiont_id is
+        this checkpoint write. The meaning of the checkpoint_id is
         storage-dependent. It can be a path to a folder/file or a key for
         a key-value storage.
 
@@ -149,7 +149,7 @@ class StorageWriter(abc.ABC):
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         """
-        Check if the given checkpoint_id is supported by the storage. This allow
+        Check if the given checkpoint_id is supported by the storage. This allows
         us to enable automatic storage selection.
         """
         ...
@@ -173,7 +173,7 @@ class StorageReader(abc.ABC):
     in a distributed checkpoint. As part of initialization, each instance
     is told its role.
 
-    A subclass should expected the following sequence of calls by ``load_state_dict``:
+    A subclass should expect the following sequence of calls by ``load_state_dict``:
 
     0) (all ranks) set checkpoint_id if users pass a valid checkpoint_id.
     1) (all ranks) read_metadata()
@@ -188,7 +188,7 @@ class StorageReader(abc.ABC):
         """
         Calls to indicates a brand new checkpoint read is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
-        this checkpoint read. The meaning of the checkpiont_id is
+        this checkpoint read. The meaning of the checkpoint_id is
         storage-dependent. It can be a path to a folder/file or a key for
         a key-value storage.
 
@@ -282,7 +282,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         """
-        Check if the given checkpoint_id is supported by the storage. This allow
+        Check if the given checkpoint_id is supported by the storage. This allows
         us to enable automatic storage selection.
         """
         ...

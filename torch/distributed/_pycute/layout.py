@@ -139,7 +139,7 @@ LayoutProfile: TypeAlias = tuple[object, ...] | Layout | None
 LayoutInput: TypeAlias = Layout | IntTuple | tuple[object, ...] | None
 
 
-# Make Layout from a list of layouts (each layout it's own mode in the result)
+# Make Layout from a list of layouts (each layout its own mode in the result)
 def make_layout(*layouts: Layout | tuple[Layout, ...]) -> Layout:
     if len(layouts) == 1 and not is_layout(layouts[0]):
         layouts = layouts[0]

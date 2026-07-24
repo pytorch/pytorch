@@ -103,9 +103,7 @@ def as_nested_tensor(
         layout = torch.strided
     if layout == torch.strided:
         if isinstance(ts, Tensor):
-            # contiguous() might be necessary to get flattened view.
-            # we could probably be more precise about when to do this as an optimization
-            buffer = ts.contiguous().view(-1).to(device=device, dtype=dtype)
+            buffer = ts.reshape(-1).to(device=device, dtype=dtype)
             nested_sizes = torch.tensor([t.shape for t in ts])
             return torch._nested_view_from_buffer(
                 buffer,

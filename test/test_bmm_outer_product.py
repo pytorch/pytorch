@@ -3,8 +3,11 @@
 import unittest
 
 import torch
-from torch._native.ops.bmm_outer_product.triton_impl import _is_outer_product
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._native.ops.bmm_outer_product.triton_impl import (
+    _bmm_outer_product_cond,
+    _is_outer_product,
+)
+from torch.testing._internal.common_utils import run_tests, skipIfXpu, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -13,6 +16,7 @@ class TestBmmOuterProduct(TestCase):
     def _check_bmm(self, a, b, **kwargs):
         self.assertEqual(torch.bmm(a, b), a @ b, **kwargs)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180318")
     def test_shapes(self):
         shapes = [
             (4, 8, 16),
@@ -79,6 +83,72 @@ class TestBmmOuterProduct(TestCase):
         self.assertIsNotNone(b.grad)
         self.assertEqual(a.grad.shape, a.shape)
         self.assertEqual(b.grad.shape, b.shape)
+
+    def test_cpu_outer_product_fallback(self):
+        a = torch.randn(4, 8, 1)
+        b = torch.randn(4, 1, 16)
+        self.assertTrue(a.device.type == "cpu")
+        self.assertEqual(torch.bmm(a, b), a @ b)
+
+    def test_mixed_device_outer_product_fallback(self):
+        a = torch.randn(4, 8, 1)
+        b = torch.randn(4, 1, 16, device=GPU_TYPE)
+        with self.assertRaises(RuntimeError):
+            torch.bmm(a, b)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_non_current_device_outer_product(self):
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires at least 2 visible CUDA devices")
+
+        old_device = torch.cuda.current_device()
+        try:
+            torch.cuda.set_device(0)
+            a = torch.randn(4, 8, 1, device="cuda:1")
+            b = torch.randn(4, 1, 16, device="cuda:1")
+
+            out = torch.bmm(a, b)
+
+            self.assertEqual(torch.cuda.current_device(), 0)
+            self.assertEqual(out.device, torch.device("cuda:1"))
+            self.assertEqual(out, a * b)
+
+            mismatched_a = torch.randn(4, 8, 1, device="cuda:0")
+            with self.assertRaisesRegex(RuntimeError, "same device|different"):
+                torch.bmm(mismatched_a, b)
+        finally:
+            torch.cuda.set_device(old_device)
+
+    def test_cow_inputs_accepted_by_override(self):
+        # The override accepts copy-on-write inputs (it wraps its read-only
+        # inputs in ConstTensorWrapper and reads through const_data_ptr()).
+        # Assert the cond fires on COW inputs -- it previously excluded them --
+        # so a regression back to declining COW would be caught here.
+        a = torch.randn(4, 64, 1, device=GPU_TYPE)
+        b = torch.randn(4, 1, 48, device=GPU_TYPE)
+        a_cow = a._lazy_clone()
+        b_cow = b._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        self.assertTrue(_bmm_outer_product_cond(a_cow, b_cow))
+
+    def test_cow_inputs_not_materialized(self):
+        # A copy-on-write input routed through the override is read via
+        # const_data_ptr() and not materialized. Verify the result is correct
+        # and the inputs stay COW across the call.
+        a = torch.randn(4, 64, 1, device=GPU_TYPE)
+        b = torch.randn(4, 1, 48, device=GPU_TYPE)
+        a_cow = a._lazy_clone()
+        b_cow = b._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        out = torch.bmm(a_cow, b_cow)
+
+        self.assertEqual(out, a @ b)
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
 
 
 class TestOuterProductDetection(TestCase):

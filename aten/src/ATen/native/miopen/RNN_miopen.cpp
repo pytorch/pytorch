@@ -136,7 +136,7 @@ struct RNNDescriptorParams {
                 {
                     std::ostringstream oss;
                     oss << "unrecognized miopen RNN mode " << fn_mode;
-                    TORCH_CHECK(false, oss.str());
+                    TORCH_CHECK(false, std::move(oss).str());
                 }
         }
     }
@@ -315,6 +315,12 @@ struct RNNDescriptors {
 thread_local DropoutDescriptor RNNDescriptors::dropout_desc {};
 // Each state is 0.75 MB so there is no problem in caching all of them for each thread
 thread_local std::unique_ptr<DropoutState> RNNDescriptors::dropout_states { nullptr };
+
+// Releases the calling thread's cached MIOpen RNN dropout state buffer. This is
+// thread-lifetime state that empty_cache() cannot reclaim on its own.
+void _miopen_clear_dropout_state() {
+  RNNDescriptors::dropout_states.reset();
+}
 
 Tensor permute_wei_for_miopen(Tensor wei, int64_t mode)
 {
@@ -627,7 +633,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         output.transpose_(0, 1);
     }
 
-    return std::make_tuple(output, hy, cy, reserve, weight_buf);
+    return std::make_tuple(
+        std::move(output),
+        std::move(hy),
+        std::move(cy),
+        std::move(reserve),
+        std::move(weight_buf));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
@@ -909,7 +920,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
         _batch_sizes.device().is_cpu(),
         "batch_sizes tensor should be on CPU, but got ",
         _batch_sizes.device());
-    IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+    IntArrayRef batch_sizes { _batch_sizes.const_data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());
 

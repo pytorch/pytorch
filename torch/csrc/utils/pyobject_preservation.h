@@ -30,8 +30,6 @@ class PyObjectPreservation {
     PyUnstable_EnableTryIncRef(pyobj);
 
     slot->pyobj_.store(pyobj, std::memory_order_relaxed);
-    slot->pyobj_interpreter_.store(
-        c10::impl::getGlobalPyInterpreter(), std::memory_order_relaxed);
     target.combined_refcount_.store(
         c10::detail::kHasPyObject | c10::detail::kUniqueRef,
         std::memory_order_relaxed);
@@ -63,8 +61,6 @@ class PyObjectPreservation {
     auto combined = target.combined_refcount_.load(std::memory_order_relaxed);
     if (combined == c10::detail::kUniqueRef) {
       slot->pyobj_.store(obj, std::memory_order_relaxed);
-      slot->pyobj_interpreter_.store(
-          c10::impl::getGlobalPyInterpreter(), std::memory_order_relaxed);
       target.combined_refcount_.store(
           c10::detail::kHasPyObject | c10::detail::kUniqueRef,
           std::memory_order_relaxed);
@@ -72,8 +68,6 @@ class PyObjectPreservation {
     }
 
     // Slow path: atomically store our new wrapper into the slot.
-    slot->pyobj_interpreter_.store(
-        c10::impl::getGlobalPyInterpreter(), std::memory_order_release);
     PyObject* expected = nullptr;
     if (!slot->pyobj_.compare_exchange_strong(
             expected, obj, std::memory_order_acq_rel)) {

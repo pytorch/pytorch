@@ -19,7 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_common import FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -142,8 +142,32 @@ def fully_shard(
     overlap. Users generally should *not* call :meth:`fully_shard` only on the
     topmost root module.
 
+    When called with a list (``fully_shard([a, b, ...])``), the model's
+    forward may run only a subset of the grouped modules, with the rest
+    called later in the same iteration. Chunked-loss training with
+    ``fully_shard([norm, head])`` is the motivating case: the main forward
+    runs norm only, then head is invoked per chunk. Caveats:
+
+    - Each standalone per-chunk invocation registers its own post_backward
+      autograd node, so N chunk calls produce N reduce-scatters for that
+      group.
+    - ``mp_policy.cast_forward_inputs`` and ``mp_policy.output_dtype``
+      both apply per module in the group — every invocation (including
+      each standalone per-chunk call) casts its inputs to ``param_dtype``
+      and its output to ``output_dtype``.
+
+    .. note::
+       If ``forward()`` or ``backward()`` raises, FSDP's per-iteration
+       state (iteration forward-root marker, grouped-module run
+       trackers, in-flight collective state, per-group training states)
+       is left in an undefined condition. To recover and run another
+       iteration, call :meth:`FSDPModule.reset_iter_state` on the root
+       FSDP module. The failed iteration's gradients are discarded,
+       including any ``no_sync`` / HSDP partial-reduce accumulation
+       state.
+
     Args:
-        module (Union[nn.Module, List[nn.Module]): The module or modules to
+        module (Union[nn.Module, List[nn.Module]]): The module or modules to
             shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
@@ -347,6 +371,34 @@ class FSDPModule:
             return handle
         handle.wait()
         return None
+
+    @_dynamo_disable
+    def reset_iter_state(self) -> None:
+        """
+        Resets FSDP's per-iteration state after an exception aborted a
+        forward or backward mid-flight. The supported recovery workflow is:
+
+        1. Catch the exception from ``forward()`` or ``backward()``.
+        2. Call ``reset_iter_state()`` on the *root* FSDP module.
+        3. Run the next iteration normally.
+
+        The reset waits on any in-flight all-gather/reduce-scatter events,
+        reshards every parameter group, and clears iteration trackers
+        (``iter_forward_root``, ``_modules_to_run_forward``, post-forward
+        order, per-group training states). Any in-flight gradient
+        reductions are discarded: the failed iteration's gradients are
+        lost, including HSDP partial-reduce-accumulation state and
+        ``no_sync`` grad-accumulation state. Callers doing gradient
+        accumulation should treat the microbatch sequence as invalidated
+        and restart it.
+
+        Must be called on the root FSDP module — i.e. the module the
+        top-level ``fully_shard`` was applied to, equivalently the
+        module first forwarded. Calling on a non-root module raises
+        ``RuntimeError``.
+        """
+        state = self._get_fsdp_state()
+        state._reset_iter_state()
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
         """
@@ -624,6 +676,122 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
+
+    def set_reduce_scatter_unused_params(
+        self, reduce_scatter_unused_params: bool, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets whether to include zero gradients for parameters that did not
+        receive a gradient in backward. This is needed when different ranks
+        use different parameters due to conditional control flow (e.g.
+        multi-modal models, mixture of experts), causing mismatched
+        reduce-scatter collectives. Similar to DDP's
+        ``find_unused_parameters``.
+
+        Args:
+            reduce_scatter_unused_params (bool): Whether to include zero
+                gradients for unused parameters in gradient reduction.
+            recurse (bool): Whether to set for all FSDP submodules or just
+                the passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.reduce_scatter_unused_params = (
+                        reduce_scatter_unused_params
+                    )
+
+    def set_reduce_scatter_max_input_buffers(
+        self, max_input_buffers: int, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets how many gradient reduce-scatter input buffers may be in flight at
+        once -- the copy-in (``chunk_cat``) buffer cap-K (experimental).
+
+        FSDP keeps **1** such buffer in flight by default, so the compute stream
+        must wait on the previous reduce-scatter before the next copy-in can
+        reuse that buffer. When the reduce-scatter is exposed (communication
+        slower than the backward compute meant to hide it), that recycle wait
+        stalls the compute stream. Raising the cap lets the next copy-in write a
+        **fresh** buffer instead of waiting -- removing the stall -- at the cost
+        of extra peak memory for the retained buffers. The copy-in stays on the
+        compute stream; there is no extra stream and no ``record_stream``. This
+        helps only when the reduce-scatter is exposed.
+
+        Args:
+            max_input_buffers (int): Max reduce-scatter input buffers retained in
+                flight (the memory<->overlap dial); must be ``>= 1``. ``1`` is
+                FSDP's default behavior (single buffer; the exposed-RS stall). A
+                small value (e.g. ``2``) bounds peak memory and adds no stall as
+                long as it is ``>=`` the reduce-scatter pipeline depth (otherwise
+                an exposed reduce-scatter trades back a tail stall); a larger
+                value retains more buffers for deeper overlap at higher peak
+                memory.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        # bool is an int subclass; reject it so True does not silently mean 1.
+        if isinstance(max_input_buffers, bool) or not isinstance(
+            max_input_buffers, int
+        ):
+            raise TypeError(
+                "max_input_buffers must be an int, got "
+                f"{type(max_input_buffers).__name__}"
+            )
+        if max_input_buffers < 1:
+            raise ValueError(
+                f"max_input_buffers must be a positive int, got {max_input_buffers}"
+            )
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.reduce_scatter_max_input_buffers = (
+                        max_input_buffers
+                    )
+
+    def set_separate_reduce_scatter_group(
+        self, enable: bool = True, *, recurse: bool = True
+    ) -> None:
+        """
+        Enables (or disables) running gradient reduce-scatter on its own process
+        group so it can overlap with all-gather in the backward pass
+        (experimental).
+
+        By default FSDP runs all-gather and reduce-scatter on separate CUDA
+        streams but through the **same** process group -- one NCCL communicator,
+        which processes one collective at a time and so serializes them on the
+        wire. When enabled, FSDP creates a dedicated process group over the shard
+        ranks (``dist.new_group(..., use_local_synchronization=True)``) -- one
+        per distinct set of shard ranks, typically a single communicator -- so
+        the two collectives can progress concurrently when the network can
+        sustain it. This is collective for each shard rank set: like other FSDP
+        comm setup, call it consistently across ranks using this FSDP mesh.
+
+        Args:
+            enable (bool): ``True`` (default) gives reduce-scatter its own
+                process group; ``False`` resets it to the shared shard/all-gather
+                group.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        # Cache created groups by shard ranks so meshes that shard over the same
+        # ranks share one communicator (typically one total), not one per mesh.
+        new_groups: dict = {}
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._set_separate_reduce_scatter_group(
+                        enable, new_groups
+                    )
 
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """

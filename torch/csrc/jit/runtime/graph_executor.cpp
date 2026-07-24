@@ -80,7 +80,7 @@ c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
 
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
-// size of the of the subgraph is too small to be profitable.
+// size of the subgraph is too small to be profitable.
 static thread_local bool autodiff_subgraph_inlining = true;
 void debugSetAutodiffSubgraphInlining(bool state) {
   autodiff_subgraph_inlining = state;

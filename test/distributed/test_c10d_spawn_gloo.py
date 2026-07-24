@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
 
 class DistributedDataParallelSingleProcessTest(TestCase):
     def setUp(self):
+        super().setUp()
         self.rank = 0
         self.world_size = 1
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -134,6 +135,26 @@ if not TEST_WITH_DEV_DBG_ASAN:
         )
         def test_broadcast(self):
             self._test_broadcast("gloo")
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_broadcast_subgroup_with_nonzero_global_src(self):
+            store = c10d.FileStore(self.file_name, self.world_size)
+            c10d.init_process_group(
+                store=store,
+                rank=self.rank,
+                world_size=self.world_size,
+                backend="gloo",
+            )
+            group = c10d.new_group([1])
+
+            if self.rank == 1:
+                x = torch.ones(5, 5, requires_grad=True)
+                y = torch.distributed.nn.broadcast(x, 1, group=group)
+                y.sum().backward()
+                self.assertEqual(x.grad, torch.ones_like(x))
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)

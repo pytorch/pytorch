@@ -244,7 +244,7 @@ void philox_distribution_kernel(
     philox_multi_key_kernel<scalar_t>
         <<<num_blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
         output.mutable_data_ptr<scalar_t>(),
-        key.data_ptr<uint64_t>(),
+        key.const_data_ptr<uint64_t>(),
         num_keys, elems_per_key,
         sample_func, param_func, key_offset_calc);
   }

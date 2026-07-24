@@ -17,7 +17,7 @@ from typing_extensions import Never
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_arg as map_arg
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import is_opaque_constant_type
 from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
@@ -169,6 +169,19 @@ _COPY_META_FIELDS = [
 ]
 
 
+# Set of (filename, co_name) pairs registered as user-code anchors. Frames
+# matching any entry are preserved by ``_filter_traceback_frames`` when
+# ``_record_forward_stack_traces_only`` is True. Populated via
+# ``_register_stack_trace_anchor`` (e.g. by ``annotate_fn``).
+_STACK_TRACE_ANCHORS: set[tuple[str, str]] = set()
+
+
+def _register_stack_trace_anchor(fn: Callable[..., Any]) -> None:
+    code = getattr(fn, "__code__", None)
+    if code is not None:
+        _STACK_TRACE_ANCHORS.add((code.co_filename, code.co_name))
+
+
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
@@ -221,7 +234,7 @@ class TracerBase:
             check_for_mutable_operation(target_fn, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be depreciated in favor of
+        # TODO node_name_to_scope will be deprecated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
@@ -293,6 +306,7 @@ class TracerBase:
                 if (
                     frame.name == "forward"
                     or frame.filename.endswith("torch/__init__.py")
+                    or (frame.filename, frame.name) in _STACK_TRACE_ANCHORS
                 )
             ]
         else:
@@ -453,7 +467,7 @@ class TracerBase:
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a  # pyrefly: ignore[bad-return]
 
-        elif is_opaque_value_type(type(a)):
+        elif is_opaque_constant_type(type(a)):
             return a
 
         elif is_dataclass(a):
@@ -480,7 +494,7 @@ class TracerBase:
         )
 
     @compatibility(is_backward_compatible=True)
-    def iter(self, obj: "Proxy") -> Iterator:
+    def iter(self, obj: "Proxy") -> Iterator:  # pyrefly: ignore[implicit-any]
         """Called when a proxy object is being iterated over, such as
         when used in control flow.  Normally we don't know what to do because
         we don't know the value of the proxy, but a custom tracer can attach more
@@ -499,9 +513,9 @@ class TracerBase:
 
     @compatibility(is_backward_compatible=True)
     def keys(self, obj: "Proxy") -> "Proxy":
-        """Called when a proxy object is has the keys() method called.
+        """Called when a proxy object has the keys() method called.
         This is what happens when ** is called on a proxy. This should return an
-        iterator it ** is suppose to work in your custom tracer.
+        iterator if ** is supposed to work in your custom tracer.
         """
         return Attribute(obj, "keys")()
 

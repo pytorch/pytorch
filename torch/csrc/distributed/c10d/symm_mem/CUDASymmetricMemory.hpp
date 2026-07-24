@@ -6,6 +6,8 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <shared_mutex>
+
 namespace c10d::symmetric_memory {
 
 // Resource wrapper that owns a (vaddr, allocation handle) pair. Upon
@@ -111,7 +113,9 @@ struct Block : public c10::intrusive_ptr_target {
   int device_idx;
   size_t block_size;
   size_t buffer_size;
-  size_t signal_pad_offset;
+  // Byte offset from the allocation base (alloc_ref->ptr) to the start of the
+  // user buffer; the signal pad occupies [0, buffer_offset).
+  size_t buffer_offset;
   std::optional<std::string> default_group_name;
   std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
 
@@ -120,7 +124,7 @@ struct Block : public c10::intrusive_ptr_target {
       int device_idx,
       size_t block_size,
       size_t buffer_size,
-      size_t signal_pad_offset,
+      size_t buffer_offset,
       const std::optional<std::string>& group_name);
 };
 

@@ -35,7 +35,7 @@ std::string FlightRecorder<EventType>::Entry::getTraceback() {
     #4 main from /home/user/repro.py:34
     #5 <module> from /home/user/repro.py:40
   */
-  return oss.str();
+  return std::move(oss).str();
 }
 
 template <typename EventType>
@@ -296,7 +296,7 @@ void FlightRecorder<EventType>::retire_id(
   }
 
   if (can_compute_duration) {
-    // Compute duration without without holding the lock, because
+    // Compute duration without holding the lock, because
     // cudaEventDuration() can hang, and we need to acquire the lock before we
     // can dump(), which we never want to block.
     guard.unlock();

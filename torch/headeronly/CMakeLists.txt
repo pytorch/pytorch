@@ -18,18 +18,27 @@ configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/torch/headeronly/macros/cmake_macros.h)
 
-file(GLOB HEADERONLY_HEADERS
-    *.h
+file(GLOB HEADERONLY_HEADERS CONFIGURE_DEPENDS
     core/**/*.h
     cpu/**/*.h
     macros/*.h
     util/*.h
 )
 
+# version.h is configure_file'd into this source directory (see
+# caffe2/CMakeLists.txt) and is the only top-level header. List it explicitly
+# rather than via a CONFIGURE_DEPENDS glob: a generated file appearing after the
+# glob snapshot forces a build-time regenerate that MSBuild reports as a failed
+# custom build (MSB8066) on Windows multi-config generators.
+set_source_files_properties(version.h PROPERTIES GENERATED TRUE)
+list(APPEND HEADERONLY_HEADERS ${CMAKE_CURRENT_LIST_DIR}/version.h)
+
 add_library(headeronly INTERFACE ${HEADERONLY_HEADERS})
 
 install(FILES ${CMAKE_BINARY_DIR}/torch/headeronly/macros/cmake_macros.h
         DESTINATION include/torch/headeronly/macros)
+install(FILES ${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h
+        DESTINATION include/torch/headeronly/core)
 
 if(NOT BUILD_LIBTORCHLESS)
   # ---[ Installation copied from c10/CMakeLists.txt

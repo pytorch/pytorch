@@ -97,6 +97,10 @@ def define_ovrsource_targets():
     oxx_static_library(
         name = "torch_headeronly_ovrsource",
         compatible_with = cpu_supported_platforms,
+        header_namespace = "",
+        public_generated_headers = {
+            "torch/headeronly/core/enum_tag.h": ":generate-enum-tag-header[enum_tag.h]",
+        },
         exported_deps = select({
             "DEFAULT": [":torch_headeronly_full_ovrsource"],
             "ovr_config//os:android": [":torch_headeronly_mobile_ovrsource"],

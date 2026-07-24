@@ -1,6 +1,6 @@
 import enum
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeAlias
 
 import torch
@@ -24,6 +24,8 @@ class GuardDebugInfo:
     result: bool
     num_guards_executed: int
     user_stack: traceback.StackSummary | None
+
+class LocalState: ...
 
 class GuardManager:
     def check(self, value: Any) -> bool: ...
@@ -308,9 +310,11 @@ class GuardManager:
         ptype: Any,
         dispatch_keys: Any,
     ) -> None: ...
-    def add_dynamic_indices_guard(
+    def add_dimension_marking_guard(
         self,
-        value: set[Any],
+        expected_attrs: dict[str, set[int]],
+        absent_attrs: list[str],
+        dependent_attrs: dict[str, tuple[dict[int, Any] | None, str]],
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
@@ -330,6 +334,13 @@ class GuardManager:
     def add_type_match_guard(
         self,
         value: int,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
+    def add_fake_script_type_match_guard(
+        self,
+        fake_script_object_type: type,
+        type_id: int,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
@@ -398,6 +409,8 @@ class RootGuardManager(GuardManager):
         self, clone_filter_fn: Callable[[GuardManager], bool]
     ) -> RootGuardManager: ...
     def attach_compile_id(self, compile_id: str) -> None: ...
+    def get_local_state(self) -> LocalState: ...
+    def set_local_state(self, local_state: LocalState) -> None: ...
 
 class DictGuardManager(GuardManager):
     def get_key_manager(
@@ -483,6 +496,12 @@ def assert_size_stride(
     item: torch.Tensor,
     size: torch.types._size,
     stride: torch.types._size,
+    op_name: str | None = None,
+) -> None: ...
+def assert_size_stride_grouped(
+    items: Sequence[torch.Tensor],
+    sizes: Sequence[torch.types._size],
+    strides: Sequence[torch.types._size],
     op_name: str | None = None,
 ) -> None: ...
 def assert_alignment(

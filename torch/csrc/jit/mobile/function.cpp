@@ -217,7 +217,7 @@ std::optional<std::function<void(Stack&)>> makeOperatorFunction(
             static_cast<size_t>(num_specified_args.value()) >= out_args.size(),
             "The number of output arguments is: ",
             out_args.size(),
-            ", which is more then the number of specified arguments: ",
+            ", which is more than the number of specified arguments: ",
             num_specified_args.value());
         size_t start_index = num_specified_args.value() - out_args.size();
         for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {

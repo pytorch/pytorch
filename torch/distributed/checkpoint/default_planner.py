@@ -47,6 +47,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _init_state_dict,
     _merge_delta_local_plans,
 )
+from torch.distributed.checkpoint.protocol import _is_checkpointable_tensor
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.tensor import DTensor
 
@@ -348,7 +349,7 @@ class DefaultLoadPlanner(LoadPlanner):
             # 2. If we found a missing key, we first convert the keys back to
             #    the key format of v2.3
             # 3. If the previous missing keys are in the v2.3 keys, we assume
-            #    this is a old checkpoint.
+            #    this is an old checkpoint.
             # 4. Pass the state_dict to `create_default_local_load_plan()`,
             #    which has the logic to check missing for allow_partial_load.
             # So for 1.2 and 1.4 cases, we delegate allow_partial_load check to
@@ -500,11 +501,16 @@ def create_default_local_load_plan(
         if (
             isinstance(md, TensorStorageMetadata)
             and getattr(obj, "size", None) is not None
-            and md.size != obj.size()
         ):
-            raise ValueError(
-                f"Size mismatch between saved {md.size} and current: {obj.size()} for {fqn}",
+            obj_size = (
+                torch.Size(obj.global_shape)
+                if _is_checkpointable_tensor(obj)
+                else obj.size()
             )
+            if md.size != obj_size:
+                raise ValueError(
+                    f"Size mismatch between saved {md.size} and current: {obj_size} for {fqn}",
+                )
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
         if isinstance(obj, DTensor):
@@ -548,7 +554,7 @@ def create_default_local_save_plan(
                 requests += _create_write_items(fqn, obj)
         else:
             # For the plain tensor and non-tensor values, add the request for all
-            # the ranks. Coordinator will decides whether to deduplicate the
+            # the ranks. Coordinator will decide whether to deduplicate the
             # values based on the keys.
             requests += _create_write_items(fqn, obj)
 

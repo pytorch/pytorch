@@ -152,7 +152,9 @@ def eager_debug(
 def torchscript(
     gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor]
 ) -> torch.jit.ScriptModule:
-    return torch.jit.script(gm)
+    from torch.fx._lazy_graph_module import _unwrap_lazy_graph_module
+
+    return torch.jit.script(_unwrap_lazy_graph_module(gm))
 
 
 def invoke_subgraph_inner_compiler(
@@ -166,15 +168,19 @@ def invoke_subgraph_inner_compiler(
     from torch._dynamo import disable
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
 
-    @disable
     # pyrefly: ignore [deprecated]
     @torch._dynamo.allow_in_graph
+    @disable
     def invoke_subgraph_wrapper_unboxed(*operands: Any) -> Any:
         return invoke_subgraph_infer(subgraph, *operands)
 
     # NB: The direct to unboxed path is broken, you MUST DO THIS
 
     def invoke_subgraph_wrapper(args: list[Any]) -> Any:
+        # `allow_in_graph` is untyped and its `list` branch leaks a
+        # `list | fn` union into the inferred return; as the outer decorator
+        # here that makes `invoke_subgraph_wrapper_unboxed` look non-callable.
+        # pyrefly: ignore [not-callable]
         return invoke_subgraph_wrapper_unboxed(*args)
 
     invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
@@ -275,13 +281,15 @@ class AOTEagerOutputCode(OutputCode):
     _serialized_gm: bytes | None = dataclasses.field(default=None, init=False)
 
     def __call__(self, inputs: Any) -> Any:
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("gm must not be None")
         return self.gm.forward(inputs)
 
     def prepare_for_serialization(self) -> None:
         from torch.fx._graph_pickler import GraphPickler, Options
 
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("gm must not be None")
         for node in self.gm.graph.nodes:
             node.meta.pop("nn_module_stack", None)
             node.meta.pop("source_fn_stack", None)
@@ -299,9 +307,9 @@ class AOTEagerOutputCode(OutputCode):
 
             fake_mode = FakeTensorMode(shape_env=ShapeEnv())
             gm = GraphPickler.loads(self._serialized_gm, fake_mode)
-            assert isinstance(gm, torch.fx.GraphModule)
+            if not isinstance(gm, torch.fx.GraphModule):
+                raise AssertionError(f"Expected torch.fx.GraphModule, got {type(gm)}")
             self.gm = gm
-            assert isinstance(self.gm, torch.fx.GraphModule)
             self.gm.graph.set_codegen(_BoxedCodeGen())
             self.gm.recompile()
             self._serialized_gm = None
@@ -398,7 +406,11 @@ def get_nop_func() -> Callable[
     elif torch._functorch.config.fake_tensor_crossref == "all":
         return fake_crossref_boxed_nop
     else:
-        assert torch._functorch.config.fake_tensor_crossref == "custom_ops"
+        if torch._functorch.config.fake_tensor_crossref != "custom_ops":
+            raise AssertionError(
+                f"Expected fake_tensor_crossref to be 'custom_ops', "
+                f"got {torch._functorch.config.fake_tensor_crossref!r}"
+            )
         return functools.partial(fake_crossref_boxed_nop, ignore_op_fn=ignore_builtins)
 
 

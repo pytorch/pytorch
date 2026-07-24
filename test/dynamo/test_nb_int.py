@@ -2,8 +2,8 @@
 """Tests for nb_int_impl: unified __int__ / int() protocol in Dynamo."""
 
 import torch
-import torch._dynamo.testing
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class NbIntTests(TestCase):
@@ -185,6 +185,23 @@ class NbIntTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertIn("__int__ returned non-int", result)
 
+    def test_int_returning_float_raises(self):
+        # A numeric-but-wrong-type return (float is not int) must still raise.
+        class Bad:
+            def __int__(self):
+                return 3.0
+
+        obj = Bad()
+
+        def fn(x):
+            try:
+                return int(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertIn("__int__ returned non-int (type float)", result)
+
     def test_int_raising_exception_propagates(self):
         class RaisingInt:
             def __int__(self):
@@ -302,6 +319,25 @@ class NbIntTests(TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
         self.assertEqual(result, 5)
+
+    # --- Blocked slot: __int__ = None ---
+
+    def test_user_defined_int_none_raises(self):
+        class NoInt:
+            __int__ = None
+
+        obj = NoInt()
+
+        def fn(x):
+            try:
+                return int(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        eager_result = fn(torch.tensor(0))
+        self.assertIn("NoneType", result)
+        self.assertEqual(result, eager_result)
 
     # --- SymNodeVariable ---
 

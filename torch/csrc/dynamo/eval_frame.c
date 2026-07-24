@@ -12,9 +12,9 @@
 
 #if IS_PYTHON_3_14_PLUS && defined(_WIN32)
 #define Py_BUILD_CORE
-#include <internal/pycore_stackref.h>
 #include <internal/pycore_code.h>
 #include <internal/pycore_interpframe.h>
+#include <internal/pycore_stackref.h>
 #undef Py_BUILD_CORE
 #endif
 
@@ -28,6 +28,7 @@ typedef struct {
 // static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
+static int64_t current_isolate_recompiles_id = -1;
 
 static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -42,8 +43,38 @@ void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-// 3.15 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_15_PLUS)
+int64_t get_current_isolate_recompiles_id(void) {
+  return current_isolate_recompiles_id;
+}
+
+static void set_current_isolate_recompiles_id(int64_t id) {
+  current_isolate_recompiles_id = id;
+}
+
+static PyObject* get_eval_frame_isolate_recompiles_id_py(
+    PyObject* dummy,
+    PyObject* args) {
+  return PyLong_FromLongLong(get_current_isolate_recompiles_id());
+}
+
+static PyObject* set_eval_frame_isolate_recompiles_id_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  if (!PyLong_Check(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected an int");
+    return NULL;
+  }
+  int64_t new_id = PyLong_AsLongLong(arg);
+  if (new_id == -1 && PyErr_Occurred()) {
+    return NULL;
+  }
+  int64_t old_id = get_current_isolate_recompiles_id();
+  set_current_isolate_recompiles_id(new_id);
+  return PyLong_FromLongLong(old_id);
+}
+
+// 3.16 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_16_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -68,6 +99,9 @@ static PyObject* THPPyInterpreterFrame_f_locals(
 static PyObject* THPPyInterpreterFrame_f_executable(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
+  if (PyStackRef_IsNull(self->frame->f_executable)) {
+    Py_RETURN_NONE;
+  }
   return PyStackRef_AsPyObjectNew(self->frame->f_executable);
 }
 #elif IS_PYTHON_3_13_PLUS
@@ -237,7 +271,11 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 
 #if IS_PYTHON_3_14_PLUS
 static void dup_obj(_PyStackRef* dst, _PyStackRef src) {
-  *dst = PyStackRef_DUP(src);
+  if (PyStackRef_IsNull(src)) {
+    *dst = PyStackRef_NULL;
+  } else {
+    *dst = PyStackRef_DUP(src);
+  }
 }
 #else
 static void dup_obj(PyObject** dst, PyObject* src) {
@@ -644,8 +682,7 @@ static PyObject* set_skip_guard_eval_unsafe(
 static PyObject* get_eval_frame_callback_py(PyObject* dummy, PyObject* args) {
   // New reference
   PyObject* callback = eval_frame_callback_get();
-  Py_INCREF(callback);
-  return callback;
+  return Py_NewRef(callback);
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
@@ -667,8 +704,7 @@ static PyObject* unsupported(PyObject* dummy, PyObject* args) {
   if (!PyArg_ParseTuple(args, "OO", &obj1, &obj2)) {
     return NULL;
   }
-  Py_INCREF(obj2);
-  return obj2;
+  return Py_NewRef(obj2);
 }
 
 static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
@@ -790,6 +826,8 @@ static PyMethodDef _methods[] = {
      set_fullgraph_error_on_nested_compile_py,
      METH_O,
      NULL},
+    {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
+    {"get_eval_frame_isolate_recompiles_id", get_eval_frame_isolate_recompiles_id_py, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -827,14 +865,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
 #endif
 
-  if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
-    return NULL;
-  }
-  Py_INCREF(&THPPyInterpreterFrameType);
-  if (PyModule_AddObject(
-          module,
-          "_PyInterpreterFrame",
-          (PyObject*)&THPPyInterpreterFrameType) != 0) {
+  if (PyModule_AddType(module, &THPPyInterpreterFrameType) < 0) {
     return NULL;
   }
 

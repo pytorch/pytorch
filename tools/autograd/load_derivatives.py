@@ -174,7 +174,7 @@ def load_derivatives(
 
         add_view_copy_derivatives(infos, view_groups)
 
-        # cache both loaded infos as well a a set of all the dispatch_keys/aliases
+        # cache both loaded infos as well as a set of all the dispatch_keys/aliases
         # that appear in derivatives.yaml. used_dispatch_keys is useful for generating
         # VariableType.cpp where we need a TORCH_LIBRARY_IMPL for every autograd dispatch key used
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos, used_dispatch_keys
