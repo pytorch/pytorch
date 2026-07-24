@@ -390,41 +390,7 @@ class TracerBase:
 
         return proxy
 
-    def _find_user_frame(self) -> types.FrameType | None:
-        """
-        Find the Python stack frame executing the user code during
-        symbolic tracing.
-        """
-        # We have to do a little dance here. Basically, walk up the callstack and
-        # record the first frame not in the pytorch source. This is the frame executing
-        # the user code during tracing.
-        frame = inspect.currentframe()
-
-        pt_files = [
-            "torch/fx/proxy.py",
-            "torch/fx/_symbolic_trace.py",
-            "torch/fx/experimental/proxy_tensor.py",
-            "torch/_ops.py",
-            "torch/_tensor.py",
-            "torch/utils/_python_dispatch.py",
-            "torch/_prims_common/wrappers.py",
-            "torch/_refs/__init__.py",
-            "torch/_refs/nn/functional/__init__.py",
-            "torch/utils/_stats.py",
-        ]
-        while frame:
-            frame = frame.f_back
-            if frame and all(
-                not frame.f_code.co_filename.endswith(file) for file in pt_files
-            ):
-                break
-
-        if not frame:
-            return None
-
-        return frame
-
-    @compatibility(is_backward_compatible=True)
+        @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> Argument:
         """
         A method that lowers the objects seen as arguments during symbolic evaluation
