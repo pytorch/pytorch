@@ -42,6 +42,7 @@ index 0da611a..68435cb 100644
 -class TestIOCTypes(unittest.TestCase):
 +class TestIOCTypes(__TestCase):
      def setUp(self):
++        super().setUp()
          _io = import_helper.import_module("_io")
          self.types = [
 @@ -1199,7 +1219,7 @@ class PyIOTest(IOTest):

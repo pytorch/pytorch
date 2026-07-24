@@ -1113,6 +1113,7 @@ class CIOTest(IOTest):
 @support.cpython_only
 class TestIOCTypes(__TestCase):
     def setUp(self):
+        super().setUp()
         _io = import_helper.import_module("_io")
         self.types = [
             _io.BufferedRWPair,
