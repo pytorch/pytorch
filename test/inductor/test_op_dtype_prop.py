@@ -85,7 +85,6 @@ class TestCase(InductorTestCase):
 
     @requires_gpu()
     @parametrize("upcast_to_fp32", [False, True])
-    @config.patch("triton.use_block_ptr", True)
     def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
         @torch.compile
         def func(a, b, c, d):
@@ -112,7 +111,6 @@ class TestCase(InductorTestCase):
         ],
     )
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
-    @config.patch("triton.use_block_ptr", True)
     def test_low_precision_reduction(self, input_shape, reduction_func, input_dtype):
         @torch.compile
         def func(a, b, c, d):
@@ -174,7 +172,6 @@ class TestCase(InductorTestCase):
     @parametrize("op_name", OpDtypeSupport.supported_dtypes)
     @parametrize("load_upcast_to_fp32", [False, True])
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
-    @config.patch("triton.use_block_ptr", True)
     def test_dtype_aware_codegen(self, op_name: str, load_upcast_to_fp32, input_dtype):
         """
         Test dtype aware codegen for some tl.math/libdevice calls.

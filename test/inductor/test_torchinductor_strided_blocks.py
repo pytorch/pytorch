@@ -1598,15 +1598,6 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1]" in code)
 
 
-@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
-@config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
-    device = GPU_TYPE
-
-
-test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
-
-
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch({"triton.use_tensor_descriptor": True, "cpu_backend": "triton"})
 @instantiate_parametrized_tests
