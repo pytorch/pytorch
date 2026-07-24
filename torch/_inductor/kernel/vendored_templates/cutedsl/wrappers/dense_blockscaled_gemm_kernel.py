@@ -28,6 +28,11 @@ from cutlass.operators.utils.common import tuple_to_string
 from cutlass.operators.utils.device import to_cuda_stream
 from cutlass.operators.utils.tensor import strides_to_layout_string
 
+from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+    canonical_tensorssa_reduction_type,
+    materialize_tensorssa_reduction,
+)
+
 
 log = logging.getLogger(__name__)
 
@@ -253,6 +258,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             or local_reduce_feed_out is not None
             or local_reduce_feeds_main
         ):
+            reduction = materialize_tensorssa_reduction(
+                canonical_tensorssa_reduction_type(args.local_reduce_type),
+                args.local_reduce_source,
+                args.local_reduce_type,
+            )
             return self.cute_compile(
                 self.impl,
                 args.A.tensor,
@@ -285,6 +295,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 args.local_reduce_type,
                 args.local_reduce_source,
                 local_reduce_feeds_main,
+                reduction.reduce_op,
+                reduction.init_val,
+                reduction.combine,
+                reduction.source,
+                reduction.finalize,
                 target_sm=target_sm,
             )
         return self.cute_compile(
