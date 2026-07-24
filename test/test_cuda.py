@@ -2913,6 +2913,7 @@ torch.cuda.synchronize()
         torch.cuda.synchronize()
         return x, w, y
 
+    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -2936,6 +2937,7 @@ torch.cuda.synchronize()
                 g.capture_end()
         torch.cuda.synchronize()
 
+    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
