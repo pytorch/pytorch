@@ -18,6 +18,10 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+    VendoredDenseBlockScaledGemmEFC,
+    VendoredDenseBlockScaledGemmKernel,
+)
 
 
 log = logging.getLogger(__name__)
@@ -348,11 +352,6 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
             target_sm=f"{cc}a",
         )
         if out:
-            from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
-                VendoredDenseBlockScaledGemmEFC,
-                VendoredDenseBlockScaledGemmKernel,
-            )
-
             efc = []
             for op in out:
                 if op.metadata.operator_class is not VendoredDenseBlockScaledGemmKernel:
