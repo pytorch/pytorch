@@ -145,7 +145,7 @@ ROCM_SO_FILES: list[str] = [
     "librccl.so",
     "librocblas.so",
     "librocfft.so",
-    "librocm_smi64.so",
+    "libamd_smi.so",
     "librocrand.so",
     "librocsolver.so",
     "librocsparse.so",
