@@ -36,13 +36,11 @@ class FlyDSLTemplateKernel(Kernel):
         kernel_name: str,
         input_nodes: list[Buffer],
         output_node: Buffer,
-        subgraphs: list[Buffer] | None = None,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
         self.input_nodes = input_nodes
         self.output_node = output_node
-        self.subgraphs = subgraphs
         self.render_hooks: dict[str, Callable[[], str] | None] = {}
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
@@ -90,7 +88,6 @@ class FlyDSLTemplateKernel(Kernel):
     def render(self, template, **kwargs):
         from torch._inductor.select_algorithm import PartialRender
 
-        self._template_kwargs = dict(kwargs)
         template_env = {
             "def_kernel": self.def_kernel,
             "gen_defines": lambda: self.gen_defines(**kwargs),
@@ -157,7 +154,6 @@ class FlyDSLTemplateKernel(Kernel):
     def call_kernel(self, name: str, node=None):
         wrapper = V.graph.wrapper_code
         call_args = []
-        arg_types = []
 
         for _, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)
@@ -166,19 +162,13 @@ class FlyDSLTemplateKernel(Kernel):
                 if reinterpret_view is not None
                 else input_node.get_name()
             )
-            arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
         with self._patch_get_dtype_for_args():
-            orig_arg_defs, orig_call_args, _, orig_arg_types = (
-                self.args.python_argdefs()
-            )
-        for arg_def, call_arg, arg_type in zip(
-            orig_arg_defs, orig_call_args, orig_arg_types
-        ):
+            orig_arg_defs, orig_call_args, _, _ = self.args.python_argdefs()
+        for arg_def, call_arg in zip(orig_arg_defs, orig_call_args):
             if arg_def.full_name() in self._seen_input_args:
                 continue
             call_args.append(call_arg)
-            arg_types.append(arg_type)
 
         # FlyDSL generated modules expose `{kernel_name}_main` as a normal
         # Python callable.  Calling it directly avoids the Triton-specific

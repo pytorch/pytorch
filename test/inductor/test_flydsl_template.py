@@ -98,6 +98,7 @@ class TestFlyDSLTemplate(TestCase):
                 return_value=mock.Mock(),
             ):
                 FlyDSLTemplate(name=template_name, source="template1")
+                FlyDSLTemplate(name=template_name, source="template1")
                 with self.assertRaisesRegex(
                     AssertionError, f"duplicate template name, {template_name}"
                 ):
@@ -133,13 +134,27 @@ class TestFlyDSLTemplate(TestCase):
             {
                 "FLYDSL_GPU_ARCH": "",
                 "ARCH": "",
-                "HSA_OVERRIDE_GFX_VERSION": "9.5.0",
+                "HSA_OVERRIDE_GFX_VERSION": "9.0.10",
             },
         ):
             self.assertEqual(
                 FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0),
-                "gfx950",
+                "gfx90a",
             )
+
+    def test_scheduling_ignores_generic_arch(self):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "FLYDSL_GPU_ARCH": "",
+                    "HSA_OVERRIDE_GFX_VERSION": "",
+                    "ARCH": "x86_64",
+                },
+            ),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            self.assertIsNone(FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0))
 
 
 if __name__ == "__main__":

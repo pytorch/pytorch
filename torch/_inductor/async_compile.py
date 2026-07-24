@@ -672,9 +672,10 @@ class AsyncCompile:
 
     def _load_kernel_wrapper(self, kernel_name, main_suffix, wrapper_cls, key, path):
         """Reload a kernel module from PyCodeCache and wrap the entry point."""
-        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-        main_func_name = f"{kernel_name}_{main_suffix}"
-        return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
+        return wrapper_cls(
+            self._load_kernel_fn(kernel_name, main_suffix, key, path),
+            kernel_path=path,
+        )
 
     def _load_kernel_fn(self, kernel_name, main_suffix, key, path):
         """Reload a kernel module from PyCodeCache and return its entry point."""
@@ -768,9 +769,10 @@ class AsyncCompile:
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
-            for env_var in ("TORCHINDUCTOR_CACHE_DIR", "FLYDSL_RUNTIME_CACHE_DIR"):
-                if env_var in os.environ:
-                    extra_env[env_var] = os.environ[env_var]
+            if "FLYDSL_RUNTIME_CACHE_DIR" in os.environ:
+                extra_env["FLYDSL_RUNTIME_CACHE_DIR"] = os.environ[
+                    "FLYDSL_RUNTIME_CACHE_DIR"
+                ]
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,
