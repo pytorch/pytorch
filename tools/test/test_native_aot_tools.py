@@ -258,8 +258,9 @@ class _FakeDecl:
     ATEN_OP = "fakeop"
     DISPATCH_KEY = "CUDA"
     # Set explicitly: fixtures bypass the validating loader, which is
-    # what normalizes ARCHS on real declarations.
-    ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+    # what normalizes ARCHS on real declarations. Annotated so
+    # subclasses can narrow it without a bad-override.
+    ARCHS: tuple[str, ...] = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 
     @staticmethod
     def cpp_dispatch_prelude():
@@ -312,7 +313,9 @@ class TestAotSourceGeneration(unittest.TestCase):
 
     def test_prelude_optional(self):
         class NoPrelude(_FakeDecl):
-            cpp_dispatch_prelude = None
+            # The contract's "absent prelude" case; the deliberate
+            # callable -> None override trips bad-override.
+            cpp_dispatch_prelude = None  # pyrefly: ignore [bad-override]
 
         sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
         src = gen_aot_lib.gen_op(
@@ -395,7 +398,7 @@ class TestReadOnlyInputs(unittest.TestCase):
     # copy-on-write inputs on each call.
 
     def test_cutedsl_launcher(self):
-        sc = dict(SIDECAR)
+        sc: dict = dict(SIDECAR)
         sc["tensor_args"] = [
             {"name": "mX", "dynamic_sizes": [0], "read_only": True},
             {"name": "mOut", "dynamic_sizes": [0]},
