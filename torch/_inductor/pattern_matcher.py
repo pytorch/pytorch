@@ -2305,7 +2305,7 @@ def register_lowering_pattern(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Register an aten to inductor IR replacement pattern.  The decorated
-    function is saved and then called a lowering time allowing direct
+    function is saved and then called at lowering time allowing direct
     pattern to inductor IR conversion.
     """
 
