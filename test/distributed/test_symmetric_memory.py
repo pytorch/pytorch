@@ -107,6 +107,27 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
         # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_rendezvous_mismatch_fails_fast(self) -> None:
+        self._init_process()
+
+        # Desynchronize allocation IDs: rank 0 does an extra allocation,
+        # so its alloc_id sequence is shifted by 1 relative to other ranks.
+        if self.rank == 0:
+            extra = symm_mem.empty(64, device="cuda")
+
+        t = symm_mem.empty(64, device="cuda")
+
+        # This collective rendezvous should detect the alloc_id mismatch and fail fast
+        # rather than silent collective corruption.
+        with self.assertRaises(RuntimeError) as ctx:
+            symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        self.assertIn("Symmetric window mismatch detected during rendezvous", str(ctx.exception))
+
     @requires_cuda
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"

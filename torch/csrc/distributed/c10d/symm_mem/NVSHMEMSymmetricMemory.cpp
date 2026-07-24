@@ -43,16 +43,19 @@ struct NVSHMEMAllocation {
   size_t buffer_size;
   size_t buffer_offset;
   int device_idx;
+  int64_t alloc_id{-1};
 
   NVSHMEMAllocation(
       void* alloc_base,
       size_t buffer_size,
       size_t buffer_offset,
-      int device_idx)
+      int device_idx,
+      int64_t alloc_id)
       : alloc_base(alloc_base),
         buffer_size(buffer_size),
         buffer_offset(buffer_offset),
-        device_idx(device_idx) {}
+        device_idx(device_idx),
+        alloc_id(alloc_id) {}
 
   // Delete copy and move operations to prevent double-free
   NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
@@ -422,12 +425,17 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // alloc_base in its destructor, so free() only needs the data ptr to drop
     // the allocation entry.
     void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
+    int64_t alloc_id = 0;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      alloc_id = alloc_counter_++;
+    }
     {
       std::lock_guard<std::mutex> lock(mutex_);
       allocations_.try_emplace(
           buffer_ptr,
           std::make_unique<NVSHMEMAllocation>(
-              alloc_base, size, buffer_offset, device_idx));
+              alloc_base, size, buffer_offset, device_idx, alloc_id));
     }
     return buffer_ptr;
   }
@@ -446,6 +454,22 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     }
     return it->second->buffer_size;
   };
+
+  int64_t get_alloc_id(void* ptr) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto alloc_it = std::find_if(
+        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
+          auto& allocation = pair.second;
+          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+          auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
+          return ptr_int >= buffer_ptr &&
+              ptr_int < buffer_ptr + allocation->buffer_size;
+        });
+    if (alloc_it != allocations_.end()) {
+      return alloc_it->second->alloc_id;
+    }
+    return -1;
+  }
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
@@ -550,6 +574,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       c10::intrusive_ptr<NVSHMEMSymmetricMemory>,
       SymmMemKeyHash>
       symm_mems_;
+  int64_t alloc_counter_{0};
 };
 
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
