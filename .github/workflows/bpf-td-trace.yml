@@ -66,10 +66,12 @@ jobs:
       - canary
     uses: ./.github/workflows/_linux-build.yml
     with:
-      # Keep raw EC2 labels (skip-arc-mapping) so the test shards land on the
-      # classic docker-on-VM pool where a privileged container can mount
-      # tracefs; ARC strips those caps. The build itself still runs on ARC.
-      runner_prefix: ""
+      # skip-arc-mapping keeps the test matrix's raw EC2 labels (linux.4xlarge)
+      # so shards land on the classic docker-on-VM pool where a privileged
+      # container can mount tracefs (ARC strips those caps). runner_prefix still
+      # applies to the BUILD's own runner (label-type is mt-); zeroing it points
+      # the build at a dead bare label, so keep it.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       skip-arc-mapping: "true"
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
