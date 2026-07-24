@@ -51,6 +51,7 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     GatherOptions,
     get_debug_level,
+    NanCheckHook,
     PrefixStore,
     ProcessGroup,
     ReconfigureOptions,
@@ -1114,6 +1115,7 @@ class _World:
         self._default_pg = None
         self._pg_coalesce_state: dict[ProcessGroup, list[_CollOp]] = {}
         self._comms: list[_TorchComm] = []
+        self._nan_check_hooks: dict[ProcessGroup, NanCheckHook] = {}
 
     @property
     def default_pg(self) -> ProcessGroup | None:
@@ -1207,6 +1209,16 @@ class _World:
     @property
     def comms(self) -> list[_TorchComm]:
         return self._comms
+
+    @property
+    def nan_check_hooks(self) -> dict[ProcessGroup, NanCheckHook]:
+        """
+        NaN check hooks attached via TORCH_DIST_NAN_CHECK.
+
+        The handles are kept here so the hooks stay attached for the lifetime of
+        their process group.
+        """
+        return self._nan_check_hooks
 
     @property
     def pg_config_info(self) -> list[_WorldPGConfig]:
@@ -2828,6 +2840,11 @@ def _new_process_group_helper(
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
 
+    # Backend-agnostic NaN checking, for backends without a native checker
+    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself).
+    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
+        _world.nan_check_hooks[pg] = NanCheckHook.attach(pg)
+
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
         eager_backend.eager_connect_single_device(device_id)
@@ -2914,6 +2931,7 @@ def destroy_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
+        _world.nan_check_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -2946,6 +2964,7 @@ def destroy_process_group(
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
+        _world.nan_check_hooks.pop(pg, None)
         if pg in _world.pg_coalesce_state:
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
@@ -3030,6 +3049,7 @@ def _abort_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
+        _world.nan_check_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3047,6 +3067,7 @@ def _abort_process_group(
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
+        _world.nan_check_hooks.pop(pg, None)
         if pg in _world.pg_coalesce_state:
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
@@ -7627,6 +7648,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
     - _world.pg_backend_config (backend configuration)
     - _world.tags_to_pg and _world.pg_to_tag (tag mappings)
     - _world.pg_coalesce_state (coalescing state)
+    - _world.nan_check_hooks (TORCH_DIST_NAN_CHECK hook handles)
     - C++ internal registries via _unregister_process_group
 
     Args:
@@ -7663,6 +7685,9 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
 
         # Clean up coalesce state if present
         _world.pg_coalesce_state.pop(pg, None)
+
+        # Dropping the handle detaches the hook from the group
+        _world.nan_check_hooks.pop(pg, None)
 
     except Exception:
         # Log cleanup failures but don't propagate - we want to continue with other cleanups
