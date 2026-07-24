@@ -210,6 +210,39 @@ def _run_job(job) -> str:
     return export_point(op_pkg, kernel_module, point, out_dir)
 
 
+def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
+    """TORCH_CUDA_ARCH_LIST -> sm strings the DSL toolchains accept,
+    restricted to EXPORT_SMS.
+
+    "9.0a;10.0a" (or space-separated) -> ["sm_100a"]. Named entries
+    ("Hopper") and +PTX suffixes are not translated -- callers should
+    pass numeric lists (CI does)."""
+    out = []
+    for entry in arch_list.replace(";", " ").split():
+        entry = entry.removesuffix("+PTX")
+        parts = entry.split(".")
+        if len(parts) != 2 or not parts[0].isdigit():
+            continue  # named arch ("Hopper") or malformed: skip
+        minor = parts[1]
+        suffix = "a" if minor.endswith("a") else ""
+        minor_num = minor.removesuffix("a")
+        if not minor_num.isdigit():
+            continue
+        sm = f"sm_{int(parts[0]) * 10 + int(minor_num)}{suffix}"
+        if sm in EXPORT_SMS:
+            out.append(sm)
+    return out
+
+
+# Architectures the standard build exports AOT kernels for: Blackwell
+# only, for now. Entries outside this set are skipped (not failed), so
+# a mixed arch list ("7.5 9.0a 10.0a") exports just the Blackwell
+# subset and other builds proceed without artifacts. Single-arch also
+# keeps the flat artifacts layout the embedded link globs (multi-arch
+# nests per-arch trees, which the link does not walk).
+EXPORT_SMS = ("sm_100", "sm_100a", "sm_103", "sm_103a")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", default=os.path.join(REPO, "build", "native_aot"))

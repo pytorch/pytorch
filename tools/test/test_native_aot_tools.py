@@ -101,6 +101,25 @@ class TestExportJobs(unittest.TestCase):
         self.assertEqual(export.export_point.__qualname__, "export_point")
 
 
+class TestArch(unittest.TestCase):
+    def test_arch_gate_from_declaration_and_sidecars(self):
+        class Pinned(_FakeDecl):
+            ARCHS = ("sm_90a", "sm_100a")
+
+        # Shipped subset gates on the subset.
+        gate = gen_aot_lib._arch_gate(Pinned, [{"arch": "sm_100a"}])
+        self.assertIn("major == 10", gate)
+        self.assertNotIn("major == 9", gate)
+        # On-device sidecars (no arch) gate on the declaration's ARCHS.
+        gate = gen_aot_lib._arch_gate(Pinned, [{"arch": None}])
+        self.assertIn("major == 9", gate)
+        self.assertIn("major == 10", gate)
+        # Shipped arch outside ARCHS is a packaging error.
+        with self.assertRaisesRegex(RuntimeError, "supports only"):
+            gen_aot_lib._arch_gate(Pinned, [{"arch": "sm_80"}])
+
+
+
 class TestSpecExpansion(unittest.TestCase):
     def test_cross_product(self):
         pts = export.expand_specs(
@@ -163,6 +182,9 @@ class _FakeDecl:
 
     ATEN_OP = "fakeop"
     DISPATCH_KEY = "CUDA"
+    # Set explicitly: fixtures bypass the validating loader, which is
+    # what normalizes ARCHS on real declarations.
+    ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 
     @staticmethod
     def cpp_dispatch_prelude():
