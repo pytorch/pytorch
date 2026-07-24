@@ -32,6 +32,9 @@ class Benchmark(BenchmarkBase):
 
     def name(self):
         prefix = f"{self.category()}_{self.backend()}"
+        # Disambiguate non-cuda variants; keep existing cuda names unchanged.
+        if self.device() != "cuda":
+            prefix += f"_{self.device()}"
         if self._requires_grad:
             prefix += "_requires_grad"
         if self._inference_mode:
