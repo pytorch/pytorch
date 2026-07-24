@@ -1850,7 +1850,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             raise AssertionError("'res' should not be None")
 
         if using_len:
-            res = generic_bool(tx, res)
+            return generic_bool(tx, res)
         elif res.python_type() is bool:  # pybool_check
             return res
         else:
@@ -1866,11 +1866,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # ref: slot_tp_repr in https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
         if type(self.value).__repr__ is object.__repr__:
             return VariableTracker.build(tx, repr(self.value))
+        # A C-implemented __repr__ (e.g. `__repr__ = str.upper`) has no Python
+        # body to trace and graph breaks in _maybe_call_special.
         res = self._maybe_call_special(tx, "__repr__", [])
-        if res:
+        if res is not None:
             return res
-        return variables.ConstantVariable.create(
-            f"<{self.python_type_name()} object at f{id(self.value):#x}>"
+        unimplemented(
+            gb_type="untraceable user-defined __repr__",
+            context=f"Could not trace __repr__ override for {type(self.value).__name__}",
+            explanation="Dynamo could not safely trace this user-defined __repr__ override.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
         )
 
     def str_impl(
