@@ -838,7 +838,10 @@ class TestNVUniversalGemmHeuristics(TestCase):
             self.assertNotEqual(specialization, _local_reduce_specialization(variant))
 
     def test_local_reduce_plan_deduplicates_outputs(self):
-        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+        from torch._inductor.kernel.gemm_epilogue import (
+            GemmReductionExpression,
+            GemmReductionPlan,
+        )
 
         plan = GemmReductionPlan(
             reduction_output="aux",
@@ -851,6 +854,38 @@ class TestNVUniversalGemmHeuristics(TestCase):
             secondary_feed_output="output",
         )
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
+        expression = GemmReductionExpression.parse("mean_linear:1:2:3")
+        self.assertEqual(expression.serialize(), "mean_linear:1:2:3")
+        with self.assertRaisesRegex(ValueError, "expects 3"):
+            GemmReductionExpression.parse("mean_linear:1:2")
+
+    def test_reduction_pattern_near_misses(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            is_absmax_normalize_ir,
+            is_logsumexp_ir,
+            is_softmax_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+        scale = Expr("load", ("scale", 0, None))
+        one = Expr("constant", (1.0, torch.float32))
+        near_softmax = Expr("truediv", (Expr("exp", (load,)), Expr("add", (load, one))))
+        near_absmax = Expr(
+            "mul", (load, Expr("reciprocal", (Expr("add", (scale, one)),)))
+        )
+        near_logsumexp = Expr(
+            "add", (Expr("log", (Expr("exp", (load,)),)), Expr("maximum", (load, one)))
+        )
+
+        self.assertFalse(is_softmax_ir(GemmEpilogueIRStore(0, near_softmax), "gemm", 4))
+        self.assertFalse(
+            is_absmax_normalize_ir(GemmEpilogueIRStore(0, near_absmax), "gemm", "scale")
+        )
+        self.assertFalse(
+            is_logsumexp_ir(GemmEpilogueIRStore(0, near_logsumexp), "gemm", 4)
+        )
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
@@ -1629,6 +1664,21 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
         self.assertIn("'local_reduce_type': 'logsumexp'", code)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    def test_bf16_grouped_n_reduction_near_miss_falls_back(self):
+        m, n, k, group = 128, 96, 64, 4
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            reduced = grouped.exp().sum(-1).log() + grouped.amax(-1)
+            return torch.relu(result), reduced
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertNotIn("'local_reduce_type': 'logsumexp'", code)
 
     def test_bf16_grouped_n_chained_logsumexp_special_values(self):
         m, n, k, group = 8, 96, 8, 4
