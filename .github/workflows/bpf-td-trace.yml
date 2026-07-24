@@ -45,7 +45,7 @@ jobs:
   canary-control:
     name: canary-control
     needs: get-label-type
-    runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.4xlarge
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128
     timeout-minutes: 20
     container:
       image: ubuntu:22.04
@@ -56,7 +56,7 @@ jobs:
   canary-capadd:
     name: canary-capadd
     needs: get-label-type
-    runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.4xlarge
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128
     timeout-minutes: 20
     container:
       image: ubuntu:22.04
@@ -72,7 +72,7 @@ jobs:
   canary-bare:
     name: canary-bare
     needs: get-label-type
-    runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.4xlarge
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128
     timeout-minutes: 20
     steps:
       - name: Setup Linux
