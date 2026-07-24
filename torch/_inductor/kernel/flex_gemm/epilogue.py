@@ -11,9 +11,10 @@ epilogue and physical reduction callbacks.
 
 import dataclasses
 import hashlib
-import math
 import operator
 from typing import Any
+
+from sympy import Max, Min
 
 import torch
 from torch._inductor import inductor_prims
@@ -156,41 +157,33 @@ class FlexGemmCuteDSLOpOverrides(CuteDSLOpOverrides):
         return CuteDSLOpOverrides.to_dtype(x, dtype)
 
     @staticmethod
-    def preserve_nan(value: Any, result: Any) -> Any:
-        """Select an input NaN over a computed min, max, or clamp result."""
-        if isinstance(value, float) and math.isnan(value):
-            return CuteDSLOpOverrides.mul(result, value)
-        if isinstance(value, (int, float, bool)):
-            return result
-        return CuteDSLOpOverrides.where(
-            CuteDSLOpOverrides.ne(value, value), value, result
-        )
-
-    @staticmethod
     def nan_propagating_minmax(a: Any, b: Any, op: str) -> Any:
-        """Apply min or max while preserving NaN from either operand."""
+        """Apply an IEEE min or max that propagates NaN in one operation."""
         match op:
             case "min":
-                result = CuteDSLOpOverrides.minimum(a, b)
+                op_name, index_expr_fn = "min", Min
             case "max":
-                result = CuteDSLOpOverrides.maximum(a, b)
+                op_name, index_expr_fn = "max", Max
             case _:
                 raise AssertionError(f"unexpected minmax op: {op}")
-        result = FlexGemmCuteDSLOpOverrides.preserve_nan(a, result)
-        return FlexGemmCuteDSLOpOverrides.preserve_nan(b, result)
+        return CuteDSLOpOverrides._apply_binary_op(
+            a,
+            b,
+            f"cutlass_math.{op_name}({{a}}, {{b}}, propagate_nan=True)",
+            index_expr_fn,
+        )
 
     @staticmethod
     def clamp(x: Any, min: Any = None, max: Any = None) -> Any:
         result = x
         if min is not None:
-            result = CuteDSLOpOverrides.maximum(result, min)
+            result = FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(
+                result, min, "max"
+            )
         if max is not None:
-            result = CuteDSLOpOverrides.minimum(result, max)
-        result = FlexGemmCuteDSLOpOverrides.preserve_nan(x, result)
-        if min is not None:
-            result = FlexGemmCuteDSLOpOverrides.preserve_nan(min, result)
-        if max is not None:
-            result = FlexGemmCuteDSLOpOverrides.preserve_nan(max, result)
+            result = FlexGemmCuteDSLOpOverrides.nan_propagating_minmax(
+                result, max, "min"
+            )
         return result
 
     @staticmethod
@@ -1593,6 +1586,7 @@ class FlexGemmEpilogueEmitter:
             "import cutlass.cute as cute\n"
             "import operator\n"
             "from cutlass._mlir.dialects import math as mlir_math\n"
+            "from cutlass._mlir_helpers import math as cutlass_math\n"
             "from torch._inductor.kernel.flex_gemm.quant_intrinsics import (\n"
             "    mx_e8m0_scale_intrinsic,\n"
             ")\n\n"
