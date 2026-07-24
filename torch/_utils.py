@@ -1434,3 +1434,36 @@ def _is_privateuse1_backend_available():
     return (
         is_available := getattr(privateuse1_backend_module, "is_available", None)
     ) and is_available()
+
+
+def getenv(name: str) -> "str | None":
+    """Read an environment variable through torch's serialized env access.
+
+    Prefer this over :func:`os.getenv` when torch is loaded: it shares c10's
+    environment mutex, so the read is consistent with concurrent C++ code and
+    other :func:`torch._utils.setenv` calls that also go through c10.
+
+    Args:
+        name: Name of the environment variable.
+
+    Returns:
+        The variable's value, or ``None`` if it is not set.
+    """
+    return torch._C._getenv(name)
+
+
+def setenv(name: str, value: str, overwrite: bool = True) -> None:
+    """Set an environment variable through torch's serialized env access.
+
+    Prefer this over assigning to :data:`os.environ` when torch is loaded: it
+    shares c10's environment mutex, so the write is consistent with concurrent
+    C++ code and other :func:`torch._utils.getenv` calls that also go through
+    c10.
+
+    Args:
+        name: Name of the environment variable.
+        value: Value to set.
+        overwrite: If ``False`` and the variable is already set, leave it
+            unchanged. Defaults to ``True``.
+    """
+    torch._C._setenv(name, value, overwrite)

@@ -1135,5 +1135,24 @@ instantiate_device_type_tests(
 )
 
 
+class TestEnv(TestCase):
+    def test_getenv_matches_os(self):
+        for name in ("PATH", "PATH_DOES_NOT_EXIST_TORCH_TEST"):
+            self.assertEqual(torch._utils.getenv(name), os.environ.get(name))
+
+    def test_setenv_roundtrip(self):
+        name = "TORCH_TEST_SETENV_VAR"
+        torch._utils.setenv(name, "hello")
+        self.assertEqual(torch._utils.getenv(name), "hello")
+
+    def test_setenv_overwrite(self):
+        name = "TORCH_TEST_SETENV_OVERWRITE"
+        torch._utils.setenv(name, "first")
+        torch._utils.setenv(name, "second", overwrite=False)
+        self.assertEqual(torch._utils.getenv(name), "first")
+        torch._utils.setenv(name, "second")
+        self.assertEqual(torch._utils.getenv(name), "second")
+
+
 if __name__ == "__main__":
     run_tests()
