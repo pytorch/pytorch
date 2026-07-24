@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
 import os
 import platform
 import shutil
 import sys
 import tarfile
+import time
 from pathlib import Path
 from subprocess import check_call
 from tempfile import TemporaryDirectory
@@ -56,6 +58,28 @@ def _read_ar_member(archive: bytes, wanted_name: str) -> bytes:
     raise RuntimeError(f"Can't find {wanted_name} in the ptxas preview package")
 
 
+def _download_verified(url: str, expected_sha256: str) -> bytes:
+    last_error: Exception | None = None
+    for attempt in range(1, 6):
+        try:
+            with urlopen(url, timeout=60) as response:
+                contents = response.read()
+            actual_sha256 = hashlib.sha256(contents).hexdigest()
+            if actual_sha256 != expected_sha256:
+                raise RuntimeError(
+                    f"checksum mismatch: expected {expected_sha256}, "
+                    f"got {actual_sha256}"
+                )
+            return contents
+        except (http.client.HTTPException, OSError, RuntimeError) as error:
+            last_error = error
+            if attempt < 5:
+                print(f"Download attempt {attempt} failed: {error}; retrying")
+                time.sleep(2 ** (attempt - 1))
+
+    raise RuntimeError(f"Failed to download {url} after 5 attempts") from last_error
+
+
 def seed_preview_ptxas(commit_hash: str) -> None:
     """Seed Triton's cache when testing the ptxas 13.4.46 preview pin."""
     if commit_hash != _PTXAS_13_4_46_TRITON_PIN:
@@ -73,14 +97,7 @@ def seed_preview_ptxas(commit_hash: str) -> None:
     )
 
     print(f"Downloading ptxas 13.4.46 preview package from {package_url}")
-    with urlopen(package_url, timeout=60) as response:
-        package_contents = response.read()
-    actual_sha256 = hashlib.sha256(package_contents).hexdigest()
-    if actual_sha256 != expected_sha256:
-        raise RuntimeError(
-            f"ptxas preview package checksum mismatch: expected {expected_sha256}, "
-            f"got {actual_sha256}"
-        )
+    package_contents = _download_verified(package_url, expected_sha256)
 
     data_archive = _read_ar_member(package_contents, "data.tar.xz")
     with tarfile.open(fileobj=io.BytesIO(data_archive), mode="r:xz") as archive:
