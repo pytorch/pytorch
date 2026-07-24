@@ -8387,8 +8387,16 @@ SavedForBackwardsAOTOutput(idx=5)""",
         torch._dynamo.reset()
         m3 = TensorifyMod()
         x = torch.randn(4, 8)
-        with mock.patch.object(
-            DynamoTracerOutput, "_cleanup_output_graph", recording_cleanup
+        # specialize_float=False is required for the scalar-tensorify restart to
+        # fire: the dynamic-shapes test variant sets specialize_float=True, which
+        # constant-folds the float so no symfloat (and no tensorify restart) is
+        # produced. Pin it here so axis 3 deterministically triggers the restart
+        # under both the default config and the dynamic-shapes variant.
+        with (
+            torch._dynamo.config.patch(specialize_float=False),
+            mock.patch.object(
+                DynamoTracerOutput, "_cleanup_output_graph", recording_cleanup
+            ),
         ):
             cm3 = torch.compile(m3, backend="aot_eager")
             cm3(x, 2.0)
