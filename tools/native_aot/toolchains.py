@@ -57,9 +57,48 @@ class Toolchain:
                 f"{b.get('prefix', '<unnamed>')} is missing keys: {missing}"
             )
 
-    def export(self, b: dict, out_dir: str) -> dict:
-        """Compile one spec point; return sidecar marshalling metadata."""
+    def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
+        """Compile one spec point; return sidecar marshalling metadata.
+
+        ``arch`` is an sm string ("sm_90a") or None for detect-from-
+        device. With an explicit arch no toolchain touches the CUDA
+        driver, so export runs on GPU-less machines (CuTeDSL reads
+        CUTE_DSL_ARCH -- set by the export tool BEFORE cutlass imports,
+        it is cached at first read; Triton kinds build an explicit
+        GPUTarget)."""
         raise NotImplementedError
+
+    @staticmethod
+    def _sm_number(arch: str) -> int:
+        # "sm_90a" / "sm_100" -> 90 / 100 (Triton GPUTarget arch int).
+        import re
+
+        m = re.fullmatch(r"sm_(\d+)a?", arch)
+        if not m:
+            raise ValueError(f"arch must look like sm_90a, got {arch!r}")
+        return int(m.group(1))
+
+    @classmethod
+    def _activate_triton_target(cls, arch: str):
+        """Point triton's active driver at an explicit GPUTarget so
+        compilation never queries a device (create_binder calls
+        driver.active.get_current_target() unconditionally; the stock
+        CudaDriver answers it via torch.cuda.current_device, which
+        initializes CUDA and throws on GPU-less machines). Returns the
+        GPUTarget. Process-wide, matching CUTE_DSL_ARCH's semantics on
+        the CuTeDSL side; export workers are per-arch processes."""
+        import triton
+        from triton.backends.compiler import GPUTarget
+        from triton.backends.nvidia.driver import CudaDriver
+
+        target = GPUTarget("cuda", cls._sm_number(arch), 32)
+
+        class _FixedTargetDriver(CudaDriver):
+            def get_current_target(self):
+                return target
+
+        triton.runtime.driver.set_active(_FixedTargetDriver())
+        return target
 
     def gen_launcher(self, sidecar: dict) -> str:
         """Emit the launch_<prefix>() helper for one sidecar."""
@@ -90,7 +129,9 @@ void launch_{prefix}({tparams}, cudaStream_t stream) {{
 }}
 """
 
-    def export(self, b: dict, out_dir: str) -> dict:
+    def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
+        # arch: handled process-wide via CUTE_DSL_ARCH (set by export.py
+        # before any cutlass import; the DSL caches it at first read).
         import cutlass.cute as cute
 
         # Optional compile options (e.g. --enable-assertions). Must match
