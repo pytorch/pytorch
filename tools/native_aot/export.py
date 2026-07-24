@@ -32,10 +32,17 @@ results are byte-identical to a serial run (verified by test). --jobs
 defaults to the torch build's own parallelism (MAX_JOBS, then
 CMAKE_BUILD_PARALLEL_LEVEL, then CPU count); --jobs 1 forces serial.
 
+With --arch (one or more sm strings) export never touches the CUDA
+driver: CuTeDSL takes the arch via CUTE_DSL_ARCH and Triton via a
+fixed-target driver, so kernels build on GPU-less machines. Multiple
+archs fan out under <out-dir>/<arch>/ with one worker pool per arch
+(both DSLs pin the arch per process).
+
 Usage (from the repo root, venv with torch built and the DSL wheel
 active):
     python tools/native_aot/export.py [--out-dir build/native_aot]
                                         [--ops topk] [--force] [--jobs 8]
+                                        [--arch sm_90a sm_100a]
 """
 
 import argparse
@@ -125,21 +132,30 @@ def _json_normal(point: dict) -> dict:
     return json.loads(json.dumps(point))
 
 
-def export_point(op_pkg: str, kernel_module: str, point: dict, out_dir: str) -> str:
+def export_point(
+    op_pkg: str, kernel_module: str, point: dict, out_dir: str, arch: str | None = None
+) -> str:
     """Compile + export ONE spec point and write its sidecar. Self-
     contained (module-level function, picklable args) so it runs
-    identically inline and as a spawn-pool job."""
+    identically inline and as a spawn-pool job. ``arch``: explicit sm
+    string; also mirrored into CUTE_DSL_ARCH (the DSL caches it at the
+    FIRST read, so it must be in the env before any cutlass import --
+    safe here because workers are fresh spawn processes and the inline
+    path sets it in main() before builders import)."""
+    if arch:
+        os.environ.setdefault("CUTE_DSL_ARCH", arch)
     build = load_builder(op_pkg, kernel_module)
     b = build(point)
     tc = toolchains.get_toolchain(b.get("kind", "cutedsl"))
     tc.validate_build_result(b)
     prefix = b["prefix"]
-    extra = tc.export(b, out_dir)
+    extra = tc.export(b, out_dir, arch=arch)
     sidecar = {
         "version": SIDECAR_VERSION,
         "prefix": prefix,
         "kind": tc.kind,
         "spec": point,
+        "arch": arch,
         "sources": source_closure(),
         **extra,
     }
@@ -148,11 +164,16 @@ def export_point(op_pkg: str, kernel_module: str, point: dict, out_dir: str) -> 
     return prefix
 
 
-def _collect_jobs(ops_filter, out_root: str, force: bool):
-    """(op_pkg, kernel_module, point, out_dir) per spec point across
-    every declaration; grids expand here (cheap, torch-light), skip
-    detection is _job_needed's sidecar scan."""
+def _collect_jobs(ops_filter, out_root: str, force: bool, archs):
+    """(op_pkg, kernel_module, point, out_dir, arch) per spec point per
+    arch across every declaration; grids expand here (cheap,
+    torch-light), skip detection is _job_needed's sidecar scan. A
+    single arch (or None = detect from the local device) keeps the flat
+    <out-root>/<decl_id>/ layout; a multi-arch fan-out nests
+    <out-root>/<arch>/<decl_id>/ so per-arch artifact trees stay
+    independently gen-able and linkable."""
     jobs = []
+    multi = len(archs) > 1
     for entry in sorted(os.listdir(OPS_DIR)):
         op_dir = os.path.join(OPS_DIR, entry)
         if not os.path.exists(os.path.join(op_dir, "aot.py")):
@@ -161,10 +182,18 @@ def _collect_jobs(ops_filter, out_root: str, force: bool):
             did = decl.decl_id(d)
             if ops_filter and entry not in ops_filter and d.ATEN_OP not in ops_filter:
                 continue
-            out_dir = os.path.join(out_root, did)
-            os.makedirs(out_dir, exist_ok=True)
-            for point in expand_specs(d.kernel_precompile_grid()):
-                jobs.append((entry, d.KERNEL_MODULE, point, out_dir))
+            for arch in archs:
+                # Declaration-level arch support: skip (declaration x
+                # arch) pairs the op's kernels are not valid on. An
+                # on-device export (arch None) is not filtered -- the
+                # builder machine is the target by construction.
+                if arch is not None and arch not in d.ARCHS:
+                    continue
+                root = os.path.join(out_root, arch) if multi else out_root
+                out_dir = os.path.join(root, did)
+                os.makedirs(out_dir, exist_ok=True)
+                for point in expand_specs(d.kernel_precompile_grid()):
+                    jobs.append((entry, d.KERNEL_MODULE, point, out_dir, arch))
     return jobs
 
 
@@ -191,7 +220,7 @@ def _job_needed(job, force: bool) -> bool:
     an edited kernel module re-exports without --force."""
     if force:
         return True
-    _, _, point, out_dir = job
+    _, _, point, out_dir, _arch = job
     for fn in os.listdir(out_dir):
         if not fn.endswith(".json"):
             continue
@@ -206,8 +235,8 @@ def _job_needed(job, force: bool) -> bool:
 
 
 def _run_job(job) -> str:
-    op_pkg, kernel_module, point, out_dir = job
-    return export_point(op_pkg, kernel_module, point, out_dir)
+    op_pkg, kernel_module, point, out_dir, arch = job
+    return export_point(op_pkg, kernel_module, point, out_dir, arch)
 
 
 def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
@@ -261,12 +290,42 @@ def main() -> None:
         "CMAKE_BUILD_PARALLEL_LEVEL, then the CPU count -- the same "
         "precedence tools/setup_helpers/cmake.py hands to ninja.",
     )
+    parser.add_argument(
+        "--arch",
+        nargs="*",
+        default=None,
+        metavar="SM",
+        help="target architecture(s), e.g. --arch sm_90a sm_100a. With an "
+        "explicit arch, export never touches the CUDA driver and runs on "
+        "GPU-less machines (CuTeDSL via CUTE_DSL_ARCH; Triton via an "
+        "explicit GPUTarget). Default: detect from the local device. "
+        "Multiple archs nest artifacts under <out-dir>/<arch>/.",
+    )
     args = parser.parse_args()
     if args.jobs is None:
         env_jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
         args.jobs = int(env_jobs) if env_jobs else os.cpu_count() or 1
+    if args.arch is None and os.getenv("TORCH_CUDA_ARCH_LIST"):
+        # Standard-build integration: export for the Blackwell subset of
+        # the architectures the main build compiled for (the wheel may
+        # run on machines unlike the builder). Explicit --arch wins.
+        args.arch = archs_from_cuda_arch_list(os.environ["TORCH_CUDA_ARCH_LIST"])
+        if args.arch:
+            print(f"arch from TORCH_CUDA_ARCH_LIST: {' '.join(args.arch)}")
+        else:
+            print(
+                "TORCH_CUDA_ARCH_LIST contains no AOT-exportable arch "
+                f"(supported: {' '.join(EXPORT_SMS)}); nothing to export"
+            )
+            return
+    archs = args.arch if args.arch else [None]
+    if len(archs) > 1 and args.jobs <= 1:
+        # Multi-arch REQUIRES the pool: CUTE_DSL_ARCH is cached per
+        # process at first read, so one inline process cannot compile
+        # two archs. Spawn workers are fresh processes per job.
+        raise SystemExit("--arch with multiple targets requires --jobs > 1")
 
-    jobs = _collect_jobs(args.ops, args.out_dir, args.force)
+    jobs = _collect_jobs(args.ops, args.out_dir, args.force, archs)
     todo = [j for j in jobs if _job_needed(j, args.force)]
     if len(todo) < len(jobs):
         print(f"{len(jobs) - len(todo)} points already exported, skipped")
@@ -281,17 +340,27 @@ def main() -> None:
         # Spawn context: the parent has initialized CUDA (grid expansion
         # may import torch); forked children would inherit a broken
         # context. Same reasoning as Inductor's compile_worker pool.
+        # One pool PER ARCH, sequentially: CUTE_DSL_ARCH is cached per
+        # process at first read, so a worker that compiled arch A would
+        # silently compile arch B's cutedsl kernels for A. Workers die
+        # with their pool, so each arch gets fresh processes.
         import multiprocessing
         from concurrent.futures import as_completed, ProcessPoolExecutor
 
         ctx = multiprocessing.get_context("spawn")
-        n = min(args.jobs, len(todo))
-        with ProcessPoolExecutor(max_workers=n, mp_context=ctx) as pool:
-            futs = {pool.submit(_run_job, job): job for job in todo}
-            for fut in as_completed(futs):
-                prefix = fut.result()  # re-raises worker failures
-                print(f"  {prefix}: exported")
-                total += 1
+        for arch in archs:
+            arch_todo = [j for j in todo if j[4] == arch]
+            if not arch_todo:
+                continue
+            if len(archs) > 1:
+                print(f"[{arch}] {len(arch_todo)} points")
+            n = min(args.jobs, len(arch_todo))
+            with ProcessPoolExecutor(max_workers=n, mp_context=ctx) as pool:
+                futs = {pool.submit(_run_job, job): job for job in arch_todo}
+                for fut in as_completed(futs):
+                    prefix = fut.result()  # re-raises worker failures
+                    print(f"  {prefix}: exported")
+                    total += 1
 
     print(f"exported {total} kernels")
 
