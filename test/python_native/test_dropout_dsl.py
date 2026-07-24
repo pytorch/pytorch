@@ -3,7 +3,7 @@
 # Correctness tests for the example _native fused dropout overrides
 # (Triton and CuTeDSL). Both kernels replicate aten's
 # fused_dropout_kernel_vec (VEC=4) exactly, drawing RNG state through
-# Generator._philox_cuda_state, so output, mask, and generator offset
+# Generator.philox_cuda_state, so output, mask, and generator offset
 # advancement must all be bit-identical to stock aten. References are
 # computed with the DSL override disabled, per the stock-aten rule.
 

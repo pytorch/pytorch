@@ -6,7 +6,7 @@ philox counter mapping (counter=(offset/4 + iter), subsequence=global thread
 id), same curand uniform transform and comparison, so results and generator
 offset advancement are bit-identical to aten.
 
-RNG state comes from ``Generator._philox_cuda_state(increment)``: 1-element int64
+RNG state comes from ``Generator.philox_cuda_state(increment)``: 1-element int64
 device tensors (seed, offset) plus a CPU intragraph offset tensor. The kernels
 load seed/offset from the device tensors, which makes them CUDA-graph-safe for
 free: during capture those tensors alias the generator's extragraph state that
@@ -34,7 +34,7 @@ def launch_plan(n: int, device_index: int) -> tuple[int, int, int]:
     """Mirror of aten's dropout_cuda launch math.
 
     Returns (grid, counter_offset, num_iters). counter_offset is the philox
-    reservation passed to ``_philox_cuda_state``; num_iters is the per-thread
+    reservation passed to ``philox_cuda_state``; num_iters is the per-thread
     curand_uniform4 call count (== counter_offset / 4).
     """
     sm_count, blocks_per_sm = _device_launch_caps(device_index)
@@ -75,5 +75,5 @@ def philox_args(x: torch.Tensor, counter_offset: int):
     if device_index is None:
         device_index = torch.cuda.current_device()
     gen = torch.cuda.default_generators[device_index]
-    seed_t, offset_t, intra_t = gen._philox_cuda_state(counter_offset)
+    seed_t, offset_t, intra_t = gen.philox_cuda_state(counter_offset)
     return seed_t, offset_t, intra_t.item()
