@@ -101,6 +101,10 @@ class GemmEpilogueIRAnalysis:
                 buffer.get_store_function()(*buffer.data.inner_fn_args())
         return cls(handler.stores)
 
+    @classmethod
+    def store_from_buffer(cls, buffer: ComputedBuffer) -> GemmEpilogueIRStore | None:
+        return cls.from_buffers((buffer,)).store(buffer.get_name())
+
     def store(self, name: str) -> GemmEpilogueIRStore | None:
         return self.stores.get(name)
 
@@ -441,6 +445,120 @@ def _sum_terms(expr: Any, source_name: str, group: int) -> bool:
     return len(terms) == group and all(_is_source(term, source_name) for term in terms)
 
 
+def _group_max(expr: Any, source_name: str, group: int) -> bool:
+    terms = _flatten_associative(expr, "maximum")
+    return len(terms) == group and all(_is_source(term, source_name) for term in terms)
+
+
+def _stable_group_max(expr: Any, source_name: str, group: int) -> bool:
+    """Match max(xs), including logsumexp's where(isinf(max), 0, max)."""
+    expr = _strip_conversions(expr)
+    if _group_max(expr, source_name, group):
+        return True
+    if not (
+        isinstance(expr, GemmEpilogueIRExpression)
+        and expr.op == "where"
+        and len(expr.args) >= 3
+        and _constant_value(expr.args[1]) == 0.0
+    ):
+        return False
+    condition = _strip_conversions(expr.args[0])
+    maximum = _strip_conversions(expr.args[2])
+    if not (
+        isinstance(condition, GemmEpilogueIRExpression)
+        and condition.op == "eq"
+        and _group_max(maximum, source_name, group)
+    ):
+        return False
+    for absolute, infinity in (condition.args[:2], reversed(condition.args[:2])):
+        absolute = _strip_conversions(absolute)
+        if (
+            isinstance(absolute, GemmEpilogueIRExpression)
+            and absolute.op == "abs"
+            and _strip_conversions(absolute.args[0]) == maximum
+            and _constant_value(infinity) == math.inf
+        ):
+            return True
+    return False
+
+
+def _shifted_exp(expr: Any, source_name: str) -> Any | None:
+    expr = _strip_conversions(expr)
+    if not (
+        isinstance(expr, GemmEpilogueIRExpression) and expr.op == "exp" and expr.args
+    ):
+        return None
+    shifted = _strip_conversions(expr.args[0])
+    if not (
+        isinstance(shifted, GemmEpilogueIRExpression)
+        and shifted.op == "sub"
+        and _is_source(shifted.args[0], source_name)
+    ):
+        return None
+    return _strip_conversions(shifted.args[1])
+
+
+def is_softmax_ir(
+    store: GemmEpilogueIRStore,
+    source_name: str,
+    group: int,
+    reduction_names: frozenset[str] = frozenset(),
+) -> bool:
+    """Match stable grouped softmax, either unrolled or reduction-backed."""
+    expr = _strip_conversions(store.value)
+    if not isinstance(expr, GemmEpilogueIRExpression) or expr.op != "truediv":
+        return False
+    numerator, denominator = expr.args[:2]
+    maximum = _shifted_exp(numerator, source_name)
+    if maximum is None:
+        return False
+    denominator = _strip_conversions(denominator)
+    if reduction_names:
+        return (
+            isinstance(maximum, GemmEpilogueIRExpression)
+            and maximum.op == "load"
+            and maximum.args[0] in reduction_names
+            and isinstance(denominator, GemmEpilogueIRExpression)
+            and denominator.op == "load"
+            and denominator.args[0] in reduction_names
+            and maximum.args[0] != denominator.args[0]
+        )
+    terms = _flatten_associative(denominator, "add")
+    return (
+        _group_max(maximum, source_name, group)
+        and len(terms) == group
+        and all(_shifted_exp(term, source_name) == maximum for term in terms)
+    )
+
+
+def is_absmax_normalize_ir(
+    store: GemmEpilogueIRStore,
+    source_name: str,
+    scale_names: str | frozenset[str],
+) -> bool:
+    """Match source * reciprocal(clamp(absmax, 1e-12) / 448)."""
+    if isinstance(scale_names, str):
+        scale_names = frozenset((scale_names,))
+    expr = _strip_conversions(store.value)
+    if not isinstance(expr, GemmEpilogueIRExpression) or expr.op != "mul":
+        return False
+    for source, reciprocal in (expr.args[:2], reversed(expr.args[:2])):
+        reciprocal = _strip_conversions(reciprocal)
+        if (
+            _is_source(source, source_name)
+            and isinstance(reciprocal, GemmEpilogueIRExpression)
+            and reciprocal.op == "reciprocal"
+            and any(
+                is_absmax_scale_finalizer_ir(
+                    GemmEpilogueIRStore(store.index, reciprocal.args[0]), scale_name
+                )
+                for scale_name in scale_names
+            )
+        ):
+            return True
+    return False
+
+
 def _sum_affine_ir(
     expr: Any,
     source_name: str,
@@ -629,10 +747,23 @@ def centered_mean_consumer_type_unrolled_ir(
     return "mean_linear:" + ":".join(format(value, ".17g") for value in values)
 
 
-def is_logsumexp_ir(store: GemmEpilogueIRStore) -> bool:
-    operations = operation_names_ir(store)
-    return (
-        "exp" in operations
-        and "log" in operations
-        and ("maximum" in operations or "max" in operations)
-    )
+def is_logsumexp_ir(store: GemmEpilogueIRStore, source_name: str, group: int) -> bool:
+    """Match max(xs) + log(sum(exp(xs - max(xs))))."""
+    expr = _strip_conversions(store.value)
+    if not isinstance(expr, GemmEpilogueIRExpression) or expr.op != "add":
+        return False
+    for maximum, logarithm in (expr.args[:2], reversed(expr.args[:2])):
+        maximum = _strip_conversions(maximum)
+        logarithm = _strip_conversions(logarithm)
+        if not (
+            _stable_group_max(maximum, source_name, group)
+            and isinstance(logarithm, GemmEpilogueIRExpression)
+            and logarithm.op == "log"
+        ):
+            continue
+        terms = _flatten_associative(logarithm.args[0], "add")
+        if len(terms) == group and all(
+            _shifted_exp(term, source_name) == maximum for term in terms
+        ):
+            return True
+    return False

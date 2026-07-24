@@ -3,13 +3,14 @@
 
 import dataclasses
 from collections.abc import Iterator, Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 import sympy
 
 import torch
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
+    GuardOnDataDependentSymNode,
     statically_known_true as fx_statically_known_true,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -69,7 +70,7 @@ class GemmReductionGeometry:
         for axis, group_dim in ((0, 1), (1, 2)):
             try:
                 group = V.graph.sizevars.optimization_hint(output_shape[group_dim])
-            except Exception:
+            except (GuardOnDataDependentSymNode, TypeError, ValueError):
                 continue
             geometry = cls(group=group, axis=axis)
             if geometry.matches_output_shape(output_shape, gemm_shape):
@@ -101,6 +102,44 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True)
+class GemmReductionExpression:
+    """Typed reduction kind and compile-time scalar parameters."""
+
+    kind: str
+    parameters: tuple[float, ...] = ()
+
+    _PARAMETER_COUNTS: ClassVar[dict[str, int]] = {
+        "mean_linear": 3,
+        "normalize_sum_affine": 4,
+        "normalize_sum_reverse_affine": 4,
+        "sum_mul_affine": 2,
+        "variance_affine": 2,
+    }
+
+    def __post_init__(self) -> None:
+        expected = self._PARAMETER_COUNTS.get(self.kind, 0)
+        if len(self.parameters) != expected:
+            raise ValueError(
+                f"{self.kind} expects {expected} reduction parameters, "
+                f"got {len(self.parameters)}"
+            )
+
+    @classmethod
+    def parse(cls, value: str) -> "GemmReductionExpression":
+        kind, *parameters = value.split(":")
+        return cls(kind, tuple(float(parameter) for parameter in parameters))
+
+    def serialize(self) -> str:
+        if not self.parameters:
+            return self.kind
+        return (
+            self.kind
+            + ":"
+            + ":".join(format(parameter, ".17g") for parameter in self.parameters)
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class GemmReductionConfig:
     """Describe a grouped reduction recognized during scheduler analysis."""
 
@@ -117,22 +156,6 @@ class GemmReductionConfig:
     @property
     def contract(self) -> tuple[int, int, str, str]:
         return self.group, self.axis, self.reduction_type, self.source_type
-
-    def replace(
-        self,
-        *,
-        output_name: str | None = None,
-        reduction_type: str | None = None,
-        source_type: str | None = None,
-    ) -> "GemmReductionConfig":
-        return dataclasses.replace(
-            self,
-            output_name=self.output_name if output_name is None else output_name,
-            reduction_type=(
-                self.reduction_type if reduction_type is None else reduction_type
-            ),
-            source_type=self.source_type if source_type is None else source_type,
-        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,9 +191,6 @@ class GemmReductionPlan:
             )
         )
 
-    def with_primary_output(self, output: str) -> "GemmReductionPlan":
-        return dataclasses.replace(self, primary_output=output)
-
 
 def iter_fx_node_inputs(value: Any) -> Iterator[torch.fx.Node]:
     """Yield FX node inputs nested in args/kwargs-style containers."""
@@ -195,12 +215,6 @@ class GemmEpilogueGraph:
                 node_dependencies.update(dependencies.get(input_node, ()))
             dependencies[node] = frozenset(node_dependencies)
         return cls(dependencies)
-
-    @classmethod
-    def from_graph_module(
-        cls, graph_module: torch.fx.GraphModule
-    ) -> "GemmEpilogueGraph":
-        return cls.from_nodes(tuple(graph_module.graph.nodes))
 
     def depends_on(self, value: Any, target: torch.fx.Node) -> bool:
         return any(

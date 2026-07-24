@@ -43,6 +43,7 @@ from cutlass.cute.runtime import from_dlpack
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 import torch
+from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
 from torch._vendor.quack.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -498,37 +499,34 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_affine_bias = 0.0
         self.local_reduce_denominator_scale = 1.0
         self.local_reduce_denominator_bias = 0.0
-        if cutlass.const_expr(local_reduce_type.startswith("mean_linear:")):
-            _, input_coefficient, result_coefficient, bias = local_reduce_type.split(
-                ":"
+        reduction_expression = GemmReductionExpression.parse(local_reduce_type)
+        local_reduce_type = reduction_expression.kind
+        if cutlass.const_expr(local_reduce_type == "mean_linear"):
+            input_coefficient, result_coefficient, bias = (
+                reduction_expression.parameters
             )
-            local_reduce_type = "mean_linear"
             self.local_reduce_input_coefficient = float(input_coefficient)
             self.local_reduce_result_coefficient = float(result_coefficient)
             self.local_reduce_bias = float(bias)
-        if cutlass.const_expr(local_reduce_type.startswith("normalize_sum_affine:")):
+        if cutlass.const_expr(local_reduce_type == "normalize_sum_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)
             self.local_reduce_denominator_scale = float(denominator_scale)
             self.local_reduce_denominator_bias = float(denominator_bias)
-        if cutlass.const_expr(
-            local_reduce_type.startswith("normalize_sum_reverse_affine:")
-        ):
+        if cutlass.const_expr(local_reduce_type == "normalize_sum_reverse_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum_reverse"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)

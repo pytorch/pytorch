@@ -40,6 +40,7 @@ import cutlass.utils.blackwell_helpers as sm100_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.operators.providers.cutedsl.evt.common_efc import log
 
+from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
 from torch._vendor.quack.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -651,57 +652,61 @@ class PersistentDenseGemmEFCKernel:
         self.local_reduce_variance_bias = 0.0
         self.local_reduce_direct_bool = False
         self.local_reduce_secondary_reuses_primary = False
+        secondary_expression = (
+            GemmReductionExpression.parse(local_reduce_secondary_feed_type)
+            if local_reduce_secondary_feed_type is not None
+            else None
+        )
+        secondary_parameters = (
+            () if secondary_expression is None else secondary_expression.parameters
+        )
         if cutlass.const_expr(
-            local_reduce_secondary_feed_type is not None
-            and local_reduce_secondary_feed_type.startswith("sum_mul_affine:")
+            secondary_expression is not None
+            and secondary_expression.kind == "sum_mul_affine"
         ):
-            _, secondary_scale, secondary_bias = local_reduce_secondary_feed_type.split(
-                ":"
-            )
+            secondary_scale, secondary_bias = secondary_parameters
             self.local_reduce_secondary_scale = float(secondary_scale)
             self.local_reduce_secondary_bias = float(secondary_bias)
         elif cutlass.const_expr(
-            local_reduce_secondary_feed_type == "direct_bool_gt_zero"
+            secondary_expression is not None
+            and secondary_expression.kind == "direct_bool_gt_zero"
         ):
             self.local_reduce_direct_bool = True
         elif cutlass.const_expr(local_reduce_secondary_feed_type is not None):
             self.local_reduce_secondary_reuses_primary = True
-        if cutlass.const_expr(local_reduce_type.startswith("mean_linear:")):
-            _, input_coefficient, result_coefficient, bias = local_reduce_type.split(
-                ":"
+        reduction_expression = GemmReductionExpression.parse(local_reduce_type)
+        local_reduce_type = reduction_expression.kind
+        if cutlass.const_expr(local_reduce_type == "mean_linear"):
+            input_coefficient, result_coefficient, bias = (
+                reduction_expression.parameters
             )
-            local_reduce_type = "mean_linear"
             self.local_reduce_input_coefficient = float(input_coefficient)
             self.local_reduce_result_coefficient = float(result_coefficient)
             self.local_reduce_bias = float(bias)
-        elif cutlass.const_expr(local_reduce_type.startswith("variance_affine:")):
-            _, variance_scale, variance_bias = local_reduce_type.split(":")
+        elif cutlass.const_expr(local_reduce_type == "variance_affine"):
+            variance_scale, variance_bias = reduction_expression.parameters
             local_reduce_type = "variance"
             self.local_reduce_variance_scale = float(variance_scale)
             self.local_reduce_variance_bias = float(variance_bias)
-        elif cutlass.const_expr(local_reduce_type.startswith("normalize_sum_affine:")):
+        elif cutlass.const_expr(local_reduce_type == "normalize_sum_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)
             self.local_reduce_denominator_scale = float(denominator_scale)
             self.local_reduce_denominator_bias = float(denominator_bias)
-        elif cutlass.const_expr(
-            local_reduce_type.startswith("normalize_sum_reverse_affine:")
-        ):
+        elif cutlass.const_expr(local_reduce_type == "normalize_sum_reverse_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum_reverse"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)
@@ -2048,8 +2053,6 @@ class PersistentDenseGemmEFCKernel:
                                         ):
                                             exp_sum += cute.math.exp(acc_flt[j] - shift)
                                     reduced = cute.math.log(exp_sum) + shift
-                                elif cutlass.const_expr(group <= fragment_n):
-                                    reduced = self.local_reduce_finalize(reduced, group)
                                 elif cutlass.const_expr(
                                     self.local_reduce_type == "variance"
                                     and group <= fragment_n
@@ -2071,6 +2074,8 @@ class PersistentDenseGemmEFCKernel:
                                         * self.local_reduce_variance_scale
                                         + self.local_reduce_variance_bias
                                     )
+                                elif cutlass.const_expr(group <= fragment_n):
+                                    reduced = self.local_reduce_finalize(reduced, group)
                                 if cutlass.const_expr(self.local_reduce_feeds_main):
                                     reduced_flt[i] = reduced
                                 if cutlass.const_expr(group > fragment_n):

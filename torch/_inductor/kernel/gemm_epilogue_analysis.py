@@ -212,21 +212,17 @@ class GemmLocalReduceAnalysis:
     )
 
     @classmethod
-    def from_nodes(cls, nodes: Sequence[torch.fx.Node]) -> "GemmLocalReduceAnalysis":
-        """Analyze an FX epilogue node sequence in topological order."""
+    def from_graph_module(
+        cls, graph_module: torch.fx.GraphModule
+    ) -> "GemmLocalReduceAnalysis":
+        """Build shared dependency and reduction state in one topological pass."""
+        nodes = tuple(graph_module.graph.nodes)
         analysis = cls(GemmEpilogueGraph.from_nodes(nodes))
         for node in nodes:
             if node.op == "output":
                 break
             analysis.visit_node(node)
         return analysis
-
-    @classmethod
-    def from_graph_module(
-        cls, graph_module: torch.fx.GraphModule
-    ) -> "GemmLocalReduceAnalysis":
-        """Build shared dependency and reduction state in one topological pass."""
-        return cls.from_nodes(tuple(graph_module.graph.nodes))
 
     def visit_node(self, node: torch.fx.Node) -> None:
         """Record grouped layouts and local-reduction matches for one FX node."""
@@ -621,18 +617,6 @@ class GemmLocalReduceAnalysis:
         return GemmLocalReduceMatch.common_value(
             matches, LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR
         )
-
-    def common_output_match(
-        self, outputs: Sequence[torch.fx.Node]
-    ) -> GemmLocalReduceMatch | None:
-        """Return the physical reduction represented by output values."""
-        matches = [self.matches[node] for node in outputs if node in self.matches]
-        if not matches:
-            return None
-        match = matches[0]
-        if any(item.reduction_node is not match.reduction_node for item in matches):
-            return None
-        return match
 
     def common_reduction_dependency_match(
         self, outputs: Sequence[torch.fx.Node]
