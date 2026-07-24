@@ -37,7 +37,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
 from torch._inductor.kernel.gemm_epilogue import (
-    GroupedReductionLayout,
+    GemmReductionGeometry,
     iter_fx_node_inputs,
     statically_known_equal,
 )
@@ -52,7 +52,7 @@ def normalize_shape(shape: Any) -> Any:
 
 
 @dataclasses.dataclass(frozen=True)
-class GroupedTensorSSALayout(GroupedReductionLayout):
+class GroupedTensorSSALayout(GemmReductionGeometry):
     """Describe a grouped M/N TensorSSA view inside the generated epilogue.
 
     Attributes:
@@ -102,9 +102,9 @@ def _syntactic_grouped_tensor_layout(
     if len(shape) not in (3, 4):
         return None
     if isinstance(shape[-1], int) and shape[-1] > 0 and shape[-2] == -1:
-        return GroupedTensorSSALayout(axis=1, group_size=shape[-1])
+        return GroupedTensorSSALayout(group=shape[-1], axis=1)
     if shape[-3] == -1 and isinstance(shape[-2], int) and shape[-2] > 0:
-        return GroupedTensorSSALayout(axis=0, group_size=shape[-2])
+        return GroupedTensorSSALayout(group=shape[-2], axis=0)
     return None
 
 
@@ -158,10 +158,10 @@ def grouped_tensor_layout(
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=1, group_size=group))
+                    candidates.append(GroupedTensorSSALayout(group=group, axis=1))
             match shape:
                 case (*_, int(group), _) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=0, group_size=group))
+                    candidates.append(GroupedTensorSSALayout(group=group, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
                     return layout

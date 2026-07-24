@@ -148,6 +148,7 @@ def _compile_nvgemm(
             args=args if cc is not None else None,
             cc=cc,
             base_kernel=base_kernel,
+            epilogue_specialization=_local_reduce_specialization(args_kwargs),
         )
 
     artifact = None
@@ -534,6 +535,7 @@ def _lookup_gemm_kernel(
     args: Any | None = None,
     cc: int | None = None,
     base_kernel: Any | None = None,
+    epilogue_specialization: tuple = (),
 ):
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
         get_efc_kernel_with_epilogue,
@@ -569,6 +571,7 @@ def _lookup_gemm_kernel(
         epilogue_args,
         epilogue_source=epilogue_source,
         base_kernel=base_kernel,
+        specialization=epilogue_specialization,
     )
     if kernel is None:
         raise RuntimeError(f"Could not find EFC kernel: {kernel_name}")
@@ -577,6 +580,26 @@ def _lookup_gemm_kernel(
 
 def _tensor_sig(t):
     return (t.shape, t.stride(), t.dtype)
+
+
+_LOCAL_REDUCE_SPECIALIZATION_KEYS = (
+    "local_reduce_group",
+    "local_reduce_axis",
+    "local_reduce_type",
+    "local_reduce_source",
+    "local_reduce_feeds_main",
+    "local_reduce_secondary_feed_type",
+)
+
+
+def _local_reduce_specialization(variant_kwargs: dict | None) -> tuple:
+    if variant_kwargs is None:
+        return ()
+    return tuple(
+        (key, variant_kwargs[key])
+        for key in _LOCAL_REDUCE_SPECIALIZATION_KEYS
+        if key in variant_kwargs
+    )
 
 
 def _create_gemm_cache_key(
@@ -812,11 +835,7 @@ def _nvgemm_run(
 
     from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
-    epilogue_specialization = tuple(
-        (key, variant_kwargs[key])
-        for key in ("local_reduce_type", "local_reduce_source")
-        if variant_kwargs is not None and key in variant_kwargs
-    )
+    epilogue_specialization = _local_reduce_specialization(variant_kwargs)
     cache_key = _create_gemm_cache_key(
         input_tensors,
         out,
