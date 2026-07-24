@@ -16,20 +16,17 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       }
     ")
 
-    set(CXX_ARM_SVE_BF16_FLAGS "-march=armv8.2-a+sve+bf16" CACHE STRING "C++ flags for ARM SVE BF16")
-
     SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
-    SET(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS_INIT} ${CXX_ARM_SVE_BF16_FLAGS} -msve-vector-bits=256")
-    CHECK_CXX_SOURCE_COMPILES("${SVE_BF16_CODE}" CXX_ARMV82_SVE_BF16_FOUND)
-    set(CXX_SVE256_FOUND ${CXX_ARMV82_SVE_BF16_FOUND} CACHE BOOL "SVE256 available on host" FORCE)
+    SET(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS_INIT} -march=armv8-a+sve+bf16 -msve-vector-bits=256")
+    CHECK_CXX_SOURCE_COMPILES("${SVE_BF16_CODE}" CXX_SVE256_FOUND)
     SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
 
     if(CXX_SVE256_FOUND)
       # Any compiler that supports SVE256 also supports SVE128
-      set(CXX_SVE_FOUND TRUE CACHE BOOL "SVE available on host" FORCE)
+      set(CXX_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
       message(STATUS "SVE support detected.")
     else()
-      set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE not available on host" FORCE)
+      set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE not available on host")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND NOT DEFINED ENV{BUILD_IGNORE_SVE_UNAVAILABLE})
         message(FATAL_ERROR "No SVE support on this machine. "
           "Set BUILD_IGNORE_SVE_UNAVAILABLE environment variable to ignore this error.")
@@ -38,5 +35,5 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       endif()
     endif()
 
-    mark_as_advanced(CXX_ARMV82_SVE_BF16_FOUND CXX_ARM_SVE_BF16_FLAGS CXX_SVE_FOUND CXX_SVE256_FOUND)
+    mark_as_advanced(CXX_SVE_FOUND CXX_SVE256_FOUND)
 ENDIF()
