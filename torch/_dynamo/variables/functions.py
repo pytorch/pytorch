@@ -915,23 +915,26 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         first_tree = tree_map_args[1]
         rest = tree_map_args[2:]
 
-        if is_tree_map_with_path:
-            return first_tree.call_tree_map_with_path(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-                keypath=(),
-            )
-        else:
-            return first_tree.call_tree_map(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-            )
+        # The tree_map fast path doesn't create an InliningIT for tree_map,
+        # so NGB resume functions would miss the tree_map continuation.
+        with torch._dynamo.disable_nested_graph_breaks():
+            if is_tree_map_with_path:
+                return first_tree.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                    keypath=(),
+                )
+            else:
+                return first_tree.call_tree_map(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                )
 
     def _is_tree_map_function(self) -> bool:
         return (
@@ -1617,27 +1620,6 @@ class FunctionDecoratedByContextlibContextManagerVariable(
             generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
             **kwargs,
         )
-
-    def _build_inline_tracer(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> "InliningGeneratorInstructionTranslator":
-        # NOTE: This only exists to not break support for context manager when
-        # config.enable_faithful_generator_behavior = False and
-        # config.enable_trace_contextlib = True. In case the former is false,
-        # Dynamo should still be able to trace through @contextmanager functions
-        tracer = super()._build_inline_tracer(tx, args, kwargs)
-        if not isinstance(
-            tracer,
-            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
-        ):
-            raise AssertionError(
-                f"expected InliningGeneratorInstructionTranslator, got {type(tracer)}"
-            )
-        tracer.is_generator_from_ctx_manager = True
-        return tracer
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -2373,7 +2355,29 @@ class SkipFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+        def unimplemented_direct_disable_call(api_name: str) -> Never:
+            # The registry linter keys off this helper name and records concrete
+            # entries from the call sites below. Use an alias here so the
+            # parameterized helper body is not recorded as a generic
+            # `{api_name}` entry.
+            _unimplemented = unimplemented
+            _unimplemented(
+                gb_type=f"Call to `{api_name}()`",
+                context=f"Called `{api_name}()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"`{api_name}()` was called inside a compiled region. "
+                "This API disables compilation when used as a decorator or wrapper "
+                "outside the compiled region.",
+                hints=[
+                    f"Move the `{api_name}()` call outside the compiled function and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+                ],
+            )
+
+        if self.value is torch._dynamo.disable:
+            unimplemented_direct_disable_call("torch._dynamo.disable")
+        elif self.value is torch.compiler.disable:
+            unimplemented_direct_disable_call("torch.compiler.disable")
+        elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
@@ -2706,7 +2710,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def get_real_python_backed_value(self) -> object:
-        return getattr(self.wrapper_obj, self.attr_to_trace)
+        # This VT stands for the wrapper, which is also what self.source
+        # denotes. The inline target is reached via attr_to_trace and is a
+        # different object.
+        return self.wrapper_obj
 
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):

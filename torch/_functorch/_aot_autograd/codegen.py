@@ -21,19 +21,23 @@ import threading
 from collections.abc import Callable, Iterator
 
 import torch
+from torch.utils._indented_buffer import IndentedBuffer
 
 
 log = logging.getLogger(__name__)
 
 
-class PySourceBuilder:
+class PySourceBuilder(IndentedBuffer):
     """Builds indented Python source for compile/exec, along with the globals
     the generated code closes over and a monotonic fresh-name counter.
 
-    Body lines are written WITHOUT leading whitespace; indentation is managed
-    by the ``indent()`` context manager so call sites read as plain code. Pass
+    Inherits the indentation primitive (``writeline``/``indent()``) from
+    IndentedBuffer: body lines are written WITHOUT leading whitespace and
+    indentation is managed by the ``indent()`` context manager so call sites
+    read as plain code. This subclass adds the exec layer (globals binding,
+    fresh-name generation, and ``build()`` via _compile_and_exec_source). Pass
     ``fn_name``/``artifact_name`` to emit a ``def`` header and enable
-    ``build()``, which routes through _compile_and_exec_source.
+    ``build()``.
     """
 
     def __init__(
@@ -43,26 +47,13 @@ class PySourceBuilder:
         args: str = "args",
         artifact_name: str | None = None,
     ) -> None:
-        self.lines: list[str] = []
+        super().__init__()
         self.globals: dict[str, object] = {}
         self._name_counter: int = 0
-        self._indent: int = 0
         self._fn_name = fn_name
         self._artifact_name = artifact_name
         if fn_name is not None:
             self.writeline(f"def {fn_name}({args}):")
-
-    @contextlib.contextmanager
-    def indent(self, offset: int = 1) -> Iterator[None]:
-        self._indent += offset
-        try:
-            yield
-        finally:
-            self._indent -= offset
-
-    def writeline(self, line: str) -> None:
-        """Append one line at the current indent level (paired with indent())."""
-        self.lines.append("    " * self._indent + line)
 
     def emit(self, line: str, indent: int = 1) -> None:
         """Append one line at an explicit absolute indent level.
@@ -70,7 +61,11 @@ class PySourceBuilder:
         Convenient for recursive generators that thread an indent depth instead
         of nesting indent() context managers.
         """
-        self.lines.append("    " * indent + line)
+        saved, self._indent = self._indent, indent
+        try:
+            self.writeline(line)
+        finally:
+            self._indent = saved
 
     def fresh_name(self, prefix: str) -> str:
         name = f"{prefix}_{self._name_counter}"
@@ -91,7 +86,9 @@ class PySourceBuilder:
         return self.add_global(self.fresh_name(prefix), value)
 
     def getvalue(self) -> str:
-        return "\n".join(self.lines)
+        # Join without a trailing newline (unlike IndentedBuffer.getvalue).
+        assert all(isinstance(li, str) for li in self._lines)  # noqa: S101
+        return "\n".join(self._lines)  # type: ignore[arg-type]
 
     def build(
         self, *, wrapped_fn: Callable[..., object] | None = None
