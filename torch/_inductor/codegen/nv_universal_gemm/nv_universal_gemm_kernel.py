@@ -35,7 +35,6 @@ from torch._inductor.ir import (
     ReinterpretView,
 )
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -1073,8 +1072,9 @@ class NVUniversalGemmKernel(Kernel):
         )
 
         input_tensor_names = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
+        output_buffers = self._ordered_output_buffers()
         input_params = list(input_tensor_names)
-        input_params.append("out_ptr0")
+        input_params.extend(f"out_ptr{i}" for i in range(len(output_buffers)))
         input_params.extend(self.epilogue_reads)
         if self.workspace_size > 0:
             input_params.append("workspace")
@@ -1234,26 +1234,44 @@ class NVUniversalGemmKernel(Kernel):
 
         return code.getvalue()
 
-    def _render_epilogue_kwargs(self) -> str:
-        """Render kwargs for EpilogueArguments constructor.
+    def _ordered_output_buffers(self) -> list[str]:
+        """Graph-output buffer names in out_ptr order.
 
-        Skips intermediate stores (write_buffer entries from CutlassEVTCodegen.store()
-        in a multi-node epilogue chain) -- those names are not kernel parameters and
-        would produce NameError at runtime.
+        out_ptr0 is the primary GEMM output (the epilogue's `D` store, passed as
+        the kernel's `out`). Additional stores -- a multi-store epilogue where the
+        GEMM output feeds more than one graph output -- follow in epilogue_writes
+        order as out_ptr1, out_ptr2, ...
         """
-        kwargs_parts = []
-        write_buffer_names = OrderedSet(self.epilogue_writes)
+        if not self.epilogue_writes:
+            return [self.output_node.get_name()]
+        d_buf = (self.epilogue_var_renames or {}).get("D")
+        ordered: list[str] = []
+        if d_buf is not None:
+            ordered.append(d_buf)
+        for w in self.epilogue_writes:
+            if w != d_buf and w not in ordered:
+                ordered.append(w)
+        return ordered
 
+    def _render_epilogue_kwargs(self) -> str:
+        """Render kwargs for the EpilogueArguments constructor.
+
+        Each epilogue variable maps to either an output pointer -- the `D` store
+        and any additional multi-store outputs become out_ptr0, out_ptr1, ... in
+        _ordered_output_buffers order -- or, for a read, the aux input buffer.
+        `accum` is the kernel-supplied accumulator and is not a kwarg.
+        """
+        out_ptr_of = {
+            buf: f"out_ptr{i}" for i, buf in enumerate(self._ordered_output_buffers())
+        }
+        kwargs_parts = []
         for var_name, buffer_name in self.epilogue_var_renames.items():
-            if var_name == "D":
-                kwargs_parts.append("D=out_ptr0")
-            elif var_name == _ACCUMULATOR_ARG_NAME:
+            if var_name == _ACCUMULATOR_ARG_NAME:
                 continue
-            elif buffer_name in write_buffer_names:
-                continue
+            if buffer_name in out_ptr_of:
+                kwargs_parts.append(f"{var_name}={out_ptr_of[buffer_name]}")
             else:
                 kwargs_parts.append(f"{var_name}={buffer_name}")
-
         return ", ".join(kwargs_parts)
 
     def _get_reinterpret_view(self, node) -> ReinterpretView | None:
@@ -1291,16 +1309,14 @@ class NVUniversalGemmKernel(Kernel):
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
             raw_keys.append(param_name)
 
-        # The kernel writes to the epilogue's final output, not the GEMM buffer
-        # (which is removed via removed_buffers aliasing).
-        if self.epilogue_writes:
-            output_name = self.epilogue_writes[-1]
-        else:
-            output_name = self.output_node.get_name()
-        call_args.append(output_name)
-        arg_types.append(V.graph.get_dtype(output_name))
-        raw_args.append(None)  # Output buffer is findable by name
-        raw_keys.append("out_ptr0")
+        # The kernel writes the epilogue's output store(s), not the GEMM buffer
+        # (which is removed via removed_buffers aliasing). out_ptr0 is the primary
+        # (`D`) output; a multi-store epilogue adds out_ptr1, ... in order.
+        for i, output_name in enumerate(self._ordered_output_buffers()):
+            call_args.append(output_name)
+            arg_types.append(V.graph.get_dtype(output_name))
+            raw_args.append(None)  # Output buffer is findable by name
+            raw_keys.append(f"out_ptr{i}")
 
         for read_name in self.epilogue_reads:
             call_args.append(read_name)

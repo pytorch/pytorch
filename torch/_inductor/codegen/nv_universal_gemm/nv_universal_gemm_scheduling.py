@@ -312,17 +312,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
             node_to_fuse.get_nodes()
         )
 
-        # Multi-store chains (>1 node) not yet supported: _render_epilogue_kwargs
-        # skips intermediate stores, so EpilogueArguments construction would fail.
-        # Normally pre-fusion collapses chains, but reject explicitly to avoid
-        # silent miscompile if that changes.
-        if len(all_epilogue_nodes) > 1:
-            log.debug(
-                "NVGEMM epilogue fusion: multi-stage chains (%d nodes) not yet supported",
-                len(all_epilogue_nodes),
-            )
-            return False
-
+        # Multi-store epilogues (the GEMM output feeding >1 graph output) are
+        # supported: each output store is wired to its own out_ptr (see
+        # NVUniversalGemmKernel._ordered_output_buffers). The trial EVT codegen
+        # below still gates any chain cutlass can't express.
         trial_removed_buffers = V.graph.removed_buffers | OrderedSet(
             [ir_node.get_name()]
         )
@@ -464,20 +457,22 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                     fused_buffer_names.add(original_buffer_name)
                     scheduler = V.graph.scheduler
+                    write_bufs = OrderedSet(epilogue_writes)
                     # Must add to removed_buffers BEFORE mark_run: mark_run emits
                     # AllocateLine eagerly, and codegen_allocation only skips it
-                    # when the name is already in removed_buffers.
+                    # when the name is already in removed_buffers. Keep every output
+                    # store (each is written as an out_ptr, incl. all outputs of a
+                    # multi-store epilogue); only intermediate nodes are removed.
                     for node in epilogue_nodes:
                         node_name = node.get_name()
-                        if epilogue_writes and node_name == epilogue_writes[-1]:
+                        if node_name in write_bufs:
                             continue
                         if scheduler.can_buffer_be_removed_through_fusion(
                             node_name, fused_buffer_names
                         ):
                             V.graph.removed_buffers.add(node_name)
                     if (
-                        epilogue_writes
-                        and original_buffer_name != epilogue_writes[-1]
+                        original_buffer_name not in write_bufs
                         and scheduler.can_buffer_be_removed_through_fusion(
                             original_buffer_name, fused_buffer_names
                         )
@@ -621,6 +616,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         )
 
         epilogue_reads: list[str] = []
+        output_bufs: list[str] = []
         if epilogue:
             template_sn = cast(SchedulerNode, template)
             assert isinstance(template_sn.node, Buffer)  # noqa: S101
@@ -629,12 +625,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 [original_buffer_name]
             )
             try:
-                reads, _, _, _ = CutlassEVTCodegen.ir_to_evt_python_code(
+                reads, writes, var_renames, _ = CutlassEVTCodegen.ir_to_evt_python_code(
                     original_buffer_name,
                     list(epilogue),
                     removed_buffers_with_gemm,
                 )
                 epilogue_reads = reads
+                # Output stores in out_ptr order (D first, then multi-store extras),
+                # matching NVUniversalGemmKernel._ordered_output_buffers.
+                d_buf = var_renames.get("D")
+                output_bufs = ([d_buf] if d_buf else []) + [
+                    w for w in writes if w != d_buf
+                ]
             except (NotImplementedError, AssertionError) as e:
                 log.warning("NVGEMM benchmark epilogue codegen failed: %s", e)
 
@@ -653,7 +655,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         if benchmark_kernel:
             src_code = self._add_benchmark_helpers(
-                src_code, template, epilogue, epilogue_reads
+                src_code, template, epilogue, epilogue_reads, output_bufs
             )
 
         return src_code
@@ -664,6 +666,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
         epilogue_reads: list[str],
+        output_bufs: list[str] | None = None,
     ) -> str:
         template_node = cast(SchedulerNode, template_node)
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
@@ -671,14 +674,21 @@ class NVUniversalGemmScheduling(BaseScheduling):
         )
 
         input_nodes = cast(list[Buffer], ctb.inputs)
-        if epilogue_nodes:
+        # Output store layouts in out_ptr order. A multi-store epilogue has one
+        # per graph output; otherwise a single output (the fused final node, or
+        # the plain GEMM layout).
+        output_layouts: list[Layout] = []
+        if output_bufs:
+            for b in output_bufs:
+                buf = V.graph.get_buffer(b)
+                # pyrefly: ignore [missing-attribute]
+                output_layouts.append(cast(Layout, buf.get_layout()))
+        elif epilogue_nodes:
             final_node = cast(SchedulerNode, epilogue_nodes[-1])
-            output_layout = cast(
-                Layout,
-                final_node.node.get_layout(),  # pyrefly: ignore [missing-attribute]
-            )
+            # pyrefly: ignore [missing-attribute]
+            output_layouts.append(cast(Layout, final_node.node.get_layout()))
         else:
-            output_layout = cast(Layout, ctb.layout)
+            output_layouts.append(cast(Layout, ctb.layout))
 
         args_code = IndentedBuffer()
         args_code.writeline("")
@@ -699,13 +709,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     f"args.append(rand_strided({size}, {stride}, device='{device}', dtype={dtype}))"
                 )
 
-            out_size = V.graph.sizevars.optimization_hints(output_layout.size)
-            out_stride = V.graph.sizevars.optimization_hints(output_layout.stride)
-            out_dtype = output_layout.dtype
-            out_device = output_layout.device
-            args_code.writeline(
-                f"args.append(rand_strided({out_size}, {out_stride}, device='{out_device}', dtype={out_dtype}))"
-            )
+            for ol in output_layouts:
+                out_size = V.graph.sizevars.optimization_hints(ol.size)
+                out_stride = V.graph.sizevars.optimization_hints(ol.stride)
+                args_code.writeline(
+                    f"args.append(rand_strided({out_size}, {out_stride}, device='{ol.device}', dtype={ol.dtype}))"
+                )
 
             for read_name in epilogue_reads:
                 buf = V.graph.get_buffer(read_name)
@@ -720,7 +729,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if ctb.workspace_size > 0:
                 args_code.writeline(
                     f"args.append(torch.empty({ctb.workspace_size}, "
-                    f"device='{out_device}', dtype=torch.int8))"
+                    f"device='{output_layouts[0].device}', dtype=torch.int8))"
                 )
 
             args_code.writeline("return args")
@@ -730,14 +739,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
         with args_code.indent():
             args_code.writeline("import torch")
             num_inputs = len(input_nodes)
-            param_list = [f"args[{i}]" for i in range(num_inputs)]
-            param_list.append(f"args[{num_inputs}]")
+            n_fixed = num_inputs + len(output_layouts)
+            param_list = [f"args[{i}]" for i in range(n_fixed)]
 
             for j in range(len(epilogue_reads)):
-                param_list.append(f"args[{num_inputs + 1 + j}]")
+                param_list.append(f"args[{n_fixed + j}]")
 
             if ctb.workspace_size > 0:
-                param_list.append(f"args[{num_inputs + 1 + len(epilogue_reads)}]")
+                param_list.append(f"args[{n_fixed + len(epilogue_reads)}]")
 
             params_str = ", ".join(param_list)
             args_code.writeline("stream = torch.cuda.current_stream().cuda_stream")
