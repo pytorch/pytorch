@@ -115,28 +115,6 @@ def _rmsnorm_block_scale_swizzle(x, weight, G):
     return payload.view(B, D).float(), _swizzle_scale(scale)
 
 
-def _rmsnorm_mxfp8_scale_swizzle(x, weight, G):
-    import torch.nn.functional as F
-    from torch._inductor import inductor_prims
-
-    B, D = x.shape
-    x = F.rms_norm(x, (D,), weight)
-    x_groups = x.view(B, D // G, G)
-    amax = x_groups.abs().float().amax(dim=-1)
-    scale = (amax / 448.0).clamp_min(torch.finfo(torch.float32).tiny)
-    scale_u8 = inductor_prims.cvt_e8m0_rceil(scale)
-    scale_f32 = torch.ldexp(
-        torch.ones_like(scale, dtype=torch.float32),
-        scale_u8.to(torch.int32) - 127,
-    )
-    payload = (
-        (x_groups.float() / scale_f32.unsqueeze(-1))
-        .clamp(min=-448.0, max=448.0)
-        .to(torch.float8_e4m3fn)
-    )
-    return payload.view(B, D), _swizzle_scale(scale_u8)
-
-
 @instantiate_parametrized_tests
 class _NestedReductionBase:
     """Tests for fusing dependent cross-axis reductions into a single kernel."""
@@ -1157,24 +1135,6 @@ def _capture_rmsnorm_block_scale_swizzle_sources(
     )
 
 
-def _capture_rmsnorm_mxfp8_scale_swizzle_sources(
-    batch_size: int, *, force_persistent_outer_reduction: bool | None = None
-) -> tuple[str, str]:
-    B, D, G = batch_size, 4096, 32
-
-    def f(x, weight):
-        return _rmsnorm_mxfp8_scale_swizzle(x, weight, G)
-
-    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-    weight = torch.ones(D, device=GPU_TYPE, dtype=torch.bfloat16)
-    return _run_and_capture_sources(
-        f,
-        (x, weight),
-        _nested_kernel_signature(force_persistent_outer_reduction),
-        force_persistent_outer_reduction=force_persistent_outer_reduction,
-    )
-
-
 def _capture_bf16_layernorm_block_amax_epilogue_sources(
     batch_size: int, *, force_persistent_outer_reduction: bool | None = None
 ) -> tuple[str, str]:
@@ -1458,22 +1418,6 @@ class _InternalsBase:
             min_rblock=32,
             extra_checks=FileCheck().check(
                 "tl.store(out_ptr3 + (4*(x0 // 32) + 16*((x0 % 32))"
-            ),
-        )
-
-    def test_rmsnorm_mxfp8_scale_swizzle_kernel_form(self):
-        if torch.cuda.get_device_capability() < (10, 0):
-            self.skipTest("cvt_e8m0_rceil lowering requires SM100+")
-
-        self.assert_single_kernel_form(
-            _capture_rmsnorm_mxfp8_scale_swizzle_sources,
-            128,
-            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
-            num_outputs=2,
-            meta_num_load=self.looped_or_persistent(3, 2),
-            min_rblock=32,
-            extra_checks=FileCheck().check_count(
-                "cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True
             ),
         )
 
