@@ -3753,12 +3753,42 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(
             rceil,
             torch.tensor(
-                [0, 127, 128, 128, 128, 128, 255, 255],
+                [0, 127, 128, 128, 128, 128, 254, 255],
                 device="cuda",
                 dtype=torch.uint8,
             ),
         )
         self.assertEqual(default, rceil)
+
+        descale_bits = torch.tensor(
+            [
+                0x00000000,
+                0x00000001,
+                0x003FFFFF,
+                0x00400000,
+                0x00400001,
+                0x007FFFFF,
+                0x00800000,
+                0x3F000000,
+                0x3F800000,
+                0x3F800001,
+                0x7F7FFFFF,
+                0x7F800000,
+                0x7FC00000,
+            ],
+            device="cuda",
+            dtype=torch.int32,
+        )
+        self.assertEqual(
+            mx_e8m0_scale(
+                descale_bits.view(torch.float32) * 448.0, rounding="rceil"
+            ).view(torch.uint8),
+            torch.tensor(
+                [0, 0, 0, 0, 1, 1, 1, 126, 127, 128, 254, 254, 255],
+                device="cuda",
+                dtype=torch.uint8,
+            ),
+        )
 
         for max_value in (6.0, 57344.0):
             format_amax = torch.tensor(
@@ -3802,8 +3832,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             (None, 448.0, 450.0, 128, "448.0, 'rceil'"),
             ("rceil", 448.0, 450.0, 128, "448.0, 'rceil'"),
             ("floor", 448.0, 450.0, 127, "448.0, 'floor'"),
-            ("rceil", 448.0, 2.0**-140, 1, "448.0, 'rceil'"),
-            ("rceil", 448.0, float("inf"), 255, "448.0, 'rceil'"),
+            ("rceil", 448.0, 2.0**-140, 0, "448.0, 'rceil'"),
+            ("rceil", 448.0, float("inf"), 254, "448.0, 'rceil'"),
             ("floor", 448.0, float("inf"), 247, "448.0, 'floor'"),
             ("rceil", 57344.0, 60000.0, 128, "57344.0, 'rceil'"),
             ("floor", 6.0, 7.0, 127, "6.0, 'floor'"),
@@ -4040,6 +4070,69 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "local_reduce_finalize_fn"
         ).run(code)
         self.assertLocalReduceAuxCode(code, group, callbacks=True)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("case", ("clamp", "clamp_min", "clamp_max"))
+    def test_mm_epilogue_clamp_preserves_nan(self, case):
+        m = n = k = 16
+
+        def epilogue_fn(acc):
+            x = acc.float() + float("nan")
+            match case:
+                case "clamp":
+                    return x.clamp(-1.0, 1.0)
+                case "clamp_min":
+                    return x.clamp_min(-1.0)
+                case "clamp_max":
+                    return x.clamp_max(1.0)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        self.assertTrue(torch.isnan(actual).all())
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("rounding", ("floor", "rceil"))
+    def test_mm_fragment_group_mx_quant_preserves_nan(self, rounding):
+        m = n = k = 32
+        group = 32
+
+        def epilogue_fn(acc):
+            x = (acc.float() + float("nan")).view(m, -1, group)
+            scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True), rounding=rounding)
+            quantized = (x * scale.float().reciprocal()).view(m, n)
+            return (
+                quantized.clamp(-448.0, 448.0).to(torch.float8_e4m3fn),
+                scale.squeeze(-1),
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        quantized, scale = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        self.assertTrue(torch.isnan(quantized.float()).all())
+        self.assertTrue((scale.view(torch.uint8) == 255).all())
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
