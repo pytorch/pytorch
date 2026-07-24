@@ -118,6 +118,37 @@ def gen_launcher(sidecar: dict) -> str:
     )
 
 
+def _arch_gate(d, sidecars: list[dict]) -> str:
+    """Runtime device gate: decline (fall through to the JIT/aten
+    routes) on any device outside the intersection of the arches the
+    DECLARATION supports (d.ARCHS -- op intent) and the arches the
+    artifacts were actually COMPILED for (sidecar 'arch' -- build
+    fact). Without it, a wheel whose artifacts target Blackwell would
+    attempt a wrong-arch cubin load on Hopper and fail at launch
+    instead of falling back. Emitted ahead of the declaration's own
+    prelude AND into cpp_covers, so declarations never hand-write arch
+    checks. Sidecars with no recorded arch (exported on-device) gate on
+    d.ARCHS alone -- the artifact matches the builder by construction.
+    Shipped arches outside d.ARCHS are a packaging bug: error here
+    rather than gate on kernels the op disowns."""
+    shipped = {sc.get("arch") for sc in sidecars}
+    if shipped - {None} - set(d.ARCHS):
+        raise RuntimeError(
+            f"{d.ATEN_OP}: artifacts exported for {sorted(shipped - {None})} "
+            f"but the declaration supports only {d.ARCHS}; re-export "
+            f"(export.py skips unsupported arches)"
+        )
+    gate = sorted(shipped - {None}) or sorted(d.ARCHS)
+    majors = sorted({int(a.removeprefix("sm_").rstrip("a")) // 10 for a in gate})
+    accept = " || ".join(
+        f"at::cuda::getCurrentDeviceProperties()->major == {m}" for m in majors
+    )
+    return (
+        f"  // Device gate: declaration ARCHS x shipped artifacts = {' '.join(gate)}\n"
+        f"  if (!({accept})) return false;\n"
+    )
+
+
 def gen_op(
     op: str,
     key: str,
@@ -141,11 +172,14 @@ def gen_op(
     covers_fn = covers_reg = ""
     if covers is not None:
         covers_params, covers_schema, covers_body = covers
+        # Coverage must be no wider than the stub's acceptance: the
+        # arch gate declines in the stub, so covers must decline on the
+        # same devices or gated calls lose their JIT route.
         covers_fn = COVERS_FN_TMPL.format(
             op=op,
             key_lc=key.lower(),
             params=covers_params,
-            body=indent(covers_body, "  "),
+            body=_arch_gate(d, sidecars) + indent(covers_body, "  "),
         )
         covers_reg = COVERS_REG_TMPL.format(
             op=op, key_lc=key.lower(), schema=covers_schema
@@ -182,7 +216,7 @@ def gen_op(
             ([helpers] if helpers else []) + [gen_launcher(s) for s in sidecars]
         ),
         params=impl_params,
-        cond=indent(prelude, "  "),
+        cond=_arch_gate(d, sidecars) + indent(prelude, "  "),
         guards="\n".join(branches),
     )
 
