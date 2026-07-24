@@ -160,7 +160,7 @@ class BroadcastOptions:
     asyncOp: bool
 
 class AllreduceOptions:
-    reduceOp: ReduceOp | ReduceOp.RedOpType
+    reduceOp: ReduceOp
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
@@ -168,7 +168,7 @@ class AllreduceOptions:
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
 class ReduceOptions:
-    reduceOp: ReduceOp | ReduceOp.RedOpType
+    reduceOp: ReduceOp
     rootRank: int
     rootTensor: int
     timeout: timedelta
@@ -189,7 +189,7 @@ class ScatterOptions:
     asyncOp: bool
 
 class ReduceScatterOptions:
-    reduceOp: ReduceOp | ReduceOp.RedOpType
+    reduceOp: ReduceOp
     timeout: timedelta
     asyncOp: bool
 
@@ -307,7 +307,6 @@ class Store:
     def queue_push(self, key: str, value: bytes | str) -> None: ...
     def queue_len(self, key: str) -> int: ...
     def list_keys(self) -> list[str]: ...
-    def clone(self) -> Store: ...
 
 class FileStore(Store):
     def __init__(self, path: str, numWorkers: int = ...) -> None: ...

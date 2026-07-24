@@ -660,17 +660,15 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
 
     op_types = {p.op for p in p2p_ops}
     if op_types == {dist.isend}:
-        send_works = [
+        return [
             p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
             for p in p2p_ops
         ]
-        return [work for work in send_works if work is not None]
     if op_types == {dist.irecv}:
-        recv_works = [
+        return [
             p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
             for p in p2p_ops
         ]
-        return [work for work in recv_works if work is not None]
 
     return dist.batch_isend_irecv(p2p_ops)
 
