@@ -585,9 +585,7 @@ void GroupNormKernelImplInternal(
   TORCH_CHECK(X.numel() == N * C * HxW);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
-  if (N == 0) {
-    return;
-  }
+
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.const_data_ptr<T>();
@@ -849,16 +847,6 @@ void GroupNormBackwardKernelImplInternal(
   TORCH_CHECK(rstd.numel() == N * G);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-
-  if (N == 0) {
-    if (dgamma.defined()) {
-      dgamma.fill_(T(0));
-    }
-    if (dbeta.defined()) {
-      dbeta.fill_(T(0));
-    }
-    return;
-  }
 
   const T* dY_data = dY.const_data_ptr<T>();
   const T* X_data = X.const_data_ptr<T>();
