@@ -40,37 +40,31 @@ def _register_enum_pickling() -> None:
 _register_enum_pickling()
 
 
-def _make_scaled_operand_constraints_picklable() -> None:
-    """Guard ScaledOperandConstraints.__getattr__ against unpickling recursion.
+def _rebuild_scaled_operand_constraints(
+    quantized: Any, scale: Any, mode: Any, swizzle: Any
+) -> Any:
+    from cutlass.operators.metadata import ScaledOperandConstraints
 
-    Its __getattr__ delegates to ``self.quantized``, but reading ``self.quantized``
-    re-enters __getattr__ when ``quantized`` isn't set yet -- which happens while
-    unpickling, since pickle probes ``__setstate__``/``__reduce_ex__`` on the
-    freshly-created, state-less instance before restoring ``__dict__``. That
-    self-delegation recurses infinitely (RecursionError), which blocks shipping a
-    scaled-GEMM operator's metadata to the subprocess precompile pool. Read
-    ``quantized`` from ``__dict__`` (no re-entry) and never delegate dunder
-    lookups; behavior is unchanged once ``quantized`` is set.
-    """
+    return ScaledOperandConstraints(quantized, scale, mode, swizzle)
+
+
+def _register_scaled_operand_constraints_pickling() -> None:
+    """Avoid CUTLASS's recursive ``__getattr__`` during unpickling."""
     try:
         from cutlass.operators.metadata import ScaledOperandConstraints
     except ImportError:
         return
 
-    def __getattr__(self: Any, attr: str) -> Any:
-        if attr == "quantized" or (attr.startswith("__") and attr.endswith("__")):
-            raise AttributeError(attr)
-        quantized = self.__dict__.get("quantized")
-        if quantized is not None and hasattr(quantized, attr):
-            return getattr(quantized, attr)
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{attr}'"
-        )
-
-    ScaledOperandConstraints.__getattr__ = __getattr__
+    copyreg.pickle(
+        ScaledOperandConstraints,
+        lambda value: (
+            _rebuild_scaled_operand_constraints,
+            (value.quantized, value.scale, value.mode, value.swizzle),
+        ),
+    )
 
 
-_make_scaled_operand_constraints_picklable()
+_register_scaled_operand_constraints_pickling()
 
 
 def to_cutlass_scale_mode(
