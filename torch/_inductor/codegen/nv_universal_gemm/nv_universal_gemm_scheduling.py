@@ -3,6 +3,7 @@
 NVIDIA Universal GEMM scheduling for PyTorch Inductor.
 """
 
+import dataclasses
 import hashlib
 import logging
 from collections.abc import Sequence
@@ -14,6 +15,7 @@ from torch._inductor.utils import (
     get_kernel_metadata,
     Placeholder,
 )
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._ordered_set import OrderedSet
 
 from ... import config
@@ -39,9 +41,11 @@ from ...kernel.gemm_epilogue_ir import (
     GemmEpilogueIRAnalysis,
     GemmEpilogueIRStore,
     grouped_reduction_ir,
+    is_absmax_normalize_ir,
     is_absmax_scale_finalizer_ir,
     is_direct_bool_gt_zero_ir,
     is_logsumexp_ir,
+    is_softmax_ir,
     operation_names_ir,
     single_source_affine_ir,
     sum_multiply_consumer_type_ir,
@@ -319,7 +323,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             group_extent = reduction.reduction_ranges[0]
             try:
                 group = V.graph.sizevars.optimization_hint(group_extent)
-            except Exception:
+            except (GuardOnDataDependentSymNode, TypeError, ValueError):
                 return None
             if (known_equals(m, out_m) and known_equals(n, out_n * group_extent)) or (
                 known_equals(out_m, m) and known_equals(out_n, n // group_extent)
@@ -339,7 +343,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 n = V.graph.sizevars.optimization_hint(n)
                 out_m = V.graph.sizevars.optimization_hint(out_m)
                 out_n = V.graph.sizevars.optimization_hint(out_n)
-            except Exception:
+            except (GuardOnDataDependentSymNode, TypeError, ValueError):
                 return None
             if m == out_m and out_n > 0 and n % out_n == 0:
                 group, axis = n // out_n, 1
@@ -352,7 +356,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if group <= 1 or (axis == 0 and group > 128):
             return None
 
-        store = GemmEpilogueIRAnalysis.from_buffers((node,)).store(node.get_name())
+        store = GemmEpilogueIRAnalysis.store_from_buffer(node)
         classified = (
             grouped_reduction_ir(store, gemm_node.get_name(), group)
             if store is not None
@@ -437,7 +441,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         try:
             m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
             out_m, out_n = map(V.graph.sizevars.optimization_hint, buffer.get_size())
-        except Exception:
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
             return False
         if out_m != m or out_n <= 0 or n != out_n * group:
             return False
@@ -488,7 +492,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         try:
             _, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
             _, out_n = map(V.graph.sizevars.optimization_hint, buffer.get_size())
-        except Exception:
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
             return None
         if out_n <= 0 or n % out_n != 0:
             return None
@@ -497,7 +501,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             gemm_node, buffer, scheduler_node, group
         ):
             return None
-        store = GemmEpilogueIRAnalysis.from_buffers((buffer,)).store(buffer.get_name())
+        store = GemmEpilogueIRAnalysis.store_from_buffer(buffer)
         return (buffer, group, store) if store is not None else None
 
     @classmethod
@@ -533,7 +537,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             )
         ):
             return None
-        store = GemmEpilogueIRAnalysis.from_buffers((buffer,)).store(buffer.get_name())
+        store = GemmEpilogueIRAnalysis.store_from_buffer(buffer)
         if store is None or not is_direct_bool_gt_zero_ir(store, gemm_node.get_name()):
             return None
         reads = list(scheduler_node.read_writes.reads)
@@ -563,13 +567,16 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if candidate is None:
             return None
         buffer, group, store = candidate
-        if not is_logsumexp_ir(store):
+        if not is_logsumexp_ir(store, gemm_node.get_name(), group):
             return None
         return GemmReductionConfig(buffer.get_name(), group, 1, "logsumexp", "identity")
 
     @classmethod
     def _grouped_reduce_feeds_main_config_from_nodes(
-        cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
+        cls,
+        gemm_node: Buffer,
+        nodes: Sequence[BaseSchedulerNode],
+        analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
             return None
@@ -577,7 +584,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             node for node in nodes if isinstance(node.node, ComputedBuffer)
         ]
         buffers = tuple(cast(ComputedBuffer, node.node) for node in candidate_nodes)
-        analysis = GemmEpilogueIRAnalysis.from_buffers(buffers)
+        analysis = analysis or GemmEpilogueIRAnalysis.from_buffers(buffers)
         if len(nodes) > 1:
             reductions = [
                 config
@@ -660,7 +667,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 group = V.graph.sizevars.optimization_hint(
                     reduction.data.reduction_ranges[0]
                 )
-            except Exception:
+            except (GuardOnDataDependentSymNode, TypeError, ValueError):
                 return None
             axis = 0
             store = analysis.store(node.get_name())
@@ -698,10 +705,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return None
         try:
             _, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
-        except Exception:
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
             return None
         group, axis = len(reads) - 1, 0
-        store = GemmEpilogueIRAnalysis.from_buffers((node,)).store(node.get_name())
+        store = analysis.store(node.get_name())
         consumer_type = (
             centered_mean_consumer_type_unrolled_ir(store, gemm_node.get_name(), group)
             if store is not None
@@ -723,7 +730,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     @classmethod
     def _grouped_softmax_config_from_nodes(
-        cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
+        cls,
+        gemm_node: Buffer,
+        nodes: Sequence[BaseSchedulerNode],
+        analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
             return None
@@ -738,7 +748,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     group = V.graph.sizevars.optimization_hint(
                         buffer.data.reduction_ranges[0]
                     )
-                except Exception:
+                except (GuardOnDataDependentSymNode, TypeError, ValueError):
                     return None
                 if group <= 32:
                     return GemmReductionConfig(
@@ -751,13 +761,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 if layout is None or layout.axis != 1:
                     return None
                 group = layout.group_size
-                store = GemmEpilogueIRAnalysis.from_buffers((buffer,)).store(
-                    buffer.get_name()
+                store = (
+                    analysis.store(buffer.get_name())
+                    if analysis is not None
+                    else GemmEpilogueIRAnalysis.store_from_buffer(buffer)
                 )
-                operations = operation_names_ir(store) if store is not None else ()
                 if (
                     group <= 32
-                    and frozenset(("exp", "truediv")).issubset(operations)
+                    and store is not None
+                    and is_softmax_ir(store, gemm_node.get_name(), group)
                     and nodes[0].read_writes.reads
                     and all(
                         read.name == gemm_node.get_name()
@@ -792,7 +804,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             group = V.graph.sizevars.optimization_hint(
                 reductions[0].reduction_ranges[0]
             )
-        except Exception:
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
             return None
         if group > 32:
             return None
@@ -812,7 +824,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     buffers[2].get_size(),
                 )
             )
-        except Exception:
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
             return None
         if (
             n % group != 0
@@ -821,11 +833,16 @@ class NVUniversalGemmScheduling(BaseScheduling):
             or reductions[0].reduction_ranges != reductions[1].reduction_ranges
         ):
             return None
-        finalizer_store = GemmEpilogueIRAnalysis.from_buffers((buffers[2],)).store(
-            buffers[2].get_name()
+        finalizer_store = (
+            analysis.store(buffers[2].get_name())
+            if analysis is not None
+            else GemmEpilogueIRAnalysis.store_from_buffer(buffers[2])
         )
-        if finalizer_store is None or not frozenset(("exp", "truediv")).issubset(
-            operation_names_ir(finalizer_store)
+        if finalizer_store is None or not is_softmax_ir(
+            finalizer_store,
+            gemm_node.get_name(),
+            group,
+            frozenset(buffer.get_name() for buffer in buffers[:2]),
         ):
             return None
         if not any(
@@ -844,7 +861,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     @classmethod
     def _grouped_sum_normalize_config_from_nodes(
-        cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
+        cls,
+        gemm_node: Buffer,
+        nodes: Sequence[BaseSchedulerNode],
+        analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
             return None
@@ -857,7 +877,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if (config := cls._grouped_reduce_config(gemm_node, node)) is not None
         ]
         finalizers = []
-        analysis = GemmEpilogueIRAnalysis.from_buffers(buffers)
+        analysis = analysis or GemmEpilogueIRAnalysis.from_buffers(buffers)
         for buffer in buffers:
             if not isinstance(buffer.data, Pointwise):
                 continue
@@ -882,7 +902,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         _, n = map(
                             V.graph.sizevars.optimization_hint, gemm_node.get_size()
                         )
-                    except Exception:
+                    except (GuardOnDataDependentSymNode, TypeError, ValueError):
                         continue
                     group = len(reads) - 1
                     if group <= 1 or group > 4:
@@ -945,15 +965,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     @classmethod
     def _grouped_absmax_normalize_config_from_nodes(
-        cls, gemm_node: Buffer, nodes: Sequence[BaseSchedulerNode]
+        cls,
+        gemm_node: Buffer,
+        nodes: Sequence[BaseSchedulerNode],
+        analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
         if len(gemm_node.get_size()) != 2:
             return None
         buffers = cls._computed_buffers(nodes)
         if buffers is None:
             return None
-        analysis = GemmEpilogueIRAnalysis.from_buffers(buffers)
-        finalizers = []
+        analysis = analysis or GemmEpilogueIRAnalysis.from_buffers(buffers)
+        candidates = []
         for buffer in buffers:
             if not isinstance(buffer.data, Pointwise):
                 continue
@@ -964,16 +987,27 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 continue
             group = layout.group_size
             store = analysis.store(buffer.get_name())
-            if (
-                1 < group <= 32
-                and store is not None
-                and frozenset(("mul", "reciprocal")).issubset(operation_names_ir(store))
-            ):
-                finalizers.append((buffer, group))
+            if 1 < group <= 32 and store is not None:
+                candidates.append((buffer, group, store))
+        reductions, reduction_nodes = cls._partition_local_reductions(gemm_node, nodes)
+        if len(reductions) != 1:
+            return None
+        scale_names = frozenset(
+            [reductions[0].output_name]
+            + [
+                node.node.get_name()
+                for node in reduction_nodes
+                if isinstance(node.node, ComputedBuffer)
+            ]
+        )
+        finalizers = [
+            (buffer, group)
+            for buffer, group, store in candidates
+            if is_absmax_normalize_ir(store, gemm_node.get_name(), scale_names)
+        ]
         if len(finalizers) != 1:
             return None
         finalizer, group = finalizers[0]
-        reductions = cls._partition_local_reductions(gemm_node, nodes)[0]
         if len(reductions) != 1 or reductions[0].contract != (
             group,
             1,
@@ -992,7 +1026,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
         nodes: Sequence[BaseSchedulerNode],
         *,
         allow_softmax: bool = True,
+        analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
+        buffers = cls._computed_buffers(nodes)
+        analysis = analysis or (
+            GemmEpilogueIRAnalysis.from_buffers(buffers)
+            if buffers is not None
+            else None
+        )
         matchers = [
             cls._grouped_reduce_feeds_main_config_from_nodes,
             cls._grouped_sum_normalize_config_from_nodes,
@@ -1001,7 +1042,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if allow_softmax:
             matchers.insert(1, cls._grouped_softmax_config_from_nodes)
         for matcher in matchers:
-            if (config := matcher(gemm_node, nodes)) is not None:
+            if (config := matcher(gemm_node, nodes, analysis)) is not None:
                 return config
         return None
 
@@ -1036,9 +1077,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         ):
             return None
         reads = list(finalizer_nodes[0].read_writes.reads)
-        store = GemmEpilogueIRAnalysis.from_buffers((finalizer,)).store(
-            finalizer.get_name()
-        )
+        store = GemmEpilogueIRAnalysis.store_from_buffer(finalizer)
         if (
             store is not None
             and bool(reads)
@@ -1111,16 +1150,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
             ):
                 finalizer = epilogue_nodes[index + 1]
                 finalizer_buffer = cast(ComputedBuffer, finalizer.get_nodes()[0].node)
-                store = GemmEpilogueIRAnalysis.from_buffers((finalizer_buffer,)).store(
-                    finalizer_buffer.get_name()
-                )
+                store = GemmEpilogueIRAnalysis.store_from_buffer(finalizer_buffer)
                 affine = (
                     single_source_affine_ir(store, config.output_name)
                     if store is not None
                     else None
                 )
                 if affine == (1.0 / config.group, 0.0):
-                    config = config.replace(
+                    config = dataclasses.replace(
+                        config,
                         output_name=finalizer_buffer.get_name(),
                         reduction_type="mean",
                     )
@@ -1139,7 +1177,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 layout_finalizer = epilogue_nodes[index + 1]
                 mean_finalizer = epilogue_nodes[index + 2]
                 mean_buffer = cast(ComputedBuffer, mean_finalizer.get_nodes()[0].node)
-                config = config.replace(output_name=mean_buffer.get_name())
+                config = dataclasses.replace(config, output_name=mean_buffer.get_name())
                 reduction_nodes.add(layout_finalizer)
                 reduction_nodes.add(mean_finalizer)
                 index += 2
@@ -1150,7 +1188,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
             ):
                 finalizer = epilogue_nodes[index + 1]
                 finalizer_buffer = cast(ComputedBuffer, finalizer.get_nodes()[0].node)
-                config = config.replace(output_name=finalizer_buffer.get_name())
+                config = dataclasses.replace(
+                    config, output_name=finalizer_buffer.get_name()
+                )
                 reduction_nodes.add(finalizer)
                 index += 1
             elif index + 1 < len(epilogue_nodes) and cls._is_layout_finalizer(
@@ -1158,7 +1198,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
             ):
                 finalizer = epilogue_nodes[index + 1]
                 finalizer_buffer = cast(ComputedBuffer, finalizer.get_nodes()[0].node)
-                config = config.replace(output_name=finalizer_buffer.get_name())
+                config = dataclasses.replace(
+                    config, output_name=finalizer_buffer.get_name()
+                )
                 reduction_nodes.add(finalizer)
                 index += 1
             elif (config.reduction_type, config.source_type) == ("max", "abs"):
@@ -1175,7 +1217,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     if not isinstance(finalizer_buffer, Buffer):
                         index += 1
                         continue
-                    config = config.replace(
+                    config = dataclasses.replace(
+                        config,
                         output_name=finalizer_buffer.get_name(),
                         source_type="abs_scale",
                     )
@@ -1240,7 +1283,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
             for epilogue_node in (*existing_epilogue_nodes, node_to_fuse)
             for node in epilogue_node.get_nodes()
         ]
-        softmax = self._grouped_softmax_config_from_nodes(ir_node, all_scheduler_nodes)
+        computed_buffers = self._computed_buffers(all_scheduler_nodes)
+        ir_analysis = (
+            GemmEpilogueIRAnalysis.from_buffers(computed_buffers)
+            if computed_buffers is not None
+            else None
+        )
+        softmax = self._grouped_softmax_config_from_nodes(
+            ir_node, all_scheduler_nodes, ir_analysis
+        )
         if (
             softmax is None
             and sum(
@@ -1252,7 +1303,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         ):
             log.debug("NVGEMM supports one grouped local reduction")
             return False
-        feed_main = self._feed_main_config_from_nodes(ir_node, all_scheduler_nodes)
+        feed_main = self._feed_main_config_from_nodes(
+            ir_node, all_scheduler_nodes, analysis=ir_analysis
+        )
         if feed_main is not None:
             fused_names = OrderedSet(
                 scheduler_node.get_name() for scheduler_node in all_scheduler_nodes
@@ -1856,9 +1909,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                             )
                             if not feed_reads or candidate_reads != feed_reads:
                                 continue
-                            store = GemmEpilogueIRAnalysis.from_buffers(
-                                (buffer,)
-                            ).store(buffer.get_name())
+                            store = GemmEpilogueIRAnalysis.store_from_buffer(buffer)
                             reduction_names = frozenset(feed_reads)
                             consumer_type = (
                                 sum_normalize_consumer_type_ir(
@@ -1970,7 +2021,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     if feed_main is not None and local_reduce is not None:
                         d_buf = var_renames.get("D")
                         if isinstance(d_buf, str):
-                            local_reduce = local_reduce.with_primary_output(d_buf)
+                            local_reduce = dataclasses.replace(
+                                local_reduce, primary_output=d_buf
+                            )
 
                 if not only_gen_src_code:
                     write_bufs = OrderedSet(epilogue_writes)
