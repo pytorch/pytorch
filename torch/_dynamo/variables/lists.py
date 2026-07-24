@@ -454,7 +454,12 @@ class BaseListVariable(VariableTracker):
 
         return ConstantVariable.create(cmp_op(len(left), len(right)))
 
-    def list_index(self, tx, args, kwargs):
+    def list_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         if not len(args):
             raise_args_mismatch(
                 tx,
@@ -484,14 +489,24 @@ class BaseListVariable(VariableTracker):
                 kwargs,
             )
 
-    def list_count(self, tx, args, kwargs):
+    def list_count(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return VariableTracker.build(tx, operator.countOf).call_function(
             tx,
             [self, args[0]],
             kwargs,
         )
 
-    def list_append(self, tx, args, kwargs):
+    def list_append(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if kwargs or len(args) != 1:
@@ -506,7 +521,12 @@ class BaseListVariable(VariableTracker):
         self.items.append(arg)
         return ConstantVariable.create(None)
 
-    def list_extend(self, tx, args, kwargs):
+    def list_extend(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if kwargs or len(args) != 1:
@@ -543,7 +563,12 @@ class BaseListVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
         return ConstantVariable.create(None)
 
-    def list_insert(self, tx, args, kwargs):
+    def list_insert(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         from .tensor import SymNodeVariable
@@ -565,7 +590,12 @@ class BaseListVariable(VariableTracker):
         self.items.insert(const_idx, value)
         return ConstantVariable.create(None)
 
-    def list_pop(self, tx, args, kwargs):
+    def list_pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if kwargs or len(args) > 1:
@@ -588,7 +618,12 @@ class BaseListVariable(VariableTracker):
         tx.output.side_effects.mutation(self)
         return self.items.pop(*[a.as_python_constant() for a in args])
 
-    def list_clear(self, tx, args, kwargs):
+    def list_clear(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if args or kwargs:
@@ -602,12 +637,22 @@ class BaseListVariable(VariableTracker):
         self.items.clear()
         return ConstantVariable.create(None)
 
-    def list_copy(self, tx, args, kwargs):
+    def list_copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # List copy() doesn't have args and kwargs
         items_lst: list[VariableTracker] = list(self.items)
         return self.modified(items_lst, mutation_type=ValueMutationNew())
 
-    def list_reverse(self, tx, args, kwargs):
+    def list_reverse(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if args or kwargs:
@@ -621,7 +666,12 @@ class BaseListVariable(VariableTracker):
         tx.output.side_effects.mutation(self)
         return ConstantVariable.create(None)
 
-    def list_remove(self, tx, args, kwargs):
+    def list_remove(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if kwargs or len(args) != 1:
@@ -635,7 +685,12 @@ class BaseListVariable(VariableTracker):
         self.call_method(tx, "pop", [idx], {})
         return ConstantVariable.create(None)
 
-    def list_sort(self, tx, args, kwargs):
+    def list_sort(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if len(args) != 0:
@@ -714,7 +769,12 @@ class BaseListVariable(VariableTracker):
             raise_observed_exception(ValueError, tx, args=["list modified during sort"])
         return ConstantVariable.create(None)
 
-    def list_reversed(self, tx, args, kwargs):
+    def list_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # list/tuple/namedtuple __reversed__: reverse iterator over items.
         return ListIteratorVariable(
             list(reversed(self.items)),
@@ -1043,12 +1103,22 @@ class RangeVariable(BaseListVariable):
         else:
             return SourcelessBuilder.create(tx, not cmp)
 
-    def count(self, tx, args, kwargs):
+    def count(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
         return SourcelessBuilder.create(tx, self.range_count(*args))
 
-    def index(self, tx, args, kwargs):
+    def index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         x = args[0].as_python_constant()
         start, stop, step = self.start(), self.stop(), self.step()
         in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
@@ -1062,7 +1132,12 @@ class RangeVariable(BaseListVariable):
 
     # Reuse BaseListVariable's table, overriding index/count with range's
     # arithmetic implementations.
-    def range_reversed(self, tx, args, kwargs):
+    def range_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # range.__reversed__: range_iterator with reversed bounds.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_reverse)
         length = self.range_length()
@@ -1552,7 +1627,12 @@ class DequeVariable(BaseListVariable):
                 self.items[-maxlen:] if side == "right" else self.items[:maxlen]
             )
 
-    def append(self, tx, args, kwargs):
+    def append(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         result = BaseListVariable.list_append(self, tx, args, kwargs)
         if result is None:
             return None
@@ -1560,7 +1640,12 @@ class DequeVariable(BaseListVariable):
         self.state += 1
         return result
 
-    def extend(self, tx, args, kwargs):
+    def extend(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         pre_len = len(self.items)
         result = BaseListVariable.list_extend(self, tx, args, kwargs)
         if result is None:
@@ -1572,7 +1657,12 @@ class DequeVariable(BaseListVariable):
         self._clamp_maxlen("right")
         return result
 
-    def appendleft(self, tx, args, kwargs):
+    def appendleft(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
         if kwargs or len(args) != 1:
@@ -1588,7 +1678,12 @@ class DequeVariable(BaseListVariable):
         self.state += 1
         return ConstantVariable.create(None)
 
-    def extendleft(self, tx, args, kwargs):
+    def extendleft(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
         if kwargs or len(args) != 1:
@@ -1606,7 +1701,12 @@ class DequeVariable(BaseListVariable):
         self._clamp_maxlen("left")
         return ConstantVariable.create(None)
 
-    def popleft(self, tx, args, kwargs):
+    def popleft(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         if kwargs or len(args) > 0:
@@ -1621,7 +1721,12 @@ class DequeVariable(BaseListVariable):
         self.state += 1
         return result
 
-    def insert(self, tx, args, kwargs):
+    def insert(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
         if kwargs or len(args) != 2:
@@ -1640,7 +1745,12 @@ class DequeVariable(BaseListVariable):
         self.state += 1
         return result
 
-    def copy(self, tx, args, kwargs):
+    def copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # deque_copy preserves maxlen: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L890
         return DequeVariable(
             list(self.items),
@@ -1648,21 +1758,36 @@ class DequeVariable(BaseListVariable):
             mutation_type=ValueMutationNew(),
         )
 
-    def pop(self, tx, args, kwargs):
+    def pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         result = BaseListVariable.list_pop(self, tx, args, kwargs)
         if result is None:
             return None
         self.state += 1
         return result
 
-    def clear(self, tx, args, kwargs):
+    def clear(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         result = BaseListVariable.list_clear(self, tx, args, kwargs)
         if result is None:
             return None
         self.state += 1
         return result
 
-    def deque_reversed(self, tx, args, kwargs):
+    def deque_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
         # the current state and detects mutation during iteration.
         return DequeReverseIteratorVariable(
@@ -2373,7 +2498,12 @@ class RangeIteratorVariable(IteratorVariable):
         self.start += self.step
         return VariableTracker.build(tx, current)
 
-    def setstate(self, tx, args, kwargs):
+    def setstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # rangeiter_setstate clamps the arg against the current remaining
         # length, then advances: r->start += arg*step; r->len -= arg.
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1093-L1107
@@ -2383,7 +2513,12 @@ class RangeIteratorVariable(IteratorVariable):
         self.len -= index
         return ConstantVariable.create(None)
 
-    def length_hint(self, tx, args, kwargs):
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # rangeiter_len: remaining items.
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1109-L1115
         return ConstantVariable.create(self.len)
