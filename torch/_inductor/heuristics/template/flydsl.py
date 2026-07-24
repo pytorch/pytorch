@@ -73,6 +73,52 @@ def _make_gemm_param(gemm_config: dict[str, int | bool]):
     )
 
 
+def is_gemm_config_valid_for_shape(
+    m: int,
+    n: int,
+    k: int,
+    dtype_id: int,
+    gemm_config: dict[str, int | bool],
+) -> bool:
+    """Return whether a FlyDSL config supports this concrete GEMM shape."""
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        infer_has_k_tail,
+        make_gemm_param_and_validate,
+    )
+
+    block_k = int(gemm_config["TILE_K"])
+    stages = int(gemm_config["STAGES"])
+    use_half_tile_interleaved = bool(
+        gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
+    )
+    has_k_tail = infer_has_k_tail(k, block_k, stages)
+    if use_half_tile_interleaved:
+        k_tiles = (k + block_k - 1) // block_k
+        has_k_tail = has_k_tail or (k_tiles % 2 != 0)
+
+    return (
+        make_gemm_param_and_validate(
+            m,
+            n,
+            k,
+            {
+                "dtype_id": dtype_id,
+                "block_m": int(gemm_config["TILE_M"]),
+                "block_n": int(gemm_config["TILE_N"]),
+                "block_k": block_k,
+                "stages": stages,
+                "m_waves": int(gemm_config["BLOCK_M_WARPS"]),
+                "n_waves": int(gemm_config["BLOCK_N_WARPS"]),
+                "group_m": int(gemm_config["GROUP_M"]),
+                "use_half_tile_interleaved": use_half_tile_interleaved,
+                "has_bias": False,
+                "has_k_tail": has_k_tail,
+            },
+        )
+        is not None
+    )
+
+
 def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
     Returns the exhaustive configuration set for the gfx950 FlyDSL HGEMM kernel.
@@ -151,6 +197,7 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         (128, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
         (256, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
         (256, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
+        (256, 256, 64, 2, 1, 2, 4, 1, 4, True, True),
     ]
     configs = [_config_from_tuple(args) for args in config_tuples]
     valid_configs: list[FlyDSLGemmConfig] = []
@@ -163,7 +210,7 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     return valid_configs
 
 
-def get_gemm_configs() -> list[dict[str, object]]:
+def get_gemm_configs() -> list[dict[str, int | bool]]:
     """
     Returns the configuration set for the gfx950 FlyDSL HGEMM kernel.
 

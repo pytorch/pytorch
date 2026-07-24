@@ -291,6 +291,8 @@ def gemm_gfx950_kernel(
     m: fx.Int32,
     n: fx.Int32,
     k: fx.Int32,
+    a_row_stride: fx.Int32,
+    b_row_stride: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
 ):
@@ -453,7 +455,9 @@ def gemm_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (safe_global_m_idx * k + safe_global_k_idx) * in_data_bytes
+            global_offset = (
+                safe_global_m_idx * a_row_stride + safe_global_k_idx
+            ) * in_data_bytes
             buffer_load_lds_inline(a_rsrc, lds_ptr, global_offset, async_load_bytes)
             if i < ldg_a_iters - 1:
                 lds_ptr = lds_ptr + block_threads * async_load_bytes
@@ -475,7 +479,9 @@ def gemm_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (safe_global_n_idx * k + safe_global_k_idx) * in_data_bytes
+            global_offset = (
+                safe_global_n_idx * b_row_stride + safe_global_k_idx
+            ) * in_data_bytes
             buffer_load_lds_inline(b_rsrc, lds_ptr, global_offset, async_load_bytes)
             if i < ldg_b_iters - 1:
                 lds_ptr = lds_ptr + block_threads * async_load_bytes
@@ -560,6 +566,8 @@ def gemm_hti_gfx950_kernel(
     m: fx.Int32,
     n: fx.Int32,
     k: fx.Int32,
+    a_row_stride: fx.Int32,
+    b_row_stride: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
 ):
@@ -671,7 +679,9 @@ def gemm_hti_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (safe_global_m_idx * k + safe_global_k_idx) * in_data_bytes
+            global_offset = (
+                safe_global_m_idx * a_row_stride + safe_global_k_idx
+            ) * in_data_bytes
             buffer_load_lds_inline(a_rsrc, lds_ptr, global_offset, async_load_bytes)
             if i < half_ldg_a_iters - 1:
                 lds_ptr = lds_ptr + block_threads * async_load_bytes
@@ -693,7 +703,9 @@ def gemm_hti_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (safe_global_n_idx * k + safe_global_k_idx) * in_data_bytes
+            global_offset = (
+                safe_global_n_idx * b_row_stride + safe_global_k_idx
+            ) * in_data_bytes
             buffer_load_lds_inline(b_rsrc, lds_ptr, global_offset, async_load_bytes)
             if i < half_ldg_b_iters - 1:
                 lds_ptr = lds_ptr + block_threads * async_load_bytes
@@ -952,12 +964,14 @@ def launch_gemm_gfx950(
     out: fx.Tensor,
     a: fx.Tensor,
     b: fx.Tensor,
-    m: fx.Int32,
-    n: fx.Int32,
-    k: fx.Int32,
     param: GemmGfx950Param,
     stream: fx.Stream = fx.Stream(None),
 ):
+    m = fx.Int32(fx.get_scalar(a.shape[0]))
+    n = fx.Int32(fx.get_scalar(b.shape[0]))
+    k = fx.Int32(fx.get_scalar(a.shape[1]))
+    a_row_stride = fx.Int32(fx.get_scalar(a.stride[0]))
+    b_row_stride = fx.Int32(fx.get_scalar(b.stride[0]))
     elem_dtype = _elem_dtype(param)
     mma_atom = fx.make_mma_atom(
         fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, elem_dtype)
@@ -987,7 +1001,19 @@ def launch_gemm_gfx950(
     )
     kernel_impl._known_block_size = [param.block_threads, 1, 1]
     kernel_impl._func.__name__ = make_gemm_gfx950_kernel_name(param)
-    kernel_impl(out, a, b, out, m, n, k, tiled_mma, param).launch(
+    kernel_impl(
+        out,
+        a,
+        b,
+        out,
+        m,
+        n,
+        k,
+        a_row_stride,
+        b_row_stride,
+        tiled_mma,
+        param,
+    ).launch(
         grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
         stream=stream,
