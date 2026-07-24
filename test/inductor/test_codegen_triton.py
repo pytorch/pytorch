@@ -686,6 +686,15 @@ class TestCodegenTriton(InductorTestCase):
         self.assertIn("debug=True", source)
         self.assertIn('do_not_specialize=["x"]', source)
 
+    def test_user_defined_triton_kernel_jit_decorator_parse_failure_falls_back(self):
+        from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
+
+        for raw_src in ("", "@triton.jit(\n", ["@triton.jit(\n"]):
+            self.assertEqual(
+                _triton_jit_decorator_from_source(SimpleNamespace(raw_src=raw_src)),
+                "@triton.jit",
+            )
+
     def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
         # Regression: a backend whose import_get_raw_stream_as returns a
         # multi-line snippet (e.g. the CPU override, which MTIA uses) must not

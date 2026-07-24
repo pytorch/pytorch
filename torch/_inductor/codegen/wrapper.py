@@ -344,13 +344,18 @@ def user_defined_kernel_grid_fn_code(
 def _triton_jit_decorator_from_source(symbol) -> str:
     raw_src = getattr(symbol, "raw_src", None)
     if raw_src:
-        src = textwrap.dedent("".join(raw_src))
-        fn_def = ast.parse(src).body[0]
-        if isinstance(fn_def, ast.FunctionDef):
-            for decorator in fn_def.decorator_list:
-                decorator_src = ast.get_source_segment(src, decorator)
-                if decorator_src and decorator_src.startswith("triton.jit"):
-                    return f"@{decorator_src}"
+        # Triton .src strips decorators; raw_src preserves them in current Triton.
+        # Joining handles both string raw_src and list-of-lines raw_src variants.
+        try:
+            src = textwrap.dedent("".join(raw_src))
+            fn_def = ast.parse(src).body[0]
+            if isinstance(fn_def, ast.FunctionDef):
+                for decorator in fn_def.decorator_list:
+                    decorator_src = ast.get_source_segment(src, decorator)
+                    if decorator_src and decorator_src.startswith("triton.jit"):
+                        return f"@{decorator_src}"
+        except (IndexError, SyntaxError, TypeError, ValueError):
+            pass
     return "@triton.jit"
 
 
