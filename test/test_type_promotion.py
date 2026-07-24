@@ -37,7 +37,7 @@ def float_double_default_dtype(fn):
 
     return wrapped_fn
 
-class TestTypePromotion(TestCase):
+class TestTypePromotionDevice(TestCase):
 
     # In-place operations don't promote.
     # `int+float -> float` but `int.add_(float)` is rejected as an error.
@@ -1158,7 +1158,7 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(y, y_promo.to(dtype=dtype))
 
 
-class TestTypePromotionCPU(TestCase):
+class TestTypePromotion(TestCase):
     """Pure dtype-algebra tests that don't require any accelerator."""
 
     @float_double_default_dtype
@@ -1183,7 +1183,7 @@ class TestTypePromotionCPU(TestCase):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
 
-instantiate_device_type_tests(TestTypePromotion, globals())
+instantiate_device_type_tests(TestTypePromotionDevice, globals())
 
 if __name__ == '__main__':
     run_tests()
