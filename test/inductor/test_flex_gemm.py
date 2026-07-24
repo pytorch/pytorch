@@ -4056,10 +4056,21 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.tensor([127, 128], device="cuda", dtype=torch.uint8),
             )
 
-        nv_scale = nvfp4_e4m3_scale(amax[:6])
+        nv_amax = amax[:6]
+        nv_scale = nvfp4_e4m3_scale(nv_amax)
         self.assertEqual(
             nv_scale.view(torch.uint8),
-            nvfp4_e4m3_scale(amax[:6], rounding="nearest").view(torch.uint8),
+            nvfp4_e4m3_scale(nv_amax, max_value=6.0, rounding="nearest").view(
+                torch.uint8
+            ),
+        )
+        self.assertEqual(
+            nvfp4_e4m3_scale(nv_amax, max_value=4.0),
+            torch.clamp(
+                nv_amax.float() / 4.0,
+                min=torch.finfo(torch.float8_e4m3fn).tiny,
+                max=torch.finfo(torch.float8_e4m3fn).max,
+            ).to(torch.float8_e4m3fn),
         )
         with self.assertRaisesRegex(ValueError, "rounding must be 'floor', 'rceil'"):
             mx_e8m0_scale(amax, rounding="nearest")
@@ -4132,6 +4143,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 "mx_e8m0_scale_intrinsic",
             ),
             ("nvfp4", nvfp4_e4m3_scale, " / 6.0"),
+            (
+                "nvfp4_max4",
+                lambda x: nvfp4_e4m3_scale(x, max_value=4.0),
+                " / 4.0",
+            ),
         ),
         name_fn=lambda case: case[0],
     )

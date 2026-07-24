@@ -158,7 +158,7 @@ def normalize_nvfp4_scale_rounding(rounding: str | None) -> str:
             )
 
 
-def validate_mx_scale_max_value(max_value: float) -> None:
+def validate_scale_max_value(op_name: str, max_value: float) -> None:
     """Require a finite positive quantized-type maximum."""
     if (
         not isinstance(max_value, float)
@@ -166,7 +166,7 @@ def validate_mx_scale_max_value(max_value: float) -> None:
         or max_value <= 0
     ):
         raise ValueError(
-            f"mx_e8m0_scale max_value must be a finite positive float, got {max_value!r}"
+            f"{op_name} max_value must be a finite positive float, got {max_value!r}"
         )
 
 
@@ -185,11 +185,6 @@ def mx_e8m0_scale(
     FLOOR scale encoding. TorchAO currently chooses FLOOR by default, so callers
     requiring its default recipe should pass it explicitly.
 
-    This operation returns only the encoded scale. Full TorchAO quantizers may
-    apply additional policy when reconstructing an underflowed code-0 scale;
-    direct callers instead observe the numerical E8M0 value when converting the
-    result back to a wider dtype.
-
     Args:
         amax: Nonnegative absolute block maxima to encode.
         max_value: Maximum magnitude of the quantized element type.
@@ -199,7 +194,7 @@ def mx_e8m0_scale(
     Returns:
         E8M0 scale values with the same shape and strides as ``amax``.
     """
-    validate_mx_scale_max_value(max_value)
+    validate_scale_max_value("mx_e8m0_scale", max_value)
     rounding = normalize_mx_scale_rounding(rounding)
     mbits_f32 = 23
     f32_exp_bias = 127
@@ -247,7 +242,7 @@ def _(
     max_value: float = 448.0,
     rounding: str | None = None,
 ) -> torch.Tensor:
-    validate_mx_scale_max_value(max_value)
+    validate_scale_max_value("mx_e8m0_scale", max_value)
     normalize_mx_scale_rounding(rounding)
     return torch.empty_strided(
         tuple(amax.shape),
@@ -258,10 +253,25 @@ def _(
 
 
 @torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
-def nvfp4_e4m3_scale(amax: torch.Tensor, rounding: str | None = None) -> torch.Tensor:
-    """Encode an NVFP4 per-block E4M3 scale using nearest rounding."""
+def nvfp4_e4m3_scale(
+    amax: torch.Tensor,
+    max_value: float = 6.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    """Encode an NVFP4 per-block E4M3 scale using nearest rounding.
+
+    Args:
+        amax: Nonnegative absolute block maxima to encode.
+        max_value: Maximum magnitude of the quantized element type. The default
+            preserves the symmetric E2M1 recipe.
+        rounding: Scale calculation recipe. Only ``"nearest"`` is supported.
+
+    Returns:
+        E4M3 scale values with the same shape and strides as ``amax``.
+    """
+    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
     normalize_nvfp4_scale_rounding(rounding)
-    scale = amax.to(torch.float32) / 6.0
+    scale = amax.to(torch.float32) / max_value
     scale = torch.clamp(
         scale,
         min=torch.finfo(torch.float8_e4m3fn).tiny,
@@ -271,7 +281,12 @@ def nvfp4_e4m3_scale(amax: torch.Tensor, rounding: str | None = None) -> torch.T
 
 
 @nvfp4_e4m3_scale.register_fake
-def _(amax: torch.Tensor, rounding: str | None = None) -> torch.Tensor:
+def _(
+    amax: torch.Tensor,
+    max_value: float = 6.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
     normalize_nvfp4_scale_rounding(rounding)
     return torch.empty_strided(
         tuple(amax.shape),
