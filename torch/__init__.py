@@ -398,7 +398,6 @@ _rocm_core_libs: list[str] = [
     "libamdhip64.so",
     "libhiprtc.so",
     "librocm-core.so",
-    "librocm_smi64.so",
     "libroctx64.so",
     "libroctracer64.so",
     "librocblas.so",
@@ -3513,9 +3512,8 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
     elif isinstance(device, str):
         device_module_name = torch.device(device).type
     elif device is None:
-        # Use the current accelerator's type, falling back to CPU when none is available.
-        acc = torch._C._accelerator_getAccelerator()
-        device_module_name = acc.type if acc is not None else "cpu"
+        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
+        device_module_name = torch._C._get_accelerator().type
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"
