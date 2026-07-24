@@ -93,47 +93,36 @@ inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
   return 4;
 }
 
-// NOTE: this could probably be simplified with C++17 fold expressions.
-template <typename...>
-struct BoxedSize : std::integral_constant<size_t, 0> {};
-template <class T, class... Args>
-struct BoxedSize<T, Args...>
-    : std::integral_constant<
-          size_t,
-          boxed_size_one<T>() + BoxedSize<Args...>::value> {};
-
 template <class... Args>
-static inline constexpr size_t boxed_size() {
-  return BoxedSize<Args...>::value;
+consteval size_t boxed_size() {
+  return (size_t{0} + ... + boxed_size_one<Args>());
 }
 
-template <
-    typename T,
-    std::enable_if_t<
-        !std::is_same_v<std::decay_t<T>, c10::TensorOptions>,
-        int> = 0>
+// dest is only incremented after an IValue is fully constructed, so that
+// cleanup code (e.g. detail::BoxedBufferGuard) never destroys an
+// unconstructed slot if a constructor throws.
+template <typename T>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValue*& dest, T&& arg) {
-  new (dest++) IValue(std::forward<T>(arg));
+  if constexpr (std::is_same_v<std::decay_t<T>, c10::TensorOptions>) {
+    new (dest) IValue(c10::typeMetaToScalarType(arg.dtype()));
+    ++dest;
+    new (dest) IValue(arg.layout());
+    ++dest;
+    new (dest) IValue(arg.device());
+    ++dest;
+    new (dest) IValue(arg.pinned_memory());
+    ++dest;
+  } else {
+    new (dest) IValue(std::forward<T>(arg));
+    ++dest;
+  }
 }
 
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
-    IValue*& dest,
-    c10::TensorOptions options) {
-  new (dest++) IValue(c10::typeMetaToScalarType(options.dtype()));
-  new (dest++) IValue(options.layout());
-  new (dest++) IValue(options.device());
-  new (dest++) IValue(options.pinned_memory());
-}
-
-inline void boxArgsToStack(IValue*& /*unused*/) {}
-
-template <typename T, typename... Args>
+template <typename... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
     IValue*& dest,
-    T&& arg,
     Args&&... args) {
-  boxToStack(dest, std::forward<T>(arg));
-  boxArgsToStack(dest, std::forward<Args>(args)...);
+  (boxToStack(dest, std::forward<Args>(args)), ...);
 }
 
 //
@@ -164,7 +153,7 @@ struct BoxedBufferGuard final {
 } // namespace detail
 
 template <class... Args>
-torch::jit::Stack boxArgs(Args... args) {
+torch::jit::Stack boxArgs(Args&&... args) {
   constexpr size_t num_boxed = boxed_size<Args...>();
   if constexpr (num_boxed == 0) {
     return torch::jit::Stack();
