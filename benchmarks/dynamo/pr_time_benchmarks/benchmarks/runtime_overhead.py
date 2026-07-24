@@ -7,7 +7,15 @@ from torch.autograd.grad_mode import inference_mode
 
 
 class Benchmark(BenchmarkBase):
-    def __init__(self, requires_grad, inference_mode, backward, dynamic):
+    def __init__(
+        self,
+        requires_grad,
+        inference_mode,
+        backward,
+        dynamic,
+        backend="inductor",
+        device="cuda",
+    ):
         if inference_mode and backward:
             raise AssertionError("inference_mode and backward cannot be both True")
 
@@ -17,8 +25,8 @@ class Benchmark(BenchmarkBase):
 
         super().__init__(
             category="runtime_overhead",
-            backend="inductor",
-            device="cuda",
+            backend=backend,
+            device=device,
             dynamic=dynamic,
         )
 
@@ -99,6 +107,16 @@ def main():
         ),
         Benchmark(
             requires_grad=True, inference_mode=False, backward=True, dynamic=True
+        ),
+        # cpu + eager isolates the compile_wrapper per-call prologue (dispatch
+        # key set save/restore) with no CUDA launch or inductor runtime noise.
+        Benchmark(
+            requires_grad=False,
+            inference_mode=False,
+            backward=False,
+            dynamic=False,
+            backend="eager",
+            device="cpu",
         ),
     ]
 
