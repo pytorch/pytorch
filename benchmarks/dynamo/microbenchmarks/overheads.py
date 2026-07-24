@@ -41,8 +41,7 @@ def main():
     with torch.inference_mode():
         bench_overhead("inference_mode()", False)
 
-    # torch._dynamo.disable goes through a separate (lighter) wrapper that just
-    # toggles the eval-frame handler off and back on around the call.
+    # torch._dynamo.disable's wrapper just toggles the eval-frame handler.
     print("torch._dynamo.disable")
     eager_us = bench("eager   ", add1, False)
     disabled_us = bench("disabled", torch._dynamo.disable(add1), False)
