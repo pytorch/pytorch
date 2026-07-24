@@ -42,6 +42,7 @@ import importlib
 import inspect
 import itertools
 import logging
+import math
 import operator
 import os
 import re
@@ -61,7 +62,11 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import (
+    is_fake_tensor,
+    maybe_get_fake_constant,
+    unset_fake_temporarily,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
@@ -184,6 +189,46 @@ def _transfer_meta(
         new_meta["val"] = old_node.meta["val"]
     if "tensor_meta" not in new_meta and "tensor_meta" in old_node.meta:
         new_meta["tensor_meta"] = old_node.meta["tensor_meta"]
+
+
+def _common_custom_context(nodes: Sequence[torch.fx.Node]) -> dict[str, Any]:
+    if not nodes:
+        return {}
+
+    stream = nodes[0].meta.get("custom", {}).get("stream", 0)
+    mempool = nodes[0].meta.get("custom", {}).get("mempool")
+    mempool_device = nodes[0].meta.get("custom", {}).get("mempool_device")
+    if any(
+        (
+            node.meta.get("custom", {}).get("stream", 0),
+            node.meta.get("custom", {}).get("mempool"),
+            node.meta.get("custom", {}).get("mempool_device"),
+        )
+        != (stream, mempool, mempool_device)
+        for node in nodes[1:]
+    ):
+        return {}
+
+    context: dict[str, Any] = {}
+    if stream != 0 or any("stream" in node.meta.get("custom", {}) for node in nodes):
+        context["stream"] = stream
+    if mempool is not None:
+        context["mempool"] = mempool
+        context["mempool_device"] = mempool_device
+    return context
+
+
+def _merge_custom_context(
+    new_meta: dict[str, Any], custom_context: dict[str, Any]
+) -> None:
+    # Replacement nodes inherit user stream/mempool context only at explicit
+    # graph transform hooks. Other transforms must preserve meta["custom"] or
+    # avoid moving context-tagged values across boundaries.
+    if not custom_context:
+        return
+    custom = new_meta.setdefault("custom", {})
+    for key, value in custom_context.items():
+        custom.setdefault(key, value)
 
 
 class Match:
@@ -372,7 +417,7 @@ class Match:
                 if fake_mode is not None:
 
                     def _convert_to_fake_mode(it):
-                        if isinstance(it, FakeTensor) and fake_mode is not None:
+                        if is_fake_tensor(it) and fake_mode is not None:
                             return fake_mode.from_tensor(it)
                         return it
 
@@ -536,6 +581,165 @@ class Ignored(PatternExpr):
 
     def pretty_print(self, pp: PatternPrettyPrinter) -> str:
         return "Ignored()"
+
+
+def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
+    if is_fake_tensor(value):
+        return maybe_get_fake_constant(value)
+    return value
+
+
+def _tensor_values_equal(a: torch.Tensor, b: torch.Tensor) -> bool:
+    if torch.equal(a, b):
+        return True
+    if a.dtype.is_complex:
+        return _tensor_values_equal(a.real, b.real) and _tensor_values_equal(
+            a.imag, b.imag
+        )
+    if a.dtype.is_floating_point:
+        return bool(((a == b) | (torch.isnan(a) & torch.isnan(b))).all().item())
+    return False
+
+
+def _constant_values_equal(a: Any, b: Any) -> bool:
+    if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+        if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
+            return False
+        if (
+            a.dtype != b.dtype
+            or a.shape != b.shape
+            or a.device != b.device
+            or a.layout != b.layout
+            or a.requires_grad != b.requires_grad
+        ):
+            return False
+        if a.layout == torch.strided and (
+            a.stride() != b.stride() or a.storage_offset() != b.storage_offset()
+        ):
+            return False
+        a_constant = _get_fake_tensor_constant(a)
+        b_constant = _get_fake_tensor_constant(b)
+        if a_constant is None or b_constant is None:
+            return False
+        try:
+            with unset_fake_temporarily():
+                return _tensor_values_equal(a_constant, b_constant)
+        except (RuntimeError, TypeError, ValueError):
+            return False
+
+    try:
+        result = a == b
+    except (RuntimeError, TypeError, ValueError):
+        return False
+    return result if isinstance(result, bool) else False
+
+
+def _python_constant_repr(value: Any) -> str:
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "float('nan')"
+        if math.isinf(value):
+            return "float('inf')" if value > 0 else "-float('inf')"
+    if isinstance(value, complex):
+        return f"complex({_python_constant_repr(value.real)}, {_python_constant_repr(value.imag)})"
+    if isinstance(value, list):
+        return f"[{', '.join(map(_python_constant_repr, value))}]"
+    if isinstance(value, tuple):
+        trailing_comma = "," if len(value) == 1 else ""
+        return f"({', '.join(map(_python_constant_repr, value))}{trailing_comma})"
+    return repr(value)
+
+
+def _tensor_constant_repr(value: torch.Tensor) -> str:
+    if value.layout != torch.strided:
+        raise NotImplementedError(
+            f"NYI: serializing get_attr tensor with layout {value.layout}"
+        )
+    dtype = value.dtype
+    device = value.device
+    if is_fake_tensor(value):
+        constant = maybe_get_fake_constant(value)
+        if constant is None:
+            raise NotImplementedError("NYI: serializing fake get_attr tensor")
+        data_value = constant
+    else:
+        data_value = value
+    if value.requires_grad:
+        raise NotImplementedError("NYI: serializing tensor that requires grad")
+    if not value.is_contiguous() or value.storage_offset() != 0:
+        raise NotImplementedError("NYI: serializing non-contiguous get_attr tensor")
+    with unset_fake_temporarily():
+        if data_value.device.type != "cpu":
+            cpu_value = data_value.detach().cpu()
+        else:
+            cpu_value = data_value.detach()
+        value_list = cpu_value.tolist()
+
+    args = [_python_constant_repr(value_list)]
+    args.append(f"dtype={dtype}")
+    if device.type != "cpu":
+        args.append(f"device={str(device)!r}")
+    return f"torch.tensor({', '.join(args)})"
+
+
+class GetAttr(PatternExpr):
+    """
+    Match a get_attr node by comparing the attribute value instead of the target
+    name, which is local to the traced GraphModule.
+    """
+
+    def __init__(self, value: Any, users: Multiple | int = 1) -> None:
+        super().__init__()
+        self.value = value
+        self.users = users
+
+    def __repr__(self) -> str:
+        if self.users is MULTIPLE:
+            comma_users = ", MULTIPLE"
+        elif self.users != 1:
+            comma_users = f", {self.users}"
+        else:
+            comma_users = ""
+        return f"{self.__class__.__name__}({self.value!r}{comma_users})"
+
+    def has_multiple_users(self) -> bool:
+        return isinstance(self.users, Multiple) or self.users > 1
+
+    def _match(self, node: NodeOrConstant, ctx: MatchContext) -> MatchResult:
+        if not isinstance(node, torch.fx.Node) or node.op != "get_attr":
+            return FailedMatch("get_attr_mismatch: node={}, pattern={}", node, self)
+        if (
+            self not in ctx.outputs
+            and self.users is not MULTIPLE
+            and len(node.users) != self.users
+        ):
+            return FailedMatch("multiple_users {}", self)
+        if node.graph.owning_module is None:
+            return FailedMatch("get_attr without owning module: {}", node)
+        if not isinstance(node.target, str):
+            return FailedMatch("get_attr target is not str: {}", node.target)
+        value = _get_attr(node.graph.owning_module, node.target)
+        if not _constant_values_equal(self.value, value):
+            return FailedMatch("get_attr_value: {} != {}", value, self.value)
+        m = Match(ctx, self)
+        m.nodes.append(node)
+        return m
+
+    def pretty_print(self, pp: PatternPrettyPrinter) -> str:
+        args = [pp.pretty_print(self.value)]
+        if self.users is MULTIPLE:
+            args.append("MULTIPLE")
+        elif self.users != 1:
+            args.append(str(self.users))
+        return f"{self.__class__.__name__}({', '.join(args)})"
+
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)
+        return (
+            super().pattern_eq(other)
+            and _constant_values_equal(self.value, other.value)
+            and self.users == other.users
+        )
 
 
 class KeywordArg(PatternExpr):
@@ -1109,6 +1313,8 @@ class PatternPrettyPrinter:
                 return memoized_name
             else:
                 return self.memoize(obj)
+        if isinstance(obj, torch.Tensor):
+            return _tensor_constant_repr(obj)
         if hasattr(obj, "pretty_print"):
             return obj.pretty_print(self)
 
@@ -1214,6 +1420,7 @@ class ReplacementPatternEntry(PatternEntry):
         """
 
         added_replacement_nodes: list[torch.fx.Node] = []
+        custom_context = _common_custom_context(match.nodes)
 
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
@@ -1235,6 +1442,7 @@ class ReplacementPatternEntry(PatternEntry):
                         old_node=node,
                         pass_name=pass_name or "",
                     )
+                    _merge_custom_context(result.meta, custom_context)
                     # This function copy-pastes the replacement graph into
                     # the graph. If the replacement graph had any eager_input_vals,
                     # we propagate those over (val/tensor_meta are handled by
@@ -2016,11 +2224,12 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if isinstance(arg, FakeTensor) and arg.constant is not None:
+        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:  # noqa: ISINSTANCE_FAKE_TENSOR
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.
             # Since this is just an optimization we can clear it out.
+            # for c++ need to add a setter
             arg.constant = None
 
     _known_precompiled_patterns.append(
@@ -2090,10 +2299,13 @@ def register_lowering_pattern(
     *,
     pass_dict: _PassDictsType,
     prepend: bool = False,
+    output_metadata_ignores_input_storage: bool = True,
+    output_metadata_is_input: int | str | None = None,
+    output_metadata_fn: Callable[..., Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Register an aten to inductor IR replacement pattern.  The decorated
-    function is saved and then called a lowering time allowing direct
+    function is saved and then called at lowering time allowing direct
     pattern to inductor IR conversion.
     """
 
@@ -2104,6 +2316,13 @@ def register_lowering_pattern(
             pattern=pattern, extra_check=extra_check, handler=handler
         ).register(pass_dict, prepend=prepend)
         handler._inductor_lowering_function = True  # type: ignore[attr-defined]
+        handler._inductor_lowering_output_metadata_ignores_input_storage = (  # type: ignore[attr-defined]
+            output_metadata_ignores_input_storage
+        )
+        handler._inductor_lowering_output_metadata_is_input = (  # type: ignore[attr-defined]
+            output_metadata_is_input
+        )
+        handler._inductor_lowering_output_metadata_fn = output_metadata_fn  # type: ignore[attr-defined]
         return handler
 
     return decorator
@@ -2226,7 +2445,9 @@ class _GraphMutationTracker:
 @contextlib.contextmanager
 def _track_graph_mutation_ops(
     graph: torch.fx.Graph,
+    custom_context: dict[str, Any] | None = None,
 ) -> Generator[_GraphMutationTracker, None, None]:
+    custom_context = custom_context or {}
     tracker = _GraphMutationTracker()
     create_node = graph.create_node
     erase_node = graph.erase_node
@@ -2237,6 +2458,7 @@ def _track_graph_mutation_ops(
 
     def tracked_create_node(*args: Any, **kwargs: Any) -> torch.fx.Node:
         created_node = create_node(*args, **kwargs)
+        _merge_custom_context(created_node.meta, custom_context)
         tracker.created_nodes.append(created_node)
         return created_node
 
@@ -2446,7 +2668,11 @@ class PatternMatcherPass:
                         is_match(m)
                         and len(
                             OrderedSet(
-                                n.meta.get("custom", {}).get("stream", 0)
+                                (
+                                    n.meta.get("custom", {}).get("stream", 0),
+                                    n.meta.get("custom", {}).get("mempool"),
+                                    n.meta.get("custom", {}).get("mempool_device"),
+                                )
                                 for n in m.nodes
                             )
                         )
@@ -2471,7 +2697,9 @@ class PatternMatcherPass:
                                 graph, m.nodes
                             )
                         if isinstance(entry, GraphPatternEntry):
-                            with _track_graph_mutation_ops(graph) as mutation_tracker:
+                            with _track_graph_mutation_ops(
+                                graph, _common_custom_context(m.nodes)
+                            ) as mutation_tracker:
                                 entry.apply(m, graph, node)
                             if mutation_tracker.changed_mutation_regions():
                                 compute_mutation_region_ids(graph)
@@ -2544,8 +2772,6 @@ def fx_to_pattern(
         call_method = _not_implemented
         # pyrefly: ignore [bad-override]
         call_module = _not_implemented
-        # pyrefly: ignore [bad-override]
-        get_attr = _not_implemented
 
         # pyrefly: ignore [bad-override]
         def placeholder(
@@ -2570,6 +2796,17 @@ def fx_to_pattern(
                 return ExclusiveKeywordArg(name)
             else:
                 return KeywordArg(name)
+
+        # pyrefly: ignore [bad-override]
+        def get_attr(
+            self,
+            target: str,  # type: ignore[override]
+            args: Sequence[Any],
+            kwargs: Mapping[str, Any],
+        ) -> GetAttr:
+            if args or kwargs:
+                raise AssertionError(f"unexpected get_attr args: {args}, {kwargs}")
+            return GetAttr(_get_attr(self.module, target))
 
         # pyrefly: ignore [bad-override]
         def call_function(

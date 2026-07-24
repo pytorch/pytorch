@@ -12,8 +12,16 @@ from unittest.mock import patch
 
 import torch
 import torch._inductor
+from torch._dynamo.utils import counters
+from torch._inductor.codegen.simd import NodeInfo
+from torch._inductor.codegen.triton_combo_kernel import (
+    _default_custom_combo_kernel_horizontal_partition,
+    _log_partition_separation_once,
+    LARGE_NUMELS,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_cache, run_and_get_code
+from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -46,6 +54,256 @@ except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+
+class _Features:
+    def __init__(self, is_reduction=False):
+        self._is_reduction = is_reduction
+
+    def is_reduction(self):
+        return self._is_reduction
+
+
+class _PartitionLoggingNode:
+    def __init__(self, rnumel=1):
+        self.group = [(None, rnumel)]
+
+
+def _optimization_hint(expr, fallback=None):
+    return expr
+
+
+def _make_node_info(x_hint, rnumel=1, is_reduction=False):
+    return NodeInfo(
+        node_schedule=[],
+        tiling={"x": x_hint, "y": rnumel},
+        tiling_scores=None,
+        numel=x_hint,
+        rnumel=rnumel,
+        features=_Features(is_reduction),
+        is_persistent_reduction=False,
+    )
+
+
+class ComboKernelPartitionLoggingTests(TestCase):
+    def test_large_pointwise_separation_debug_log_uses_companion_context(self):
+        large_x = int(LARGE_NUMELS) + 1
+        large_node = _PartitionLoggingNode()
+        small_node = _PartitionLoggingNode()
+        equivalent_large_node = _PartitionLoggingNode()
+        equivalent_small_node = _PartitionLoggingNode()
+        different_companion_large_node = _PartitionLoggingNode()
+        different_small_node = _PartitionLoggingNode()
+        node_info_map = {
+            large_node: _make_node_info(large_x),
+            small_node: _make_node_info(1024),
+            equivalent_large_node: _make_node_info(large_x),
+            equivalent_small_node: _make_node_info(1024),
+            different_companion_large_node: _make_node_info(large_x),
+            different_small_node: _make_node_info(2048),
+        }
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(optimization_hint=_optimization_hint)
+        )
+        logger = logging.getLogger("torch._inductor.codegen.triton_combo_kernel")
+
+        _log_partition_separation_once.cache_clear()
+        try:
+            with (
+                V.set_graph_handler(graph),
+                self.assertLogs(logger, level=logging.DEBUG) as cm,
+            ):
+                first_partitions = _default_custom_combo_kernel_horizontal_partition(
+                    [large_node, small_node], None, node_info_map
+                )
+                second_partitions = _default_custom_combo_kernel_horizontal_partition(
+                    [equivalent_large_node, equivalent_small_node],
+                    None,
+                    node_info_map,
+                )
+                third_partitions = _default_custom_combo_kernel_horizontal_partition(
+                    [different_companion_large_node, different_small_node],
+                    None,
+                    node_info_map,
+                )
+        finally:
+            _log_partition_separation_once.cache_clear()
+
+        self.assertEqual(first_partitions, [[large_node], [small_node]])
+        self.assertEqual(
+            second_partitions, [[equivalent_large_node], [equivalent_small_node]]
+        )
+        self.assertEqual(
+            third_partitions, [[different_companion_large_node], [different_small_node]]
+        )
+        large_pointwise_logs = [
+            msg
+            for msg in cm.output
+            if "ComboKernels: 1 large pointwise nodes are separated" in msg
+        ]
+        self.assertEqual(len(large_pointwise_logs), 2)
+
+    def test_long_reduction_separation_debug_log_uses_companion_context(self):
+        long_node = _PartitionLoggingNode(rnumel=4096)
+        short_node = _PartitionLoggingNode(rnumel=1024)
+        equivalent_long_node = _PartitionLoggingNode(rnumel=4096)
+        equivalent_short_node = _PartitionLoggingNode(rnumel=1024)
+        different_companion_long_node = _PartitionLoggingNode(rnumel=4096)
+        different_short_node = _PartitionLoggingNode(rnumel=1536)
+        node_info_map = {
+            long_node: _make_node_info(1024, rnumel=4096, is_reduction=True),
+            short_node: _make_node_info(1024, rnumel=1024, is_reduction=True),
+            equivalent_long_node: _make_node_info(1024, rnumel=4096, is_reduction=True),
+            equivalent_short_node: _make_node_info(
+                1024, rnumel=1024, is_reduction=True
+            ),
+            different_companion_long_node: _make_node_info(
+                1024, rnumel=4096, is_reduction=True
+            ),
+            different_short_node: _make_node_info(1024, rnumel=1536, is_reduction=True),
+        }
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(optimization_hint=_optimization_hint)
+        )
+        logger = logging.getLogger("torch._inductor.codegen.triton_combo_kernel")
+
+        _log_partition_separation_once.cache_clear()
+        try:
+            with (
+                V.set_graph_handler(graph),
+                self.assertLogs(logger, level=logging.DEBUG) as cm,
+            ):
+                first_partitions = _default_custom_combo_kernel_horizontal_partition(
+                    [long_node, short_node], None, node_info_map
+                )
+                second_partitions = _default_custom_combo_kernel_horizontal_partition(
+                    [equivalent_long_node, equivalent_short_node],
+                    None,
+                    node_info_map,
+                )
+                third_partitions = _default_custom_combo_kernel_horizontal_partition(
+                    [different_companion_long_node, different_short_node],
+                    None,
+                    node_info_map,
+                )
+        finally:
+            _log_partition_separation_once.cache_clear()
+
+        self.assertEqual(first_partitions, [[short_node], [long_node]])
+        self.assertEqual(
+            second_partitions, [[equivalent_short_node], [equivalent_long_node]]
+        )
+        self.assertEqual(
+            third_partitions,
+            [[different_short_node], [different_companion_long_node]],
+        )
+        long_reduction_logs = [
+            msg
+            for msg in cm.output
+            if "ComboKernels: 1 long reduction nodes are separated" in msg
+        ]
+        self.assertEqual(len(long_reduction_logs), 2)
+
+    def test_long_reduction_log_with_very_large_reduction_split(self):
+        long_node = _PartitionLoggingNode(rnumel=4096)
+        very_large_node = _PartitionLoggingNode(rnumel=4096)
+        short_node = _PartitionLoggingNode(rnumel=1024)
+        node_info_map = {
+            long_node: _make_node_info(1024, rnumel=4096, is_reduction=True),
+            very_large_node: _make_node_info(
+                int(LARGE_NUMELS), rnumel=4096, is_reduction=True
+            ),
+            short_node: _make_node_info(1024, rnumel=1024, is_reduction=True),
+        }
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(optimization_hint=_optimization_hint)
+        )
+        logger = logging.getLogger("torch._inductor.codegen.triton_combo_kernel")
+
+        _log_partition_separation_once.cache_clear()
+        try:
+            with (
+                V.set_graph_handler(graph),
+                self.assertLogs(logger, level=logging.DEBUG) as cm,
+            ):
+                partitions = _default_custom_combo_kernel_horizontal_partition(
+                    [long_node, very_large_node, short_node], None, node_info_map
+                )
+        finally:
+            _log_partition_separation_once.cache_clear()
+
+        self.assertEqual(partitions, [[very_large_node], [short_node], [long_node]])
+        self.assertEqual(
+            len(
+                [
+                    msg
+                    for msg in cm.output
+                    if "ComboKernels: 1 long reduction nodes are separated" in msg
+                ]
+            ),
+            1,
+        )
+        self.assertEqual(
+            len(
+                [
+                    msg
+                    for msg in cm.output
+                    if "ComboKernels: 1 very large reduction nodes are separated" in msg
+                ]
+            ),
+            1,
+        )
+
+    def test_partition_separation_debug_log_cache_clears_with_inductor_caches(self):
+        large_x = int(LARGE_NUMELS) + 1
+        large_node = _PartitionLoggingNode()
+        small_node = _PartitionLoggingNode()
+        equivalent_large_node = _PartitionLoggingNode()
+        equivalent_small_node = _PartitionLoggingNode()
+        after_clear_large_node = _PartitionLoggingNode()
+        after_clear_small_node = _PartitionLoggingNode()
+        node_info_map = {
+            large_node: _make_node_info(large_x),
+            small_node: _make_node_info(1024),
+            equivalent_large_node: _make_node_info(large_x),
+            equivalent_small_node: _make_node_info(1024),
+            after_clear_large_node: _make_node_info(large_x),
+            after_clear_small_node: _make_node_info(1024),
+        }
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(optimization_hint=_optimization_hint)
+        )
+        logger = logging.getLogger("torch._inductor.codegen.triton_combo_kernel")
+
+        _log_partition_separation_once.cache_clear()
+        try:
+            with (
+                V.set_graph_handler(graph),
+                self.assertLogs(logger, level=logging.DEBUG) as cm,
+            ):
+                _default_custom_combo_kernel_horizontal_partition(
+                    [large_node, small_node], None, node_info_map
+                )
+                _default_custom_combo_kernel_horizontal_partition(
+                    [equivalent_large_node, equivalent_small_node],
+                    None,
+                    node_info_map,
+                )
+                clear_caches()
+                _default_custom_combo_kernel_horizontal_partition(
+                    [after_clear_large_node, after_clear_small_node],
+                    None,
+                    node_info_map,
+                )
+        finally:
+            _log_partition_separation_once.cache_clear()
+
+        large_pointwise_logs = [
+            msg
+            for msg in cm.output
+            if "ComboKernels: 1 large pointwise nodes are separated" in msg
+        ]
+        self.assertEqual(len(large_pointwise_logs), 2)
 
 
 @instantiate_parametrized_tests
@@ -532,8 +790,6 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180024")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180018")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -613,8 +869,6 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180023")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180017")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -757,8 +1011,6 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180026")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180019")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
@@ -868,7 +1120,14 @@ class ComboKernelTests(TestCase):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
-        self.assertEqual(out_eager, out_compiled)
+        if GPU_TYPE == "xpu":
+            # For this shape (64, 1024), XPU eager uses fewer threads (e.g. 32)
+            # with strided access while Triton uses more threads (e.g. 256)
+            # with contiguous access. Due to float32 non-associativity,
+            # different element-to-thread mappings produce slightly different sums.
+            self.assertEqual(out_eager, out_compiled, atol=2e-5, rtol=1e-5)
+        else:
+            self.assertEqual(out_eager, out_compiled)
         combined = " ".join(code)
         self.assertEqual(combined.count("async_compile.triton("), 1)
 
@@ -975,6 +1234,10 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu_and_triton
+    @skipIfXpu(
+        msg="dynamic_scale_rblock requires GPU-specific device properties "
+        "(major, regs_per_multiprocessor, warp_size) not available on XPU"
+    )
     @torch._inductor.config.patch(
         {
             "combo_kernel_per_subkernel_blocks": True,
@@ -1234,6 +1497,64 @@ class ComboKernelBenchmarkTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
+    @requires_gpu_and_triton
+    def test_graph_state_restored_on_swallowed_compilation_error(self):
+        # speedup_by_combo_kernel swallows Loop-carried-variable CompilationError
+        # and keeps compiling; benchmark_combo_kernel must restore the original
+        # V.graph.removed_buffers/inplaced_to_remove on that path, not leak the
+        # throwaway copies it benchmarks with.
+        from triton.compiler.errors import CompilationError
+
+        from torch._inductor.codegen.simd import SIMDScheduling
+        from torch._inductor.scheduler import Scheduler
+
+        class FakeCompilationError(CompilationError):
+            def __init__(self, msg):
+                Exception.__init__(self, msg)
+                self.msg = msg
+
+            def __str__(self):
+                return self.msg
+
+        def fn(a, b, c):
+            return a * 2.0, b + 1.0, c - 1.0
+
+        inps = [torch.rand(64, device=GPU_TYPE) for _ in range(3)]
+
+        captured = {}
+        orig_speedup = Scheduler.speedup_by_combo_kernel
+        orig_generate = SIMDScheduling.generate_combo_kernel_code
+
+        def speedup_capturing_restore(sched, nodes):
+            before = V.graph.removed_buffers
+            result = orig_speedup(sched, nodes)
+            captured["result"] = result
+            captured["restored"] = V.graph.removed_buffers is before
+            return result
+
+        def mutate_then_raise(self, *args, **kwargs):
+            # Real codegen (only_gen_src_code=False) must keep working; only
+            # the benchmark's throwaway codegen simulates mutate-then-fail.
+            if not kwargs.get("only_gen_src_code"):
+                return orig_generate(self, *args, **kwargs)
+            V.graph.removed_buffers.add("throwaway_buf")
+            raise FakeCompilationError("Loop-carried variable")
+
+        with (
+            patch.object(
+                Scheduler, "speedup_by_combo_kernel", speedup_capturing_restore
+            ),
+            patch.object(
+                SIMDScheduling, "generate_combo_kernel_code", mutate_then_raise
+            ),
+            fresh_cache(),
+        ):
+            out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(fn(*inps), out_compiled)
+        self.assertTrue(captured["result"])
+        self.assertTrue(captured["restored"])
 
 
 class ComboKernelDynamicShapesTests(TestCase):
@@ -1519,6 +1840,31 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(code.count("def _triton_helper_fn_add0(arg0_0, arg1_0):"), 1)
 
+    @requires_gpu_and_triton
+    def test_dynamic_shapes_persistent_reduction_dynamic_rdim(self):
+        def fn(a, b):
+            torch._check(a.shape[0] <= 32)
+            torch._check(b.shape[0] <= 32)
+            return a.sum(), b.sum()
+
+        for benchmark in (False, True):
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            a = torch.randn(16, device=GPU_TYPE)
+            b = torch.randn(16, device=GPU_TYPE)
+            with torch._inductor.config.patch("benchmark_combo_kernel", benchmark):
+                fn_c = torch.compile(fn, dynamic=True)
+                result, code = run_and_get_code(fn_c, a, b)
+                self.assertEqual(result[0], a.sum())
+                self.assertEqual(result[1], b.sum())
+                self.assertEqual(
+                    torch._inductor.metrics.generated_kernel_count,
+                    4 if benchmark else 1,
+                )
+                FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
+                    "R0_BLOCK_1: tl.constexpr = 32"
+                ).run(code[0])
+
 
 class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
     combo_kernel_per_subkernel_blocks = True
@@ -1530,6 +1876,197 @@ class ComboKernelBenchmarkTestsPerSubkernelBlocks(ComboKernelBenchmarkTests):
 
 class ComboKernelDynamicShapesTestsPerSubkernelBlocks(ComboKernelDynamicShapesTests):
     combo_kernel_per_subkernel_blocks = True
+
+
+@instantiate_parametrized_tests
+class ComboKernelCompileTimeAutotuneTests(TestCase):
+    """Compile-time per-subkernel autotune: each combo subkernel autotunes its blocks
+    standalone at compile time; winners are stitched into the combo's launch config."""
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                    "combo_kernel_per_subkernel_blocks": True,
+                    "combo_kernel_compile_time_autotune": True,
+                }
+            )
+        )
+
+    def tearDown(self):
+        self._test_stack.close()
+        torch._inductor.metrics.reset()
+        super().tearDown()
+
+    @requires_gpu_and_triton
+    @parametrize("mode", ["default", "cdt"])
+    def test_compile_time_autotune(self, mode):
+        extra = {}
+        if mode == "cdt":
+            extra["coordinate_descent_tuning"] = True
+
+        # one fn -> a pointwise combo (a+b, c*d) AND a reduction combo (e.sum, g.amax),
+        # each with differently-shaped subkernels so their blocks differ.
+        def f(a, b, c, d, e, g):
+            return a + b, c * d, e.sum(-1), g.amax(-1)
+
+        inps = [
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(1024, 512, device=GPU_TYPE),
+            torch.randn(1024, 768, device=GPU_TYPE),
+        ]
+        counters.clear()
+        # fresh_cache so the subkernels aren't served from the autotune cache
+        # (.best_config), which is what makes the cdt mode actually run coordesc.
+        with fresh_cache(), torch._inductor.config.patch(extra):
+            out, code = run_and_get_code(torch.compile(f), *inps)
+        code = " ".join(code)
+
+        self.assertEqual(out, f(*inps))
+        # all 4 subkernels were processed by the compile-time autotuner
+        processed = (
+            counters["inductor"]["combo_subkernel_autotune"]
+            + counters["inductor"]["combo_subkernel_autotune_cached"]
+        )
+        self.assertEqual(processed, 4)
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+        if mode == "cdt":
+            self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_caching(self):
+        from torch._inductor.codecache import PyCodeCache
+
+        def f(a, b, c, d):
+            return a + b, c * d
+
+        # shapes distinct from the other test so these subkernels aren't already cached
+        inps = [
+            torch.randn(2048, device=GPU_TYPE),
+            torch.randn(2048, device=GPU_TYPE),
+            torch.randn(3072, device=GPU_TYPE),
+            torch.randn(3072, device=GPU_TYPE),
+        ]
+        # disable FXGraphCache so codegen re-runs and we exercise the autotune cache
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "max_autotune": True,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                }
+            ),
+        ):
+            counters.clear()
+            torch.compile(f)(*inps)  # cold: subkernels benchmarked
+            cold = counters["inductor"]["combo_subkernel_autotune"]
+            self.assertGreater(cold, 0)
+            self.assertEqual(
+                counters["inductor"]["combo_subkernel_autotune_fallback"], 0
+            )
+
+            # Simulate a new process: drop the in-memory module cache (which would
+            # otherwise serve the already-tuned autotuner object) but keep the on-disk
+            # caches, so the warm run genuinely re-imports and reads .best_config.
+            torch._dynamo.reset()
+            PyCodeCache.cache_clear(purge=False)
+            counters.clear()
+            torch.compile(f)(*inps)  # warm: reuse .best_config, no re-benchmark
+            self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
+            warm_cached = counters["inductor"]["combo_subkernel_autotune_cached"]
+            self.assertEqual(warm_cached, cold)
+            self.assertEqual(
+                counters["inductor"]["combo_subkernel_autotune_fallback"], 0
+            )
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_looped_reduction(self):
+        # rnumel above the persistent threshold but below the split-reduction
+        # threshold -> single-pass looped reductions, whose winning configs
+        # carry R0_BLOCK; the combo must expose R0_BLOCK_i as constexpr args.
+        def f(a, b):
+            return a.sum(-1), b.amax(-1)
+
+        inps = [
+            torch.randn(64, 8192, device=GPU_TYPE),
+            torch.randn(64, 16384, device=GPU_TYPE),
+        ]
+        counters.clear()
+        with fresh_cache():
+            out, code = run_and_get_code(torch.compile(f), *inps)
+        # loose tolerance: summing 65536 fp32 elements is accumulation-order sensitive
+        self.assertEqual(out, f(*inps), atol=1e-3, rtol=1e-3)
+        # cpp_wrapper emits C++ source; the constexpr args only appear in python codegen
+        if not torch._inductor.config.cpp_wrapper:
+            src = " ".join(code)
+            FileCheck().check("R0_BLOCK_0").check("R0_BLOCK_1").run(src)
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_dynamic_shapes(self):
+        def f(a, b):
+            return a + 1.0, b * 2.0
+
+        a = torch.randn(4096, device=GPU_TYPE)
+        b = torch.randn(6144, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.mark_dynamic(b, 0)
+        counters.clear()
+        with fresh_cache():
+            fn_c = torch.compile(f, dynamic=True)
+            out = fn_c(a, b)
+        self.assertEqual(out, f(a, b))
+        # recompile-free on new dynamic sizes
+        a2 = torch.randn(5000, device=GPU_TYPE)
+        b2 = torch.randn(7000, device=GPU_TYPE)
+        self.assertEqual(fn_c(a2, b2), f(a2, b2))
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_sort_forces_persistent(self):
+        # The standalone benchmark twin must stay persistent for sort even when the
+        # choices-level heuristic says otherwise (TritonKernel.sort asserts persistent;
+        # TritonKernel.should_use_persistent_reduction enforces it above the heuristic).
+        from torch._inductor.choices import InductorChoices
+
+        orig = InductorChoices.should_use_persistent_reduction
+
+        @staticmethod
+        def force_non_persistent_for_sort(features, cooperative_reduction):
+            if features.contains_op("sort"):
+                return False
+            return orig(features, cooperative_reduction)
+
+        def fn(a, b):
+            return torch.sort(a, dim=1).values, torch.sort(b, dim=1).values
+
+        inps = [
+            torch.randint(0, 1000, (10, 200), device=GPU_TYPE),
+            torch.randint(0, 1000, (20, 200), device=GPU_TYPE),
+        ]
+        counters.clear()
+        with (
+            patch.object(
+                InductorChoices,
+                "should_use_persistent_reduction",
+                force_non_persistent_for_sort,
+            ),
+            fresh_cache(),
+            torch._inductor.config.patch({"triton.coalesce_tiling_analysis": False}),
+        ):
+            out = torch.compile(fn)(*inps)
+        self.assertEqual(out, fn(*inps))
+        # Sorts stay fused in the combo: tuned normally, no carve-out fallbacks.
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
 
 @instantiate_parametrized_tests
@@ -1844,7 +2381,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(
             len(group_indices),
             2,
-            f"Expected 2 autotune groups, got {group_lines}",
+            lambda msg: f"{msg}\nExpected 2 autotune groups, got {group_lines}",
         )
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -1941,7 +2478,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
                 self.assertEqual(
                     len(groups),
                     expected_groups,
-                    f"{desc}: expected {expected_groups} group(s), got {len(groups)}",
+                    lambda msg: f"{msg}\n{desc}: expected {expected_groups} group(s), got {len(groups)}",
                 )
 
     @requires_gpu_and_triton
@@ -2029,7 +2566,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(
             changed_fields,
             {"XBLOCK_1"},
-            f"Expected the first combo coordesc step to tune the largest subkernel first, got {changed_fields}",
+            lambda msg: f"{msg}\nExpected the first combo coordesc step to tune the largest subkernel first, got {changed_fields}",
         )
 
 
@@ -2494,7 +3031,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             ("abs_gb=1MB", self._thresholds(abs_thr_gb=1.0 / 1024)),
         ):
             combo, _ = run(thresholds)
-            self.assertIsNone(combo, f"{label} should reject")
+            self.assertIsNone(combo, lambda msg: f"{msg}\n{label} should reject")
 
         combo, combo_step = run(self._thresholds(abs_thr_gb=1.0))
         self.assertIsNotNone(combo)
@@ -2570,7 +3107,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertLess(
             peak_tight,
             peak_disabled,
-            f"tight threshold did not reduce runtime peak memory "
+            lambda msg: f"{msg}\ntight threshold did not reduce runtime peak memory "
             f"(tight={peak_tight}, disabled={peak_disabled})",
         )
 

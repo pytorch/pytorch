@@ -3,9 +3,11 @@ import contextlib
 import math
 import sys
 import warnings
+from collections.abc import Callable, Sequence
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
+import torch.compiler.config
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._utils import _maybe_view_chunk_cat
@@ -657,9 +659,13 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     group_name = ctx.group_name
     reduce_op = ctx.reduce_op
 
-    if reduce_op != "sum":
+    # Only linear reductions have a well-defined all_reduce backward: for both
+    # 'sum' and 'avg' the gradient is an all_reduce of grad_output with the same
+    # op (grad wrt each rank's input is the same reduction of the per-rank
+    # grad_outputs). Nonlinear ops (min/max/product/premul_sum) do not.
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"all_reduce backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"all_reduce backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
 
     # Backward does all_reduce with the same reduce_op
@@ -1275,7 +1281,7 @@ def _resolve_group(
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        if dist.config.compile_on_one_rank:
+        if torch.compiler.config.compile_on_one_rank:
             return torch.ops._dtensor.mesh_get_process_group(group, 0)
         return group._dim_group_names[0]
     elif isinstance(group, tuple):
@@ -1286,7 +1292,7 @@ def _resolve_group(
         ):
             dmesh = group[0]
             dim = group[1]
-            if dist.config.compile_on_one_rank:
+            if torch.compiler.config.compile_on_one_rank:
                 return torch.ops._dtensor.mesh_get_process_group(dmesh, dim)
             return dmesh._dim_group_names[dim]
         else:
@@ -1813,7 +1819,7 @@ def all_gather_inplace(
 
 def isend_inplace(
     tensor: torch.Tensor,
-    dst: int,
+    dst: int | None = None,
     tag: int = 0,
     group: dist.ProcessGroup | None = None,
     group_dst: int = -1,
@@ -1827,12 +1833,14 @@ def isend_inplace(
             raise ValueError(
                 "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
             )
-        global_dst = c10d.get_global_rank(group, group_dst)
+        local_dst = group_dst
+    elif dst is not None:
+        local_dst = c10d.get_group_rank(group, dst)
     else:
-        global_dst = dst
+        raise ValueError("Must specify either 'dst' or 'group_dst'")
 
     group_name = _resolve_group_name(group)
-    tensor = torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+    tensor = torch.ops._c10d_functional.isend(tensor, local_dst, tag, group_name)
     if _are_we_tracing():
         return tensor
     return _maybe_wrap_tensor(tensor)
@@ -1840,7 +1848,7 @@ def isend_inplace(
 
 def irecv_inplace(
     tensor: torch.Tensor,
-    src: int,
+    src: int | None = None,
     tag: int = 0,
     group: dist.ProcessGroup | None = None,
     group_src: int = -1,
@@ -1854,11 +1862,13 @@ def irecv_inplace(
             raise ValueError(
                 "Cannot specify both 'src' and 'group_src' args as per eager impl"
             )
-        global_src = c10d.get_global_rank(group, group_src)
+        local_src = group_src
+    elif src is not None:
+        local_src = c10d.get_group_rank(group, src)
     else:
-        global_src = src
+        raise ValueError("Must specify either 'src' or 'group_src'")
     group_name = _resolve_group_name(group)
-    tensor = torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+    tensor = torch.ops._c10d_functional.irecv(tensor, local_src, tag, group_name)
     return _maybe_wrap_tensor(tensor)
 
 
@@ -1891,7 +1901,7 @@ def _group_or_group_name(
 ) -> dist.ProcessGroup | c10d.GroupName:
     if isinstance(group, str):
         return group
-    elif dist.config.compile_on_one_rank:
+    elif torch.compiler.config.compile_on_one_rank:
         return group
     else:
         return group.group_name
@@ -1993,3 +2003,57 @@ traceable_collective_remaps = {
     legacy_irecv: _remapped_irecv,
     legacy_batch_p2p_ops: _remapped_batch_p2p_ops,
 }
+
+
+def _remap_traceable_collective(
+    func: Callable[..., Any],
+    args: Sequence[Any],
+    kwargs: dict[str, Any] | None,
+) -> tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]] | None:
+    """Redirect a legacy ``torch.distributed`` collective to its functional
+    equivalent, following Dynamo's CollectiveFunctionRewriteVariable.
+
+    Returns ``(mapped_func, (), kwargs)`` if ``func`` is a remappable collective,
+    else None. Shared by the make_fx compile_on_one_rank mode below and
+    non-strict export's _NonStrictTorchFunctionHandler.
+    """
+    if func not in traceable_collective_remaps:
+        return None
+    import inspect
+
+    mapped_func = traceable_collective_remaps[func]
+    bound = dict(inspect.signature(func).bind(*args, **(kwargs or {})).arguments)
+    if func in (
+        torch.distributed.all_reduce,
+        torch.distributed.reduce_scatter_single,
+        torch.distributed.reduce_scatter_tensor,
+        torch.distributed._reduce_scatter_base,
+    ):
+        if "op" in bound:
+            bound["op"] = REDUCE_OP_TO_STR[bound["op"]]
+    return mapped_func, (), bound
+
+
+class _LegacyToFunctionalCollectiveMode(torch.overrides.TorchFunctionMode):
+    """Redirect legacy ``torch.distributed`` collectives to functional collectives
+    while tracing, mirroring Dynamo and non-strict export.
+
+    Used by ``make_fx`` under ``compile_on_one_rank``: the in-place ``c10d.*`` ops
+    bind the ProcessGroup as a torchbind constant that cannot be serialized,
+    whereas the functional collectives take the group as an op argument, so the
+    group (e.g. a ``DeviceMesh.get_group()`` -> ``mesh_get_process_group`` output)
+    flows into the graph instead of being baked in.
+    """
+
+    def __torch_function__(
+        self,
+        func: Callable[..., Any],
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        remapped = _remap_traceable_collective(func, args, kwargs)
+        if remapped is not None:
+            mapped_func, mapped_args, mapped_kwargs = remapped
+            return mapped_func(*mapped_args, **mapped_kwargs)
+        return func(*args, **(kwargs or {}))

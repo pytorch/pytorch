@@ -1,14 +1,22 @@
 import argparse
 import gzip
 import os
+import socket
 import sys
-from urllib.error import URLError
+import time
+from http.client import HTTPException
 from urllib.request import urlretrieve
 
 
 MIRRORS = [
     "https://ossci-datasets.s3.amazonaws.com/mnist/",  # @lint-ignore
 ]
+
+# Number of attempts per mirror before giving up on it. The download hits a
+# single S3 mirror with no built-in retry, so a transient network blip fails
+# the whole job; retry a few times with backoff first.
+RETRIES = 3
+RETRY_BACKOFF_S = 5
 
 RESOURCES = [
     "train-images-idx3-ubyte.gz",
@@ -36,20 +44,25 @@ def download(destination_path: str, resource: str, quiet: bool) -> None:
     else:
         for mirror in MIRRORS:
             url = mirror + resource
-            print(f"Downloading {url} ...")
-            try:
-                hook = None if quiet else report_download_progress
-                urlretrieve(url, destination_path, reporthook=hook)
-            except (URLError, ConnectionError) as e:
-                print(f"Failed to download (trying next):\n{e}")
-                continue
-            finally:
-                if not quiet:
-                    # Just a newline.
-                    print()
-            break
-        else:
-            raise RuntimeError("Error downloading resource!")
+            for attempt in range(1, RETRIES + 1):
+                print(f"Downloading {url} ...")
+                try:
+                    hook = None if quiet else report_download_progress
+                    urlretrieve(url, destination_path, reporthook=hook)
+                    return
+                except (OSError, HTTPException) as e:
+                    # A failed urlretrieve leaves a partial file behind; remove
+                    # it so the exists check above doesn't skip it on a rerun.
+                    if os.path.exists(destination_path):
+                        os.remove(destination_path)
+                    print(f"Failed to download (attempt {attempt}/{RETRIES}):\n{e}")
+                    if attempt < RETRIES:
+                        time.sleep(RETRY_BACKOFF_S * attempt)
+                finally:
+                    if not quiet:
+                        # Just a newline.
+                        print()
+        raise RuntimeError("Error downloading resource!")
 
 
 def unzip(zipped_path: str, quiet: bool) -> None:
@@ -76,6 +89,10 @@ def main() -> None:
         "-q", "--quiet", action="store_true", help="Don't report about progress"
     )
     options = parser.parse_args()
+
+    # urlretrieve has no timeout parameter and defaults to blocking forever on
+    # a stalled connection, which would defeat the retry logic in download().
+    socket.setdefaulttimeout(60)
 
     if not os.path.exists(options.destination):
         os.makedirs(options.destination)

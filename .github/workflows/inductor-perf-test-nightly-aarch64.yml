@@ -80,10 +80,11 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
       runner: linux.arm64.${{ needs.get-label-type.outputs.runner-config }}.4xlarge
       build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc15-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_cpu_aarch64", shard: 1, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },

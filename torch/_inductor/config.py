@@ -346,6 +346,7 @@ batch_fusion = True
 # batch fusion options:
 # batch_linear
 # batch_linear_lhs
+# cat_linear
 # batch_layernorm
 # batch_tanh
 # batch_relu
@@ -372,6 +373,14 @@ post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
+
+# Also run reorder_for_locality (a semantics-preserving pass; see
+# reorder_for_locality in fx_passes/post_grad.py for the cases it guards) on
+# training graphs, not just inference. Default off. Gated by reorder_for_locality
+# above: enabling this while that is False does nothing.
+reorder_for_locality_in_training = (
+    os.environ.get("TORCHINDUCTOR_REORDER_LOCALITY_TRAINING", "0") == "1"
+)
 
 # Scale down Rn_BLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
@@ -405,6 +414,13 @@ mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
+
+# Decompose DTensor Shard(dim) -> Shard(other_dim) all-to-all into explicit
+# layout ops plus _c10d_functional.all_to_all_single/wait_tensor. This is
+# experimental and intentionally opt-in.
+decompose_shard_dim_alltoall = (
+    os.environ.get("TORCHINDUCTOR_DECOMPOSE_SHARD_DIM_ALLTOALL", "0") == "1"
+)
 
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
@@ -539,6 +555,15 @@ inductor_default_autotune_rep = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
 )
 
+# When enabled, the autotuner captures each candidate kernel in a CUDA graph
+# and benchmarks graph replay instead of eager kernel launches. This eliminates
+# host-side dispatch overhead from timing measurements, giving results that are
+# representative of CUDA graph replay execution. Useful when the compiled output
+# will run under external CUDA graph capture. Only applies with max_autotune.
+autotune_cudagraph_benchmarking: bool = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
+)
+
 
 # Modifies the number of autotuning choices displayed, set to None for all
 def _autotune_num_choices_displayed_default() -> int | None:
@@ -616,7 +641,7 @@ multi_kernel_hints: list[int] = []
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
-# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
@@ -626,10 +651,14 @@ max_autotune_gemm_backends = os.environ.get(
 
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. By default it's 5, to keep compile time reasonable.
-# Set to 0, None, or env var "none"/"all" to tune all configs.
+# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
+# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
+# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
+# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
+# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
+# "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
-    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
         return None
     return int(env_val)
@@ -644,6 +673,11 @@ nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default
 nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
+
+# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
+# large N dimension goes on the M-axis. Improves tile utilization for
+# small-M decode shapes typical in LLM inference (M << N).
+nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
@@ -854,6 +888,10 @@ cache_sdpa_constraint = (
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
+# Whether view outputs must match eager strides exactly instead of only matching
+# their stride order. Exact matching can introduce additional copy kernels.
+strict_output_strides = False
+
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
 # since kernel with mixed layout inputs may run much slower then one whose inputs
@@ -1062,6 +1100,15 @@ combo_kernel_max_num_nodes = 8
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, each combo sub-kernel autotunes its block sizes standalone at compile time; the
+# winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
+# then autotunes num_warps/num_stages over the winners). Requires
+# combo_kernel_per_subkernel_blocks.
+combo_kernel_compile_time_autotune: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_compile_time_autotune",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
+    default=False,
+)
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
@@ -1143,6 +1190,15 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# The compile-worker sidecar runs a watchdog that, every N seconds, reports any
+# compile job still running after N seconds back to the parent, which emits it as
+# a structured-trace artifact (viewable in tlparse). This leaves a breadcrumb for
+# a stuck/slow worker that would otherwise wedge silently (the parent just blocks
+# reading the result pipe). Read in the sidecar. 0 disables the watchdog.
+compile_worker_watchdog_interval_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL", 60)
+)
+
 # Log per-operation runtime estimates for TLParse analysis.
 log_tlparse: bool = Config(
     env_name_force="LOG_TLPARSE",
@@ -1155,7 +1211,7 @@ _fuse_ddp_communication = False
 _fuse_ddp_bucket_size = 25
 
 # Flag to control which fusion passes to apply. Functions in the list will
-# be applied in order. There are two different different fusion passes
+# be applied in order. There are two different fusion passes
 # --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
 # one is "fuse_ddp_with_concat_op". Users can also change this to a customized
 # fusion function.
@@ -1198,6 +1254,15 @@ class _collective:
 
 class aten_distributed_optimizations:
     """Configuration for distributed optimization passes on ATen FX graphs."""
+
+    # Move collectives earlier and waits later in the inductor schedule
+    # to overlap communication with compute.
+    #
+    # Guarantees:
+    #   - No collective reordering (preserves NCCL stream ordering)
+    #   - No memory regression (each move verified individually)
+    #   - Predictable (no runtime estimation, no heuristics)
+    enable_simple_overlap: bool = True
 
     # Enable overlap scheduling pass
     enable_overlap_scheduling: bool = False
@@ -1324,6 +1389,10 @@ class aten_distributed_optimizations:
     # Multiplier on the empirical saturation model's output.
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
+
+    # Direct-input NVLS multicast + Copy Engine variant. Requires NVSwitch /
+    # NVLink SHARP and uses cudaMemcpyAsync to the multicast pointer.
+    low_contention_all_gather_ce_multicast: bool = False
 
     # Decompose collective patterns when mathematically equivalent local
     # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
@@ -1815,10 +1884,28 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
+def tlx_mode_from_env() -> Literal["allow", "force"] | None:
+    # Only the explicit values "allow"/"force" enable torchTLX. Any other
+    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
+    # TLX stays off. See the "Knob" section of the torchTLX README under
+    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
+    mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
+    if mode in ("allow", "force"):
+        return cast("Literal['allow', 'force']", mode)
+    return None
+
+
 class triton:
     """
     Config specific to codegen/triton.py
     """
+
+    # torchTLX enablement. None (the default) means TLX is never considered
+    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
+    # "force" uses only TLX templates plus forced epilogue fusion. Also a
+    # no-op unless the active Triton is the fbtriton fork (the integration
+    # import in template_heuristics/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
@@ -1849,6 +1936,15 @@ class triton:
 
     # Emit objgraph backref dumps for leaked cudagraph pool tensors
     cudagraph_trees_objgraph = False
+
+    # Which live cudagraph tree storages to clone before starting a new
+    # generation. None keeps the existing stale-output error behavior.
+    # "user_visible" clones live user-visible output storages out of
+    # the graph pool. Backward graph outputs are not selected for cloning.
+    # This mode can add overhead because live outputs that cross generations
+    # are explicitly copied and stop using cached TensorImpl outputs. Users
+    # can leave this unset and manually clone/copy those outputs instead.
+    cudagraph_trees_generation_cloning: Literal["user_visible"] | None = None
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = not is_fbcode()
@@ -1904,12 +2000,10 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
-    # TODO - enable by default
-    coalesce_tiling_analysis: bool = (
-        os.environ.get(
-            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
-        )
-        == "1"
+    coalesce_tiling_analysis: bool = Config(
+        justknob="pytorch/inductor:coalesce_tiling_analysis",
+        env_name_force="TORCHINDUCTOR_COALESCE_TILING_ANALYSIS",
+        default=True,
     )
 
     # limit tiling dimensions
@@ -2103,6 +2197,12 @@ class triton:
     enable_tma_load_for_template_epilogue = (
         os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
     )
+    # Host-side TMA: build TensorDescriptors on the host and pass them as kernel
+    # args instead of creating them device-side inside the kernel. Selects the
+    # descriptor flavor only; requires use_tensor_descriptor and
+    # assume_aligned_inputs to also be enabled (no effect otherwise).
+    enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -2652,7 +2752,7 @@ class rocm:
     # reducing autotuning cost while keeping runtime within ~5% of full
     # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
     # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at template_heuristics/triton.py load time.
+    # module import is cached at heuristics/template/triton.py load time.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
@@ -2666,7 +2766,7 @@ class rocm:
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
     # on exact strides and would mis-compile under flexible layouts.
-    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") in (None, "1")
 
     # Number of top configs origami selects per GEMM. Read once from
     # TORCHINDUCTOR_ORIGAMI_TOPK; defaults to 6 (sweet spot between compile

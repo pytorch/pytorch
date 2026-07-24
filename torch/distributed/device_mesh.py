@@ -9,7 +9,7 @@ from itertools import zip_longest
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
 from torch.types import IntLikeType
@@ -51,6 +51,7 @@ else:
         get_process_group_ranks,
         get_rank,
         get_world_size,
+        GroupMember,
         GroupName,
         init_process_group,
         is_initialized,
@@ -92,6 +93,40 @@ else:
             return pg
         else:
             return _resolve_process_group(name)  # pyrefly: ignore[bad-argument-type]
+
+    def _maybe_traced_group(mesh: "DeviceMesh", mesh_dim: int) -> ProcessGroup | None:
+        """Resolve the group via an in-graph op when tracing under CooR.
+
+        Under compile_on_one_rank and an active make_fx/proxy trace, return the
+        group as the output of _dtensor.mesh_get_process_group so the
+        ProcessGroup is extracted from the (graph-input) mesh at runtime instead
+        of being baked into the graph as an unserializable torchbind constant.
+        Returns None to take the eager path otherwise. Mirrors
+        _functional_collectives._resolve_group, but also covers eager collectives
+        (dist.all_reduce -> c10d.allreduce_) that bind the ProcessGroup directly.
+
+        This is a module-level helper rather than a DeviceMesh method so that
+        Dynamo does not reject it as an unregistered opaque-object member.
+        """
+        if not torch.compiler.config.compile_on_one_rank:
+            return None
+        # Under torch.compile, Dynamo lifts the ProcessGroup from the mesh's
+        # _pg_registry itself (see _get_pg_from_name); the op-emitting path here
+        # is only for make_fx tracing. is_compiling() folds to a constant under
+        # Dynamo, so this returns cleanly without tracing the op below.
+        if torch.compiler.is_compiling():
+            return None
+        from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+        # get_proxy_mode() is None in eager and inside the op's own fake/eager
+        # impl (the proxy mode is popped while dispatching), so this does not
+        # recurse.
+        if get_proxy_mode() is None:
+            return None
+        # Ensure the op is registered without a module-level circular import.
+        from torch.distributed.tensor import _collective_utils  # noqa: F401
+
+        return torch.ops._dtensor.mesh_get_process_group(mesh, mesh_dim)
 
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
@@ -150,7 +185,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh(OpaqueBase):
+    class DeviceMesh(CustomClassBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -595,6 +630,10 @@ else:
 
                 # only add to dim_groups if the current rank in the subgroup
                 if get_rank() in subgroup_ranks:
+                    if dim_group == GroupMember.NON_GROUP_MEMBER:
+                        raise AssertionError(
+                            f"Rank {get_rank()} was not included in process group {subgroup_ranks}"
+                        )
                     if pg_name is not None:
                         raise RuntimeError(
                             f"Each device mesh dimension should get only one process group, but got {get_rank()} "
@@ -744,7 +783,7 @@ else:
                 >>>
                 >>> # Initialize a 3D mesh.
                 >>> mesh_3d = init_device_mesh(device_type="cuda", (2,2,2), mesh_dim_names=("dp", "pp", "cp"))
-                >>> # The order of the mesh_dim_names provided deteremines the order of dimensions in the submesh.
+                >>> # The order of the mesh_dim_names provided determines the order of dimensions in the submesh.
                 >>> dp_cp_mesh = mesh_3d["dp", "cp"]
                 >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
@@ -763,7 +802,7 @@ else:
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` and `disable_proxy_modes_tracing()`
                 # will allow us to materialize the tensors within
-                # `_create_sub_mesh`, which should not affect modling.
+                # `_create_sub_mesh`, which should not affect modeling.
                 #
                 # Note that this should be orthogonal to torch.compile(). But whether
                 # we can compile device_mesh `slicing` (no graph break) is not verified
@@ -807,6 +846,9 @@ else:
 
             # Quick return if the current device_mesh is a 1D mesh.
             if len(self._layout) == 1 and mesh_dim is None:
+                traced = _maybe_traced_group(self, 0)
+                if traced is not None:
+                    return traced
                 return not_none(_get_pg_from_name(root_mesh, self._dim_group_names[0]))
 
             root_to_flatten_mapping = root_mesh._flatten_mapping
@@ -825,6 +867,9 @@ else:
                     raise AssertionError(
                         f"mesh_dim must be an int, got {type(mesh_dim)}"
                     )
+                traced = _maybe_traced_group(self, mesh_dim)
+                if traced is not None:
+                    return traced
                 return not_none(
                     _get_pg_from_name(root_mesh, self._dim_group_names[mesh_dim])
                 )
@@ -843,41 +888,41 @@ else:
             layout: _MeshLayout,
             submesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
-            root_mesh = self._get_root_mesh()
-            slice_dim_group_name = []
-            if len(self._dim_group_names) > 0:
-                if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
-                    raise AssertionError(
-                        "The number of dim_group_names and mesh_dim_names "
-                        "should have the same length if the rank is in the mesh."
-                    )
-                for name in submesh_dim_names:
-                    if name in not_none(self._mesh_dim_names):
-                        slice_dim_group_name.append(
-                            self._dim_group_names[
-                                not_none(self._mesh_dim_names).index(name)
-                            ]
+            with torch._dynamo.disable_nested_graph_breaks():
+                root_mesh = self._get_root_mesh()
+                slice_dim_group_name = []
+                dim_names = not_none(self._mesh_dim_names)
+                if len(self._dim_group_names) > 0:
+                    if len(self._dim_group_names) != len(dim_names):
+                        raise AssertionError(
+                            "The number of dim_group_names and mesh_dim_names "
+                            "should have the same length if the rank is in the mesh."
                         )
-                    else:
-                        # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
-                        # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
-                        # we don't want to optimize the code furthermore.
-                        flatten_mesh = self._flatten_mapping[name]
-                        slice_dim_group_name.append(
-                            flatten_mesh._dim_group_names[
-                                not_none(flatten_mesh._mesh_dim_names).index(name)
-                            ]
-                        )
-            res_submesh = DeviceMesh(
-                self._device_type,
-                _layout=layout,
-                _rank_map=root_mesh._rank_map,
-                mesh_dim_names=submesh_dim_names,
-                _root_mesh=root_mesh,
-                _init_backend=False,
-            )
-            res_submesh._dim_group_names = slice_dim_group_name
-            return res_submesh
+                    for name in submesh_dim_names:
+                        if name in dim_names:
+                            slice_dim_group_name.append(
+                                self._dim_group_names[dim_names.index(name)]
+                            )
+                        else:
+                            # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
+                            # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
+                            # we don't want to optimize the code furthermore.
+                            flatten_mesh = self._flatten_mapping[name]
+                            slice_dim_group_name.append(
+                                flatten_mesh._dim_group_names[
+                                    not_none(flatten_mesh._mesh_dim_names).index(name)
+                                ]
+                            )
+                res_submesh = DeviceMesh(
+                    self._device_type,
+                    _layout=layout,
+                    _rank_map=root_mesh._rank_map,
+                    mesh_dim_names=submesh_dim_names,
+                    _root_mesh=root_mesh,
+                    _init_backend=False,
+                )
+                res_submesh._dim_group_names = slice_dim_group_name
+                return res_submesh
 
         def _create_flatten_mesh(
             self,
@@ -1238,7 +1283,7 @@ else:
             return self._coordinate_on_dim
 
         def _sym_get_coordinate(self, index: int) -> IntLikeType:
-            import torch.distributed.config as config
+            import torch.compiler.config as config
             from torch._guards import detect_fake_mode
 
             if (
@@ -1441,7 +1486,7 @@ else:
                 # because the concatenated indices should be indexed by the same root mesh tensor.
                 if dm._flatten_rank_map != flatten_rank_map:
                     raise RuntimeError(
-                        "Cannot concatenate DeviceMeshes derived from different device meshs"
+                        "Cannot concatenate DeviceMeshes derived from different device meshes"
                     )
             concat_mesh_layout = _MeshLayout(concat_axes)
             if not concat_mesh_layout.collapse().check_orthogonal():
@@ -1596,8 +1641,8 @@ _distributed_opaque_types_registered = False
 
 
 def _device_mesh_reconstruct_fn(
-    mesh: "OpaqueBase",
-    get_tracked_proxy: Callable[["OpaqueBase"], "torch.fx.Proxy | None"],
+    mesh: "CustomClassBase",
+    get_tracked_proxy: Callable[["CustomClassBase"], "torch.fx.Proxy | None"],
     tracer: Any,
 ) -> "torch.fx.Proxy | None":
     """Reconstruct a DeviceMesh submesh from a tracked ancestor mesh.
@@ -1675,13 +1720,13 @@ def _register_distributed_opaque_types():
         return
     _distributed_opaque_types_registered = True
 
-    from torch._library.opaque_object import MemberType, register_opaque_type
+    from torch._library.opaque_object import MemberType, register_custom_class
 
     _register_process_group_opaque_type()
 
-    register_opaque_type(
+    register_custom_class(
         DeviceMesh,
-        typ="reference",
+        typ="symbolic",
         reconstruct_fn=_device_mesh_reconstruct_fn,
         guard_fn=lambda obj: [
             obj._flatten_rank_map,
