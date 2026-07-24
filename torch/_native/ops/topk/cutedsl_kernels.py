@@ -678,12 +678,16 @@ def build(spec: dict) -> dict:
             cute.runtime.make_fake_stream(),
         ],
         "tensor_args": [
-            {"name": "mX", "dynamic_sizes": [0], "dynamic_strides": [0], "read_only": True},
+            {
+                "name": "mX",
+                "dynamic_sizes": [0],
+                "dynamic_strides": [0],
+                "read_only": True,
+            },
             {"name": "mValues", "dynamic_sizes": [0], "dynamic_strides": [0]},
             {"name": "mIndices", "dynamic_sizes": [0], "dynamic_strides": [0]},
         ],
     }
-
 
 
 @instrumented_cutedsl_cache(

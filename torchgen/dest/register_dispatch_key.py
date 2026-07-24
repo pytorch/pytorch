@@ -983,7 +983,9 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 # structured group (uniqueness enforced at validation).
                 aot_manifest = self.native_aot_manifests.get(
                     str(self.g.functional.func.name)
-                ) or self.native_aot_manifests.get(self.g.functional.func.name.name.base)
+                ) or self.native_aot_manifests.get(
+                    self.g.functional.func.name.name.base
+                )
                 if aot_manifest is not None:
                     from torchgen.native_aot import gen_stub_consultation
 

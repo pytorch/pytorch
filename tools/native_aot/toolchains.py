@@ -125,9 +125,7 @@ void launch_{prefix}({tparams}, cudaStream_t stream) {{
                 # copy-on-write inputs (PAIN_POINTS P15). The ABI struct
                 # field is void*, hence the const_cast; the kernel only
                 # reads through it (declaration's read_only promise).
-                fills.append(
-                    f"  {n}_s.data = const_cast<void*>({n}.const_data_ptr());"
-                )
+                fills.append(f"  {n}_s.data = const_cast<void*>({n}.const_data_ptr());")
             else:
                 fills.append(f"  {n}_s.data = {n}.data_ptr();")
             for slot, dim in enumerate(a.get("dynamic_sizes", [])):
