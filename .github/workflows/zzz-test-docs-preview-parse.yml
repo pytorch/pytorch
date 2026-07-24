@@ -1,0 +1,81 @@
+name: TEST docs-preview metadata parse (TEMPORARY - delete before merge)
+
+# Temporary harness to exercise the metadata parse/validate logic from
+# upload-docs-preview.yml in real GitHub Actions. `on: push` runs from THIS
+# branch (unlike the workflow_run upload job, which only runs from default).
+# DELETE this file before merging anything.
+
+on:
+  push:
+    branches:
+      - atalman/test_docs_upload
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-parse:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Run parse/validate assertions
+        shell: bash
+        run: |
+          set -u
+          # ---- mirror of the "Read PR metadata" step in upload-docs-preview.yml ----
+          parse () {
+            (
+              set -eu
+              meta="$1"
+              if [ ! -f "${meta}" ]; then
+                echo "  -> abort (missing file)"; exit 1
+              fi
+              PR_NUMBER="$(grep -m1 '^PR_NUMBER=' "${meta}" | cut -d= -f2- || true)"
+              if ! [[ "${PR_NUMBER}" =~ ^[0-9]+$ ]]; then
+                echo "  -> abort (bad PR_NUMBER='${PR_NUMBER}')"; exit 1
+              fi
+              echo "  -> ok pr_number=${PR_NUMBER}"
+            )
+          }
+          # -------------------------------------------------------------------------
+
+          fail=0
+          check () {  # $1 desc  $2 expected_rc
+            local desc="$1" exp="$2"
+            echo "== ${desc} =="
+            parse t/pr-metadata.txt || true
+            parse t/pr-metadata.txt >/dev/null 2>&1; local rc=$?
+            if [ "${rc}" -ne "${exp}" ]; then
+              echo "  FAIL: rc=${rc}, expected ${exp}"; fail=1
+            else
+              echo "  PASS (rc=${rc})"
+            fi
+          }
+
+          rm -rf t; mkdir t
+
+          printf 'PR_NUMBER=190787\nDOCS_TYPE=python\nSHA=68825077ae581a173bfe63ec872cf956810d1b71\n' > t/pr-metadata.txt
+          check "real artifact file (3 lines)" 0
+
+          rm -f "${RUNNER_TEMP}/PWNED"
+          printf 'PR_NUMBER=1; touch %s/PWNED\nDOCS_TYPE=python\n' "${RUNNER_TEMP}" > t/pr-metadata.txt
+          check "shell injection attempt" 1
+          if [ -f "${RUNNER_TEMP}/PWNED" ]; then echo "  FAIL: injection executed!"; fail=1; fi
+
+          rm -f "${RUNNER_TEMP}/EXFIL"
+          printf 'PR_NUMBER=$(id > %s/EXFIL)\n' "${RUNNER_TEMP}" > t/pr-metadata.txt
+          check "command-substitution attempt" 1
+          if [ -f "${RUNNER_TEMP}/EXFIL" ]; then echo "  FAIL: cmd-sub executed!"; fail=1; fi
+
+          printf 'PR_NUMBER=../../evil/path\nDOCS_TYPE=python\n' > t/pr-metadata.txt
+          check "S3 path-traversal attempt" 1
+
+          printf 'DOCS_TYPE=python\n' > t/pr-metadata.txt
+          check "missing PR_NUMBER" 1
+
+          rm -f t/pr-metadata.txt
+          check "missing file" 1
+
+          echo
+          if [ "${fail}" -ne 0 ]; then echo "OVERALL: FAIL"; exit 1; fi
+          echo "OVERALL: PASS"
