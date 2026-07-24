@@ -209,38 +209,6 @@ def _driver_requires_flow(name: str) -> bool:
     return name in _DRIVER_FLOW_NAMES
 
 
-_RUNTIME_DROPPED_CBIDS: frozenset[int] | None = None
-_DRIVER_KEPT_CBIDS: frozenset[int] | None = None
-
-
-def runtime_dropped_cbids() -> frozenset[int]:
-    """cbids of RUNTIME APIs the trace drops (names in the blocklist), so the decoder can
-    filter the noise (e.g. cudaGetDevice/GetLastError) out of the window before it is
-    built/merged. CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under
-    user-defined records, so it cannot be done in CUPTI; this is the post-decode
-    equivalent, drop-set-identical to the merge's name blocklist."""
-    global _RUNTIME_DROPPED_CBIDS
-    if _RUNTIME_DROPPED_CBIDS is None:
-        names = _load_cbid_names(Runtime_api_trace_cbid)
-        _RUNTIME_DROPPED_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _RUNTIME_BLOCKLIST
-        )
-    return _RUNTIME_DROPPED_CBIDS
-
-
-def driver_kept_cbids() -> frozenset[int]:
-    """cbids of DRIVER APIs the trace keeps (names in the registered allowlist); the
-    decoder drops every other driver record (the driver kind is an allowlist, unlike the
-    runtime blocklist). Keep-set-identical to the merge's allowlist."""
-    global _DRIVER_KEPT_CBIDS
-    if _DRIVER_KEPT_CBIDS is None:
-        names = _load_cbid_names(Driver_api_trace_cbid)
-        _DRIVER_KEPT_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _DRIVER_REGISTERED
-        )
-    return _DRIVER_KEPT_CBIDS
-
-
 def _trace_window_entries(
     trace_window: dict[str, object],
     *,
@@ -390,6 +358,8 @@ def _trace_window_entries(
                 c["dst_kind"].tolist(),
             )
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -409,6 +379,8 @@ def _trace_window_entries(
                         "src kind": _MEMORY_KIND_NAMES.get(sk_l[i], sk_l[i]),
                         "dst kind": _MEMORY_KIND_NAMES.get(dk_l[i], dk_l[i]),
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -418,6 +390,8 @@ def _trace_window_entries(
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -436,6 +410,8 @@ def _trace_window_entries(
                         "value": val_l[i],
                         "memory kind": mk_l[i],
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
