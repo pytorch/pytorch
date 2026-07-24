@@ -362,8 +362,14 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
 
   int64_t local_alloc_id = allocator->get_alloc_id(tensor.storage().data_ptr().get());
 
-  if (store && rank >= 0 && world_size > 1 && local_alloc_id >= 0) {
-    validate_rendezvous_alloc_id(store, resolved_group_name, rank, world_size, rendezvous_idx, local_alloc_id);
+  if (store && rank >= 0 && world_size > 1) {
+    validate_rendezvous_alloc_id(
+        store,
+        resolved_group_name,
+        rank,
+        world_size,
+        rendezvous_idx,
+        local_alloc_id);
   }
 
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
