@@ -1821,7 +1821,7 @@ def reduce_scatter_inplace(
     output: torch.Tensor,
     input_list: list[torch.Tensor],
     op: str = "sum",
-    group=None,
+    group: dist.ProcessGroup | None = None,
     async_op: bool = False,
     tag: str = "",
 ):
@@ -1838,6 +1838,10 @@ def reduce_scatter_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
+    if output.dim() == 0:
+        # scalars have no dim to scatter along; stack into 1-D then reshape back
+        result = reduce_scatter_single(torch.stack(input_list), op, 0, group, tag)
+        return output.copy_(result.reshape(output.shape))
     return output.copy_(reduce_scatter_single(torch.cat(input_list), op, 0, group, tag))
 
 
