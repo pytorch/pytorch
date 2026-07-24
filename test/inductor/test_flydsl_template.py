@@ -236,6 +236,62 @@ class TestFlyDSLTemplate(TestCase):
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
         max_autotune_gemm=True,
+        max_autotune_gemm_backends="ATEN,FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_gemm_rejects_unaligned_inputs(self):
+        from torch._inductor.utils import run_and_get_code
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        def fn(a, b):
+            return torch.mm(a, b.t())
+
+        m, n, k = 64, 64, 128
+        dtype = torch.bfloat16
+
+        a = torch.randn(m, k, device="cuda", dtype=dtype)
+        b = torch.randn(n, k, device="cuda", dtype=dtype)
+        a_bad_stride = torch.empty_strided(
+            (m, k), (k + 1, 1), device="cuda", dtype=dtype
+        ).normal_()
+        b_bad_stride = torch.empty_strided(
+            (n, k), (k + 1, 1), device="cuda", dtype=dtype
+        ).normal_()
+
+        a_storage = torch.randn(m * k + 1, device="cuda", dtype=dtype)
+        b_storage = torch.randn(n * k + 1, device="cuda", dtype=dtype)
+        a_bad_offset = torch.as_strided(
+            a_storage, (m, k), (k, 1), storage_offset=1
+        )
+        b_bad_offset = torch.as_strided(
+            b_storage, (n, k), (k, 1), storage_offset=1
+        )
+
+        for name, test_a, test_b in (
+            ("a_row_stride", a_bad_stride, b),
+            ("b_row_stride", a, b_bad_stride),
+            ("a_storage_offset", a_bad_offset, b),
+            ("b_storage_offset", a, b_bad_offset),
+        ):
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(fn, backend="inductor")
+                result, (code,) = run_and_get_code(compiled_fn, test_a, test_b)
+
+                self.assertNotIn("async_compile.flydsl", code)
+                self.assertTrue(
+                    torch.allclose(
+                        result, fn(test_a, test_b), atol=3e-2, rtol=3e-2
+                    )
+                )
+
+    @unittest.skipUnless(HAS_FLYDSL, "requires flydsl")
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
         flydsl_enable_autotuning=False,
     )
