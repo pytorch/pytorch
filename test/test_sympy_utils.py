@@ -1107,7 +1107,7 @@ class TestSympyFunctions(TestCase):
 
         self.assertNotEqual(expr, ModularIndexing(-1 - q0, 2, n**2))
         for nv in range(2, 9):
-            for q0v in range(2 * nv * nv):
+            for q0v in range(4 * nv * nv):
                 actual = int(expr.subs({n: nv, q0: q0v}))
                 expected = (nv * nv + (-1 - q0v) // 2) % (nv * nv)
                 self.assertEqual(actual, expected)

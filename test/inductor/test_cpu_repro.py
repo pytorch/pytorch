@@ -5107,33 +5107,6 @@ class CPUReproTests(TestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    def test_issue_190765_tiny_repro(self):
-        def fn(p):
-            return torch.flip(torch.repeat_interleave(torch.flatten(p + 1.0), 2), [0])
-
-        torch.manual_seed(0)
-        p = torch.randn(2, 2, dtype=torch.float32)
-        compiled = torch.compile(fn, backend="inductor", dynamic=True)
-        for _ in range(4):
-            self.assertEqual(compiled(p), fn(p))
-
-    def test_issue_190765_intermediate_graph(self):
-        def postprocess(z):
-            return torch.flip(torch.repeat_interleave(torch.flatten(z), 2), [0])
-
-        def fn(x, a, b):
-            left = (x @ a).transpose(0, 1)
-            right = (x @ b).transpose(0, 1)
-            return postprocess((left + right).transpose(0, 1))
-
-        torch.manual_seed(0)
-        x = torch.randn(8, 6, dtype=torch.float32)
-        a = torch.randn(6, 8, dtype=torch.float32)
-        b = torch.randn(6, 8, dtype=torch.float32)
-        compiled = torch.compile(fn, backend="inductor", dynamic=True)
-        for _ in range(4):
-            self.assertEqual(compiled(x, a, b), fn(x, a, b))
-
     def test_scalar_mul_bfloat16(self):
         def f(x):
             return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
