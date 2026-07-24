@@ -112,7 +112,6 @@ from .base import (
     getset_read,
     Member,
     Method,
-    MethodFlags,
     MutationType,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
@@ -1000,11 +999,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return variables.LambdaVariable(fake_cross_entropy_loss)
 
-    def _subclasses(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if (
-            len(args) == 0
+            name == "__subclasses__"
+            and len(args) == 0
             and not kwargs
             and "__subclasses__" not in self.value.__dict__
         ):
@@ -1013,67 +1019,31 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        return None
-
-    def _fromkeys(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        if self.value in {collections.OrderedDict, collections.defaultdict}:
+        elif (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
-        return None
-
-    def _move_to_end(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        if self.value is collections.OrderedDict:
-            return args[0].call_method(tx, "move_to_end", [*args[1:]], kwargs)
-        return None
-
-    def _copy(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        # copy.copy(x) resolves type(x).__copy__ and calls it with the instance
-        # as the sole argument; dispatch to the instance so the contents (and
-        # defaultdict default_factory / deque maxlen) are preserved.
-        if (
+        elif self.value is collections.OrderedDict and name == "move_to_end":
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
+        elif (
             self.value in {collections.defaultdict, collections.deque}
+            and name == "__copy__"
             and len(args) == 1
             and not kwargs
         ):
-            return args[0].call_method(tx, "__copy__", [], kwargs)
-        return None
-
-    def _len(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        if len(args) == 1 and not kwargs:
+            # copy.copy(x) resolves type(x).__copy__ and calls it with the
+            # instance as the sole argument; dispatch to the instance so the
+            # contents (and defaultdict default_factory / deque maxlen) are
+            # preserved.
+            return args[0].call_method(tx, name, [], kwargs)
+        elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
-        return None
-
-    tp_methods = {
-        "__subclasses__": Method(
-            _subclasses, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "fromkeys": Method(_fromkeys, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "move_to_end": Method(_move_to_end, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "__copy__": Method(_copy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "__len__": Method(_len, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-    }
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        from .builder import SourcelessBuilder
-
-        if issubclass(self.value, dict) and name != "__new__":
+        elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
                 tx, name, args, kwargs
@@ -4409,11 +4379,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         return self._base_vt.call_method(tx, "with_traceback", args, kwargs)  # type: ignore[missing-attribute]
 
     tp_methods = {
-        "__init__": Method(_init, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "__setattr__": Method(_setattr, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "with_traceback": Method(
-            _with_traceback, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
+        "__init__": Method(_init, "__init__"),
+        "__setattr__": Method(_setattr, "__setattr__"),
+        "with_traceback": Method(_with_traceback, "with_traceback"),
     }
 
     # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
@@ -4614,7 +4582,7 @@ class RemovableHandleVariable(VariableTracker):
             self.idx = self.REMOVED
         return variables.ConstantVariable.create(None)
 
-    tp_methods = {"remove": Method(remove, MethodFlags.NOARGS)}
+    tp_methods = {"remove": Method(remove, "remove")}
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.idx == self.REMOVED:
@@ -4717,9 +4685,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 return self.call_method(tx, "__missing__", args, kwargs)
         return None
 
-    tp_methods = {
-        "__getitem__": Method(_getitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS)
-    }
+    tp_methods = {"__getitem__": Method(_getitem, "__getitem__")}
 
     def debug_repr(self) -> str:
         if self._base_vt is None:
@@ -4947,8 +4913,8 @@ class OrderedDictVariable(UserDefinedDictVariable):
         return variables.TupleVariable([k.vt, v])
 
     tp_methods = {
-        "move_to_end": Method(_move_to_end, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "popitem": Method(_popitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "move_to_end": Method(_move_to_end, "move_to_end"),
+        "popitem": Method(_popitem, "popitem"),
     }
 
 
@@ -5255,10 +5221,10 @@ class DefaultDictVariable(UserDefinedDictVariable):
         return super().call_method(tx, name, args, kwargs)
 
     tp_methods = {
-        "__getitem__": Method(_getitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "__missing__": Method(_missing, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "copy": Method(_copy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "__copy__": Method(_copy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__getitem__": Method(_getitem, "__getitem__"),
+        "__missing__": Method(_missing, "__missing__"),
+        "copy": Method(_copy, "copy"),
+        "__copy__": Method(_copy, "__copy__"),
     }
 
 

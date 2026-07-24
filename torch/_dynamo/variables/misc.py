@@ -77,11 +77,10 @@ from .base import (
     GetSet,
     getset_build,
     getset_read,
-    getset_unsupported,
     Member,
     Method,
-    MethodFlags,
     NO_SUCH_SUBOBJ,
+    unsupported_attr,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -542,7 +541,7 @@ class TracebackVariable(VariableTracker):
 
     # ref: CPython Objects/traceback.c tb_memberlist.
     tp_members = {
-        "tb_lasti": Member(getset_unsupported("tb_lasti")),
+        "tb_lasti": Member(unsupported_attr("tb_lasti")),
     }
 
     def richcompare_impl(
@@ -735,9 +734,7 @@ class ExceptionVariable(VariableTracker):
         return self
 
     tp_methods = {
-        "with_traceback": Method(
-            with_traceback, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
+        "with_traceback": Method(with_traceback, "with_traceback"),
     }
 
     def _get_args(self, tx: "InstructionTranslatorBase"):
@@ -2844,15 +2841,15 @@ class RandomVariable(VariableTracker):
         return self._call_random(tx, "uniform", args, kwargs)
 
     tp_methods = {
-        "seed": Method(seed, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "getstate": Method(getstate, MethodFlags.NOARGS),
-        "setstate": Method(setstate, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "shuffle": Method(shuffle, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "sample": Method(sample, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "random": Method(_random, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "randint": Method(_randint, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "randrange": Method(_randrange, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "uniform": Method(_uniform, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "seed": Method(seed, "seed"),
+        "getstate": Method(getstate, "getstate"),
+        "setstate": Method(setstate, "setstate"),
+        "shuffle": Method(shuffle, "shuffle"),
+        "sample": Method(sample, "sample"),
+        "random": Method(_random, "random"),
+        "randint": Method(_randint, "randint"),
+        "randrange": Method(_randrange, "randrange"),
+        "uniform": Method(_uniform, "uniform"),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

@@ -97,7 +97,6 @@ from .base import (
     getset_read,
     Member,
     Method,
-    MethodFlags,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
@@ -1548,9 +1547,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return throw_here()
 
     tp_methods = {
-        "send": Method(gen_send, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "close": Method(gen_close, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "throw": Method(gen_throw, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "send": Method(gen_send, "send"),
+        "close": Method(gen_close, "close"),
+        "throw": Method(gen_throw, "throw"),
     }
 
 
@@ -3576,7 +3575,7 @@ class TritonKernelVariable(VariableTracker):
             return ConstantVariable.create(arg.evaluate_expr())
         return arg
 
-    tp_methods = {"run": Method(run, MethodFlags.VARARGS | MethodFlags.KEYWORDS)}
+    tp_methods = {"run": Method(run, "run")}
 
 
 class TMADescriptorExperimentalVariable(VariableTracker):
