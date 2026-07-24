@@ -251,6 +251,20 @@ class CUDAAllocator : public DeviceAllocator {
   virtual std::string getUserMetadata() {
     return "";
   }
+  // Post-facto annotation: records an "annotate" trace entry for a live
+  // allocation identified by its base data pointer. Unlike setUserMetadata,
+  // this does not affect metadata recorded at allocation time; annotations
+  // accumulate as separate trace events keyed by address.
+  virtual void annotateMemory(
+      const void* /*ptr*/,
+      const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support memory annotations; the value passed to "
+        "torch.cuda.memory._annotate_memory is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
+  }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
 
@@ -548,6 +562,10 @@ inline void setUserMetadata(const std::string& metadata) {
 
 inline std::string getUserMetadata() {
   return get()->getUserMetadata();
+}
+
+inline void annotateMemory(const void* ptr, const std::string& metadata) {
+  get()->annotateMemory(ptr, metadata);
 }
 
 } // namespace c10::cuda::CUDACachingAllocator

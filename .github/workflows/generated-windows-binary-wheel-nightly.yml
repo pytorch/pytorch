@@ -224,6 +224,66 @@ jobs:
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_14t-xpu"
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
+          - desired_python: "3.15"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_15-cpu"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+          - desired_python: "3.15"
+            desired_cuda: "cu126"
+            gpu_arch_version: "12.6"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda12_6"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.15"
+            desired_cuda: "cu130"
+            gpu_arch_version: "13.0"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda13_0"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.15"
+            desired_cuda: "cu132"
+            gpu_arch_version: "13.2"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda13_2"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.15"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            build_name: "wheel-py3_15-xpu"
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
+          - desired_python: "3.15t"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_15t-cpu"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+          - desired_python: "3.15t"
+            desired_cuda: "cu126"
+            gpu_arch_version: "12.6"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda12_6"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.15t"
+            desired_cuda: "cu130"
+            gpu_arch_version: "13.0"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda13_0"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.15t"
+            desired_cuda: "cu132"
+            gpu_arch_version: "13.2"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda13_2"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.15t"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            build_name: "wheel-py3_15t-xpu"
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
@@ -515,6 +575,66 @@ jobs:
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_14t-xpu"
             runs_on: "windows.4xlarge"
+          - desired_python: "3.15"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_15-cpu"
+            runs_on: "windows.4xlarge"
+          - desired_python: "3.15"
+            desired_cuda: "cu126"
+            gpu_arch_version: "12.6"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda12_6"
+            runs_on: "windows.g4dn.xlarge"
+          - desired_python: "3.15"
+            desired_cuda: "cu130"
+            gpu_arch_version: "13.0"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda13_0"
+            runs_on: "windows.g4dn.xlarge"
+          - desired_python: "3.15"
+            desired_cuda: "cu132"
+            gpu_arch_version: "13.2"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda13_2"
+            runs_on: "windows.g4dn.xlarge"
+          - desired_python: "3.15"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            build_name: "wheel-py3_15-xpu"
+            runs_on: "windows.4xlarge"
+          - desired_python: "3.15t"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_15t-cpu"
+            runs_on: "windows.4xlarge"
+          - desired_python: "3.15t"
+            desired_cuda: "cu126"
+            gpu_arch_version: "12.6"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda12_6"
+            runs_on: "windows.g4dn.xlarge"
+          - desired_python: "3.15t"
+            desired_cuda: "cu130"
+            gpu_arch_version: "13.0"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda13_0"
+            runs_on: "windows.g4dn.xlarge"
+          - desired_python: "3.15t"
+            desired_cuda: "cu132"
+            gpu_arch_version: "13.2"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda13_2"
+            runs_on: "windows.g4dn.xlarge"
+          - desired_python: "3.15t"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            build_name: "wheel-py3_15t-xpu"
+            runs_on: "windows.4xlarge"
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
@@ -774,6 +894,56 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_14t-xpu"
+          - desired_python: "3.15"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_15-cpu"
+          - desired_python: "3.15"
+            desired_cuda: "cu126"
+            gpu_arch_version: "12.6"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda12_6"
+          - desired_python: "3.15"
+            desired_cuda: "cu130"
+            gpu_arch_version: "13.0"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda13_0"
+          - desired_python: "3.15"
+            desired_cuda: "cu132"
+            gpu_arch_version: "13.2"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15-cuda13_2"
+          - desired_python: "3.15"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            build_name: "wheel-py3_15-xpu"
+          - desired_python: "3.15t"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_15t-cpu"
+          - desired_python: "3.15t"
+            desired_cuda: "cu126"
+            gpu_arch_version: "12.6"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda12_6"
+          - desired_python: "3.15t"
+            desired_cuda: "cu130"
+            gpu_arch_version: "13.0"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda13_0"
+          - desired_python: "3.15t"
+            desired_cuda: "cu132"
+            gpu_arch_version: "13.2"
+            gpu_arch_type: "cuda"
+            build_name: "wheel-py3_15t-cuda13_2"
+          - desired_python: "3.15t"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            build_name: "wheel-py3_15t-xpu"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
@@ -793,12 +963,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -814,10 +988,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
@@ -853,12 +1027,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu126
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -874,10 +1052,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
@@ -914,12 +1092,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu130
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -935,10 +1117,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
@@ -975,12 +1157,16 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-    runs-on: "linux.4xlarge"
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: python:3.11
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu132
       LIBTORCH_VARIANT: shared-with-deps
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -996,10 +1182,10 @@ jobs:
         shell: bash
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          mkdir -p "${RUNNER_TEMP}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
+            --output-dir "${RUNNER_TEMP}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
