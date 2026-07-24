@@ -127,3 +127,7 @@ nn_module_guard_eval,instruction_count,83710,0.1
 
 
 nn_module_guard_eval_dynamic,instruction_count,116300,0.1
+
+
+
+runtime_overhead_eager,instruction_count,50000,0.1
