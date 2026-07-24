@@ -948,6 +948,27 @@ class SideEffects:
                     )
                 init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
+
+        # Generators tracked for close-on-exit have their close() called in
+        # compile_subgraph after pruning.
+        gen_reachable_new: set[VariableTracker] = set()
+
+        def visit_gen(var: VariableTracker) -> None:
+            if isinstance(var.mutation_type, AttributeMutationNew):
+                gen_reachable_new.add(var)
+
+        # Pass side_effects so the walk follows store_attr_mutations, and share
+        # one cache across all generators to dedup shared subiterators.
+        gen_visit_cache: dict[int, Any] = {}
+        for gen in tx.output.local_generators:
+            gen_tracer = gen.inline_tracer
+            VariableTracker.visit(
+                visit_gen,
+                [gen_tracer.stack, gen_tracer.symbolic_locals],
+                gen_visit_cache,
+                self,
+            )
+
         VariableTracker.visit(
             visit,
             # TODO track from all possible sources.
@@ -963,7 +984,7 @@ class SideEffects:
         # that are sensitive to when certain objects get released.
         del visit
 
-        # NB: cell variable handling.is tricky.
+        # NB: cell variable handling is tricky.
         # cell variables must stay alive if any NestedUserFunctionVariable
         # are live. "visit"-ing the NestedUserFunctionVariable visits
         # the .closures field, from which we will see if we need to keep
@@ -973,10 +994,14 @@ class SideEffects:
             k: v for k, v in self.id_to_variable.items() if is_live(v)
         }
         self.store_attr_mutations = {
-            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+            k: v
+            for k, v in self.store_attr_mutations.items()
+            if is_live(k) or k in gen_reachable_new
         }
         self.attr_mutation_kinds = {
-            k: v for k, v in self.attr_mutation_kinds.items() if is_live(k)
+            k: v
+            for k, v in self.attr_mutation_kinds.items()
+            if is_live(k) or k in gen_reachable_new
         }
 
     def mutation(self, var: VariableTracker) -> None:
