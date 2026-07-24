@@ -19422,6 +19422,18 @@ if RUN_GPU or HAS_MPS:
                     ),
                 )
 
+        @requires_cuda_and_triton
+        def test_addmm_out_dtype_compile(self):
+            x = torch.randn(2, 8, device=self.device, dtype=torch.float16)
+            w = torch.randn(8, 13, device=self.device, dtype=torch.float16)
+            bias = torch.zeros(13, device=self.device, dtype=torch.float16)
+
+            def fn(bias, x, w):
+                return torch.addmm(bias, x, w, out_dtype=torch.float32)
+
+            result = torch.compile(fn, fullgraph=True)(bias, x, w)
+            self.assertEqual(result.dtype, torch.float32)
+
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:

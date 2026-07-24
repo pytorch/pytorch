@@ -459,7 +459,6 @@ def addmm(
     self: torch.Tensor,
     mat1: torch.Tensor,
     mat2: torch.Tensor,
-    out_dtype: torch.dtype | None = None,
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
