@@ -3790,10 +3790,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dense_mask_vars.add(tree.mask_name())
 
         if (
-            (
-                tma_compatibility_checker
-                and tma_compatibility_checker.can_use_tma()
-            )
+            (tma_compatibility_checker and tma_compatibility_checker.can_use_tma())
             and not override_mask
             and not self._load_mask
             and len(mask_vars - dense_mask_vars) == 0
@@ -4012,10 +4009,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 can_lift = tma_compatibility_checker.can_lift()
 
-                if (
-                    self.transpose_discontiguous_tensor_descriptors_override
-                    is not None
-                ):
+                if self.transpose_discontiguous_tensor_descriptors_override is not None:
                     transpose_contiguous = (
                         self.transpose_discontiguous_tensor_descriptors_override
                     )
