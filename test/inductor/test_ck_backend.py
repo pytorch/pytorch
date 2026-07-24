@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 import logging
 import os
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 try:
@@ -565,6 +567,11 @@ class TestCKTileUniversalGemmTemplate(TestCase):
         # _ck_tile_universal_gemm_v2_api is functools.cache'd on rocm_home.
         self._ck_tile._ck_tile_universal_gemm_v2_api.cache_clear()
 
+    def _require_ck_lib(self):
+        ck_dir, _, _, _ = try_import_ck_lib()
+        if not ck_dir:
+            raise unittest.SkipTest("Composable Kernel library is not installed")
+
     def _sample_ck_tile_op(self):
         ck_ops = self._ck_tile.ops()
         self.assertTrue(len(ck_ops) > 0, "expected CK-Tile gemm ops to be defined")
@@ -587,58 +594,113 @@ class TestCKTileUniversalGemmTemplate(TestCase):
             f.write(body)
 
     def test_header_probe_legacy_api(self):
-        import tempfile
-
         with tempfile.TemporaryDirectory() as rocm_home:
             self._write_pipeline_header(
                 rocm_home,
                 """
+template <typename ADataType_,
+          typename BDataType_,
+          typename CDataType_,
+          typename BlockGemmShape_,
+          typename Traits_,
+          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
+          bool HasHotLoop_                 = true,
+          TailNumber TailNum_              = TailNumber::Full,
+          typename ComputeDataType_        = ADataType_,
+          bool FixedVectorSize_            = false,
+          index_t VectorSizeA_             = 1,
+          index_t VectorSizeB_             = 1>
 struct UniversalGemmPipelineProblem
 {
-    template<typename ADataType_,
-             typename BDataType_,
-             typename AccDataType_,
-             typename GemmShape_,
-             typename GemmUniversalTraits_,
-             ck_tile::GemmPipelineScheduler Scheduler_,
-             bool HasHotLoop_    = true,
-             ck_tile::TailNumber TailNum_ = ck_tile::TailNumber::Full>
-    {};
+};
 """,
             )
             self.assertFalse(self._ck_tile._ck_tile_universal_gemm_v2_api(rocm_home))
 
     def test_header_probe_v2_api(self):
-        import tempfile
+        with tempfile.TemporaryDirectory() as rocm_home:
+            self._write_pipeline_header(
+                rocm_home,
+                """
+template <typename AsDataType_,
+          typename BsDataType_,
+          typename EDataType_,
+          typename BlockGemmShape_,
+          typename Traits_,
+          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
+          typename AElementWise_           = ck_tile::element_wise::PassThrough,
+          typename BElementWise_           = ck_tile::element_wise::PassThrough,
+          typename AComputeDataType_       = AsDataType_,
+          typename BComputeDataType_       = BsDataType_,
+          bool FixedVectorSize_            = false,
+          index_t VectorSizeA_             = 1,
+          index_t VectorSizeB_             = 1>
+struct UniversalGemmPipelineProblem
+{
+};
+""",
+            )
+            self.assertTrue(self._ck_tile._ck_tile_universal_gemm_v2_api(rocm_home))
 
+    def test_header_probe_does_not_use_later_flatmm_signature(self):
+        header_text = """
+template <typename AsDataType_,
+          typename BsDataType_,
+          typename EDataType_,
+          typename BlockGemmShape_,
+          typename Traits_,
+          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
+          typename AElementWise_           = ck_tile::element_wise::PassThrough,
+          typename BElementWise_           = ck_tile::element_wise::PassThrough>
+struct UniversalGemmPipelineProblem
+{
+};
+
+template <typename ADataType_,
+          typename BDataType_,
+          typename CDataType_,
+          typename BlockGemmShape_,
+          typename Traits_,
+          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
+          bool HasHotLoop_                 = true,
+          TailNumber TailNum_              = TailNumber::Full>
+struct FlatmmPipelineProblem
+{
+};
+"""
+        self.assertTrue(
+            self._ck_tile._header_has_v2_universal_gemm_pipeline(header_text)
+        )
+
+    @patch(f"{_MODULE}.torch.version.hip", "7.14.0")
+    def test_header_probe_fallback_v2_when_header_missing(self):
+        with tempfile.TemporaryDirectory() as rocm_home:
+            self.assertTrue(self._ck_tile._ck_tile_universal_gemm_v2_api(rocm_home))
+
+    @patch(f"{_MODULE}.torch.version.hip", "7.2.0")
+    def test_header_probe_fallback_v1_when_header_missing(self):
+        with tempfile.TemporaryDirectory() as rocm_home:
+            self.assertFalse(self._ck_tile._ck_tile_universal_gemm_v2_api(rocm_home))
+
+    @patch(f"{_MODULE}.torch.version.hip", "7.14.0")
+    def test_header_probe_fallback_v2_when_header_unrecognized(self):
         with tempfile.TemporaryDirectory() as rocm_home:
             self._write_pipeline_header(
                 rocm_home,
                 """
 struct UniversalGemmPipelineProblem
 {
-    template<typename ADataType_,
-             typename BDataType_,
-             typename AccDataType_,
-             typename GemmShape_,
-             typename GemmUniversalTraits_,
-             ck_tile::GemmPipelineScheduler Scheduler_,
-             typename AElementWise_ = ck_tile::element_wise::PassThrough,
-             bool HasHotLoop_    = true,
-             ck_tile::TailNumber TailNum_ = ck_tile::TailNumber::Full>
-    {};
+};
 """,
             )
             self.assertTrue(self._ck_tile._ck_tile_universal_gemm_v2_api(rocm_home))
 
     def test_emit_v1_legacy_instance(self):
-        from unittest.mock import patch
-
+        self._require_ck_lib()
         tmpl = self._ck_tile.CKTileGemmTemplate
-        with patch(
-            f"{self._MODULE}._ck_tile_universal_gemm_v2_api", return_value=False
-        ):
-            code = object.__new__(tmpl).emit_ck_instance(self._sample_ck_tile_op())
+        code = object.__new__(tmpl).emit_ck_instance(
+            self._sample_ck_tile_op(), use_v2_api=False
+        )
         self.assertIn("has_hot_loop_v", code)
         self.assertIn("GemmPipelineProblem", code)
         self.assertNotIn(
@@ -647,11 +709,11 @@ struct UniversalGemmPipelineProblem
         )
 
     def test_emit_v2_simplified_instance(self):
-        from unittest.mock import patch
-
+        self._require_ck_lib()
         tmpl = self._ck_tile.CKTileGemmTemplate
-        with patch(f"{self._MODULE}._ck_tile_universal_gemm_v2_api", return_value=True):
-            code = object.__new__(tmpl).emit_ck_instance(self._sample_ck_tile_op())
+        code = object.__new__(tmpl).emit_ck_instance(
+            self._sample_ck_tile_op(), use_v2_api=True
+        )
         self.assertNotIn("TailHandler", code)
         self.assertNotIn("has_hot_loop_v", code)
         self.assertIn(

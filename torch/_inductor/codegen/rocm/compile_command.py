@@ -9,14 +9,20 @@ from torch._inductor.utils import is_linux, try_import_ck_lib
 log = logging.getLogger(__name__)
 
 
+def _rocm_system_include_dir(rocm_home: str | None = None) -> str:
+    from torch.utils import cpp_extension
+
+    if rocm_home:
+        return os.path.join(rocm_home, "include")
+    if config.rocm.rocm_home:
+        return os.path.join(config.rocm.rocm_home, "include")
+    return cpp_extension._join_rocm_home("include")
+
+
 def _rocm_include_paths(dst_file_ext: str) -> list[str]:
     from torch.utils import cpp_extension
 
-    rocm_include = (
-        os.path.join(config.rocm.rocm_home, "include")
-        if config.rocm.rocm_home
-        else cpp_extension._join_rocm_home("include")
-    )
+    rocm_include = _rocm_system_include_dir()
 
     if config.is_fbcode():
         from libfb.py import parutil

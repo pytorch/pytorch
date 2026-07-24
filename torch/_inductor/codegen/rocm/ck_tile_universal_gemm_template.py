@@ -10,6 +10,7 @@ from typing import Any
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_tile_template import CKTileTemplate
+from torch._inductor.codegen.rocm.compile_command import _rocm_system_include_dir
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.codegen.rocm.rocm_template import ArgInfo
 from torch._inductor.ir import Buffer, Layout
@@ -22,43 +23,29 @@ log = logging.getLogger(__name__)
 
 
 _CK_TILE_PIPELINE_PROBLEM_HEADER = "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
+_STRUCT_ANCHOR = "struct UniversalGemmPipelineProblem"
 _SCHEDULER_PARAM = "GemmPipelineScheduler Scheduler_"
-# ck_tile headers place Scheduler_ within a few KB of UniversalGemmPipelineProblem.
-_HEADER_SCHEDULER_MAX_DISTANCE = 4000
-# Enough to cover the template parameters immediately following Scheduler_.
-_HEADER_AFTER_SCHEDULER_WINDOW = 800
-
-
-def _ck_tile_rocm_include_dir(rocm_home: str | None) -> str | None:
-    if rocm_home:
-        return os.path.join(rocm_home, "include")
-    from torch.utils import cpp_extension
-
-    if cpp_extension.ROCM_HOME:
-        return os.path.join(cpp_extension.ROCM_HOME, "include")
-    rocm_home = os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH")
-    if rocm_home:
-        return os.path.join(rocm_home, "include")
-    try:
-        from torch.utils.cpp_extension import _join_rocm_home
-
-        return _join_rocm_home("include")
-    except OSError:
-        return None
+# ck_tile writes the template parameter list above the struct name.
+_HEADER_TEMPLATE_MAX_BACKWARD = 900
 
 
 def _header_has_v2_universal_gemm_pipeline(header_text: str) -> bool | None:
-    pos = header_text.find("UniversalGemmPipelineProblem")
+    pos = header_text.find(_STRUCT_ANCHOR)
     if pos < 0:
         return None
 
-    sched_pos = header_text.find(_SCHEDULER_PARAM, pos)
-    if sched_pos < 0 or sched_pos - pos > _HEADER_SCHEDULER_MAX_DISTANCE:
+    template_start = header_text.rfind(
+        "template", max(0, pos - _HEADER_TEMPLATE_MAX_BACKWARD), pos
+    )
+    if template_start < 0:
         return None
 
-    after_scheduler = header_text[
-        sched_pos : sched_pos + _HEADER_AFTER_SCHEDULER_WINDOW
-    ]
+    template_block = header_text[template_start:pos]
+    sched_pos = template_block.rfind(_SCHEDULER_PARAM)
+    if sched_pos < 0:
+        return None
+
+    after_scheduler = template_block[sched_pos:]
     elemwise_pos = after_scheduler.find("AElementWise_")
     hotloop_pos = after_scheduler.find("HasHotLoop_")
     if elemwise_pos >= 0 and (hotloop_pos < 0 or elemwise_pos < hotloop_pos):
@@ -76,22 +63,21 @@ def _ck_tile_universal_gemm_v2_api(rocm_home: str | None) -> bool:
     if torch.version.hip is None:
         return False
 
-    rocm_include = _ck_tile_rocm_include_dir(rocm_home)
-    if rocm_include is not None:
+    try:
+        rocm_include = _rocm_system_include_dir(rocm_home)
         header_path = os.path.join(rocm_include, _CK_TILE_PIPELINE_PROBLEM_HEADER)
-        try:
-            with open(header_path) as header_file:
-                header_text = header_file.read()
-            header_v2 = _header_has_v2_universal_gemm_pipeline(header_text)
-            if header_v2 is not None:
-                return header_v2
-            log.debug(
-                "Could not determine CK-Tile universal GEMM API from %s; "
-                "falling back to torch.version.hip",
-                header_path,
-            )
-        except OSError:
-            pass
+        with open(header_path) as header_file:
+            header_text = header_file.read()
+        header_v2 = _header_has_v2_universal_gemm_pipeline(header_text)
+        if header_v2 is not None:
+            return header_v2
+        log.debug(
+            "Could not determine CK-Tile universal GEMM API from %s; "
+            "falling back to torch.version.hip",
+            header_path,
+        )
+    except OSError:
+        pass
 
     # torch.version.hip is the HIP version, conventionally aligned with ROCm.
     rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
@@ -619,7 +605,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return op
 
-    def emit_ck_instance(self, op: "CKTileGemmOperation"):
+    def emit_ck_instance(self, op: "CKTileGemmOperation", *, use_v2_api: bool):
         """
         This method is used to generate code which defines the type alias for the generated kernel class
         """
@@ -767,7 +753,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             using GemmPipeline = ck_tile::GemmPipelineAgBgCr{pipeline_type}<UniversalGemmProblem>;
         """
 
-        use_v2_api = _ck_tile_universal_gemm_v2_api(config.rocm.rocm_home)
         if use_v2_api:
             rendered_pipeline_problem = ""
             rendered_universal_gemm_problem = ""
@@ -834,7 +819,8 @@ class CKTileGemmTemplate(CKTileTemplate):
         X, W = self.input_nodes
         Y = self.output_node
 
-        instance_definition = self.emit_ck_instance(op)
+        use_v2_api = _ck_tile_universal_gemm_v2_api(config.rocm.rocm_home)
+        instance_definition = self.emit_ck_instance(op, use_v2_api=use_v2_api)
 
         version_comment = rf"""/**
 * Generated code for CK inductor backend
@@ -846,8 +832,6 @@ class CKTileGemmTemplate(CKTileTemplate):
 * torch.version.git_version={getattr(torch.version, "git_version", "None")}
 */
 """
-
-        use_v2_api = _ck_tile_universal_gemm_v2_api(config.rocm.rocm_home)
 
         kernel_launch = self._template_from_string(self.gemm_kernel_launch).render(
             instance_namespace=op.name(),
