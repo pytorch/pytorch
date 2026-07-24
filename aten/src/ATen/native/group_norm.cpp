@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/group_norm.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/cpu/mixed_data_type.h>
+#include <ATen/native/group_norm.h>
 #include <c10/util/accumulate.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -37,11 +37,13 @@ static void check_group_norm_inputs(
     int64_t num_groups) {
   // We explicitly support N == 0, but if either C or HxW == 0 the results are
   // non-sensical.
-  TORCH_CHECK(C > 0, "Expected number of channels to be greater than 0, got ", C);
+  TORCH_CHECK(
+      C > 0, "Expected number of channels to be greater than 0, got ", C);
   TORCH_CHECK(HxW > 0, "Expected HxW to be greater than 0, got ", HxW);
   TORCH_CHECK(
       num_groups > 0,
-      "Expected num groups to be greater than 0, got ", num_groups);
+      "Expected num groups to be greater than 0, got ",
+      num_groups);
   TORCH_CHECK(
       C % num_groups == 0,
       "Expected number of channels in input to be divisible by ",
@@ -51,7 +53,8 @@ static void check_group_norm_inputs(
       "num_groups=",
       num_groups);
   TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && at::symint::numel<T>(weight) == C),
+      !weight.defined() ||
+          (weight.dim() == 1 && at::symint::numel<T>(weight) == C),
       "Expected weight to be a vector of size equal to the number of ",
       "channels in input, but got weight of shape ",
       weight.sizes(),
@@ -91,9 +94,13 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     check_mixed_data_type(X, gamma, beta);
   }
 
-  auto memory_format{(X.device().is_cpu() || X.device().is_privateuseone()) ?
-      X.suggest_memory_format() : at::MemoryFormat::Contiguous};
-  auto stat_options{X.options().memory_format(at::MemoryFormat::Contiguous).dtype(param_scalar_type(X, mixed_type))};
+  auto memory_format{
+      (X.device().is_cpu() || X.device().is_privateuseone())
+          ? X.suggest_memory_format()
+          : at::MemoryFormat::Contiguous};
+  auto stat_options{X.options()
+                        .memory_format(at::MemoryFormat::Contiguous)
+                        .dtype(param_scalar_type(X, mixed_type))};
 
   Tensor Y = at::empty_like(X, {}, memory_format);
   Tensor mean = at::empty({N, group}, stat_options);
@@ -105,7 +112,18 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     Tensor beta_ = beta.defined() ? beta.contiguous() : beta;
 
     GroupNormKernel(
-        X_.device().type(), X_, gamma_, beta_, N, C, HxW, group, eps, Y, mean, rstd);
+        X_.device().type(),
+        X_,
+        gamma_,
+        beta_,
+        N,
+        C,
+        HxW,
+        group,
+        eps,
+        Y,
+        mean,
+        rstd);
   }
 
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
@@ -134,10 +152,11 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     check_mixed_data_type(X, mean, rstd);
   }
 
-  auto memory_format = (X.device().is_cpu() || X.device().is_privateuseone()) ?
-      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
-  auto dparam_options{(gamma.defined() ?
-      gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
+  auto memory_format = (X.device().is_cpu() || X.device().is_privateuseone())
+      ? X.suggest_memory_format()
+      : at::MemoryFormat::Contiguous;
+  auto dparam_options{(gamma.defined() ? gamma.options() : X.options())
+                          .memory_format(MemoryFormat::Contiguous)};
 
   if (!N) {
     return std::make_tuple(
@@ -202,8 +221,8 @@ Tensor group_norm(
   const auto HxW = c10::multiply_integers(input_shape.slice(2));
   check_group_norm_inputs(input, weight, bias, C, HxW, num_groups);
 
-  return std::get<0>(
-      at::native_group_norm_symint(input, weight, bias, N, C, HxW, num_groups, eps));
+  return std::get<0>(at::native_group_norm_symint(
+      input, weight, bias, N, C, HxW, num_groups, eps));
 }
 
 DEFINE_DISPATCH(GroupNormKernel);
@@ -228,15 +247,18 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
 
   check_group_norm_inputs(input, weight, bias, C, HxW, group);
 
-  auto memory_format{(input.device().is_cpu() || input.device().is_privateuseone()) ?
-      input.suggest_memory_format() : at::MemoryFormat::Contiguous};
-  auto stat_options{input.options().memory_format(at::MemoryFormat::Contiguous)};
+  auto memory_format{
+      (input.device().is_cpu() || input.device().is_privateuseone())
+          ? input.suggest_memory_format()
+          : at::MemoryFormat::Contiguous};
+  auto stat_options{
+      input.options().memory_format(at::MemoryFormat::Contiguous)};
 
   if (!N) {
     return std::make_tuple(
         at::empty_like(input, {}, memory_format),
-        // Return in the dtype of input, matching the operations below, unlike the
-        // optimized native_group_norm impl above.
+        // Return in the dtype of input, matching the operations below, unlike
+        // the optimized native_group_norm impl above.
         at::empty({N, group}, stat_options),
         at::empty({N, group}, stat_options));
   }
