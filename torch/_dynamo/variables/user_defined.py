@@ -1130,7 +1130,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # object is created (and destroyed) exactly once in eager.
         if (
             isinstance(self.value, type)
-            and hasattr(self.value, "__del__")
+            # instance-side __del__ only: hasattr(cls, "__del__") would also
+            # match a metaclass __del__, which instances never receive.
+            and any("__del__" in klass.__dict__ for klass in self.value.__mro__)
             and not self.can_constant_fold_through()
         ):
             unimplemented(
