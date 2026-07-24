@@ -1092,6 +1092,7 @@ def break_graph_if_unsupported(
             self.current_instruction_push = push
             speculation = self.speculate()
             if speculation.failed(self):
+                # no need to restore current_instruction_push if speculation failed
                 if speculation.reason is None:
                     raise AssertionError(
                         "expected speculation.reason is not None to be true"
@@ -3309,10 +3310,6 @@ class InstructionTranslatorBase(
             )
         self.push(result)
 
-    @break_graph_if_unsupported(
-        push=True,
-        msg_prefix="Encountered graph break when attempting to trace LOAD_ATTR: loading an object's attribute, e.g. x.attr",
-    )
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
             assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
