@@ -1,3 +1,12 @@
+"""Exact E8M0 conversion for FlexGEMM quantization epilogues.
+
+CuTeDSL's public conversion neither exposes FLOOR rounding nor handles every
+TensorSSA fragment width needed by FlexGEMM. These helpers emit the packed SM100
+instructions directly and rebuild the original fragment. Edge-case probes match
+the eager custom op and TorchAO's compiled RCEIL path bit-for-bit, while matched
+fused benchmarks showed no material performance regression.
+"""
+
 import math
 
 import cutlass
