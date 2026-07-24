@@ -690,7 +690,7 @@ static PyObject* eval_frame_module = NULL;
 //
 // These lazy static caches (is_exporting_dict, is_exporting_key,
 // disable_wrapper_export_call, stance_module_dict, stance_key, stance_attr,
-// default_stance_str, disable_wrapper_stance_call) assume their first
+// default_stance_str, disable_wrapper_slow_call) assume their first
 // initialization happens under the GIL / single-threaded; they are not yet
 // free-threading (NoGIL) safe. A race on first init would at worst leak a
 // reference once, never corrupt state.
@@ -707,8 +707,8 @@ static PyObject* stance_module_dict = NULL;
 static PyObject* stance_key = NULL; // interned "_stance"
 static PyObject* stance_attr = NULL; // interned "stance"
 static PyObject* default_stance_str = NULL; // interned "default"
-// Cached torch._dynamo.eval_frame._disable_wrapper_stance_call (lazy import).
-static PyObject* disable_wrapper_stance_call = NULL;
+// Cached torch._dynamo.eval_frame._disable_wrapper_slow_call (lazy import).
+static PyObject* disable_wrapper_slow_call = NULL;
 
 typedef struct {
   PyObject_HEAD
@@ -847,26 +847,26 @@ static int disable_wrapper_stance_is_default(void) {
   return 1;
 }
 
-// Delegate to the Python stance fallback _disable_wrapper_stance_call.
-static PyObject* disable_wrapper_stance_vectorcall(
+// Delegate to the Python slow path _disable_wrapper_slow_call.
+static PyObject* disable_wrapper_slow_vectorcall(
     PyObject* fn,
     PyObject* const* args,
     size_t nargsf,
     PyObject* kwnames) {
-  if (disable_wrapper_stance_call == NULL) {
+  if (disable_wrapper_slow_call == NULL) {
     PyObject* mod = PyImport_ImportModule("torch._dynamo.eval_frame");
     if (mod == NULL) {
       return NULL;
     }
-    disable_wrapper_stance_call =
-        PyObject_GetAttrString(mod, "_disable_wrapper_stance_call");
+    disable_wrapper_slow_call =
+        PyObject_GetAttrString(mod, "_disable_wrapper_slow_call");
     Py_DECREF(mod);
-    if (disable_wrapper_stance_call == NULL) {
+    if (disable_wrapper_slow_call == NULL) {
       return NULL;
     }
   }
   return disable_wrapper_prepend_and_call(
-      disable_wrapper_stance_call, fn, args, nargsf, kwnames);
+      disable_wrapper_slow_call, fn, args, nargsf, kwnames);
 }
 
 static PyObject* THPDisableWrapper_vectorcall(
@@ -879,21 +879,18 @@ static PyObject* THPDisableWrapper_vectorcall(
     return disable_wrapper_export_vectorcall(
         wrapper->fn, args, nargsf, kwnames);
   }
-  if (unlikely(!disable_wrapper_stance_is_default())) {
-    // A non-default compile stance is active; let Python compute the
-    // stance-derived callback so disable honors e.g. eager_on_recompile.
-    return disable_wrapper_stance_vectorcall(
+  // Route to the Python slow path for a non-default stance or an active callback
+  // (prior != None), whose restore must honor the enable_compiler_set_eval_frame
+  // killswitch. The fast path only clears (never needs the knob) and, with prior
+  // None, restores nothing.
+  if (unlikely(
+          !disable_wrapper_stance_is_default() ||
+          eval_frame_callback_get() != Py_None)) {
+    return disable_wrapper_slow_vectorcall(
         wrapper->fn, args, nargsf, kwnames);
   }
-  // Clear the callback; set_eval_frame returns a new reference to the prior one.
-  // In the common case (Dynamo off) prior is None and set_eval_frame short
-  // circuits without touching thread-local state or the module.
   PyObject* prior = set_eval_frame(Py_None, eval_frame_module);
   PyObject* result = PyObject_Vectorcall(wrapper->fn, args, nargsf, kwnames);
-  if (prior != Py_None) {
-    PyObject* cleared = set_eval_frame(prior, eval_frame_module);
-    Py_DECREF(cleared);
-  }
   Py_DECREF(prior);
   return result;
 }
