@@ -11,6 +11,8 @@ from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
+
+from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
     get_gpu_shared_memory,
     get_gpu_type,
