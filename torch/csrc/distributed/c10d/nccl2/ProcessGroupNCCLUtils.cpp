@@ -407,6 +407,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
   // Only create the work object without enqueuing it
   auto work =
       c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensors);
+  work->setSequenceNumber(sequence_number_);
   return work;
 }
 
@@ -416,6 +417,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     const at::Tensor& inputTensor) {
   // Single-tensor overload to avoid vector allocation
   auto work = c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensor);
+  work->setSequenceNumber(sequence_number_);
   return work;
 }
 
@@ -512,24 +514,39 @@ void ProcessGroupNCCL::checkTensorsDevice(
 }
 
 // Protected methods (not in the private section of the header)
-std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent() {
+std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent(
+    bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (!event_pool_.empty()) {
+  if (timing_enabled == timing_enabled_.load() && !event_pool_.empty()) {
     auto event = std::move(event_pool_.front());
     event_pool_.pop();
     return event;
   }
 
-  return std::make_unique<at::cuda::CUDAEvent>(cudaEventDisableTiming);
+  return std::make_unique<at::cuda::CUDAEvent>(
+      timing_enabled ? cudaEventDefault : cudaEventDisableTiming);
 }
 
-void ProcessGroupNCCL::returnEvent(std::unique_ptr<at::cuda::CUDAEvent> event) {
+void ProcessGroupNCCL::returnEvent(
+    std::unique_ptr<at::cuda::CUDAEvent> event,
+    bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (event_pool_.size() < max_event_pool_size_) {
+  if (timing_enabled == timing_enabled_.load() &&
+      event_pool_.size() < max_event_pool_size_) {
     event_pool_.push(std::move(event));
   }
+}
+
+void ProcessGroupNCCL::enableCollectivesTiming() {
+  std::lock_guard<std::mutex> lock(event_pool_mutex_);
+  if (timing_enabled_.exchange(true)) {
+    return;
+  }
+  // Pooled events were created with timing disabled and cannot serve
+  // getDuration(); drop them so later works get timing-capable events.
+  std::queue<std::unique_ptr<at::cuda::CUDAEvent>>().swap(event_pool_);
 }
 
 void ProcessGroupNCCL::attachMemoryHook() {
