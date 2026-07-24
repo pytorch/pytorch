@@ -38,6 +38,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      nested_compile_region
      load_cache_artifacts
      load_compiled_function
+     export_python
      save_cache_artifacts
      wrap_numpy
 ```
