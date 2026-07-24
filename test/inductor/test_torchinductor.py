@@ -524,7 +524,6 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
-    gradcheck_wrapper: Callable | None = None,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
@@ -532,22 +531,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    from torch.testing._internal.opinfo.core import gradcheck_wrapper_masked_operation
-
-    use_gradcheck_wrapper = check_gradient and gradcheck_wrapper
-    add_original_op = gradcheck_wrapper is gradcheck_wrapper_masked_operation
-
-    example_inputs_gradcheck = (
-        [clone_preserve_strides_offset(x) for x in example_inputs]
-        if use_gradcheck_wrapper
-        else example_inputs
-    )
     ref_inputs = [clone_preserve_strides_offset(x) for x in example_inputs]
-    ref_gradcheck_inputs = (
-        [clone_preserve_strides_offset(x) for x in example_inputs]
-        if use_gradcheck_wrapper
-        else ref_inputs
-    )
     ref_kwargs = kwargs
     has_lowp_args = False
 
@@ -589,30 +573,13 @@ def check_model(
         # if example_inputs is already fp32 and get inplace updated in the model.
         # Call on the cloned tensors instead
         ref_inputs = list(map(upcast_fn, ref_inputs))
-        ref_gradcheck_inputs = (
-            list(map(upcast_fn, ref_gradcheck_inputs))
-            if use_gradcheck_wrapper
-            else ref_inputs
-        )
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
             ref_model = copy.deepcopy(model).to(torch.float)
 
     torch.manual_seed(0)
-    correct = ref_model(*ref_inputs, **ref_kwargs)
 
-    if use_gradcheck_wrapper:
-        torch.manual_seed(0)
-        if add_original_op:
-            correct_gradcheck = gradcheck_wrapper(
-                ref_model, *ref_gradcheck_inputs, original_op=model, **ref_kwargs
-            )
-        else:
-            correct_gradcheck = gradcheck_wrapper(
-                ref_model, *ref_gradcheck_inputs, **ref_kwargs
-            )
-    else:
-        correct_gradcheck = correct
+    correct = ref_model(*ref_inputs, **ref_kwargs)
 
     torch._inductor.metrics.reset()
 
@@ -623,26 +590,18 @@ def check_model(
         called = True
         return compile_fx(model_, example_inputs_)
 
-    @torch.compile(backend=compile_fx_wrapper, fullgraph=nopython)
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
+    run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=nopython)
+
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
-
-    if use_gradcheck_wrapper:
-        torch.manual_seed(0)
-        if add_original_op:
-            actual_gradcheck = gradcheck_wrapper(
-                run, *example_inputs_gradcheck, original_op=model, **kwargs
-            )
-        else:
-            actual_gradcheck = gradcheck_wrapper(
-                run, *example_inputs_gradcheck, **kwargs
-            )
-    else:
-        actual_gradcheck = actual
-
+    # if not called:
+    #     exp = torch._dynamo.explain(run)(*example_inputs)
+    #     print("Explain:", exp[0])
+    #     for graph in exp[2]:
+    #         print("Graph", graph)
     if check_has_compiled:
         if not called:
             raise AssertionError("Ran graph without calling compile_fx")
@@ -709,20 +668,6 @@ def check_model(
     if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
-
-        if use_gradcheck_wrapper:
-            correct_gradcheck_flat, correct_gradcheck_spec = tree_flatten(
-                correct_gradcheck
-            )
-            actual_gradcheck_flat = pytree.tree_leaves(actual_gradcheck)
-            correct_gradcheck_flat = reference_to_expect(
-                actual_gradcheck_flat, correct_gradcheck_flat
-            )
-            correct_gradcheck = tree_unflatten(
-                correct_gradcheck_flat, correct_gradcheck_spec
-            )
-        else:
-            correct_gradcheck = correct
 
     def has_zero_dim(x):
         if not isinstance(x, tuple):
@@ -796,8 +741,8 @@ def check_model(
                             f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
                         )
     if check_gradient:
-        actual = output_process_fn_grad(actual_gradcheck)
-        correct = output_process_fn_grad(correct_gradcheck)
+        actual = output_process_fn_grad(actual)
+        correct = output_process_fn_grad(correct)
         actual_flat = pytree.tree_leaves(actual)
         correct_flat = pytree.tree_leaves(correct)
 
@@ -810,11 +755,11 @@ def check_model(
         for g in grads:
             g /= g.norm()
 
-        correct_grad = compute_grads(ref_gradcheck_inputs, ref_kwargs, correct, grads)
+        correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         all_none_grads = all(x is None for x in correct_grad)
         tensor_args = [
             x
-            for x in pytree.tree_flatten(example_inputs_gradcheck)[0]
+            for x in pytree.tree_flatten(example_inputs)[0]
             if isinstance(x, torch.Tensor)
         ]
         any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
@@ -833,7 +778,7 @@ def check_model(
             ]
             self.assertEqual(len(results_that_require_grad), 0)
         else:
-            actual_grad = compute_grads(example_inputs_gradcheck, kwargs, actual, grads)
+            actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
 
             if reference_in_float:
                 expect_grad = reference_to_expect(actual_grad, correct_grad)
@@ -876,7 +821,6 @@ def check_model_gpu(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
-    gradcheck_wrapper: Callable | None = None,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
@@ -905,7 +849,6 @@ def check_model_gpu(
         assert_equal=assert_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
-        gradcheck_wrapper=gradcheck_wrapper,
         output_process_fn_grad=output_process_fn_grad,
         exact_stride=exact_stride,
     )
@@ -939,7 +882,6 @@ def check_model_gpu(
             assert_equal=assert_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
-            gradcheck_wrapper=gradcheck_wrapper,
             output_process_fn_grad=output_process_fn_grad,
             exact_stride=exact_stride,
         )
@@ -1260,9 +1202,9 @@ def cpp_int_array_str(values):
 
 
 def target_assert_size_stride_str(
-    name, sizes, strides, dynamic_sizes=None, dynamic_strides=None
+    name, sizes, strides, dynamic_sizes=None, dynamic_strides=None, dtype=None
 ):
-    """Build expected assert_size_stride check string for generated code.
+    """Build expected tensor metadata check string for generated code.
 
     Handles cpp_wrapper ({}/L or LL suffix) vs Python wrapper (()). When dynamic_sizes
     and dynamic_strides are provided, uses them if dynamic shapes are enabled.
@@ -1282,6 +1224,8 @@ def target_assert_size_stride_str(
         size_str = "(" + ", ".join(str(s) for s in sizes) + ")"
         stride_str = "(" + ", ".join(str(s) for s in strides) + ")"
 
+    if name is not None and dtype is not None and not config.cpp_wrapper:
+        return f"assert_tensor_metadata({name}, {size_str}, {stride_str}, {dtype}"
     if name is not None:
         return f"assert_size_stride({name}, {size_str}, {stride_str}"
     return f"{size_str}, {stride_str}"
@@ -2071,6 +2015,15 @@ class CommonTemplate:
         expect = flip(x)
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
+    def test_index_propagation_to_dtype_inf(self):
+        def fn():
+            x = torch.full((2,), 0.0, device=self.device)
+            y = torch.log(x)
+            return torch.sum(y, dtype=torch.int32).float()
+
+        self.common(fn, ())
 
     def test_index_propagation_floordiv(self):
         def repeat_interleave(x, n):
@@ -9641,6 +9594,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         out = foo_opt(inp)
         self.assertEqual(inp.storage(), out.storage())
 
+    def test_empty_output_strides(self):
+        def fn(x):
+            return x.new_empty((2, 0, 0))
+
+        inp = torch.randn(1, device=self.device)
+        eager = fn(inp)
+        compiled = torch.compile(fn, backend="inductor")(inp)
+        self.assertEqual(compiled.stride(), eager.stride())
+
     def test_index_select(self):
         def fn(a, b):
             return (
@@ -10133,6 +10095,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.rand(30, dtype=torch.float32),
             ),
         )
+
+    def test_bincount_with_int_weights(self):
+        def fn(x, w):
+            return torch.bincount(x, weights=w, minlength=8)
+
+        self.common(
+            fn,
+            (
+                torch.randint(0, 8, (30,), dtype=torch.int64),
+                torch.arange(30, dtype=torch.int32),
+            ),
+        )
+
+    def test_bincount_empty_with_weights(self):
+        def fn(x, w):
+            return torch.bincount(x, weights=w, minlength=8)
+
+        self.common(
+            fn,
+            (
+                torch.empty(0, dtype=torch.int64),
+                torch.empty(0, dtype=torch.float32),
+            ),
+        )
+
+    @lowering.force_fallback(aten.quantize_per_tensor.default)
+    def test_quantize_per_tensor_fallback_output_dtype(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("quantized tensor kernels are CPU-only")
+
+        def fn(x):
+            return torch.quantize_per_tensor(x, 0.1, 5, torch.quint8)
+
+        x = torch.randn(16, dtype=torch.float32, device=self.device)
+        ref = fn(x)
+        out = torch.compile(fn)(x)
+        self.assertEqual(out.dtype, torch.quint8)
+        self.assertEqual(out.q_scale(), ref.q_scale())
+        self.assertEqual(out.q_zero_point(), ref.q_zero_point())
+        self.assertEqual(out.int_repr(), ref.int_repr())
 
     def test_unique(self):
         # aten._unique2: torch.unique() backend; multi-output with data-dependent size.
@@ -17372,7 +17374,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # Dynamic shapes have compound sympy expressions (e.g. 3*s12*s80*s80)
             # whose C++ formatting (3L*s12*...) requires regex matching.
             suffix = "L?" if config.cpp_wrapper else ""
-            size_assert_pattern = rf"assert_size_stride.[a-z]+[0-9]+, .2{suffix}, 3{suffix}, s12, s80, s80., .3{suffix}\*s12\*s80\*s80, s12\*s80\*s80, 1{suffix}, s12\*s80, s1.."
+            assert_fn = (
+                "assert_size_stride" if config.cpp_wrapper else "assert_tensor_metadata"
+            )
+            size_assert_pattern = rf"{assert_fn}.[a-z]+[0-9]+, .2{suffix}, 3{suffix}, s12, s80, s80., .3{suffix}\*s12\*s80\*s80, s12\*s80\*s80, 1{suffix}, s12\*s80, s1.."
             FileCheck().check_regex(size_assert_pattern).run(code)
         else:
             FileCheck().check("assert_size_stride(").check(
@@ -17610,10 +17615,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(f, x)
 
         check1 = target_assert_size_stride_str(
-            "buf1", [16, 32], [32, 1], ["s77", "s27"], ["s27", 1]
+            "buf1",
+            [16, 32],
+            [32, 1],
+            ["s77", "s27"],
+            ["s27", 1],
+            torch.float32,
         )
         check2 = target_assert_size_stride_str(
-            "buf2", [16, 32], [32, 1], ["s77", "s27"], ["s27", 1]
+            "buf2",
+            [16, 32],
+            [32, 1],
+            ["s77", "s27"],
+            ["s27", 1],
+            torch.int64,
         )
         FileCheck().check(check1).check(check2).run(code)
 
