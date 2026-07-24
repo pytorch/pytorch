@@ -30,8 +30,9 @@ Properties consumed by the driver scripts:
   * ``artifact_exts``: extensions written next to the sidecar; the first
     is probed for idempotency-skip.
   * ``link_source_globs``: artifact patterns the CMake project must
-    compile or link (kept in sync with tools/native_aot/CMakeLists.txt,
-    which cannot import this file; see the assertion in the tests).
+    compile or link (kept in sync with the embedded-link block in
+    caffe2/CMakeLists.txt, which cannot import this file; see the
+    assertion in the tests).
   * ``launcher_includes``: per-kind includes for the generated .cpp.
 
 Export runs as stage 2 of the two-stage build (build torch -> build
