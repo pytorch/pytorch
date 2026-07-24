@@ -173,6 +173,7 @@ def normalize_local_reduce_output_layout(
 
 
 class GemmActMixin(ComposableEpiMixin):
+    grouped_n_contract_group = 1
     _epi_ops = (
         Scalar("alpha"),
         Scalar("beta"),
@@ -505,10 +506,14 @@ class GemmActMixin(ComposableEpiMixin):
                 tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
                 if const_expr(params.local_reduce_feeds_main):
                     tDrLocalReduce = tDrLocalReduce.local_reduce
-                tRS_rD.store(epilogue_result[0])
                 tDrLocalReduce.store(epilogue_result[1])
+                aux_out_dtype = self.acc_dtype
+                if const_expr(self.grouped_n_contract_group == 1):
+                    tRS_rD.store(epilogue_result[0])
+                else:
+                    aux_out_dtype = epilogue_result[0].element_type
                 tRS_rAuxOut = cute.make_rmem_tensor(
-                    epilogue_result[0].shape, self.acc_dtype
+                    epilogue_result[0].shape, aux_out_dtype
                 )
                 tRS_rAuxOut.store(epilogue_result[0])
             else:
@@ -569,6 +574,7 @@ class GemmGroupedNContractMixin(GemmActMixin):
         Scalar("sr_seed", dtype=Int32),
         RowVecLoad("mRowVecBroadcast"),
         ColVecLoad("mColVecBroadcast"),
+        GroupedLocalReduce("mLocalReduce"),
         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
     )
 
@@ -628,6 +634,7 @@ class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
         Scalar("sr_seed", dtype=Int32),
         RowVecLoad("mRowVecBroadcast"),
         ColVecLoad("mColVecBroadcast"),
+        GroupedLocalReduce("mLocalReduce"),
         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
     )
 
@@ -1143,9 +1150,9 @@ def gemm_act(
             )
         if tensor_epilogue_fn is None and tensor_epilogue_key is None:
             raise RuntimeError("grouped_n_contract requires a generated tensor epilogue")
-        if tensor_epilogue_returns_aux or tensor_epilogue_returns_local_reduce:
+        if tensor_epilogue_returns_aux:
             raise NotImplementedError(
-                "grouped_n_contract does not compose with auxiliary outputs"
+                "grouped_n_contract does not compose with full-shape auxiliary outputs"
             )
         gemm_cls_name = "grouped_n_contract"
 

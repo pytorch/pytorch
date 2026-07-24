@@ -290,9 +290,7 @@ class FlexGemmRuntimeOutputPlan:
     )
 
     def __post_init__(self) -> None:
-        if self.main.transform is not None and (
-            self.aux_outs or self.local_reduce is not None
-        ):
+        if self.main.transform is not None and self.aux_outs:
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
 
 

@@ -1265,7 +1265,8 @@ class GroupedLocalReduce(VecReduce):
                 args.local_reduce_finalize_fn,
                 args.local_reduce_feeds_main,
                 cute.size(reference_output, mode=[0]),
-                cute.size(reference_output, mode=[1]),
+                cute.size(reference_output, mode=[1])
+                * gemm.grouped_n_contract_group,
             )
         }
 

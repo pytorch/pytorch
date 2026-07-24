@@ -134,8 +134,8 @@ LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
 FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
-    "FlexGEMM grouped main outputs do not compose with aux outputs, local "
-    "reductions, captured tensors, C, alpha/beta, or batched GEMMs yet"
+    "FlexGEMM grouped main outputs do not compose with full-shape aux outputs, "
+    "captured tensors, C, alpha/beta, or batched GEMMs yet"
 )
 FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: grouped main output shape must equal the "

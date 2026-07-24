@@ -16,6 +16,7 @@ from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
     mx_e8m0_scale,
     nvfp4_e4m3_scale,
+    nvfp4_pack,
     to_blocked,
 )
 from torch._inductor.exc import InductorError
@@ -25,6 +26,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater, SM120OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, pack_uint4
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1604,9 +1606,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmLocalReduceStore(aux, -1)
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
-            tuple_output_plan(object(), (), analysis)
+            tuple_output_plan(object(), (), analysis, ())
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
-            tuple_output_plan(node, (object(),), analysis)
+            tuple_output_plan(node, (object(),), analysis, ())
         FlexGemmOutputPlan(
             FlexGemmMainOutputPlan(node),
             (aux,),
@@ -3280,6 +3282,52 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    def test_mm_grouped_main_with_local_reduce_output(self):
+        m = n = k = 256
+        reduce_group = 16
+        config = {
+            "tile_m": 256,
+            "tile_n": 256,
+            "cluster_m": 2,
+            "cluster_n": 1,
+            "pingpong": False,
+            "is_dynamic_persistent": True,
+            "swap_ab": False,
+        }
+
+        def epilogue_fn(acc):
+            pairs = acc.float().view(m, -1, 2)
+            grouped = acc.float().view(m, -1, reduce_group)
+            scale = nvfp4_e4m3_scale(grouped.abs().amax(-1))
+            return (pairs[..., 0] - pairs[..., 1]).to(acc.dtype), scale
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
+        rows = torch.arange(k, device="cuda")[:, None]
+        cols = torch.arange(n, device="cuda")[None, :]
+        b = (2.0 ** (((rows + cols) % 7) - 3)).to(torch.bfloat16)
+        (actual, scale), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected, expected_scale = epilogue_fn(a @ b)
+        torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.5)
+        self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
+        FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
+            "FlexGemmGroupedMainOutputTransform(group=2"
+        ).check_not("extern_kernels.mm").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
     def test_mm_grouped_n_main_output_dynamic_m(self):
         k, n, group = 64, 64, 2
 
@@ -3975,6 +4023,23 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ).run(code)
         self.assertLocalReduceAuxCode(code, group)
 
+    def test_nvfp4_pack_matches_reference(self):
+        values = torch.tensor(
+            [
+                [-6.0, -5.0],
+                [-3.5, -2.5],
+                [-1.75, -1.25],
+                [-0.75, -0.25],
+                [0.25, 0.75],
+                [1.25, 1.75],
+                [2.5, 3.5],
+                [5.0, 6.0],
+            ],
+            dtype=torch.float32,
+        )
+        expected = pack_uint4(_f32_to_floatx_unpacked(values, 2, 1)).squeeze(-1)
+        self.assertEqual(nvfp4_pack(values), expected)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     def test_quant_scale_rounding_args(self):
         amax = torch.tensor(
@@ -4256,6 +4321,56 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         FileCheck().check(
             "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
         ).check_not("triton_poi_fused").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    def test_mm_grouped_main_with_blocked_local_reduce_output(self):
+        m = n = k = 256
+        reduce_group = 16
+        config = {
+            "tile_m": 256,
+            "tile_n": 256,
+            "cluster_m": 2,
+            "cluster_n": 1,
+            "pingpong": False,
+            "is_dynamic_persistent": True,
+            "swap_ab": False,
+        }
+
+        def epilogue_fn(acc):
+            pairs = acc.float().view(m, -1, 2)
+            grouped = acc.float().view(m, -1, reduce_group)
+            scale = nvfp4_e4m3_scale(grouped.abs().amax(-1))
+            return (pairs[..., 0] - pairs[..., 1]).to(acc.dtype), to_blocked(scale)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
+        rows = torch.arange(k, device="cuda")[:, None]
+        cols = torch.arange(n, device="cuda")[None, :]
+        b = (2.0 ** (((rows + cols) % 7) - 3)).to(torch.bfloat16)
+        (actual, blocked_scale), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected, expected_scale = epilogue_fn(a @ b)
+        torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.5)
+        self.assertEqual(
+            blocked_scale.view(torch.uint8), expected_scale.view(torch.uint8)
+        )
+        FileCheck().check(
+            "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
+        ).check("FlexGemmGroupedMainOutputTransform(group=2").check_not(
+            "extern_kernels.mm"
+        ).run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -4621,6 +4736,89 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         FileCheck().check(
             "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
         ).check("_scaled_mm_v2").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    def test_mm_nvfp4_quant_blocked_output_feeds_scaled_mm(self):
+        m = hidden = output = k = 256
+        group = 16
+        config = {
+            "tile_m": 256,
+            "tile_n": 256,
+            "cluster_m": 2,
+            "cluster_n": 1,
+            "pingpong": False,
+            "is_dynamic_persistent": True,
+            "swap_ab": False,
+        }
+
+        def quantize(x):
+            grouped = x.float().view(x.shape[0], -1, group)
+            scale = nvfp4_e4m3_scale(grouped.abs().amax(-1, keepdim=True))
+            normalized = grouped * scale.float().reciprocal()
+            packed = nvfp4_pack(normalized.view(x.shape[0], -1, 2))
+            scale = scale.squeeze(-1)
+            return packed, scale, to_blocked(scale)
+
+        def epilogue_fn(acc):
+            packed, _, blocked_scale = quantize(acc)
+            return packed, blocked_scale
+
+        def fn(a, b, weight, weight_scale):
+            activation_storage, activation_scale = flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+            return F.scaled_mm(
+                activation_storage.view(torch.float4_e2m1fn_x2),
+                weight.t(),
+                scale_a=activation_scale,
+                scale_recipe_a=F.ScalingType.BlockWise1x16,
+                scale_b=weight_scale,
+                scale_recipe_b=F.ScalingType.BlockWise1x16,
+                swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
+        rows = torch.arange(k, device="cuda")[:, None]
+        cols = torch.arange(hidden, device="cuda")[None, :]
+        b = (2.0 ** (((rows + cols) % 7) - 3)).to(torch.bfloat16)
+        weight_hp = torch.randn(output, hidden, device="cuda", dtype=torch.bfloat16)
+        weight_storage, _, weight_scale = quantize(weight_hp)
+        weight = weight_storage.view(torch.float4_e2m1fn_x2)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            weight,
+            weight_scale,
+        )
+
+        activation_storage, _, activation_scale = quantize(a @ b)
+        expected = F.scaled_mm(
+            activation_storage.view(torch.float4_e2m1fn_x2),
+            weight.t(),
+            scale_a=activation_scale,
+            scale_recipe_a=F.ScalingType.BlockWise1x16,
+            scale_b=weight_scale,
+            scale_recipe_b=F.ScalingType.BlockWise1x16,
+            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+            output_dtype=torch.bfloat16,
+        )
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        FileCheck().check("nvfp4_pack_intrinsic").check(
+            "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
+        ).check("FlexGemmGroupedMainOutputTransform(group=2").check(
+            "_scaled_mm_v2"
+        ).run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

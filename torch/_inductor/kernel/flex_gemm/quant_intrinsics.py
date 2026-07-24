@@ -16,6 +16,48 @@ from cutlass._mlir.dialects import arith, llvm, vector
 from cutlass.cutlass_dsl import dsl_user_op, T
 
 
+@dsl_user_op
+def nvfp4_pack_intrinsic(source, *, loc=None, ip=None):
+    """Round paired Float32 values to packed finite E2M1 bytes."""
+    magnitude = cute.absf(source)
+    zero = cute.full_like(source, 0.0)
+    half = cute.full_like(source, 0.5)
+    one = cute.full_like(source, 1.0)
+    one_and_half = cute.full_like(source, 1.5)
+    two = cute.full_like(source, 2.0)
+    three = cute.full_like(source, 3.0)
+    four = cute.full_like(source, 4.0)
+    six = cute.full_like(source, 6.0)
+    quantized = cute.where(
+        magnitude > 5.0,
+        six,
+        cute.where(
+            magnitude >= 3.5,
+            four,
+            cute.where(
+                magnitude > 2.5,
+                three,
+                cute.where(
+                    magnitude >= 1.75,
+                    two,
+                    cute.where(
+                        magnitude > 1.25,
+                        one_and_half,
+                        cute.where(
+                            magnitude >= 0.75,
+                            one,
+                            cute.where(magnitude > 0.25, half, zero),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    quantized = cute.where(source < 0.0, -quantized, quantized)
+    packed = quantized.to(cutlass.Float4E2M1FN).bitcast(cutlass.Uint8)
+    return packed.reshape((cute.size(packed.shape), 1, 1))
+
+
 def extract_vector_element(value: ir.Value, index: int) -> ir.Value:
     """Extract one statically indexed element from an MLIR vector."""
     return vector.extract(value, [], [index])
