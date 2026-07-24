@@ -6232,7 +6232,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 def _grid_sample_test_shape(self, N, C, IH, IW, H, W, mode, padding_mode, align_corners,
-                             input_requires_grad, device):
+                            input_requires_grad, device):
     for grid_dim_contig_order in [(0, 1, 2, 3), (0, 3, 1, 2), (3, 0, 1, 2), (0, 2, 1, 3)]:
         # grid_dim_contig_order specifies the dimension order that can
         # make grid to be contiguous.
