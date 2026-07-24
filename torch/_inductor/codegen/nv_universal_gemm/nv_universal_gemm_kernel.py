@@ -431,7 +431,9 @@ def _create_gemm_arguments(
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
-        raise NotImplementedError("Epilogue fusion is not yet supported for grouped GEMM")
+        raise NotImplementedError(
+            "Epilogue fusion is not yet supported for grouped GEMM"
+        )
 
     match variant_name:
         case "GROUPED_GEMM":
