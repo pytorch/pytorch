@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include <iostream>
+#include <memory>
 #include <optional>
 
 // CUDA Graphs utils used by c10 and aten.
@@ -85,23 +86,56 @@ inline bool isStreamCapturingMayInitCtx(cudaStream_t stream) {
   return captureStatusMayInitCtx(stream) == CaptureStatus::Active;
 }
 
-inline std::optional<CaptureId_t> currentStreamCaptureIdMayInitCtx() {
+struct CaptureInfo {
+  CaptureStatus status;
+  CaptureId_t id;
+  cudaGraph_t graph;
+};
+
+inline CaptureInfo captureInfoMayInitCtx(cudaStream_t stream) {
   cudaStreamCaptureStatus status{};
   CaptureId_t capture_id = 0;
+  cudaGraph_t graph = nullptr;
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
   C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-      c10::cuda::getCurrentCUDAStream(), &status, &capture_id));
-  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
-    return capture_id;
+      stream, &status, &capture_id, &graph, nullptr, nullptr, nullptr));
+#else
+  C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+      stream, &status, &capture_id, &graph, nullptr, nullptr));
+#endif
+  return {CaptureStatus(status), capture_id, graph};
+}
+
+template <typename T>
+void retainGraphUserObject(
+    cudaGraph_t graph,
+    std::unique_ptr<T> data,
+    cudaHostFn_t destroy) {
+  cudaUserObject_t user_object{};
+  C10_CUDA_CHECK(cudaUserObjectCreate(
+      &user_object, data.get(), destroy, 1, cudaUserObjectNoDestructorSync));
+  data.release();
+
+  auto status =
+      cudaGraphRetainUserObject(graph, user_object, 1, cudaGraphUserObjectMove);
+  if (status != cudaSuccess) {
+    C10_CUDA_CHECK_WARN(cudaUserObjectRelease(user_object, 1));
+    C10_CUDA_CHECK(status);
+  }
+}
+
+inline std::optional<CaptureId_t> currentStreamCaptureIdMayInitCtx() {
+  auto info = captureInfoMayInitCtx(c10::cuda::getCurrentCUDAStream());
+  if (info.status == CaptureStatus::Active) {
+    return info.id;
   }
   return std::nullopt;
 }
 
 inline std::optional<CaptureId_t> captureIdMayInitCtx(cudaStream_t stream) {
-  cudaStreamCaptureStatus status{};
-  CaptureId_t capture_id = 0;
-  C10_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id));
-  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
-    return capture_id;
+  auto info = captureInfoMayInitCtx(stream);
+  if (info.status == CaptureStatus::Active) {
+    return info.id;
   }
   return std::nullopt;
 }
