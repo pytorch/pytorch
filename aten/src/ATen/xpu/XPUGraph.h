@@ -48,6 +48,7 @@ struct TORCH_XPU_API XPUGraphImpl : public at::GraphImplInterface {
   bool has_graph_ = false;
   bool capture_ended_ = false;
   bool has_graph_exec_ = false;
+  size_t capture_id_ = 0;
   MempoolId_t mempool_id_;
   at::xpu::XPUStream capture_stream_;
 
