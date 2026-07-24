@@ -124,6 +124,14 @@ void THCPGraph_init(PyObject* module) {
               &::at::cuda::CUDAGraph::get_currently_capturing_graph),
           py::return_value_policy::reference)
       .def(
+          "begin_capture_to_child_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_child_node))
+      .def(
+          "end_capture_to_child_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::end_capture_to_child_node))
+      .def(
           "begin_capture_to_if_node",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::begin_capture_to_if_node),
