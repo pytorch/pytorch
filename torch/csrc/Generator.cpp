@@ -228,9 +228,13 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
 static PyObject* THPGenerator_philoxCudaState(
     PyObject* _self,
     PyObject* increment) {
-  using namespace torch::autograd;
   HANDLE_TH_ERRORS
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      gen.device().type() == at::kCUDA,
+      "_philox_cuda_state is only supported on CUDA generators, but got a "
+      "generator on ",
+      gen.device());
   TORCH_CHECK(
       THPUtils_checkLong(increment),
       "_philox_cuda_state expected an int, but got ",

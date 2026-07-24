@@ -498,9 +498,14 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
  * Tensor-based variant of philox_cuda_state for consumers that cannot
  * take a PhiloxCudaState (e.g. Python). Returns 1-element int64 tensors
  * (seed, offset, intragraph_offset); the kernel-visible values are
- * (seed, offset + intragraph_offset). During capture, seed and offset are
- * the per-capture extragraph CUDA tensors that replay_prologue refills on
- * every replay; otherwise they are CPU tensors holding the current values.
+ * (seed, offset + intragraph_offset), with the uint64 seed and offset
+ * reinterpreted as int64. During capture, seed and offset alias the
+ * per-capture extragraph device state that replay_prologue refills on
+ * every replay; their contents are undefined until the first replay, they
+ * are only valid for that capture's lifetime, and they are returned as
+ * non-resizable from_blob wrappers so a caller cannot reallocate the
+ * underlying storage out from under the captured graph. Otherwise they
+ * are device tensors holding the current values.
  *
  * See Note [Acquire lock when using random generators]
  */
@@ -510,20 +515,30 @@ std::tuple<
     c10::intrusive_ptr<c10::TensorImpl>>
 CUDAGeneratorImpl::philox_state(uint64_t increment) {
   const auto cpu_opts = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  const auto dev_opts = at::TensorOptions().dtype(at::kLong).device(device());
   auto capture_id = at::cuda::currentStreamCaptureId();
   if (capture_id.has_value()) {
     auto* capture_state = state_->get_capture_state(capture_id.value(), true);
     uint64_t offset = capture_state->offset_intragraph_;
     state_->increase(increment);
+    auto seed_t = at::from_blob(
+        capture_state->rng_state_seed_extragraph_.data_ptr(),
+        {1},
+        [](void*) {},
+        dev_opts);
+    auto off_t = at::from_blob(
+        capture_state->rng_state_offset_extragraph_.data_ptr(),
+        {1},
+        [](void*) {},
+        dev_opts);
     auto intra_t = at::full({1}, static_cast<int64_t>(offset), cpu_opts);
     return {
-        capture_state->rng_state_seed_extragraph_.getIntrusivePtr(),
-        capture_state->rng_state_offset_extragraph_.getIntrusivePtr(),
+        seed_t.getIntrusivePtr(),
+        off_t.getIntrusivePtr(),
         intra_t.getIntrusivePtr()};
   }
   uint64_t offset = state_->philox_offset_per_thread_;
   state_->increase(increment);
-  const auto dev_opts = at::TensorOptions().dtype(at::kLong).device(device());
   auto seed_t = at::full({1}, static_cast<int64_t>(state_->seed_), dev_opts);
   auto off_t = at::full({1}, static_cast<int64_t>(offset), dev_opts);
   auto intra_t = at::zeros({1}, cpu_opts);
