@@ -1779,15 +1779,16 @@ test_distributed_single_gpu() {
 test_distributed_4gpu() {
   # Distributed tests that need more GPUs than the standard 2-GPU distributed
   # runner provides (3-4 GPU tests), run on runners with 4-GPU labels (e.g. ROCm
-  # gfx950.4). Selection uses the native `multigpu` marker machinery (see the
-  # `multigpu_extra` marker in test/conftest.py): --distributed-tests discovers
-  # every distributed test file dynamically and --multigpu-filter multigpu-extra
-  # keeps only those needing >2 GPUs, so there is no per-test list to maintain.
+  # gfx950.4). Selection reuses the native `multigpu` marker machinery (see
+  # test/conftest.py): --distributed-tests discovers every distributed test file
+  # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
+  # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
+  # runner (STANDARD_DISTRIBUTED_GPUS), so there is no per-test list to maintain.
   # Python suite only; the multi-GPU C++/mpiexec tests already run on the
   # standard `distributed` job.
   echo "Testing distributed python tests that need more than 2 GPUs"
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --multigpu-filter multigpu-extra --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus 3 --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 }
 

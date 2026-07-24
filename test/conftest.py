@@ -103,6 +103,19 @@ def pytest_addoption(parser: Parser) -> None:
         type=str.upper,
         help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
     )
+    parser.addoption(
+        "--multigpu-min-gpus",
+        action="store",
+        type=int,
+        default=0,
+        dest="multigpu_min_gpus",
+        metavar="N",
+        help="Among the auto-applied `multigpu` tests (see pytest_itemcollected), "
+        "keep only those whose resolved accelerator requirement is at least N "
+        "GPUs; deselect the rest. 0 (default) disables the filter, so runs "
+        "without it are unaffected. Layered on top of `-m multigpu` so a "
+        "larger-runner config can run just the >2-GPU distributed tests.",
+    )
     shard_addoptions(parser)
 
 
@@ -164,6 +177,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(
             HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
             "hw_classification_plugin",
+        )
+    if config.getoption("multigpu_min_gpus"):
+        config.pluginmanager.register(
+            MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),
+            "multigpu_min_filter_plugin",
         )
 
 
@@ -460,37 +478,40 @@ def _is_local_tensor_simulation(cls: type | None) -> bool:
     """LocalTensor test classes (e.g. *WithLocalTensor) inherit a multi-process
     base and a >1 ``world_size`` but run single-process under LocalTensorMode on
     one GPU, so their ``world_size`` is a simulated mesh size, not a GPU count.
-    Such classes need neither the ``multigpu`` nor ``multigpu_extra`` marker."""
-    if cls is None:
-        return False
-    if "LocalTensor" in cls.__name__:
-        return True
+    Every such class inherits ``is_local_tensor_enabled = True`` (LocalDTensor*
+    bases; create_local_tensor_test_class always builds on one), so probing that
+    property on an uninitialized instance is a sufficient, name-independent
+    signal -- False (or absent) everywhere else."""
     try:
-        return bool(cls.__new__(cls).is_local_tensor_enabled)
+        return bool(cls.__new__(cls).is_local_tensor_enabled)  # type: ignore[union-attr]
     except Exception:
         return False
 
 
-def _needs_extra_gpus(item: Any, cls: type | None) -> bool:
-    """Whether a process-spawning distributed test needs strictly more
-    accelerators than the standard 2-GPU distributed runner provides.
+# Favor coverage: a test whose GPU requirement cannot be resolved at collection
+# clears any threshold, so it is routed to the larger runner rather than dropped.
+_UNRESOLVED_GPU_REQUIREMENT = 1 << 30
 
-    CPU-backed tests spawn ranks rather than GPUs, so they never qualify
-    regardless of world_size. Otherwise combine the two GPU-count signals -- the
-    ``skip_if_lt_x_gpu``/``requires_world_size`` decorator and the class
-    ``world_size`` -- and select when the larger exceeds the standard runner:
-    a test decorated ``skip_if_lt_x_gpu(2)`` whose class hardcodes
-    ``world_size = 4`` still needs 4 GPUs. On any ambiguity (unresolvable
-    world_size) favor coverage and route the test to the larger runner."""
-    from torch.testing._internal.common_distributed import STANDARD_DISTRIBUTED_GPUS
 
+def _resolve_gpu_requirement(item: Any, cls: type | None) -> int:
+    """Number of accelerators a distributed test needs, resolved statically at
+    collection.
+
+    Combines the two GPU-count signals and takes the larger: the
+    ``skip_if_lt_x_gpu``/``requires_world_size`` decorator and the multi-process
+    base-class ``world_size`` -- so a test decorated ``skip_if_lt_x_gpu(2)``
+    whose class hardcodes ``world_size = 4`` still resolves to 4. Returns 0 for
+    tests that do not scale with GPU count (CPU-backed, which spawn ranks not
+    GPUs; single-process; LocalTensor simulations on one GPU) and a very large
+    value on unresolvable ``world_size`` to favor coverage."""
+    if not _spawns_multiple_processes(cls) or _is_local_tensor_simulation(cls):
+        return 0
     if _is_cpu_backed(item):
-        return False
+        return 0
     world_size = _probe_world_size(cls)
     if world_size == 0:
-        return True
-    dec = _decorator_gpu_requirement(_safe_obj(item))
-    return max(dec, world_size) > STANDARD_DISTRIBUTED_GPUS
+        return _UNRESOLVED_GPU_REQUIREMENT
+    return max(_decorator_gpu_requirement(_safe_obj(item)), world_size)
 
 
 def pytest_itemcollected(item: Any) -> None:
@@ -499,19 +520,36 @@ def pytest_itemcollected(item: Any) -> None:
     per-item during collection, before pytest applies `-m` deselection, so the
     distributed CI configs can partition a file into multigpu and `not
     multigpu` halves without touching the test source.
-
-    A process-spawning test that needs strictly more accelerators than the
-    standard 2-GPU distributed runner provides additionally gets `multigpu_extra`
-    so a larger-runner config (e.g. the ROCm 4-GPU periodic job) can select just
-    the 3-4 GPU tests with `--multigpu-filter multigpu-extra`.
     """
-    cls = getattr(item, "cls", None)
-    if _is_local_tensor_simulation(cls):
-        return
-    if _spawns_multiple_processes(cls):
+    if _spawns_multiple_processes(getattr(item, "cls", None)):
         item.add_marker("multigpu")
-        if _needs_extra_gpus(item, cls):
-            item.add_marker("multigpu_extra")
+
+
+class MultiGpuMinFilterPlugin:
+    """Deselect auto-`multigpu`-marked tests whose resolved accelerator
+    requirement is below ``--multigpu-min-gpus`` (see _resolve_gpu_requirement),
+    so a larger-runner config can run just the >N-GPU distributed tests on top of
+    the existing `-m multigpu` selection. Only `multigpu`-marked items are
+    considered, and the plugin is registered only when the option is set, so runs
+    without it (e.g. every CUDA distributed job) are untouched."""
+
+    def __init__(self, min_gpus: int) -> None:
+        self.min_gpus = min_gpus
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        if self.min_gpus <= 0:
+            return
+        selected, deselected = [], []
+        for item in items:
+            is_multigpu = any(m.name == "multigpu" for m in item.iter_markers())
+            cls = getattr(item, "cls", None)
+            if is_multigpu and _resolve_gpu_requirement(item, cls) < self.min_gpus:
+                deselected.append(item)
+            else:
+                selected.append(item)
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
 
 
 class StepcurrentPlugin:
