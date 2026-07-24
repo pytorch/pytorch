@@ -1116,9 +1116,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     )
                 )
             else:
-                buffer.writeline(
-                    maybe_hipify_code_wrapper("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
-                )
+                buffer.writeline("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
             return
 
         raise NotImplementedError(
@@ -1374,7 +1372,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     if ((reinterpret_cast<std::uintptr_t>({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
                         AOTI_TORCH_WARN("{warn_msg}");
                         AtenTensorHandle {input_name}_aligned;
-                        aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
+                        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned));
                         {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
                     }}
                     """
