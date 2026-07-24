@@ -4044,7 +4044,11 @@ Returns:
           .def(
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "options",
+              &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
+              R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
 
   intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
       processGroupNCCL2, "Options", backendOptions)
@@ -4055,7 +4059,17 @@ Returns:
       .def_readwrite(
           "abort_process_on_timeout_or_error",
           &::c10d::nccl2::ProcessGroupNCCL::Options::
-              abort_process_on_timeout_or_error);
+              abort_process_on_timeout_or_error)
+      .def_readwrite(
+          "hints",
+          &::c10d::nccl2::ProcessGroupNCCL::Options::hints,
+          R"(
+Dict of str -> str configuring the NCCL communicator, e.g.
+{"cga_cluster_size": "2", "max_ctas": "4", "max_event_pool_size": "128"}.
+Keys are ncclConfig_t fields (see populateNcclConfigFromHints) plus
+backend-level hints; unknown keys are ignored with a warning.  The getter
+returns a copy, so set the whole dict rather than mutating it in place.
+)");
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)

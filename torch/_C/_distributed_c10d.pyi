@@ -857,6 +857,7 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
+        net_name: str | None
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
@@ -1123,6 +1124,7 @@ class ProcessGroupNCCL2(Backend):
     class Options(Backend.Options):
         is_high_priority_stream: bool
         abort_process_on_timeout_or_error: bool
+        hints: dict[str, str]
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -1134,6 +1136,8 @@ class ProcessGroupNCCL2(Backend):
         options: Options,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
+    @property
+    def options(self) -> Options: ...
 
 class ProcessGroupNCCLLazy(Backend):
     def __init__(

@@ -111,7 +111,7 @@ void populateNcclConfigFromHints(
       config.maxCTAs = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.maxCTAs=" << config.maxCTAs;
-    } else if (key == "netName") {
+    } else if (key == "netName" || key == "net_name") {
       config.netName = val.c_str();
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.netName=" << config.netName;
