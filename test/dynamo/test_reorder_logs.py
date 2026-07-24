@@ -244,6 +244,33 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             self.assertIn("moo tensor(6.)", captured.output[0])
             self.assertTrue(same(opt_out, torch.full((3,), 4.0)))
 
+    @torch._dynamo.config.patch(reorderable_logging_functions={logging.Logger.info})
+    def test_dont_reorder_logger_method_kwargs(self):
+        # kwargs must graph break rather than be silently dropped at replay
+        def f(x):
+            x = x + x
+            logger.info("moo %s", x.sum(), stacklevel=2)
+            return x * x
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "attempted to reorder a debugging function that can't actually be reordered",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(torch.ones(3))
+
+    @torch._dynamo.config.patch(reorderable_logging_functions={logging.Logger.info})
+    def test_dont_reorder_logger_method_unsupported_arg(self):
+        def f(x):
+            x = x + x
+            logger.info("moo %s", [x.sum()])
+            return x * x
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "attempted to reorder a debugging function that can't actually be reordered",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(torch.ones(3))
+
     @torch._dynamo.config.patch(reorderable_logging_functions={warnings.warn})
     def test_reorder_warnings(self):
         import warnings
