@@ -555,10 +555,10 @@ class ManualOverlapScheduler(OverlapScheduler):
 
         if self.insert_overlap_deps:
             from torch._inductor.fx_passes.control_dependencies import (
-                preserve_node_ordering,
+                preserve_node_ordering_from_config,
             )
 
-            preserve_node_ordering(self.graph, overlap_deps)
+            preserve_node_ordering_from_config(self.graph, overlap_deps)
 
     def _manual_bucket_collectives(self) -> None:
         """Bucket nodes in each module_bucket from module_bucket_plans."""
