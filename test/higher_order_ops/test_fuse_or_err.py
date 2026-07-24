@@ -6,7 +6,13 @@ import torch._inductor
 import torch._inductor.metrics as metrics
 from torch._higher_order_ops import fuse_or_err
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -107,6 +113,30 @@ class TestFuseOrErr(TestCase):
         torch.compile(fn, backend="inductor", fullgraph=True)(x).backward()
         (xr.sin().cos()).sum().backward()
         self.assertEqual(x.grad, xr.grad)
+
+    @requires_gpu
+    @parametrize("fuse_backward", [False, True])
+    def test_backward_multiple_kernels(self, fuse_backward):
+        def fn(x, w):
+            return fuse_or_err(lambda a, b: a @ b, fuse_backward=fuse_backward)(
+                x, w
+            ).sum()
+
+        x = torch.randn(64, 64, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(64, 64, device=GPU_TYPE, requires_grad=True)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        if fuse_backward:
+            with self.assertRaisesRegex(
+                RuntimeError, r"did not fuse into a single kernel"
+            ):
+                compiled(x, w).backward()
+        else:
+            compiled(x, w).backward()
+            xr = x.detach().clone().requires_grad_(True)
+            wr = w.detach().clone().requires_grad_(True)
+            (xr @ wr).sum().backward()
+            self.assertEqual(x.grad, xr.grad)
+            self.assertEqual(w.grad, wr.grad)
 
     def _enforce_flags(self, fuse_backward):
         # Compiles a differentiable region and returns the _enforce_fusion flag
@@ -220,6 +250,7 @@ class TestFuseOrErr(TestCase):
         with inductor_config.patch(combo_kernels=True, benchmark_combo_kernel=False):
             res = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
         self.assertEqual(ref, res)
+        self.assertEqual(metrics.generated_kernel_count, 1)
 
     @requires_gpu
     def test_surfaces_exact_captured_reason(self):
@@ -247,6 +278,27 @@ class TestFuseOrErr(TestCase):
                 torch.compile(fn, backend="inductor", fullgraph=True)(a)
 
     @requires_gpu
+    def test_restores_existing_reason_capture_hook(self):
+        from torch._inductor import scheduler
+
+        previous_hook = getattr(scheduler._fuse_or_err_capture, "hook", None)
+
+        def sentinel(*args):
+            pass
+
+        def fn(x):
+            return fuse_or_err(lambda a: a.sin().cos())(x)
+
+        scheduler._fuse_or_err_capture.hook = sentinel
+        try:
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                torch.randn(128, device=GPU_TYPE)
+            )
+            self.assertIs(scheduler._fuse_or_err_capture.hook, sentinel)
+        finally:
+            scheduler._fuse_or_err_capture.hook = previous_hook
+
+    @requires_gpu
     def test_zero_kernel_region_passes(self):
         # "at most one kernel": a region that materializes no kernel trivially
         # passes.
@@ -257,6 +309,9 @@ class TestFuseOrErr(TestCase):
             torch.randn(8, device=GPU_TYPE)
         )
         self.assertEqual(res, 8)
+
+
+instantiate_parametrized_tests(TestFuseOrErr)
 
 
 if __name__ == "__main__":

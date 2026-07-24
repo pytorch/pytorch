@@ -4265,17 +4265,20 @@ class Scheduler:
         # during the fusion pass so a required region that splits can be
         # explained accurately (see _verify_fuse_or_err_groups).
         self._fuse_or_err_region_ops: OrderedSet[str] = OrderedSet()
+        self._fuse_or_err_region_groups: list[OrderedSet[str]] = []
         for group in V.graph.fuse_or_err_groups:
             self._fuse_or_err_region_ops |= group.op_names
+            self._fuse_or_err_region_groups.append(group.op_names)
         self._fuse_or_err_no_fuse_reasons: list[
             tuple[OrderedSet[str], OrderedSet[str], str]
         ] = []
+        previous_fuse_or_err_hook = getattr(_fuse_or_err_capture, "hook", None)
         if self._fuse_or_err_region_ops:
             _fuse_or_err_capture.hook = self._record_no_fuse_reason
         try:
             self.nodes = self.fuse_nodes(self.nodes)
         finally:
-            _fuse_or_err_capture.hook = None
+            _fuse_or_err_capture.hook = previous_fuse_or_err_hook
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
@@ -6153,11 +6156,14 @@ class Scheduler:
     def _record_no_fuse_reason(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, message: str
     ) -> None:
-        # Called from WhyNoFuse during the fusion pass. Keep only rejections that
-        # touch a fuse_or_err region so this stays bounded.
+        # Called from WhyNoFuse during the fusion pass. Only pairs containing
+        # operations from the same region can explain a region split.
         ops1 = node1.get_operation_names()
         ops2 = node2.get_operation_names()
-        if self._fuse_or_err_region_ops.isdisjoint(ops1 | ops2):
+        if not any(
+            not group.isdisjoint(ops1) and not group.isdisjoint(ops2)
+            for group in self._fuse_or_err_region_groups
+        ):
             return
         self._fuse_or_err_no_fuse_reasons.append((ops1, ops2, message))
 
