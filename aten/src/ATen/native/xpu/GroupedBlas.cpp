@@ -56,35 +56,6 @@ namespace at::native {
 
 namespace xpu {
 
-inline at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
-  const Tensor& mat_b,
-  const std::optional<at::Tensor>& offs,
-  c10::ScalarType out_dtype
-  ){
-  c10::SmallVector<int64_t, 3> out_size;
-  const bool a_is_2d = mat_a.dim() == 2;
-  const bool b_is_2d = mat_b.dim() == 2;
-  if (a_is_2d) {
-    if (b_is_2d) {
-      out_size = {offs->size(0), mat_a.size(0), mat_b.size(1)};
-    } else {
-      TORCH_CHECK(offs->size(0) == mat_b.size(0), "matrix batch sizes have to match");
-      out_size = {mat_a.size(0), mat_b.size(-1)};
-    }
-  } else {
-    if (b_is_2d) {
-      // this case is not actually encountered for MoE gemms
-      TORCH_CHECK(offs->size(0) == mat_a.size(0), "matrix batch sizes have to match");
-      out_size = {mat_a.size(1), mat_b.size(1)};
-    } else { // regular bmm
-      TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");
-      out_size = {mat_a.size(0), mat_a.size(1), mat_b.size(-1)};
-    }
-  }
-
-  return at::empty(out_size, mat_a.options().dtype(out_dtype));
-}
-
 void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
   // Checks scales for 2d or 3d target tensors (`mat`).
   if (mat.dim() == 2) {
@@ -242,7 +213,6 @@ _scaled_grouped_mm_xpu(
 
   TORCH_CHECK_VALUE(!bias.has_value(), "Bias not supported yet");
   TORCH_CHECK_VALUE(!scale_result.has_value(), "Scale result not supported yet");
-  TORCH_CHECK_VALUE(!use_fast_accum, "Fast_accum not supported yet");
   TORCH_CHECK_VALUE(offs.has_value() == (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {
@@ -264,7 +234,7 @@ _scaled_grouped_mm_xpu(
   const auto out_dtype_ = out_dtype.value_or(at::kBFloat16);
   TORCH_CHECK_VALUE(out_dtype_ == at::kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
-  Tensor out = xpu::create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
   // MXFP8 grouped GEMM dispatching
   bool is_mxf8 = (
@@ -356,7 +326,6 @@ _scaled_grouped_mm_xpu_v2(
 
   TORCH_CHECK_VALUE((a_is_2d && !b_is_2d), "Only 2d x 3d with offsets is supported for XPU scaled_grouped_mm for now");
   TORCH_CHECK_VALUE(!bias.has_value(), "Bias not supported yet");
-  TORCH_CHECK_VALUE(!use_fast_accum, "Fast_accum not supported yet");
   TORCH_CHECK_VALUE(offs.has_value() == (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {
@@ -367,7 +336,7 @@ _scaled_grouped_mm_xpu_v2(
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   TORCH_CHECK_VALUE(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
-  Tensor out = xpu::create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
   // Conversion of implicitly-defined enums to explicit
   auto swizzle_a_enum = convert_int_to_enum<SwizzleType>(swizzle_a);
@@ -460,7 +429,7 @@ std::optional<c10::ScalarType> out_dtype) {
 
   bool use_fast_path = a_b_and_out_are_same_type && supported_cases;
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
-  Tensor out = xpu::create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     at::native::onednn::scaled_grouped_matmul(mat_a, mat_b,
                                               std::nullopt,

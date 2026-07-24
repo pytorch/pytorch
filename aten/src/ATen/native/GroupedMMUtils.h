@@ -82,7 +82,7 @@ c10::ScalarType out_dtype
   }
 
   std::vector<int64_t> out_stride;
-  #ifndef USE_ROCM
+  #if defined(USE_CUDA)
   // For TMA transfers, strides of output tensor have to be either 1, or aligned
   // to 16 bytes. Pad the last dim up to that alignment and take the contiguous
   // strides of the padded shape (so the second-to-last stride picks up the pad).
@@ -106,15 +106,16 @@ c10::ScalarType out_dtype
 
   #ifndef USE_ROCM
   return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype));
-  #else
+#elif defined(USE_ROCM)
   // For ROCm 2D-2D case (output is 3D), zero-initialize to handle K=0 or small K
   // groups correctly. When K=0, the mathematically correct result is zeros,
   // but CK kernel may not write to the output region.
   if (mat_a.dim() == 2 && mat_b.dim() == 2) {
     return at::zeros(out_size, mat_a.options().dtype(out_dtype));
   }
+#endif
+// ROCm non-2D-2D, and other backends: standard contiguous allocation.
   return at::empty(out_size, mat_a.options().dtype(out_dtype));
-  #endif
 }
 
 inline void _grouped_mm_validate_inputs(const Tensor& mat_a, const Tensor& mat_b,
