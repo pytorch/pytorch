@@ -87,10 +87,8 @@ void XPUGraphImpl::capture_begin(
   }
 
   auto filter = [this](sycl::queue* queue) {
-    // Compare queue pointers rather than queue objects to avoid expensive queue
-    // comparison operations.
     return queue->ext_oneapi_get_state() == queue_state::recording &&
-        queue == &capture_stream_.queue();
+      capture_id_ == queue->ext_oneapi_get_graph().get_id();
   };
 
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(
@@ -103,6 +101,9 @@ void XPUGraphImpl::capture_begin(
 
   auto graph_impl = xpuGraph_t(capture_stream_.queue());
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
+  // acquire the capture_id_ once graph is instantiated
+  capture_id_ = graph_->get_id();
+
   graph_->begin_recording(capture_stream_.queue());
 
   TORCH_INTERNAL_ASSERT(
