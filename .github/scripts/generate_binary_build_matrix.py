@@ -82,9 +82,9 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "intel-cmplr-lib-ur==2026.1.0 | "
         "intel-cmplr-lic-rt==2026.1.0 | "
         "intel-sycl-rt==2026.1.0 | "
-        "oneccl-devel==2022.1.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2022.1.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "onemkl-license==2026.1.0 | "
         "onemkl-sycl-blas==2026.1.0 | "
         "onemkl-sycl-dft==2026.1.0 | "
@@ -98,7 +98,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "tbb==2023.1.0 | "
         "tcmlib==1.5.0 | "
         "umf==1.1.0 | "
-        "intel-pti==1.0.0 | "
+        "intel-pti==1.0.1 | "
         "pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
