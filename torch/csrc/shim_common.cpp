@@ -20,6 +20,10 @@
 #include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
 
+#ifdef USE_MPS
+#include <ATen/native/mps/MetalShaderLibrary.h>
+#endif // USE_MPS
+
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
   auto list_ptr = std::make_unique<std::vector<StableIValue>>();
   list_ptr->reserve(size);
@@ -861,3 +865,17 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
       get_torch_exception_what_without_backtrace()
           .c_str();
 }
+
+#ifdef USE_MPS
+AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
+    AOTIMetalKernelFunctionHandle handle,
+    unsigned idx,
+    const void* ptr,
+    uint64_t size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ptr != nullptr, "Pointer is null.");
+    auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
+    func->setArg(idx, ptr, size);
+  });
+}
+#endif // USE_MPS
