@@ -842,25 +842,28 @@ class ComboKernel(Kernel):
 
     def get_mutated_args_sub_kernels(self) -> list[str]:
         mutated_args: OrderedSet[str] = OrderedSet()
-        for sub_kernel in self.sub_kernels:
+        for num, sub_kernel in enumerate(self.sub_kernels):
+            arg_name_map = (
+                self.noinline_arg_name_maps[num] if self.per_subkernel_blocks else {}
+            )
             for mutation in sub_kernel.mutations:
                 if mutation in sub_kernel.args.input_buffers:
-                    mutated_args.add(sub_kernel.args.input_buffers[mutation])
+                    name = sub_kernel.args.input_buffers[mutation]
+                    mutated_args.add(arg_name_map.get(name, name))
                 if (
                     mutation in sub_kernel.args.inplace_buffers
                     and mutation not in V.graph.removed_buffers
                     and mutation not in sub_kernel.removed_buffers
                 ):
-                    mutated_args.add(
-                        cast(
-                            InplacedBuffer, sub_kernel.args.inplace_buffers[mutation]
-                        ).inner_name
-                    )
+                    name = cast(
+                        InplacedBuffer, sub_kernel.args.inplace_buffers[mutation]
+                    ).inner_name
+                    mutated_args.add(arg_name_map.get(name, name))
                 if mutation in sub_kernel.args.output_buffers:
                     arg = sub_kernel.args.output_buffers[mutation]
                     if isinstance(arg, RemovedArg):
                         raise AssertionError("mutated output buffer arg was removed")
-                    mutated_args.add(arg)
+                    mutated_args.add(arg_name_map.get(arg, arg))
         return sorted(mutated_args)
 
     def select_dispatch_strategy(self) -> None:
@@ -1151,8 +1154,13 @@ class ComboKernel(Kernel):
                 if isinstance(expr, Symbol):
                     local_to_main[argdef.name] = self.args.size(expr)
                 elif expr not in self.args.sizevars:
-                    self.args.sizevars[expr] = argdef.name
-                    local_to_main[argdef.name] = argdef.name
+                    name = argdef.name
+                    existing_names = tuple(self.args.sizevars.values())
+                    if name in existing_names:
+                        suffix = sum(1 for v in existing_names if v.startswith(name))
+                        name = f"{name}{suffix}"
+                    self.args.sizevars[expr] = name
+                    local_to_main[argdef.name] = name
                 else:
                     local_to_main[argdef.name] = self.args.sizevars[expr]
 
