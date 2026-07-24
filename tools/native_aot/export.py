@@ -62,7 +62,7 @@ def _load_by_path(name: str, path: str):
     return mod
 
 
-from torch._native._spec_grid import expand_specs  # noqa: E402
+from torch._native._spec_grid import expand_specs
 
 
 def load_builder(op: str, kernel_module: str):
