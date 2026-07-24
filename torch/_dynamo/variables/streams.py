@@ -18,7 +18,7 @@ from ..graph_bytecode_inputs import (
     reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
-from .base import GetSet, Method, MethodFlags, VariableTracker
+from .base import GetSet, Method, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
@@ -498,13 +498,11 @@ class StreamVariable(StreamContextVariable):
         )
 
     tp_methods = {
-        "wait_event": Method(wait_event, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "wait_stream": Method(wait_stream, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "synchronize": Method(synchronize, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "query": Method(query, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "record_event": Method(
-            record_event, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
+        "wait_event": Method(wait_event, "wait_event"),
+        "wait_stream": Method(wait_stream, "wait_stream"),
+        "synchronize": Method(synchronize, "synchronize"),
+        "query": Method(query, "query"),
+        "record_event": Method(record_event, "record_event"),
     }
 
     def richcompare_impl(self, tx, other, op):
@@ -694,10 +692,10 @@ class EventVariable(VariableTracker):
         )
 
     tp_methods = {
-        "wait": Method(wait, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "record": Method(record, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "synchronize": Method(synchronize, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "query": Method(query, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "wait": Method(wait, "wait"),
+        "record": Method(record, "record"),
+        "synchronize": Method(synchronize, "synchronize"),
+        "query": Method(query, "query"),
     }
 
     def call_method(

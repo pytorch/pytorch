@@ -31,7 +31,7 @@ from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
-from .base import GetSet, Method, MethodFlags, VariableTracker
+from .base import GetSet, Method, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -249,12 +249,8 @@ class BackwardHookVariable(VariableTracker):
         return self._setup_hook(tx, "setup_output_hook", *args, **kwargs)
 
     tp_methods = {
-        "setup_input_hook": Method(
-            setup_input_hook, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
-        "setup_output_hook": Method(
-            setup_output_hook, MethodFlags.VARARGS | MethodFlags.KEYWORDS
-        ),
+        "setup_input_hook": Method(setup_input_hook, "setup_input_hook"),
+        "setup_output_hook": Method(setup_output_hook, "setup_output_hook"),
     }
 
     def _setup_hook(
