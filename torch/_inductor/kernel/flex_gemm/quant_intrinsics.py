@@ -105,7 +105,12 @@ def mx_e8m0_scale_intrinsic(
     loc=None,
     ip=None,
 ):
-    """Encode an MX scale with packed SM100 E8M0 conversion instructions."""
+    """Encode an MX scale with exact packed SM100 E8M0 conversion.
+
+    CuTeDSL's public conversion is saturating and does not expose FLOOR/RZ.
+    The MLIR boundary preserves non-saturating edge semantics while emitting
+    one packed E8M0 encode per pair and rebuilding the original TensorSSA.
+    """
     max_power = math.floor(math.log2(max_value))
     scaled = source / max_value if rounding == "rceil" else source * 2.0**-max_power
     floor_inf_exponent = min(128 - max_power, 128)
