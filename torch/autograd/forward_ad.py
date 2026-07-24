@@ -187,8 +187,8 @@ class dual_level(_DecoratorContextManager):
 
     .. Note::
 
-        The ``dual_level`` context appropriately enters and exit the dual level to
-        controls the current forward AD level, which is used by default by the other
+        The ``dual_level`` context appropriately enters and exits the dual level to
+        control the current forward AD level, which is used by default by the other
         functions in this API.
 
         We currently don't plan to support nested ``dual_level`` contexts, however, so
