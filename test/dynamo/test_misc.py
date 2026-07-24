@@ -7104,6 +7104,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(foo_v2_compile.bar.const, 4)
             same(res, foo_v2_eager(inp))
 
+    def test_construct_object_with_del_graph_breaks(self):
+        # A class with a custom __del__ cannot be traced: Dynamo would
+        # materialize example instances during tracing and reconstruct the
+        # object across graph breaks, each firing __del__. Dynamo graph-breaks
+        # on construction so the object is created and destroyed once, in eager.
+        counter = [0]
+
+        class Tracked:
+            def __del__(self):
+                counter[0] += 1
+
+        def fn(x):
+            Tracked()
+            return x + 1
+
+        for compiled in (False, True):
+            torch._dynamo.reset()
+            counter[0] = 0
+            f = torch.compile(fn, backend="eager") if compiled else fn
+            f(torch.randn(3))
+            gc.collect()
+            self.assertEqual(counter[0], 1)
+
     def test_replay_side_effects_input_mut(self):
         class Foo(torch.nn.Module):
             def __init__(self):

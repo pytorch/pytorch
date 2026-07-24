@@ -1123,6 +1123,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         constant_args = check_constant_args(args, kwargs)
 
+        # Objects whose class defines a custom __del__ cannot be safely traced:
+        # Dynamo materializes example instances via base_cls.__new__ during
+        # tracing and may reconstruct the object across graph breaks, so a
+        # side-effecting __del__ fires more than once. Graph-break so the
+        # object is created (and destroyed) exactly once in eager.
+        if (
+            isinstance(self.value, type)
+            and hasattr(self.value, "__del__")
+            and not self.can_constant_fold_through()
+        ):
+            unimplemented(
+                gb_type="construct object with custom __del__",
+                context=f"class={self.value.__name__}",
+                explanation=(
+                    "Dynamo cannot preserve __del__-once semantics for an object "
+                    "whose class defines __del__; example-object materialization "
+                    "and cross-graph-break reconstruction would fire __del__ "
+                    "multiple times."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         if torch.distributed.is_available() and self.value is torch.distributed.P2POp:
             if not config.enable_p2p_compilation:
                 unimplemented(
