@@ -20,6 +20,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
 )
+from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
@@ -34,6 +35,7 @@ class FlexGemmEpilogueLocalReduceConfig:
 
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
     feeds_main: bool = False
 
     @classmethod
@@ -50,6 +52,7 @@ class FlexGemmEpilogueLocalReduceConfig:
         return FlexGemmEpilogueLocalReduceConfig(
             dataclasses.replace(local_reduce.match.geometry, swapped=swap_ab),
             out_index,
+            None if local_reduce.store is None else local_reduce.store.output_layout,
             local_reduce.feeds_main,
         )
 
@@ -68,7 +71,7 @@ class FlexGemmEpilogueLocalReduceConfig:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueOutputConfig:
-    """Template input indices and plans for all user-visible outputs."""
+    """Template input indices and structural plans for returned values."""
 
     aux_out_indices: tuple[int, ...] = ()
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None = None
@@ -160,6 +163,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 FlexGemmGroupedMainOutputTransform,
                 FlexGemmLocalReduceCallbacks,
                 FlexGemmLocalReduceGeometry,
+            )
+            from torch._inductor.kernel.flex_gemm.output_layout import (
+                FlexGemmOutputStorageLayout,
             )
             from torch._inductor.kernel.flex_gemm.runtime import (
                 FlexGemmRuntimeLocalReducePlan,
@@ -261,6 +267,11 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         plan = f"FlexGemmRuntimeLocalReducePlan({geometry}"
         if local_reduce.out_index is not None:
             plan += f", out={input_args[local_reduce.out_index]}"
+        if local_reduce.output_layout is not None:
+            plan += (
+                ", output_layout="
+                f"FlexGemmOutputStorageLayout.{local_reduce.output_layout.name}"
+            )
         if local_reduce.feeds_main:
             plan += ", feeds_main=True"
         if local_reduce.feeds_main or local_reduce.needs_physical_callbacks:

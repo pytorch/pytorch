@@ -25,6 +25,11 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_runtime_dense_mm,
     validate_local_reduce_selected_dim_divisible,
 )
+from torch._inductor.kernel.flex_gemm.output_layout import (
+    blocked_128x4_carrier_shape,
+    blocked_128x4_numel,
+    FlexGemmOutputStorageLayout,
+)
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
 
@@ -212,12 +217,15 @@ class FlexGemmRuntimeLocalReducePlan:
     geometry: FlexGemmLocalReduceGeometry
     out: torch.Tensor | None = None
     callbacks: FlexGemmLocalReduceCallbacks | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
     feeds_main: bool = False
 
     def __post_init__(self) -> None:
         """Reject plans without the output/callback state required by their consumer."""
         if self.out is None and not self.feeds_main:
             raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if self.output_layout is not None and self.out is None:
+            raise RuntimeError("FlexGEMM output layouts require an output buffer")
         if self.feeds_main:
             if self.callbacks is None:
                 raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
@@ -240,10 +248,13 @@ def swap_local_reduce_plan(
     """Transpose a physical local-reduction plan with the swapped GEMM output."""
     if plan is None:
         return None
+    out = plan.out
+    if out is not None and plan.output_layout is None:
+        out = out.mT
     return dataclasses.replace(
         plan,
         geometry=FlexGemmLocalReduceGeometry(plan.group, 1 - plan.axis),
-        out=None if plan.out is None else plan.out.mT,
+        out=out,
     )
 
 
@@ -263,7 +274,14 @@ class FlexGemmRuntimeMainOutputPlan:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeOutputPlan:
-    """Bundle all user-visible output consumers into one generated ABI value."""
+    """Bundle allocated returns and their structural output plans.
+
+    Attributes:
+        aux_outs: Full-shape auxiliary buffers in QuACK store order. The local
+            reduction buffer is represented separately by ``local_reduce``.
+        local_reduce: Optional compressed-reduction runtime plan and output.
+        main: Logical transform applied to the first user-visible return.
+    """
 
     aux_outs: tuple[torch.Tensor, ...] = ()
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None
@@ -299,6 +317,20 @@ def validate_runtime_local_reduce(
     local_reduce_out = plan.out
     if local_reduce_out is None:
         return
+    if plan.output_layout is FlexGemmOutputStorageLayout.BLOCKED_128X4:
+        if local_reduce_out.ndim != 1 or local_reduce_out.stride(0) != 1:
+            raise NotImplementedError(
+                "FlexGEMM blocked local-reduce output must be contiguous and 1-D"
+            )
+        expected_numel = blocked_128x4_numel(
+            local_reduce_compressed_shape(expected_shape, plan.group, plan.axis)
+        )
+        if local_reduce_out.numel() != expected_numel:
+            raise RuntimeError(
+                "blocked local_reduce_out size must be "
+                f"{expected_numel}, got {local_reduce_out.numel()}"
+            )
+        return
     check_matrix("local_reduce_out", local_reduce_out)
     if swap_ab:
         check_matrix_row_major_layout("local_reduce_out.mT", local_reduce_out.mT)
@@ -308,6 +340,17 @@ def validate_runtime_local_reduce(
         expected_shape, plan.group, plan.axis
     )
     validate_local_reduce_out_shape(local_reduce_out.shape, expected_local_reduce_shape)
+
+
+def blocked_local_reduce_carrier(
+    output: torch.Tensor, logical_shape: tuple[int, ...]
+) -> torch.Tensor:
+    """View flat blocked storage as the carrier consumed by QuACK.
+
+    This host-side shape exposes padded block counts and the 512-element atom.
+    QuACK constructs the actual swizzled ``cute.Layout`` inside CuTeDSL.
+    """
+    return output.view(blocked_128x4_carrier_shape(logical_shape))
 
 
 def local_reduce_callback_key(callback: Any, fallback_key: str) -> str:
@@ -344,6 +387,32 @@ def register_runtime_local_reduce_callbacks(
         callbacks.finalize_fn,
     )
     return local_reduce_combine_key, local_reduce_finalize_key
+
+
+def register_runtime_output_layout(
+    layout: FlexGemmOutputStorageLayout | None, *, transposed: bool
+) -> str | None:
+    """Register a PyTorch-owned CuTe layout callback for one orientation."""
+    if layout is None:
+        return None
+    if layout is not FlexGemmOutputStorageLayout.BLOCKED_128X4:
+        raise NotImplementedError(f"unsupported FlexGEMM output layout: {layout}")
+
+    from torch._inductor.kernel.flex_gemm.output_layout_cutedsl import (
+        blocked_128x4_output_layout_key,
+        blocked_128x4_output_shape,
+        blocked_128x4_output_tensor_for_orientation,
+    )
+    from torch._vendor.quack.gemm_act import register_output_layout
+
+    layout_key = blocked_128x4_output_layout_key(transposed)
+    register_output_layout(
+        layout_key,
+        blocked_128x4_output_tensor_for_orientation(transposed),
+        blocked_128x4_output_shape,
+        4,
+    )
+    return layout_key
 
 
 def local_reduce_gemm_act_kwargs(
@@ -400,6 +469,18 @@ def dispatch_gemm_act(
     main_transform = output_plan.main.transform
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
+    local_reduce_layout = None if local_reduce is None else local_reduce.output_layout
+    blocked_local_reduce_shape = (
+        local_reduce_compressed_shape(
+            (a.shape[-2], b.shape[-1]), local_reduce.group, local_reduce.axis
+        )
+        if local_reduce is not None
+        and local_reduce_layout is FlexGemmOutputStorageLayout.BLOCKED_128X4
+        else None
+    )
+    local_reduce_output_layout = register_runtime_output_layout(
+        local_reduce_layout, transposed=config.swap_ab
+    )
     quack_out, quack_aux_outs, quack_local_reduce_out, quack_c = (
         out,
         aux_outs,
@@ -432,8 +513,13 @@ def dispatch_gemm_act(
         aux_out.unsqueeze(0) if aux_out.ndim == 2 else aux_out
         for aux_out in quack_aux_outs
     )
-    if quack_local_reduce_out is not None and quack_local_reduce_out.ndim == 2:
-        quack_local_reduce_out = quack_local_reduce_out.unsqueeze(0)
+    if local_reduce is not None and quack_local_reduce_out is not None:
+        if blocked_local_reduce_shape is not None:
+            quack_local_reduce_out = blocked_local_reduce_carrier(
+                quack_local_reduce_out, blocked_local_reduce_shape
+            )
+        elif quack_local_reduce_out.ndim == 2:
+            quack_local_reduce_out = quack_local_reduce_out.unsqueeze(0)
     if quack_c is not None and quack_c.ndim == 2:
         quack_c = quack_c.unsqueeze(0)
 
@@ -472,6 +558,7 @@ def dispatch_gemm_act(
             None if main_transform is None else main_transform.group
         ),
         concat_layout=(() if main_transform is None else main_transform.concat_layout),
+        local_reduce_output_layout=local_reduce_output_layout,
         alpha=alpha,
         beta=beta,
         use_tma_gather=config.use_tma_gather,

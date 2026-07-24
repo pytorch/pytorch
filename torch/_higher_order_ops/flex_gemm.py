@@ -258,6 +258,47 @@ def _(amax: torch.Tensor, rounding: str | None = None) -> torch.Tensor:
     )
 
 
+@torch.library.custom_op("flex_gemm::to_blocked", mutates_args=())
+def to_blocked(input_matrix: torch.Tensor) -> torch.Tensor:
+    """Rearrange a scale matrix into the cuBLAS 128x4 blocked format.
+
+    Args:
+        input_matrix: Two-dimensional matrix of block-scaling factors.
+
+    Returns:
+        Flattened blocked storage, including zero-filled padding tiles.
+    """
+    if input_matrix.ndim != 2:
+        raise ValueError(f"to_blocked expects a 2-D tensor, got {input_matrix.ndim}-D")
+    rows, cols = input_matrix.shape
+    row_blocks = (rows + 127) // 128
+    col_blocks = (cols + 3) // 4
+    padded_rows = row_blocks * 128
+    padded_cols = col_blocks * 4
+    padded = input_matrix
+    if (rows, cols) != (padded_rows, padded_cols):
+        padded = torch.zeros(
+            (padded_rows, padded_cols),
+            device=input_matrix.device,
+            dtype=input_matrix.dtype,
+        )
+        padded[:rows, :cols] = input_matrix
+    blocks = padded.reshape(row_blocks, 128, col_blocks, 4).permute(0, 2, 1, 3)
+    return blocks.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(-1)
+
+
+@to_blocked.register_fake
+def _(input_matrix: torch.Tensor) -> torch.Tensor:
+    if input_matrix.ndim != 2:
+        raise ValueError(f"to_blocked expects a 2-D tensor, got {input_matrix.ndim}-D")
+    rows, cols = input_matrix.shape
+    return torch.empty(
+        512 * ((rows + 127) // 128) * ((cols + 3) // 4),
+        device=input_matrix.device,
+        dtype=input_matrix.dtype,
+    )
+
+
 def apply_flex_gemm_body_graph_passes(
     body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
 ) -> None:

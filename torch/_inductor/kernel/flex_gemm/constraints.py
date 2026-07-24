@@ -115,6 +115,9 @@ LOCAL_REDUCE_MIXED_MATCH_ERROR = (
 LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
     "FlexGEMM local-reduce broadcast values must share one grouped layout"
 )
+FLEX_GEMM_OUTPUT_LAYOUT_USAGE_ERROR = (
+    "FlexGEMM output layout transforms must be returned directly as a validated output"
+)
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
@@ -124,6 +127,9 @@ LOCAL_REDUCE_RUNTIME_DENSE_MM_ERROR = (
     "FlexGEMM local reductions currently support only 2-D aten.mm"
 )
 LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {actual}"
+LOCAL_REDUCE_BLOCKED_AXIS_ERROR = (
+    "FlexGEMM blocked local-reduce outputs currently support only axis 1"
+)
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
