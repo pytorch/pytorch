@@ -7,7 +7,7 @@ import torch
 
 # This handles collecting registration of all native ops
 # Also need to import DSL utils to make sure DSL registration is ok
-from . import cutedsl_utils, dsl_registry, ops, registry, triton_utils
+from . import cutedsl_utils, dsl_registry, helion_utils, ops, registry, triton_utils
 
 
 @cache

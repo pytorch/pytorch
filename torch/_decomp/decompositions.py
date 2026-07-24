@@ -2125,7 +2125,7 @@ def native_batch_norm_helper(
         running_var = running_var.to(dtype=computation_dtype, copy=True)
         new_running_var = running_var
         mean = running_mean
-        invstd = 1 / (torch.sqrt(running_var + eps))
+        invstd = torch.rsqrt(running_var + eps)
         # Very annoying inconsistency where CPU and CUDA give different shapes
         if input.device.type != "cpu":
             save_mean = running_mean
@@ -5775,6 +5775,8 @@ def multilabel_margin_loss_forward(
     z = z / dim
     # masks loss
     z = torch.where(is_target, 0, z)
+    # drops contributions from padded target slots (positions at/after the first -1)
+    z = torch.where(target_mask.T.unsqueeze(dim=-1), z, 0)
     # reduction
     if reduction == Reduction.MEAN.value:
         z = z.sum(dim=(0, -1)).mean()
