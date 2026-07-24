@@ -971,9 +971,13 @@ class TestMPS(TestCaseMPS):
             ptr_s1_second = make_and_free_get_ptr(s1)
             self.assertEqual(ptr_s1_second, ptr_s1_first)
 
-            # Different stream: must not reuse s1's freed buffer
-            ptr_s2 = make_and_free_get_ptr(s2)
-            self.assertNotEqual(ptr_s2, ptr_s1_second)
+            # Different stream: s1's cached buffer is never handed over as is, a new
+            # buffer is placed over its range instead. data_ptr() can't tell the two
+            # apart, since Metal reuses the released buffer's address for the new one.
+            torch._C._mps_setStream(s2)
+            t_s2 = torch.full((1 << 16,), 3.0, device='mps')
+            s2.synchronize()
+            self.assertEqual(t_s2, torch.full((1 << 16,), 3.0))
 
         finally:
             torch._C._mps_setStream(None)
