@@ -205,7 +205,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return False
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
-            if ir_node.variant != GemmVariant.GEMM:
+            if ir_node.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
                 log.debug(
                     "NVGEMM epilogue fusion: not supported for %s variant",
                     ir_node.variant.op_name,
@@ -227,9 +227,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 ):
                     continue
                 has_efc_choice = True
-                if choice.variant != GemmVariant.GEMM:
+                if choice.variant not in (
+                    GemmVariant.GEMM,
+                    GemmVariant.SCALED_GEMM,
+                ):
                     log.debug(
-                        "NVGEMM epilogue fusion: MultiTemplateBuffer has non-GEMM EFC choices"
+                        "NVGEMM epilogue fusion: MultiTemplateBuffer has unsupported EFC choices"
                     )
                     return False
             if not has_efc_choice:
