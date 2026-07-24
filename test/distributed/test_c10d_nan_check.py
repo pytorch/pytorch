@@ -24,8 +24,11 @@ from c10d_backend_common import (
 )
 
 from torch._C._distributed_c10d import NanCheckHook
-from torch.distributed.distributed_c10d import _world
 from torch.testing._internal.common_utils import run_tests
+
+
+# Tests in which the check is expected to fire.
+DETECTING_TESTS = ("test_nan_in_input_detected", "test_env_var_auto_attach")
 
 
 class AbstractNanCheckHookTest(C10dBackendTest):
@@ -33,39 +36,41 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         super().setUp()
         # Set after super().setUp(): MultiProcessTestCase.setUp() resets the
         # dict, and the parent only consults it when joining the children.
-        if (
-            self.device_type == "cuda"
-            and self._testMethodName == "test_nan_in_input_detected"
-        ):
+        if self.device_type == "cuda" and self._testMethodName in DETECTING_TESTS:
             # The CUDA checker traps on the device rather than raising a
             # catchable error, so the process dies instead; see
             # test_c10d_nccl.py's test_nan_assert. ROCm's assert(0) surfaces as
             # a signal rather than a clean exit code.
             self.special_return_code_checks = {
-                self.test_nan_in_input_detected.__wrapped__: (
+                getattr(self, self._testMethodName).__wrapped__: (
                     -signal.SIGABRT if torch.version.hip else signal.SIGABRT
                 )
             }
 
+    def _assert_nan_detected(self, tensor):
+        if self.device_type == "cuda":
+            try:
+                dist.all_reduce(tensor)
+                torch.cuda.synchronize()
+            except Exception:
+                # os._exit, not sys.exit: the CUDA context is poisoned, so
+                # unwinding through tearDown's destroy_process_group can hang
+                # waiting on collectives that will never complete.
+                os._exit(signal.SIGABRT)
+            self.fail("NaN in collective input was not detected")
+        else:
+            with self.assertRaisesRegex(RuntimeError, "NaN"):
+                dist.all_reduce(tensor)
+
     def test_nan_in_input_detected(self):
         self._init_pg()
-        hook = NanCheckHook.attach(dist.group.WORLD)
+        # The handle is deliberately dropped: the group owns the hook.
+        NanCheckHook.attach(dist.group.WORLD)
         # All ranks poison their input so no rank is left waiting on a peer
         # that died in the check.
         t = torch.ones(1024, device=self.device)
         t[42] = float("nan")
-
-        if self.device_type == "cuda":
-            try:
-                dist.all_reduce(t)
-                torch.cuda.synchronize()
-            except Exception:
-                sys.exit(signal.SIGABRT)
-            self.fail("NaN in collective input was not detected")
-        else:
-            with self.assertRaisesRegex(RuntimeError, "NaN"):
-                dist.all_reduce(t)
-            hook.remove()
+        self._assert_nan_detected(t)
 
     def test_nan_in_recv_buffer_ok(self):
         self._init_pg()
@@ -118,7 +123,6 @@ class AbstractNanCheckHookTest(C10dBackendTest):
 
     def test_off_by_default_and_removable(self):
         self._init_pg()
-        self.assertEqual(len(_world.nan_check_hooks), 0)
 
         t = torch.ones(8, device=self.device)
         t[0] = float("nan")
@@ -135,15 +139,13 @@ class AbstractNanCheckHookTest(C10dBackendTest):
             self._init_pg()
         finally:
             del os.environ["TORCH_DIST_NAN_CHECK"]
-        self.assertIn(dist.group.WORLD, _world.nan_check_hooks)
 
+        # Nothing on the Python side holds the auto-attached handle, so this
+        # also covers the hook outliving it.
         t = torch.ones(8, device=self.device)
         dist.all_reduce(t)
-        if self.device_type == "cuda":
-            torch.cuda.synchronize()
-
-        dist.destroy_process_group()
-        self.assertEqual(len(_world.nan_check_hooks), 0)
+        t[0] = float("nan")
+        self._assert_nan_detected(t)
 
 
 instantiate_backend_tests(

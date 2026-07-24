@@ -14,28 +14,32 @@
 
 namespace c10d {
 
-class TORCH_API NanCheckHook {
+class TORCH_API NanCheckHook
+    : public std::enable_shared_from_this<NanCheckHook> {
  public:
-  // Attaches a hook to the process group and returns it. The hook stays
-  // attached until remove() is called or the returned handle is destroyed.
+  // Attaches the check to the process group, which owns it from then on: the
+  // check lives as long as the group's hook map. The returned handle only needs
+  // to be kept if the caller wants to remove() the check early.
   static std::shared_ptr<NanCheckHook> attach(
-      c10::intrusive_ptr<ProcessGroup> pg);
-
-  ~NanCheckHook();
+      const c10::intrusive_ptr<ProcessGroup>& pg);
 
   NanCheckHook(const NanCheckHook&) = delete;
   NanCheckHook(NanCheckHook&&) = delete;
   NanCheckHook& operator=(const NanCheckHook&) = delete;
   NanCheckHook& operator=(NanCheckHook&&) = delete;
 
-  // Detach from the process group. Idempotent.
+  // Detach from the process group. Idempotent, and a no-op once the group is
+  // gone.
   void remove();
 
  private:
-  explicit NanCheckHook(c10::intrusive_ptr<ProcessGroup> pg);
-  void onPre(const PreHookArgs& args);
+  explicit NanCheckHook(const c10::intrusive_ptr<ProcessGroup>& pg);
+  void onPre(const PreHookArgs& args) const;
 
-  c10::intrusive_ptr<ProcessGroup> pg_;
+  // Weak: the group owns the hook, so an owning pointer back would keep the
+  // group alive forever.
+  c10::weak_intrusive_ptr<ProcessGroup> pg_;
+  int rank_;
   int64_t hook_id_;
 };
 
