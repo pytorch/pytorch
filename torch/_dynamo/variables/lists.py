@@ -2213,15 +2213,6 @@ class SliceVariable(VariableTracker):
         "step": Member(getset_read(lambda s: s.items[2])),
     }
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name in cmp_name_to_op_mapping or name in ("__hash__", "indices"):
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(slice, name))
-            )
-        return super().getattro_impl(tx, name)
-
     def indices(
         self,
         tx: "InstructionTranslatorBase",
