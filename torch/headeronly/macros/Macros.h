@@ -554,11 +554,56 @@ __host__ __device__
     abort();                     \
   }
 #else
+#if defined(USE_ROCM)
+template <unsigned N>
+__device__ __attribute__((flatten)) void c10_rocm_assert_literal(
+    const char (&msg)[N]) {
+  auto d = __ockl_fprintf_stderr_begin();
+  __ockl_fprintf_append_string_n(d, msg, N - 1, 1);
+  __builtin_trap();
+}
+
+template <unsigned N>
+__host__ inline void c10_rocm_kernel_assert(
+    const char* cond,
+    const char* file,
+    unsigned int line,
+    const char* func,
+    const char (&msg)[N]) {
+  (void)msg;
+  __assert_fail(cond, file, line, func);
+}
+
+template <unsigned N>
+__device__ inline void c10_rocm_kernel_assert(
+    const char* cond,
+    const char* file,
+    unsigned int line,
+    const char* func,
+    const char (&msg)[N]) {
+  (void)cond;
+  (void)file;
+  (void)line;
+  (void)func;
+  c10_rocm_assert_literal(msg);
+}
+
+#define CUDA_KERNEL_ASSERT(cond)                                          \
+  do {                                                                    \
+    if C10_UNLIKELY(!(cond)) {                                            \
+      c10_rocm_kernel_assert(                                             \
+          #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__, \
+          __FILE__ ":" C10_STRINGIZE(__LINE__)                            \
+          ": Device-side assertion " #cond " failed.\n");                  \
+    }                                                                     \
+  } while (0)
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#endif
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
