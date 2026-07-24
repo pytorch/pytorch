@@ -60,8 +60,17 @@ def main() -> None:
     """Allow only mutations aimed at the workflow-selected issue."""
     try:
         data = json.load(sys.stdin)
+        tool_input = data.get("tool_input", {})
+        if (
+            data.get("tool_name") == "mcp__github__issue_write"
+            and tool_input.get("method") != "update"
+        ):
+            raise RuntimeError(
+                "issue_write is restricted to updating the triage target"
+            )
+
         expected = expected_target()
-        requested = requested_target(data.get("tool_input", {}))
+        requested = requested_target(tool_input)
         debug_log(f"Expected target {expected}; requested target {requested}")
 
         if requested != expected:
