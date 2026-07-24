@@ -52,7 +52,15 @@ class TestExportJobs(unittest.TestCase):
             job = ("fakeop", "aot_kernel.py", point, d)
             self.assertTrue(export._job_needed(job, force=False))
             with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump({"version": export.SIDECAR_VERSION, "prefix": "x", "spec": point, "sources": current}, f)
+                _json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "x",
+                        "spec": point,
+                        "sources": current,
+                    },
+                    f,
+                )
             self.assertFalse(export._job_needed(job, force=False))
             self.assertTrue(export._job_needed(job, force=True))
             other = ("fakeop", "aot_kernel.py", {"dtype": "bfloat16"}, d)
@@ -74,7 +82,12 @@ class TestExportJobs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             point = {"aten": "add.Tensor", "in_dtypes": ("float32", "bfloat16")}
             job = ("fakeop", "aot_kernel.py", point, d)
-            sidecar = {"version": export.SIDECAR_VERSION, "prefix": "x", "spec": export._json_normal(point), "sources": current}  # noqa: B950
+            sidecar = {
+                "version": export.SIDECAR_VERSION,
+                "prefix": "x",
+                "spec": export._json_normal(point),
+                "sources": current,
+            }
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(sidecar, f)
             self.assertFalse(export._job_needed(job, force=False))
@@ -221,11 +234,21 @@ class TestAotSourceGeneration(unittest.TestCase):
             "return self.scalar_type() == at::kFloat && k == 8;",
         )
         src = gen_aot_lib.gen_op(
-            "fakeop", "CUDA", _FakeDecl, [sidecar], "const at::Tensor & self, int64_t k", covers
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [sidecar],
+            "const at::Tensor & self, int64_t k",
+            covers,
         )
-        self.assertIn("bool fakeop_cuda_covers(const at::Tensor & self, int64_t k) {", src)
+        self.assertIn(
+            "bool fakeop_cuda_covers(const at::Tensor & self, int64_t k) {", src
+        )
         self.assertIn("TORCH_LIBRARY_FRAGMENT(_native_aot, m) {", src)
-        self.assertIn('m.def("covers_fakeop(Tensor self, int k) -> bool", &::fakeop_cuda_covers);', src)
+        self.assertIn(
+            'm.def("covers_fakeop(Tensor self, int k) -> bool", &::fakeop_cuda_covers);',
+            src,
+        )
 
     def test_cpp_covers_absent_no_registration(self):
         sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
@@ -242,7 +265,10 @@ class TestAotSourceGeneration(unittest.TestCase):
         self.assertIn("int64_t k", params)
         self.assertIn("const std::optional<at::Tensor>& values", params)
         self.assertIn("const std::optional<at::Tensor>& indices", params)
-        self.assertEqual(schema, "covers_topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, Tensor? values=None, Tensor? indices=None) -> bool")  # noqa: B950
+        self.assertEqual(
+            schema,
+            "covers_topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, Tensor? values=None, Tensor? indices=None) -> bool",
+        )
 
     def test_covers_signature_kwarg_only_and_defaults(self):
         # Pin the tricky schema shapes the per-argument rendering must
@@ -250,11 +276,20 @@ class TestAotSourceGeneration(unittest.TestCase):
         # ('int[1] dim=[]'), and Scalar defaults -- surgery on the whole
         # schema string mangles these.
         _, schema = gen_aot_lib.covers_signature("sum.dim_IntList")
-        self.assertEqual(schema, "covers_sum_dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor? out=None) -> bool")  # noqa: B950
+        self.assertEqual(
+            schema,
+            "covers_sum_dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor? out=None) -> bool",
+        )
         _, schema = gen_aot_lib.covers_signature("amax")
-        self.assertEqual(schema, "covers_amax(Tensor self, int[1] dim=[], bool keepdim=False, Tensor? out=None) -> bool")  # noqa: B950
+        self.assertEqual(
+            schema,
+            "covers_amax(Tensor self, int[1] dim=[], bool keepdim=False, Tensor? out=None) -> bool",
+        )
         _, schema = gen_aot_lib.covers_signature("add.Tensor")
-        self.assertEqual(schema, "covers_add_Tensor(Tensor self, Tensor other, *, Scalar alpha=1, Tensor? out=None) -> bool")  # noqa: B950
+        self.assertEqual(
+            schema,
+            "covers_add_Tensor(Tensor self, Tensor other, *, Scalar alpha=1, Tensor? out=None) -> bool",
+        )
 
 
 class TestReadOnlyInputs(unittest.TestCase):
@@ -288,9 +323,7 @@ class TestSourceStaleness(unittest.TestCase):
         self.assertFalse(export.sources_current({"version": 0, "sources": {rel: h}}))
         self.assertFalse(export.sources_current({"sources": {rel: "0" * 16}}))
         self.assertFalse(export.sources_current({}))
-        self.assertFalse(
-            export.sources_current({"sources": {"no/such/file.py": "aa"}})
-        )
+        self.assertFalse(export.sources_current({"sources": {"no/such/file.py": "aa"}}))
 
     def test_stale_point_reexports_without_force(self):
         import json as _json
@@ -304,7 +337,15 @@ class TestSourceStaleness(unittest.TestCase):
             )
             current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
             with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump({"version": export.SIDECAR_VERSION, "prefix": "x", "spec": point, "sources": current}, f)
+                _json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "x",
+                        "spec": point,
+                        "sources": current,
+                    },
+                    f,
+                )
             self.assertFalse(export._job_needed(job, force=False))
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(
@@ -330,7 +371,8 @@ class TestToolchainRegistry(unittest.TestCase):
         # The embedded link block in caffe2/CMakeLists.txt must glob every
         # artifact pattern the toolchains emit (it cannot import this file).
         cmake_path = os.path.join(TOOLS_DIR, "..", "..", "caffe2", "CMakeLists.txt")
-        cmake = open(cmake_path).read()
+        with open(cmake_path) as f:
+            cmake = f.read()
         for tc in toolchains.TOOLCHAINS.values():
             for pattern in tc.link_source_globs:
                 self.assertIn(pattern.split("/")[-1], cmake)
@@ -361,7 +403,12 @@ class TestEndToEndGeneration(unittest.TestCase):
                 export.REPO,
             )
             current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
-            sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8}, sources=current, version=export.SIDECAR_VERSION)
+            sidecar = dict(
+                SIDECAR,
+                spec={"N": 1024, "K": 8},
+                sources=current,
+                version=export.SIDECAR_VERSION,
+            )
             with open(
                 os.path.join(art, "fakeop", SIDECAR["prefix"] + ".json"), "w"
             ) as f:
