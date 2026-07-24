@@ -46,11 +46,11 @@ class no_grad(_NoParamDecoratorContextManager):
         This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
         In particular, forward-mode transforms such as :func:`torch.func.jvp`
         and :func:`torch.func.jacfwd` are not affected by a ``no_grad`` block
-        inside the function being transformed, so they can produce different
-        results than their reverse-mode counterparts (:func:`torch.func.vjp`,
-        :func:`torch.func.jacrev`) for such functions. If you want to disable
-        forward AD for a computation, you can unpack your dual tensors, or
-        block both modes with :meth:`~torch.Tensor.detach`.
+        inside the function being transformed. For example,
+        :func:`torch.func.jacfwd` can produce a different Jacobian than
+        :func:`torch.func.jacrev` for such a function. If you want to disable
+        forward AD for a computation, you can unpack your dual tensors, or block
+        both modes with :meth:`~torch.Tensor.detach`.
 
     Example::
         >>> # xdoctest: +SKIP
