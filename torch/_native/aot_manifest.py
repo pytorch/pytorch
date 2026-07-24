@@ -120,6 +120,8 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
         # need only the coverage pieces. A module is either one
         # declaration or a family exporting declarations().
         spec = importlib.util.spec_from_file_location(f"{entry}_aot", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load declaration module from {path}")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         family = getattr(mod, "declarations", None)
