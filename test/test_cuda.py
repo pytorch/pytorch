@@ -2983,6 +2983,14 @@ torch.cuda.synchronize()
         g._philox_cuda_state(5)
         self.assertEqual(g.get_offset(), 12)
 
+    def test_philox_cuda_state_large_seed_reinterpreted_as_int64(self):
+        # Seeds >= 2**63 come back reinterpreted as negative int64.
+        g = torch.Generator(device="cuda")
+        seed = (1 << 64) - 3
+        g.manual_seed(seed)
+        seed_t, _, _ = g._philox_cuda_state(4)
+        self.assertEqual(seed_t.item() & ((1 << 64) - 1), seed)
+
     def test_philox_cuda_state_composes_with_eager_ops(self):
         # A reservation must consume the same Philox stream positions an
         # eager kernel would, so subsequent eager ops are reproducible via
@@ -2999,10 +3007,10 @@ torch.cuda.synchronize()
 
     def test_philox_cuda_state_errors(self):
         cpu_gen = torch.Generator()
-        with self.assertRaisesRegex(NotImplementedError, "philox_state"):
+        with self.assertRaisesRegex(NotImplementedError, "_philox_cuda_state"):
             cpu_gen._philox_cuda_state(4)
         g = torch.Generator(device="cuda")
-        with self.assertRaises((OverflowError, RuntimeError)):
+        with self.assertRaisesRegex(OverflowError, "negative"):
             g._philox_cuda_state(-1)
         with self.assertRaisesRegex(RuntimeError, "expected an int"):
             g._philox_cuda_state(1.5)
@@ -3047,6 +3055,13 @@ torch.cuda.synchronize()
             self.assertEqual(seed_t.item(), g.initial_seed())
             self.assertEqual(off_t.item(), offset_before)
             self.assertEqual(g.get_offset(), offset_before + 8)
+
+        # The returned aliases must not allow reallocating the capture
+        # state's storage out from under the captured graph.
+        data_ptr = seed_t.data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "not resizable"):
+            seed_t.resize_(64)
+        self.assertEqual(seed_t.data_ptr(), data_ptr)
 
     @skipIfRocmVersionLessThan((7, 14))
     @xfailCUDAIfSM89OrLaterOnWindows
