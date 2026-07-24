@@ -17,6 +17,8 @@ import ast
 import json
 import multiprocessing as mp
 import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
@@ -27,8 +29,15 @@ HW_CLASSIFICATION_ATTR = "hw_classification"  # class attribute name to check
 HW_CLASSIFICATION_ENUM_CLASS = (
     "HardwareClassification"  # enum class the attribute must reference
 )
-INSTANTIATE_FN_NAME = "instantiate_device_type_tests"  # ACCELERATOR classes must be instantiated via this function
-ACCELERATOR = "ACCELERATOR"  # classification requiring device parameter and instantiate_device_type_tests
+INSTANTIATE_FN_NAME = "instantiate_device_type_tests"
+
+GENERIC = "GENERIC"
+ACCELERATOR = "ACCELERATOR"
+CPU = "CPU"
+CUDA = "CUDA"
+MPS = "MPS"
+XPU = "XPU"
+
 
 # Files in this allowlist are temporarily excluded from hw_classification checks
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "hw_classification_allowlist.json"
@@ -53,8 +62,8 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
+    path: str
+    line: int
     char: int | None
     code: str
     severity: LintSeverity
@@ -62,6 +71,20 @@ class LintMessage(NamedTuple):
     original: str | None
     replacement: str | None
     description: str | None
+
+
+def create_error_msg(filename: str, line: int, description: str) -> LintMessage:
+    return LintMessage(
+        path=filename,
+        line=line,
+        char=None,
+        code=LINTER_CODE,
+        severity=LintSeverity.ERROR,
+        name=f"[{HW_CLASSIFICATION_ATTR}]",
+        original=None,
+        replacement=None,
+        description=description,
+    )
 
 
 def _is_test_file(filename: str) -> bool:
@@ -72,12 +95,11 @@ def _is_test_file(filename: str) -> bool:
 
 
 def _is_test_class(node: ast.ClassDef) -> bool:
-    for base in node.bases:
-        # class TestSubclass(TestCase)
-        if isinstance(base, ast.Name) and base.id == "TestCase":
-            return True
-        # class TestSubclass(common_utils.TestCase)
-        if isinstance(base, ast.Attribute) and base.attr == "TestCase":
+    # Identify test classes by the presence of test_* methods rather than
+    # inheritance. Resolving TestCase inheritance through AST is incomplete
+    # because subclasses can be defined indirectly (e.g. NNTestCase, JitTestCase).
+    for stmt in node.body:
+        if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_"):
             return True
     return False
 
@@ -121,52 +143,6 @@ def _extract_hw_classification_value(assign_node: ast.AST) -> str | None:
     return None
 
 
-def _check_accelerator_methods(node: ast.ClassDef, filename: str) -> list[LintMessage]:
-    """ACCELERATOR classes: every test_* method must accept device/devices."""
-    messages: list[LintMessage] = []
-    for stmt in node.body:
-        if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_"):
-            params = (
-                [a.arg for a in stmt.args.args]
-                + [a.arg for a in stmt.args.posonlyargs]
-                + [a.arg for a in stmt.args.kwonlyargs]
-            )
-            if "device" not in params and "devices" not in params:
-                messages.append(
-                    LintMessage(
-                        path=filename,
-                        line=stmt.lineno,
-                        char=None,
-                        code=LINTER_CODE,
-                        severity=LintSeverity.ERROR,
-                        name=f"[{HW_CLASSIFICATION_ATTR}]",
-                        original=None,
-                        replacement=None,
-                        description=(
-                            f"ACCELERATOR test method '{node.name}.{stmt.name}' "
-                            f"must accept a 'device' or 'devices' parameter."
-                        ),
-                    )
-                )
-    return messages
-
-
-# Sub-directories whose test classes are instantiated in a separate file.
-CROSS_FILE_INSTANTIATION = {
-    "test/ao/sparsity": "test/test_ao_sparsity.py",
-    "test/quantization": "test/test_quantization.py",
-}
-
-
-def _class_is_instantiated(class_name: str, rel_path: str, tree: ast.Module) -> bool:
-    """Check if *class_name* is passed to ``instantiate_device_type_tests``."""
-    for prefix, agg_file in CROSS_FILE_INSTANTIATION.items():
-        if rel_path.startswith(prefix):
-            return _check_instantiation_in_file(agg_file, class_name)
-
-    return _check_instantiation_in_tree(tree, class_name)
-
-
 def _check_instantiation_in_tree(tree: ast.Module, class_name: str) -> bool:
     """Scan module-level statements for ``instantiate_device_type_tests(ClassName, ...)``."""
     for stmt in tree.body:
@@ -182,16 +158,143 @@ def _check_instantiation_in_tree(tree: ast.Module, class_name: str) -> bool:
     return False
 
 
-def _check_instantiation_in_file(filepath: str, class_name: str) -> bool:
-    try:
-        tree = ast.parse(Path(filepath).read_text(encoding="utf-8"), filename=filepath)
-    except (OSError, SyntaxError) as e:
-        raise RuntimeError(f"Failed to load Python source '{filepath}'") from e
+@dataclass
+class RuleContext:
+    """Context passed to each rule function during classification checks."""
 
-    return _check_instantiation_in_tree(tree, class_name)
+    filename: str
+    rel_path: str
+    class_node: ast.ClassDef
+    tree: ast.Module
+    classification: str
 
 
-def _check_file(filename: str) -> list[LintMessage]:
+RuleFunc = Callable[[RuleContext], list[LintMessage]]
+rules: dict[str, list[RuleFunc]] = {}
+
+
+def _register(*groups: str) -> Callable[[RuleFunc], RuleFunc]:
+    """Decorator: register a rule function into one or more classification groups.
+
+    Example::
+
+        @_register(ACCELERATOR)
+        def check_method_params(ctx): ...
+
+
+        @_register(GENERIC, CPU, CUDA)
+        def check_no_device_param(ctx): ...
+    """
+
+    def decorator(fn: RuleFunc) -> RuleFunc:
+        for g in groups:
+            rules.setdefault(g, []).append(fn)
+        return fn
+
+    return decorator
+
+
+def _collect_params(stmt: ast.FunctionDef) -> set[str]:
+    return {
+        a.arg for a in stmt.args.args + stmt.args.posonlyargs + stmt.args.kwonlyargs
+    }
+
+
+@_register(GENERIC, CPU, CUDA, MPS, XPU)
+def _check_no_device_param(ctx: RuleContext) -> list[LintMessage]:
+    """Non-accelerator classes: test methods must not accept device/devices."""
+    messages: list[LintMessage] = []
+    for stmt in ctx.class_node.body:
+        if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_"):
+            params = _collect_params(stmt)
+            if "device" in params or "devices" in params:
+                messages.append(
+                    create_error_msg(
+                        ctx.filename,
+                        stmt.lineno,
+                        f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
+                        f"must not accept a 'device' or 'devices' parameter.",
+                    )
+                )
+    return messages
+
+
+@_register(ACCELERATOR)
+def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
+    """ACCELERATOR classes: every test_* method must accept device/devices."""
+    messages: list[LintMessage] = []
+    for stmt in ctx.class_node.body:
+        if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_"):
+            params = _collect_params(stmt)
+            if "device" not in params and "devices" not in params:
+                messages.append(
+                    create_error_msg(
+                        ctx.filename,
+                        stmt.lineno,
+                        f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
+                        f"must accept a 'device' or 'devices' parameter.",
+                    )
+                )
+    return messages
+
+
+@_register(ACCELERATOR)
+def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
+    """ACCELERATOR classes: test methods must not use only* decorators except onlyAccelerator."""
+    messages: list[LintMessage] = []
+    for stmt in ctx.class_node.body:
+        if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_"):
+            for dec in stmt.decorator_list:
+                name = None
+                if isinstance(dec, ast.Name):
+                    name = dec.id
+                elif isinstance(dec, ast.Attribute):
+                    name = dec.attr
+                if (
+                    name is not None
+                    and name.startswith("only")
+                    and name != "onlyAccelerator"
+                ):
+                    messages.append(
+                        create_error_msg(
+                            ctx.filename,
+                            stmt.lineno,
+                            f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
+                            f"must not use '@{name}' decorators except onlyAccelerator",
+                        )
+                    )
+    return messages
+
+
+@_register(ACCELERATOR)
+def _check_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
+    if not _check_instantiation_in_tree(ctx.tree, ctx.class_node.name):
+        return [
+            create_error_msg(
+                ctx.filename,
+                ctx.class_node.lineno,
+                f"{ctx.classification} class '{ctx.class_node.name}' must be "
+                f"instantiated via 'instantiate_device_type_tests'.",
+            )
+        ]
+    return []
+
+
+@_register(GENERIC, CPU, CUDA, MPS, XPU)
+def _check_must_not_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
+    if _check_instantiation_in_tree(ctx.tree, ctx.class_node.name):
+        return [
+            create_error_msg(
+                ctx.filename,
+                ctx.class_node.lineno,
+                f"{ctx.classification} class '{ctx.class_node.name}' must not be "
+                f"instantiated via 'instantiate_device_type_tests'.",
+            )
+        ]
+    return []
+
+
+def check_file(filename: str) -> list[LintMessage]:
     if not _is_test_file(filename):
         return []
 
@@ -218,19 +321,11 @@ def _check_file(filename: str) -> list[LintMessage]:
         # Missing hw_classification attribute
         if assign_node is None:
             messages.append(
-                LintMessage(
-                    path=filename,
-                    line=node.lineno,
-                    char=None,
-                    code=LINTER_CODE,
-                    severity=LintSeverity.ERROR,
-                    name=f"[{HW_CLASSIFICATION_ATTR}]",
-                    original=None,
-                    replacement=None,
-                    description=(
-                        f"Test class '{node.name}' must declare "
-                        f"{HW_CLASSIFICATION_ATTR} = HardwareClassification.<MEMBER>."
-                    ),
+                create_error_msg(
+                    filename,
+                    node.lineno,
+                    f"Test class '{node.name}' must declare "
+                    f"{HW_CLASSIFICATION_ATTR} = HardwareClassification.<MEMBER>.",
                 )
             )
             continue
@@ -240,40 +335,25 @@ def _check_file(filename: str) -> list[LintMessage]:
         # Value is not HardwareClassification.enum_member
         if value is None:
             messages.append(
-                LintMessage(
-                    path=filename,
-                    line=assign_node.lineno,
-                    char=None,
-                    code=LINTER_CODE,
-                    severity=LintSeverity.ERROR,
-                    name=f"[{HW_CLASSIFICATION_ATTR}]",
-                    original=None,
-                    replacement=None,
-                    description=(
-                        f"Could not determine {HW_CLASSIFICATION_ATTR} value for class '{node.name}'. "
-                        f"Use 'HardwareClassification.<MEMBER>'."
-                    ),
+                create_error_msg(
+                    filename,
+                    assign_node.lineno,
+                    f"Could not determine {HW_CLASSIFICATION_ATTR} value for class '{node.name}'. "
+                    f"Use 'HardwareClassification.<MEMBER>'.",
                 )
             )
-        elif value == ACCELERATOR:
-            messages.extend(_check_accelerator_methods(node, filename))
-            if not _class_is_instantiated(node.name, rel_path, tree):
-                messages.append(
-                    LintMessage(
-                        path=filename,
-                        line=node.lineno,
-                        char=None,
-                        code=LINTER_CODE,
-                        severity=LintSeverity.ERROR,
-                        name=f"[{HW_CLASSIFICATION_ATTR}]",
-                        original=None,
-                        replacement=None,
-                        description=(
-                            f"ACCELERATOR class '{node.name}' must be "
-                            f"instantiated via 'instantiate_device_type_tests'."
-                        ),
-                    )
-                )
+            continue
+
+        # Dispatch to registered rule functions for this classification
+        ctx = RuleContext(
+            filename=filename,
+            rel_path=rel_path,
+            class_node=node,
+            tree=tree,
+            classification=value,
+        )
+        for rule in rules.get(value, []):
+            messages.extend(rule(ctx))
 
     return messages
 
@@ -287,7 +367,7 @@ def main() -> None:
     args = parser.parse_args()
 
     with mp.Pool(8) as pool:
-        results = pool.map(_check_file, args.filenames)
+        results = pool.map(check_file, args.filenames)
 
     for msgs in results:
         for msg in msgs:
