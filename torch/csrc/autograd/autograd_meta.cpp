@@ -89,7 +89,7 @@ namespace utils {
 // goals:
 // - When properties of the primal are checked in composite op's to determine
 //   control flow, the code path decided upon is also reasonable for the tangent
-// - Make sure that when the same as_strided is applied to both primal and
+// - Make sure that when the same as_strided is applied to both primal
 //   and tangent, it behaves similarly.
 //
 // We do that by checking:
