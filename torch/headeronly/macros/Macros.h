@@ -554,7 +554,7 @@ __host__ __device__
     abort();                     \
   }
 #else
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && (defined(__HIP__) || defined(__CUDACC__))
 template <unsigned N, unsigned F, unsigned M>
 __device__ __attribute__((flatten)) void c10_rocm_assert_literal(
     const char (&prefix)[N],
@@ -594,14 +594,17 @@ __device__ inline void c10_rocm_kernel_assert(
   c10_rocm_assert_literal(prefix, func, suffix);
 }
 
-#define CUDA_KERNEL_ASSERT(cond)                                          \
-  do {                                                                    \
-    if C10_UNLIKELY(!(cond)) {                                            \
-      c10_rocm_kernel_assert(                                             \
-          #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__, \
-          __FILE__ ":" C10_STRINGIZE(__LINE__) ":",                       \
-          ": Device-side assertion " #cond " failed.\n");                  \
-    }                                                                     \
+#define CUDA_KERNEL_ASSERT(cond)                          \
+  do {                                                    \
+    if C10_UNLIKELY (!(cond)) {                           \
+      c10_rocm_kernel_assert(                             \
+          #cond,                                          \
+          __FILE__,                                       \
+          static_cast<unsigned int>(__LINE__),            \
+          __func__,                                       \
+          __FILE__ ":" C10_STRINGIZE(__LINE__) ":",       \
+          ": Device-side assertion " #cond " failed.\n"); \
+    }                                                     \
   } while (0)
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
