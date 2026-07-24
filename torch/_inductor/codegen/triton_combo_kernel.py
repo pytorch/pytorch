@@ -297,6 +297,13 @@ class SubKernelCode:
 
 
 @dataclass
+class NoinlineSubKernelCall:
+    params: list[ArgName]
+    call_args: list[str]
+    signature_key: tuple[Any, ...]
+
+
+@dataclass
 class SharedBody:
     body: IndentedBuffer
     placeholder_names: list[str]
@@ -617,6 +624,8 @@ class ComboKernel(Kernel):
         self.stitched_block_config: dict[str, int] | None = None
         # Distinct winner launch configs across the subkernels; seeds the combo's kernel-level autotune.
         self.combo_launch_candidates: list[ComboLaunchConfig] = []
+        self.noinline_sub_kernel_calls: list[NoinlineSubKernelCall] = []
+        self.noinline_arg_name_maps: list[dict[str, str]] = []
 
     @property
     def bake_blocks(self) -> bool:
@@ -629,9 +638,10 @@ class ComboKernel(Kernel):
         sub_kernel = triton_kernel
         # pyrefly: ignore [bad-assignment]
         metrics.generated_kernel_count -= 1
-        sub_kernel.args = self.args
-        sub_kernel.iter_vars_count = self.iter_vars_count
-        sub_kernel.cse.iter_buffer_ids = self.cse.iter_buffer_ids
+        if not self.per_subkernel_blocks:
+            sub_kernel.args = self.args
+            sub_kernel.iter_vars_count = self.iter_vars_count
+            sub_kernel.cse.iter_buffer_ids = self.cse.iter_buffer_ids
         self.sub_kernels.append(sub_kernel)
         return sub_kernel
 
@@ -714,14 +724,16 @@ class ComboKernel(Kernel):
 
             if tree.is_reduction and sub_kernel.persistent_reduction:
                 val = TritonKernel._get_persistent_RBLOCK(tree.numel)
-                lhs_names.append(f"{tree.prefix.upper()}BLOCK_{num}")
+                suffix = "" if self.per_subkernel_blocks else f"_{num}"
+                lhs_names.append(f"{tree.prefix.upper()}BLOCK{suffix}")
                 code.writeline(
-                    f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
+                    f"{tree.prefix.upper()}BLOCK{suffix}: tl.constexpr = {val}"
                 )
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
-                lhs_names.append(f"XBLOCK_{num}")
-                code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
+                suffix = "" if self.per_subkernel_blocks else f"_{num}"
+                lhs_names.append(f"XBLOCK{suffix}")
+                code.writeline(f"XBLOCK{suffix}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
             elif tree.prefix in ("x", "y") and self.per_subkernel_blocks:
                 uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
@@ -1101,6 +1113,121 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
+    def _merge_noinline_kernel_args(self) -> None:
+        self.noinline_arg_name_maps = [
+            self._merge_noinline_kernel_arg(sub_kernel)
+            for sub_kernel in self.sub_kernels
+        ]
+
+    def _merge_noinline_kernel_arg(self, sub_kernel: TritonKernel) -> dict[str, str]:
+        # Each noinline body codegens in a local namespace, so different members
+        # can all have local names like in_ptr0/out_ptr0. Replay those local args
+        # into the combo-main args and remember the chosen names, e.g.
+        # local in_ptr0(buf_b) -> combo main in_ptr1.
+        local_args = sub_kernel.args
+        local_to_main: dict[str, str] = {}
+        local_argdefs, _, local_signature, _ = local_args.python_argdefs()
+
+        for argdef, signature in zip(local_argdefs, local_signature, strict=True):
+            if isinstance(signature, TensorArg):
+                buffer = signature.buffer
+                inplaced = local_args.inplace_buffers.get(buffer)
+                if (
+                    inplaced is not None
+                    and not isinstance(inplaced, RemovedArg)
+                    and inplaced.inner_name == argdef.name
+                ):
+                    input_name, *output_names = inplaced.other_names
+                    for output_name in output_names:
+                        if output_name not in self.args.inplace_buffers:
+                            self.args.make_inplace(input_name, output_name)
+                    local_to_main[argdef.name] = self.args.output(output_names[-1])
+                elif local_args.output_buffers.get(buffer) == argdef.name:
+                    local_to_main[argdef.name] = self.args.output(buffer)
+                else:
+                    local_to_main[argdef.name] = self.args.input(buffer)
+            elif isinstance(signature, SizeArg):
+                expr = signature.expr
+                if isinstance(expr, Symbol):
+                    local_to_main[argdef.name] = self.args.size(expr)
+                elif expr not in self.args.sizevars:
+                    self.args.sizevars[expr] = argdef.name
+                    local_to_main[argdef.name] = argdef.name
+                else:
+                    local_to_main[argdef.name] = self.args.sizevars[expr]
+
+        return local_to_main
+
+    def _noinline_block_args_for_sub_kernel(
+        self, sub_kernel: TritonKernel, num: int
+    ) -> list[tuple[ArgName, str]]:
+        block_args: list[tuple[ArgName, str]] = []
+        for tree in sub_kernel.range_trees:
+            if tree.prefix == "x" and sub_kernel.no_x_dim:
+                continue
+            if tree.prefix in ("x", "y") or (
+                tree.is_reduction
+                and sub_kernel.inside_reduction
+                and not sub_kernel.persistent_reduction
+            ):
+                name = f"{tree.prefix.upper()}BLOCK"
+                block_args.append((ArgName(name, is_constexpr=True), f"{name}_{num}"))
+        return block_args
+
+    def _signature_key_part(self, arg: Any) -> tuple[Any, ...]:
+        if isinstance(arg, TensorArg):
+            return ("tensor", arg.dtype, is_unaligned_buffer(arg))
+        if isinstance(arg, SizeArg):
+            return ("size", type(arg.expr).__name__)
+        if isinstance(arg, ConstexprArg):
+            return ("constexpr", arg.name)
+        return (type(arg).__name__, getattr(arg, "name", None))
+
+    def _prepare_noinline_sub_kernel_calls(self) -> None:
+        calls: list[NoinlineSubKernelCall] = []
+        for num, sub_kernel in enumerate(self.sub_kernels):
+            local_to_main = self.noinline_arg_name_maps[num]
+            local_argdefs, _, local_signature, _ = sub_kernel.args.python_argdefs()
+            params = list(local_argdefs)
+            call_args = [local_to_main[arg.name] for arg in local_argdefs]
+            signature_key: list[Any] = [
+                self._signature_key_part(arg) for arg in local_signature
+            ]
+
+            for tree in sub_kernel.active_range_trees():
+                if isinstance(tree.numel, (Integer, int)):
+                    continue
+                if tree.is_reduction and not sub_kernel.inside_reduction:
+                    continue
+                params.append(ArgName(f"{tree.prefix}numel"))
+                call_args.append(f"{tree.prefix}numel_{num}")
+                signature_key.append(("range_numel", tree.prefix))
+
+            params.append(ArgName("x_pid_offset"))
+            call_args.append("x_pid_offset")
+            signature_key.append(("dispatch", "x_pid_offset"))
+            if any(tree.prefix == "y" for tree in sub_kernel.range_trees):
+                params.append(ArgName("y_pid_offset"))
+                call_args.append("y_pid_offset")
+                signature_key.append(("dispatch", "y_pid_offset"))
+
+            for param, call_arg in self._noinline_block_args_for_sub_kernel(
+                sub_kernel, num
+            ):
+                params.append(param)
+                call_args.append(call_arg)
+                signature_key.append(("block", param.full_name()))
+
+            calls.append(
+                NoinlineSubKernelCall(
+                    params=params,
+                    call_args=call_args,
+                    signature_key=tuple(signature_key),
+                )
+            )
+
+        self.noinline_sub_kernel_calls = calls
+
     def _can_share_body(
         self,
         heuristics_list: list[str],
@@ -1380,9 +1507,12 @@ class ComboKernel(Kernel):
             sub_kernel.codegen_prologue(sub_kernel.body)
             sub_kernel.codegen_body()
             sub_kernel._filter_pdl(sub_kernel.body)
-            body = self.uniquify_block_sizes(
-                sub_kernel.body, num, sub_kernel_setup.uniquify_block_sizes
+            uniquify = (
+                []
+                if self.per_subkernel_blocks
+                else sub_kernel_setup.uniquify_block_sizes
             )
+            body = self.uniquify_block_sizes(sub_kernel.body, num, uniquify)
             sub_kernel_codes.append(
                 SubKernelCode(
                     setup=setup,
@@ -1460,20 +1590,37 @@ class ComboKernel(Kernel):
         (caller falls back to inline splicing)."""
         call_lines: list[str] = []
         defs = IndentedBuffer()
+        emitted: dict[tuple[Any, ...], str] = {}
         for num, sub_kernel_code in enumerate(sub_kernel_codes):
-            params = self._noinline_sub_kernel_params(sub_kernel_code, num, argdefs)
-            if params is None:
-                return None
-            sub_name = f"{kernel_name}_body_{num}"
-            defs.writeline("")
-            defs.writeline("@triton.jit(noinline=True)")
-            defs.writeline(
-                f"def {sub_name}({', '.join(p.full_name() for p in params)}):"
-            )
-            with defs.indent():
-                defs.splice(sub_kernel_code.setup)
-                defs.splice(sub_kernel_code.body)
-            call_lines.append(f"{sub_name}({', '.join(p.name for p in params)})")
+            if self.per_subkernel_blocks:
+                noinline_call = self.noinline_sub_kernel_calls[num]
+                params = noinline_call.params
+                call_args = noinline_call.call_args
+                key = (
+                    sub_kernel_code.setup.getvalue(),
+                    sub_kernel_code.body.getvalue(),
+                    noinline_call.signature_key,
+                )
+            else:
+                params = self._noinline_sub_kernel_params(sub_kernel_code, num, argdefs)
+                if params is None:
+                    return None
+                call_args = [p.name for p in params]
+                key = (num,)
+
+            sub_name = emitted.get(key)
+            if sub_name is None:
+                sub_name = f"{kernel_name}_body_{len(emitted)}"
+                emitted[key] = sub_name
+                defs.writeline("")
+                defs.writeline("@triton.jit(noinline=True)")
+                defs.writeline(
+                    f"def {sub_name}({', '.join(p.full_name() for p in params)}):"
+                )
+                with defs.indent():
+                    defs.splice(sub_kernel_code.setup)
+                    defs.splice(sub_kernel_code.body)
+            call_lines.append(f"{sub_name}({', '.join(call_args)})")
         defs.writeline("")
         code.splice(defs)
         return call_lines
@@ -1541,13 +1688,18 @@ class ComboKernel(Kernel):
                     code.splice(helper)
                     seen_helpers.add(helper)
 
+        if self.per_subkernel_blocks:
+            self._merge_noinline_kernel_args()
+
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
         block_args = self.get_block_args()
-        if not self.bake_blocks:
+        if not self.bake_blocks or self.per_subkernel_blocks:
             argdefs.extend([ArgName(x.name, is_constexpr=True) for x in block_args])
             if triton_version_uses_attrs_dict():
                 signature.extend(block_args)
+        if self.per_subkernel_blocks:
+            self._prepare_noinline_sub_kernel_calls()
 
         kernel_name = name or str(Placeholder.KERNEL_NAME)
 
@@ -1582,7 +1734,7 @@ class ComboKernel(Kernel):
             if config.triton.proton_profiling:
                 code.writeline(f'pl.enter_scope("{kernel_name}")')
             code.splice("pid = tl.program_id(0)")
-            if self.bake_blocks:
+            if self.bake_blocks and not self.per_subkernel_blocks:
                 self.codegen_blocks(code)
 
             shared_body = self._try_get_shared_body(
