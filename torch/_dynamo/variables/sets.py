@@ -37,7 +37,7 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import Method, MethodFlags, ValueMutationNew, VariableTracker
+from .base import Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -493,25 +493,25 @@ class SetVariable(VariableTracker):
         return ConstantVariable.create(None)
 
     tp_methods = {
-        "add": Method(add, MethodFlags.O),
-        "pop": Method(pop, MethodFlags.NOARGS),
-        "isdisjoint": Method(isdisjoint, MethodFlags.O),
-        "intersection": Method(intersection, MethodFlags.VARARGS),
-        "intersection_update": Method(intersection_update, MethodFlags.VARARGS),
-        "union": Method(union, MethodFlags.VARARGS),
-        "difference": Method(difference, MethodFlags.VARARGS),
-        "difference_update": Method(difference_update, MethodFlags.VARARGS),
-        "symmetric_difference": Method(symmetric_difference, MethodFlags.O),
+        "add": Method(add, "add"),
+        "pop": Method(pop, "pop"),
+        "isdisjoint": Method(isdisjoint, "isdisjoint"),
+        "intersection": Method(intersection, "intersection"),
+        "intersection_update": Method(intersection_update, "intersection_update"),
+        "union": Method(union, "union"),
+        "difference": Method(difference, "difference"),
+        "difference_update": Method(difference_update, "difference_update"),
+        "symmetric_difference": Method(symmetric_difference, "symmetric_difference"),
         "symmetric_difference_update": Method(
-            symmetric_difference_update, MethodFlags.O
+            symmetric_difference_update, "symmetric_difference_update"
         ),
-        "update": Method(update, MethodFlags.VARARGS),
-        "remove": Method(remove, MethodFlags.O),
-        "discard": Method(discard, MethodFlags.O),
-        "issubset": Method(issubset, MethodFlags.O),
-        "issuperset": Method(issuperset, MethodFlags.O),
-        "copy": Method(copy, MethodFlags.NOARGS),
-        "clear": Method(clear, MethodFlags.NOARGS),
+        "update": Method(update, "update"),
+        "remove": Method(remove, "remove"),
+        "discard": Method(discard, "discard"),
+        "issubset": Method(issubset, "issubset"),
+        "issuperset": Method(issuperset, "issuperset"),
+        "copy": Method(copy, "copy"),
+        "clear": Method(clear, "clear"),
     }
 
     def call_method(
@@ -845,6 +845,8 @@ class OrderedSetClassVariable(VariableTracker):
 
 
 class OrderedSetVariable(SetVariable):
+    _cpython_type: OrderedSet
+
     def debug_repr(self) -> str:
         if not self.items:
             return "OrderedSet([])"
@@ -1001,10 +1003,10 @@ class FrozensetVariable(SetVariable):
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
     tp_methods = {
-        "copy": Method(copy, MethodFlags.NOARGS),
-        "difference": Method(difference, MethodFlags.VARARGS),
-        "intersection": Method(intersection, MethodFlags.VARARGS),
-        "symmetric_difference": Method(symmetric_difference, MethodFlags.O),
+        "copy": Method(copy, "copy"),
+        "difference": Method(difference, "difference"),
+        "intersection": Method(intersection, "intersection"),
+        "symmetric_difference": Method(symmetric_difference, "symmetric_difference"),
     }
 
     def call_method(
