@@ -78,6 +78,8 @@ struct BufferBlock {
   static uint64_t buffer_counter;
   // Metal events used to sync GPU/CPU operations on the shared-storage buffers
   MPSEventPtr event;
+  // Stream for which this buffer was allocated.
+  MPSStream* stream = nullptr;
 
   BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr)
       : buffer(Buffer), size(Size), requested_size(RequestedSize), heap(Heap), buf_id(Buffer ? ++buffer_counter : 0) {}
@@ -260,6 +262,11 @@ struct BufferPool {
   std::set<HeapBlock*, HeapComparison> heaps;
   // list of only "available" buffers in the pool (i.e., buffers not in-use)
   std::set<BufferBlock*, BufferComparison> available_buffers;
+  // List of available buffers partitioned by which stream allocated them.
+  // Buffers can only be reused by the same stream. Allowing buffers to be used
+  // by a different stream would require an expensive cross-stream
+  // synchronization.
+  ska::flat_hash_map<MPSStream*, std::set<BufferBlock*, BufferComparison>> available_buffers_by_stream;
   // list of buffers that are in a state of "limbo" where they've already been freed
   // from PyTorch-side, but were not returned to pool due to still being
   // in-use by command buffers with retainCount > 1. In this state, the buffer is
@@ -423,6 +430,12 @@ class MPSHeapAllocatorImpl {
   void free_buffer(BufferBlock* buffer_block);
   // returns true if the container heap is also released
   bool release_buffer(BufferBlock* buffer_block, bool remove_empty_heap = true);
+  // adds/removes a buffer in both `pool.available_buffers` and
+  // `pool.available_buffers_by_stream[buffer_block->stream]`, so the two stay
+  // in sync. `insert_available_buffer` returns whether the buffer was newly
+  // inserted.
+  bool insert_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
+  void erase_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(AllocParams& params);
   bool release_cached_buffers();
