@@ -17,6 +17,7 @@ jobs:
       id-token: write
     secrets: inherit
     with:
+      model: global.anthropic.claude-fable-5
       additional_claude_args: '--allowedTools Skill'
       append_system_prompt: |
         When asked to review a PR, always use the /pr-review skill first.
