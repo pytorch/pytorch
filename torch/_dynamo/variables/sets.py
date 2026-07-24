@@ -339,13 +339,23 @@ class SetVariable(VariableTracker):
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
         return None
 
-    def add(self, tx, args, kwargs):
+    def add(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # Convert add to __setitem__ with None value
         tx.output.side_effects.mutation(self)
         self.items[HashableTracker(args[0])] = SetVariable._default_value()
         return ConstantVariable.create(None)
 
-    def pop(self, tx, args, kwargs):
+    def pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # Choose an item at random and pop it
         try:
             result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
@@ -356,7 +366,12 @@ class SetVariable(VariableTracker):
         self.items.pop(HashableTracker(result))
         return result
 
-    def isdisjoint(self, tx, args, kwargs):
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         fast = self._try_fast_set_method(tx, "isdisjoint", args, kwargs)
         if fast is not None:
             return fast
@@ -365,7 +380,12 @@ class SetVariable(VariableTracker):
                 return ConstantVariable.create(False)
         return ConstantVariable.create(True)
 
-    def intersection(self, tx, args, kwargs):
+    def intersection(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         fast = self._try_fast_set_method(tx, "intersection", args, kwargs)
         if fast is not None:
             return fast
@@ -375,7 +395,12 @@ class SetVariable(VariableTracker):
             out_items = {k: v for k, v in out_items.items() if k in other_keys}
         return self._new_set(out_items)
 
-    def intersection_update(self, tx, args, kwargs):
+    def intersection_update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         kept = dict(self.items)
         for other in args:
             other_keys = set(self._operand_keys(tx, other))
@@ -386,7 +411,12 @@ class SetVariable(VariableTracker):
         self.items.update(kept)
         return ConstantVariable.create(None)
 
-    def union(self, tx, args, kwargs):
+    def union(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         fast = self._try_fast_set_method(tx, "union", args, kwargs)
         if fast is not None:
             return fast
@@ -396,7 +426,12 @@ class SetVariable(VariableTracker):
                 out_items.setdefault(key, SetVariable._default_value())
         return self._new_set(out_items)
 
-    def difference(self, tx, args, kwargs):
+    def difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         fast = self._try_fast_set_method(tx, "difference", args, kwargs)
         if fast is not None:
             return fast
@@ -406,7 +441,12 @@ class SetVariable(VariableTracker):
                 out_items.pop(key, None)
         return self._new_set(out_items)
 
-    def difference_update(self, tx, args, kwargs):
+    def difference_update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
         for other in args:
@@ -414,7 +454,12 @@ class SetVariable(VariableTracker):
                 self.items.pop(key, None)
         return ConstantVariable.create(None)
 
-    def symmetric_difference(self, tx, args, kwargs):
+    def symmetric_difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         fast = self._try_fast_set_method(tx, "symmetric_difference", args, kwargs)
         if fast is not None:
             return fast
@@ -425,7 +470,12 @@ class SetVariable(VariableTracker):
         out_items.update({k: v for k, v in other.items() if k not in self.items})
         return self._new_set(out_items)
 
-    def symmetric_difference_update(self, tx, args, kwargs):
+    def symmetric_difference_update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         other = dict.fromkeys(
             self._operand_keys(tx, args[0]), SetVariable._default_value()
         )
@@ -437,7 +487,12 @@ class SetVariable(VariableTracker):
         self.items.update(new_items)
         return ConstantVariable.create(None)
 
-    def update(self, tx, args, kwargs):
+    def update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
         tx.output.side_effects.mutation(self)
@@ -446,7 +501,12 @@ class SetVariable(VariableTracker):
                 self.items.setdefault(key, SetVariable._default_value())
         return ConstantVariable.create(None)
 
-    def remove(self, tx, args, kwargs):
+    def remove(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         if not self.sq_contains(tx, args[0]).as_python_constant():
             raise_observed_exception(KeyError, tx, args=[args[0]])
         self.should_reconstruct_all = True
@@ -457,7 +517,12 @@ class SetVariable(VariableTracker):
         self.items.pop(HashableTracker(key))
         return ConstantVariable.create(None)
 
-    def discard(self, tx, args, kwargs):
+    def discard(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         if self.sq_contains(tx, args[0]).as_python_constant():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
@@ -477,16 +542,36 @@ class SetVariable(VariableTracker):
             other = SourcelessBuilder.create(tx, set).call_function(tx, [other], {})
         return SourcelessBuilder.create(tx, op).call_function(tx, [self, other], {})
 
-    def issubset(self, tx, args, kwargs):
+    def issubset(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._ordering_test(tx, args, operator.le)
 
-    def issuperset(self, tx, args, kwargs):
+    def issuperset(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return self._ordering_test(tx, args, operator.ge)
 
-    def copy(self, tx, args, kwargs):
+    def copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         return set_copy(self)
 
-    def clear(self, tx, args, kwargs):
+    def clear(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
         self.items.clear()
@@ -747,7 +832,7 @@ class OrderedSetClassVariable(VariableTracker):
 
 
 class OrderedSetVariable(SetVariable):
-    _cpython_type: OrderedSet
+    _cpython_type = OrderedSet
 
     def debug_repr(self) -> str:
         if not self.items:
@@ -880,7 +965,12 @@ class FrozensetVariable(SetVariable):
             ]
         )
 
-    def copy(self, tx, args, kwargs):
+    def copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         if args or kwargs:
             raise_args_mismatch(
                 tx,
@@ -892,15 +982,30 @@ class FrozensetVariable(SetVariable):
             return self
         return SetVariable.copy(self, tx, args, kwargs)
 
-    def difference(self, tx, args, kwargs):
+    def difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         r = SetVariable.difference(self, tx, args, kwargs)
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
-    def intersection(self, tx, args, kwargs):
+    def intersection(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         r = SetVariable.intersection(self, tx, args, kwargs)
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
-    def symmetric_difference(self, tx, args, kwargs):
+    def symmetric_difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         r = SetVariable.symmetric_difference(self, tx, args, kwargs)
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 

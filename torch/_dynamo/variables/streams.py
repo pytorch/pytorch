@@ -420,7 +420,12 @@ class StreamVariable(StreamContextVariable):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def wait_event(self, tx, args, kwargs):
+    def wait_event(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         event_arg = args[0]
         if not isinstance(event_arg, EventVariable):
             raise AssertionError(f"Expected EventVariable, got {type(event_arg)}")
@@ -432,7 +437,12 @@ class StreamVariable(StreamContextVariable):
         )
         return ConstantVariable.create(None)
 
-    def wait_stream(self, tx, args, kwargs):
+    def wait_stream(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         other_stream = args[0]
         if not isinstance(other_stream, StreamVariable):
             raise AssertionError(f"Expected StreamVariable, got {type(other_stream)}")
@@ -444,7 +454,12 @@ class StreamVariable(StreamContextVariable):
         )
         return ConstantVariable.create(None)
 
-    def synchronize(self, tx, args, kwargs):
+    def synchronize(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.synchronize_stream,
@@ -453,7 +468,12 @@ class StreamVariable(StreamContextVariable):
         )
         return ConstantVariable.create(None)
 
-    def query(self, tx, args, kwargs):
+    def query(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
@@ -465,7 +485,12 @@ class StreamVariable(StreamContextVariable):
             ),
         )
 
-    def record_event(self, tx, args, kwargs):
+    def record_event(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
         tx.output.check_event_record_after_input_mutation(id(self.value))
@@ -643,7 +668,12 @@ class EventVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def wait(self, tx, args, kwargs):
+    def wait(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         _, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
         tx.output.create_proxy(
             "call_function",
@@ -656,7 +686,12 @@ class EventVariable(VariableTracker):
         )
         return ConstantVariable.create(None)
 
-    def record(self, tx, args, kwargs):
+    def record(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
         tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
         tx.output.create_proxy(
@@ -670,7 +705,12 @@ class EventVariable(VariableTracker):
         )
         return ConstantVariable.create(None)
 
-    def synchronize(self, tx, args, kwargs):
+    def synchronize(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.synchronize_event,
@@ -679,7 +719,12 @@ class EventVariable(VariableTracker):
         )
         return ConstantVariable.create(None)
 
-    def query(self, tx, args, kwargs):
+    def query(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
