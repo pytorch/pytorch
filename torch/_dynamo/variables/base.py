@@ -344,7 +344,7 @@ class Method:
     handler: Callable[..., VariableTracker | None]
     flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
 
-    def invoke(
+    def __call__(
         self,
         vt: VariableTracker,
         tx: InstructionTranslatorBase,
@@ -947,10 +947,10 @@ class SlotDef:
     slot: int
     wrapper: WrapperType
 
-    def invoke(
+    def __call__(
         self,
-        tx: InstructionTranslatorBase,
         vt: VariableTracker,
+        tx: InstructionTranslatorBase,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -1466,10 +1466,7 @@ _SLOTDEFS: list[SlotDef] = [
 
 
 @functools.cache
-def _tp_dict(obj_type: type) -> dict[str, SlotDef]:
-    # First-wins per name (mirrors add_operators skipping already-present names):
-    # for a name with entries in multiple slot groups (e.g. __add__ -> nb_add
-    # and sq_concat), the earlier _SLOTDEFS entry the type implements wins.
+def _compute_slotdefs(obj_type: type) -> dict[str, SlotDef]:
     masks = get_type_slots(obj_type)
     d: dict[str, SlotDef] = {}
     for sd in _SLOTDEFS:
@@ -1561,8 +1558,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     return table[name]
         return None
 
-    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
-        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+    def lookup_tp_getset(self, name: str) -> GetSet | None:
+        return self._lookup_tp_table(name, "tp_getset")
+
+    def lookup_tp_member(self, name: str) -> Member | None:
+        return self._lookup_tp_table(name, "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
@@ -1886,7 +1886,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         # tp_getset/tp_members are data descriptors: resolve ahead of the
         # object-protocol walk. A getter returning None declines.
-        getset = self.lookup_tp_getset_member(name)
+        getset = self.lookup_tp_getset(name)
         if getset is not None:
             result = getset.getter(self, tx)
             if result is not None:
@@ -2188,13 +2188,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # (tp_slot) dispatch below, mirroring the old super().call_method path.
         method = self.lookup_tp_method(name)
         if method is not None:
-            result = method.invoke(self, tx, name, args, kwargs)
+            result = method(self, tx, name, args, kwargs)
             if result is not None:
                 return result
 
-        slotdef = self.tp_dict.get(name)
-        if slotdef is not None and hasattr(type(self), slotdef.impl):
-            return slotdef.invoke(tx, self, args, kwargs)
+        slotdef = self._slotdefs.get(name)
+        if slotdef is not None:
+            return slotdef(self, tx, args, kwargs)
 
         if name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
@@ -3084,8 +3084,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return _tp_type(maybe_get_python_type(self)).tp_repr
 
     @property
-    def tp_dict(self):
-        return _tp_dict(maybe_get_python_type(self))
+    def _slotdefs(self):
+        return _compute_slotdefs(maybe_get_python_type(self))
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
