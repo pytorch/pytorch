@@ -152,9 +152,9 @@ ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
 HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
 
-# GPUs on the standard multi-GPU distributed CI runner. Tests needing strictly
-# more (resolved at collection in test/conftest.py) get the `multigpu_extra`
-# marker so a larger-runner config can select just the 3-4 GPU tests.
+# GPUs on the standard multi-GPU distributed CI runner. A larger-runner config
+# selects the tests that need strictly more via `--multigpu-min-gpus` (resolved
+# at collection in test/conftest.py), e.g. `--multigpu-min-gpus 3`.
 STANDARD_DISTRIBUTED_GPUS = 2
 
 
@@ -324,8 +324,8 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
-        # Record the accelerator requirement so the collection-time multigpu
-        # marker (test/conftest.py) can resolve it without running the test.
+        # Record the accelerator requirement so the collection-time GPU-count
+        # resolver (test/conftest.py) can read it without running the test.
         wrapper._min_gpus_required = x
         return wrapper
 
