@@ -643,12 +643,16 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   const bool is_sm90_or_sm10x =
       (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
-  if (is_sm90_or_sm10x) {
-    if (cudnn_version > 92200 && kCuDNNFrontendSupportsD256) {
-      head_dim_limit = 256;
-    } else if (cudnn_version >= 91100 && d_qk == 192 && d_v == 128) {
-      head_dim_limit = 192;
-    }
+  const bool is_unsupported_sm107 =
+      dprops->major == 10 && dprops->minor == 7 &&
+      cudnn_version <= 92500;
+  if (is_sm90_or_sm10x && !is_unsupported_sm107 && cudnn_version > 92200 &&
+      kCuDNNFrontendSupportsD256) {
+    head_dim_limit = 256;
+  } else if (
+      is_sm90_or_sm10x && cudnn_version >= 91100 && d_qk == 192 &&
+      d_v == 128) {
+    head_dim_limit = 192;
   }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
     if (debug) {
@@ -741,9 +745,12 @@ bool check_cudnn_d256_bprop_head_dim(
   const auto d_v = params.value.sym_size(3);
   const bool is_sm90_or_sm10x =
       (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
+  const bool is_unsupported_sm107 =
+      dprops->major == 10 && dprops->minor == 7 &&
+      cudnn_version <= 92500;
   const bool supports_d256 =
       cudnn_version > 92200 && kCuDNNFrontendSupportsD256 &&
-      is_sm90_or_sm10x;
+      is_sm90_or_sm10x && !is_unsupported_sm107;
   if (supports_d256) {
     const bool supports_bprop = (d_qk <= 128 && d_v <= 128) ||
         (d_qk == 192 && d_v == 128) || (d_qk == 256 && d_v == 256);
