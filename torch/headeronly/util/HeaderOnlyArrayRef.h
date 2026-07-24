@@ -266,3 +266,15 @@ namespace torch::headeronly {
 using c10::HeaderOnlyArrayRef;
 using IntHeaderOnlyArrayRef = HeaderOnlyArrayRef<int64_t>;
 } // namespace torch::headeronly
+
+#if __cplusplus >= 202002L
+#include <ranges>
+// HeaderOnlyArrayRef is a non-owning view; iterators remain valid after the
+// HeaderOnlyArrayRef is destroyed. Opt in to the ranges borrowed-range
+// contract so that algorithms like std::ranges::find return real iterators
+// rather than std::ranges::dangling for temporary HeaderOnlyArrayRefs.
+namespace std::ranges {
+template <typename T>
+inline constexpr bool enable_borrowed_range<c10::HeaderOnlyArrayRef<T>> = true;
+} // namespace std::ranges
+#endif

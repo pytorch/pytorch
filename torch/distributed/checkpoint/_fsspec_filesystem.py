@@ -95,7 +95,7 @@ class FileSystem(FileSystemBase):
 # TODO: add the dcp.async_save mixin
 class FsspecWriter(FileSystemWriter):
     """
-    Basic implementation of StorageWriter using FFspec.
+    Basic implementation of StorageWriter using fsspec.
 
     This implementation makes the following assumptions and simplifications:
 
