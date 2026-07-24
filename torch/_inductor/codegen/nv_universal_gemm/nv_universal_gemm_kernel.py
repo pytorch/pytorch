@@ -404,9 +404,9 @@ def _create_gemm_arguments(
 ):
     import cutlass.operators
 
-    if epilogue is not None and variant_name != "GEMM":
+    if epilogue is not None and variant_name == "GROUPED_GEMM":
         raise NotImplementedError(
-            "Epilogue fusion is not yet supported for grouped or scaled GEMM variants"
+            "Epilogue fusion is not yet supported for grouped GEMM"
         )
 
     match variant_name:
@@ -426,11 +426,14 @@ def _create_gemm_arguments(
             a, b, scale_a, scale_b = input_tensors
             scaled_a = ScaledOperand(a, scale_a, scale_mode_a, swizzle_mode_a)
             scaled_b = ScaledOperand(b, scale_b, scale_mode_b, swizzle_mode_b)
+            kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
+            if epilogue is not None:
+                kwargs["epilogue"] = epilogue
             return cutlass.operators.arguments.GemmArguments(
                 scaled_a,
                 scaled_b,
                 out,
-                accumulator_type=accumulator_type,
+                **kwargs,
             )
 
         case "GEMM":
@@ -599,12 +602,12 @@ def _update_reuse_args_tensors(
         args.B.quantized.tensor._runtime_tensor = b
         args.B.scale.tensor._runtime_tensor = scale_b
         args.out.tensor._runtime_tensor = out
-        return True
-    # GEMM: dense mm and the EFC bias/epilogue addmm path.
-    a, b = input_tensors
-    args.A.tensor._runtime_tensor = a
-    args.B.tensor._runtime_tensor = b
-    args.out.tensor._runtime_tensor = out
+    else:
+        # GEMM: dense mm and the EFC bias/epilogue addmm path.
+        a, b = input_tensors
+        args.A.tensor._runtime_tensor = a
+        args.B.tensor._runtime_tensor = b
+        args.out.tensor._runtime_tensor = out
     epilogue = getattr(args, "epilogue", None)
     if epilogue is not None:
         for name, wrapper in epilogue.tensors.items():
@@ -627,10 +630,10 @@ def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
         args.B.quantized.tensor._runtime_tensor = None
         args.B.scale.tensor._runtime_tensor = None
         args.out.tensor._runtime_tensor = None
-        return
-    args.A.tensor._runtime_tensor = None
-    args.B.tensor._runtime_tensor = None
-    args.out.tensor._runtime_tensor = None
+    else:
+        args.A.tensor._runtime_tensor = None
+        args.B.tensor._runtime_tensor = None
+        args.out.tensor._runtime_tensor = None
     epilogue = getattr(args, "epilogue", None)
     if epilogue is not None:
         for wrapper in epilogue.tensors.values():
@@ -767,6 +770,7 @@ def _nvgemm_run(
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
             fallback_fn=disk_fallback,
+            cc=_current_target_sm(dev_idx).cc,
         )
 
         if was_compiled:
