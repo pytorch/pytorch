@@ -27,25 +27,40 @@ PIDS_FILE="${TRACE_DIR}/test_pids.jsonl"
 
 maybe_sudo() { if [ "$(id -u)" -ne 0 ]; then sudo "$@"; else "$@"; fi; }
 
-if ! command -v bpftrace >/dev/null 2>&1; then
-    echo "run_traced.sh: installing bpftrace via apt" >&2
-    maybe_sudo apt-get update -y
-    maybe_sudo apt-get install -y bpftrace
+# The CI test container is privileged (see bpf-td-trace.yml) but does not
+# auto-mount tracefs, and its apt bpftrace is too old (BCC, needs kernel
+# headers). Mount tracefs ourselves and use the upstream static bpftrace
+# binary (BTF/CO-RE, no headers). This is the recipe proven by the canary.
+maybe_sudo mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+maybe_sudo mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
+
+BPFTRACE_VERSION=v0.26.1
+BPFTRACE="$(command -v bpftrace || true)"
+if [ -z "${BPFTRACE}" ]; then
+    BPFTRACE="${TRACE_DIR}/bpftrace"
+    if [ ! -x "${BPFTRACE}" ]; then
+        echo "run_traced.sh: fetching static bpftrace ${BPFTRACE_VERSION}" >&2
+        # ponytail: ~164MB download per shard; cache in the CI image or a build
+        # artifact if this outgrows the experiment.
+        curl -fsSL -o "${BPFTRACE}" \
+            "https://github.com/bpftrace/bpftrace/releases/download/${BPFTRACE_VERSION}/bpftrace"
+        chmod +x "${BPFTRACE}"
+    fi
 fi
 
-echo "run_traced.sh: verifying BPF attach capability" >&2
-if ! maybe_sudo timeout 30 bpftrace -e \
+echo "run_traced.sh: verifying BPF attach capability (${BPFTRACE})" >&2
+if ! maybe_sudo timeout 30 "${BPFTRACE}" -e \
     'tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }' \
     >/dev/null 2>"${TRACE_DIR}/canary.err"; then
     echo "run_traced.sh: FATAL: bpftrace cannot attach probes." >&2
-    echo "  The container likely lacks BPF caps (need --privileged or" >&2
-    echo "  --cap-add SYS_ADMIN --cap-add BPF --cap-add PERFMON)." >&2
+    echo "  The container likely lacks BPF caps (need --privileged) or" >&2
+    echo "  tracefs is unavailable (need a real docker-on-VM host, not ARC)." >&2
     cat "${TRACE_DIR}/canary.err" >&2 || true
     exit 3
 fi
 
 echo "run_traced.sh: starting tracer -> ${TRACE_OUT}" >&2
-maybe_sudo bpftrace "${HERE}/trace_opens.bt" >"${TRACE_OUT}" 2>"${TRACE_ERR}" &
+maybe_sudo "${BPFTRACE}" "${HERE}/trace_opens.bt" >"${TRACE_OUT}" 2>"${TRACE_ERR}" &
 TRACER_PID=$!
 
 stop_tracer() {

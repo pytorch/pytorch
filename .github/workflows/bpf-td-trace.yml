@@ -61,32 +61,32 @@ jobs:
 
   build:
     name: linux-jammy-py3.10-gcc11
-    # Disabled this round: build+test would ARC-map to l-x86iavx512 and can't
-    # trace. Re-enable once the EC2 routing (skip-arc-mapping) lands, after the
-    # canary confirms which attach path works.
-    if: false
     needs:
       - get-label-type
       - canary
     uses: ./.github/workflows/_linux-build.yml
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      # Keep raw EC2 labels (skip-arc-mapping) so the test shards land on the
+      # classic docker-on-VM pool where a privileged container can mount
+      # tracefs; ARC strips those caps. The build itself still runs on ARC.
+      runner_prefix: ""
+      skip-arc-mapping: "true"
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       bpf-td-extract-build-graph: "1"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 6, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 7, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 8, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 9, num_shards: 10, runner: "linux.4xlarge" },
+          { config: "default", shard: 10, num_shards: 10, runner: "linux.4xlarge" },
         ]}
       python-version: "3.10"
       compiler: gcc11
@@ -102,7 +102,9 @@ jobs:
       build-environment: ${{ needs.build.outputs.build-environment }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      docker-container-options: "--gpus all --cap-add=SYS_ADMIN --cap-add=PERFMON --cap-add=BPF --security-opt seccomp=unconfined"
+      # EC2 docker-on-VM honors these; privileged lets run_traced.sh mount
+      # tracefs. No --gpus all: this is a CPU pool with no nvidia runtime.
+      docker-container-options: "--privileged --security-opt seccomp=unconfined"
       bpf-td: "1"
       python-version: "3.10"
       compiler: gcc11
