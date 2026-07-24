@@ -162,11 +162,12 @@ class ScheduleTest(TestCase):
             with self.subTest(name=name):
                 schedule_class = get_schedule_class(name)
                 self.assertIsNotNone(
-                    schedule_class, f"Class for {name} should not be None"
+                    schedule_class,
+                    lambda msg: f"{msg}\nClass for {name} should not be None",
                 )
                 self.assertTrue(
                     issubclass(schedule_class, _PipelineSchedule),
-                    f"{name} should be a subclass of _PipelineSchedule",
+                    lambda msg: f"{msg}\n{name} should be a subclass of _PipelineSchedule",
                 )
 
         error_case = ["ScheduleThatDoesNotExist"]
@@ -306,7 +307,7 @@ class ScheduleTest(TestCase):
             ScheduleLoopedBFS,
         ],
     )
-    def test_schedule_with_pre_split_args_kwargs(self, ScheduleClass):
+    def test_schedule_with_pre_split_inputs(self, ScheduleClass):
         """
         Test that schedules can consume pre-split microbatch args, kwargs, and target.
         """
@@ -366,7 +367,6 @@ class ScheduleTest(TestCase):
                 kwarg_mbs=kwarg_mbs,
                 target_mbs=target_mbs,
                 losses=pre_split_losses,
-                pre_split_args_kwargs=True,
             )
 
             self.assertEqual(pre_split_out, auto_out)
@@ -386,7 +386,7 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
-    def test_schedule_pre_split_args_kwargs_validation(self):
+    def test_schedule_pre_split_validation(self):
         store = FakeStore()
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
@@ -399,56 +399,46 @@ class ScheduleTest(TestCase):
             stage = PipelineStage(torch.nn.Identity(), 0, 1, device)
             schedule = ScheduleGPipe(stage, 2)
 
-            for name, value in (
-                ("arg_mbs", [(x0,), (x1,)]),
-                ("kwarg_mbs", [{"input": x0}, {"input": x1}]),
-                ("target_mbs", [x0, x1]),
-            ):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    f"{name} can only be passed when pre_split_args_kwargs=True",
-                ):
-                    schedule.step(**{name: value})
-
             with self.assertRaisesRegex(
                 ValueError,
                 "pass pre-split positional inputs through arg_mbs",
             ):
-                schedule.step([(x0,), (x1,)], pre_split_args_kwargs=True)
+                schedule.step(x0, arg_mbs=[(x0,), (x1,)])
 
             with self.assertRaisesRegex(
                 ValueError,
-                "Unexpected keyword arguments when pre_split_args_kwargs=True: y",
+                "Unexpected keyword arguments with pre-split inputs: y",
             ):
-                schedule.step(y=x0, pre_split_args_kwargs=True)
+                schedule.step(y=x0, kwarg_mbs=[{}, {}])
 
             with self.assertRaisesRegex(
                 ValueError,
                 "pass pre-split targets through target_mbs",
             ):
-                schedule.step(target=[x0, x1], pre_split_args_kwargs=True)
+                schedule.step(target=x0, target_mbs=[x0, x1])
 
             with self.assertRaisesRegex(TypeError, "arg_mbs must be a list"):
-                schedule.step(arg_mbs=(x0,), pre_split_args_kwargs=True)
+                schedule.step(arg_mbs=(x0,))
 
             with self.assertRaisesRegex(ValueError, "Expecting 2 arg_mbs"):
-                schedule.step(arg_mbs=[(x0,)], pre_split_args_kwargs=True)
+                schedule.step(arg_mbs=[])
 
             with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list"):
                 schedule.step(
                     arg_mbs=[(x0,), (x1,)],
                     kwarg_mbs={"y": x0},
-                    pre_split_args_kwargs=True,
                 )
 
             with self.assertRaisesRegex(TypeError, "arg_mbs must be a list of tuples"):
-                schedule.step(arg_mbs=[x0, x1], pre_split_args_kwargs=True)
+                schedule.step(arg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list of dicts"):
+                schedule.step(kwarg_mbs=[x0, x1])
 
             with self.assertRaisesRegex(ValueError, "Expecting 2 target_mbs"):
                 schedule.step(
                     arg_mbs=[(x0,), (x1,)],
                     target_mbs=[x0],
-                    pre_split_args_kwargs=True,
                 )
         finally:
             torch.distributed.destroy_process_group()
@@ -464,9 +454,7 @@ class ScheduleTest(TestCase):
         ],
     )
     def test_schedule_eval_then_train(self, ScheduleClass):
-        """
-        Test that simply runs evaluation followed by training.
-        """
+        """Test full-batch and pre-split evaluation followed by training."""
         store = FakeStore()
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
@@ -495,17 +483,41 @@ class ScheduleTest(TestCase):
 
         # Attach to a schedule
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
-        # Run eval
-        for _ in range(2):
-            # Zero gradients
-            stage_module.zero_grad()
-            losses = []
-            schedule.eval(x, target=target, losses=losses)
-        # Run training
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+
         try:
-            for _ in range(2):
-                losses = []
-                schedule.step(x, target=target, losses=losses)
+            stage_module.zero_grad()
+            full_losses = []
+            full_out = schedule.eval(x, target=target, losses=full_losses)
+            pre_split_losses = []
+            pre_split_out = schedule.eval(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, full_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNone(
+                    parameter.grad,
+                    msg=f"eval unexpectedly produced a gradient for {name}",
+                )
+
+            train_losses = []
+            train_out = schedule.step(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=train_losses,
+            )
+            self.assertEqual(train_out, full_out)
+            self.assertEqual(torch.stack(train_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNotNone(
+                    parameter.grad,
+                    msg=f"training did not produce a gradient for {name}",
+                )
         finally:
             torch.distributed.destroy_process_group()
 
@@ -652,7 +664,6 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
@@ -1487,7 +1498,7 @@ class TestScheduleLowering(TestCase):
             self.assertLess(
                 i,
                 len(non_none) - 1,
-                f"RECV {a} on rank 1 has no following consumer",
+                lambda msg: f"{msg}\nRECV {a} on rank 1 has no following consumer",
             )
             consumer = non_none[i + 1]
             consumer_subs = (
@@ -1511,7 +1522,7 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertTrue(
                 matched,
-                f"RECV {a} on rank 1 is not immediately followed by its "
+                lambda msg: f"{msg}\nRECV {a} on rank 1 is not immediately followed by its "
                 f"consumer (next action: {consumer})",
             )
 

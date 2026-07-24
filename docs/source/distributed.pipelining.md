@@ -110,8 +110,7 @@ else:
     output = schedule.step()
 ```
 
-If your input pipeline already produces microbatches, pass them directly and
-set `pre_split_args_kwargs=True`:
+If your input pipeline already produces microbatches, pass them directly:
 
 ```python
 arg_mbs = [(x0,), (x1,)]
@@ -122,7 +121,6 @@ schedule.step(
     arg_mbs=arg_mbs,
     kwarg_mbs=kwarg_mbs,
     target_mbs=target_mbs,
-    pre_split_args_kwargs=True,
 )
 ```
 

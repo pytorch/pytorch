@@ -518,7 +518,6 @@ class _PipelineSchedule(ABC):
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
         target_mbs: Any = None,
-        pre_split_args_kwargs: bool = False,
         **kwargs,
     ):
         r"""Run one iteration of the pipeline schedule."""
@@ -532,7 +531,6 @@ class _PipelineSchedule(ABC):
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
         target_mbs: Any = None,
-        pre_split_args_kwargs: bool = False,
         **kwargs,
     ):
         r"""Run one forward-only iteration of the pipeline schedule.
@@ -540,40 +538,29 @@ class _PipelineSchedule(ABC):
         ``eval`` uses the same input contract as ``step``, but temporarily
         disables backward execution. By default, ``args``, ``kwargs``, and
         ``target`` are full-batch values that the schedule splits into
-        microbatches. Set ``pre_split_args_kwargs=True`` when the caller has
-        already split inputs into microbatches, and pass them through
-        ``arg_mbs``, ``kwarg_mbs``, and ``target_mbs`` instead.
+        microbatches. When the caller has already split inputs into
+        microbatches, pass them through ``arg_mbs``, ``kwarg_mbs``, and
+        ``target_mbs`` instead.
 
         Args:
             \*args (Any): Whole-batch positional root inputs when this rank owns
-                the first pipeline stage. These are split into microbatches
-                unless ``pre_split_args_kwargs=True``. Do not pass positional
-                inputs when ``pre_split_args_kwargs=True``.
+                the first pipeline stage. Do not pass positional inputs with
+                pre-split inputs.
             target (Any, optional): Whole-batch target for loss computation.
-                It is split into microbatches unless
-                ``pre_split_args_kwargs=True``. When
-                ``pre_split_args_kwargs=True``, pass targets through
+                When passing pre-split inputs, pass targets through
                 ``target_mbs`` instead. Default: ``None``.
             losses (list, optional): Mutable list populated with one loss per
                 microbatch when this schedule owns the last stage and a
                 ``loss_fn`` was configured. Default: ``None``.
             arg_mbs (list[tuple], optional): Pre-split positional inputs, one
-                tuple per microbatch. Only valid when
-                ``pre_split_args_kwargs=True``. Default: ``None``.
+                tuple per microbatch. Default: ``None``.
             kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
-                dict per microbatch. Only valid when
-                ``pre_split_args_kwargs=True``. Default: ``None``.
+                dict per microbatch. Default: ``None``.
             target_mbs (list, optional): Pre-split targets, one entry per
-                microbatch. Only valid when ``pre_split_args_kwargs=True``.
-                Default: ``None``.
-            pre_split_args_kwargs (bool, optional): If ``False``, split
-                whole-batch ``args``, ``kwargs``, and ``target`` inside the
-                schedule. If ``True``, consume ``arg_mbs``, ``kwarg_mbs``, and
-                ``target_mbs`` directly. Default: ``False``.
+                microbatch. Default: ``None``.
             \*\*kwargs (Any): Whole-batch keyword root inputs when this rank owns
-                the first pipeline stage. These are split into microbatches
-                unless ``pre_split_args_kwargs=True``. Do not pass keyword
-                inputs when ``pre_split_args_kwargs=True``.
+                the first pipeline stage. Do not pass keyword inputs with
+                pre-split inputs.
 
         Returns:
             Any or None: The merged output from the last stage when this rank
@@ -593,7 +580,6 @@ class _PipelineSchedule(ABC):
             >>> output = schedule.eval(
             ...     arg_mbs=arg_mbs,
             ...     kwarg_mbs=kwarg_mbs,
-            ...     pre_split_args_kwargs=True,
             ... )
         """
         # Save the original has_backward state
@@ -607,7 +593,6 @@ class _PipelineSchedule(ABC):
                 arg_mbs=arg_mbs,
                 kwarg_mbs=kwarg_mbs,
                 target_mbs=target_mbs,
-                pre_split_args_kwargs=pre_split_args_kwargs,
                 **kwargs,
             )
         finally:
@@ -686,24 +671,9 @@ class _PipelineSchedule(ABC):
         arg_mbs: Any,
         kwarg_mbs: Any,
         target_mbs: Any,
-        pre_split_args_kwargs: bool,
     ) -> tuple[list | None, list | None, list | None]:
-        if not pre_split_args_kwargs:
-            supplied_mbs = [
-                name
-                for name, value in (
-                    ("arg_mbs", arg_mbs),
-                    ("kwarg_mbs", kwarg_mbs),
-                    ("target_mbs", target_mbs),
-                )
-                if value is not None
-            ]
-            if supplied_mbs:
-                names = ", ".join(supplied_mbs)
-                raise ValueError(
-                    f"{names} can only be passed when pre_split_args_kwargs=True."
-                )
-
+        pre_split = any(mbs is not None for mbs in (arg_mbs, kwarg_mbs, target_mbs))
+        if not pre_split:
             args_split, kwargs_split = self._split_inputs(args, kwargs)
             targets_split = (
                 list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
@@ -714,33 +684,34 @@ class _PipelineSchedule(ABC):
 
         if args:
             raise ValueError(
-                "When pre_split_args_kwargs=True, pass pre-split positional "
-                "inputs through arg_mbs=... instead of positional args."
+                "When using pre-split inputs, pass pre-split positional inputs "
+                "through arg_mbs=... instead of positional args."
             )
 
         if kwargs:
             names = ", ".join(sorted(kwargs))
             raise ValueError(
-                "Unexpected keyword arguments when pre_split_args_kwargs=True: "
-                f"{names}. Pass pre-split keyword inputs through kwarg_mbs=..."
+                f"Unexpected keyword arguments with pre-split inputs: {names}. "
+                "Pass pre-split keyword inputs through kwarg_mbs=..."
             )
 
         if target is not None:
             raise ValueError(
-                "When pre_split_args_kwargs=True, pass pre-split targets through "
+                "When using pre-split inputs, pass pre-split targets through "
                 "target_mbs=... instead of target=..."
             )
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs)
 
-        for mb_index, arg_mb in enumerate(arg_mbs):
+        for mb_index, (arg_mb, kwarg_mb) in enumerate(
+            zip(arg_mbs, kwarg_mbs, strict=True)
+        ):
             if not isinstance(arg_mb, tuple):
                 raise TypeError(
                     "arg_mbs must be a list of tuples, but "
                     f"arg_mbs[{mb_index}] is a {type(arg_mb)}"
                 )
 
-        for mb_index, kwarg_mb in enumerate(kwarg_mbs):
             if not isinstance(kwarg_mb, dict):
                 raise TypeError(
                     "kwarg_mbs must be a list of dicts, but "
@@ -794,15 +765,17 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
 
     op_types = {p.op for p in p2p_ops}
     if op_types == {dist.isend}:
-        return [
+        send_works = [
             p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
             for p in p2p_ops
         ]
+        return [work for work in send_works if work is not None]
     if op_types == {dist.irecv}:
-        return [
+        recv_works = [
             p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
             for p in p2p_ops
         ]
+        return [work for work in recv_works if work is not None]
 
     return dist.batch_isend_irecv(p2p_ops)
 
@@ -906,26 +879,20 @@ class PipelineScheduleSingle(_PipelineSchedule):
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
         target_mbs: Any = None,
-        pre_split_args_kwargs: bool = False,
         **kwargs,
     ):
         r"""Run one training iteration of a single-stage pipeline schedule.
 
         By default, ``args``, ``kwargs``, and ``target`` are full-batch values
-        that the schedule splits into microbatches. Set
-        ``pre_split_args_kwargs=True`` when the caller has already split inputs
-        into microbatches, and pass them through ``arg_mbs``, ``kwarg_mbs``,
-        and ``target_mbs`` instead.
+        that the schedule splits into microbatches. When the caller has already
+        split inputs into microbatches, pass them through ``arg_mbs``,
+        ``kwarg_mbs``, and ``target_mbs`` instead.
 
         Args:
             \*args (Any): Whole-batch positional inputs for the first pipeline
-                stage. These are split into microbatches unless
-                ``pre_split_args_kwargs=True``. Do not pass positional inputs
-                when ``pre_split_args_kwargs=True``.
+                stage. Do not pass positional inputs with pre-split inputs.
             target (Any, optional): Whole-batch target for loss computation.
-                It is split into microbatches unless
-                ``pre_split_args_kwargs=True``. When
-                ``pre_split_args_kwargs=True``, pass targets through
+                When passing pre-split inputs, pass targets through
                 ``target_mbs`` instead. Default: ``None``.
             losses (list, optional): Mutable list populated with one loss per
                 microbatch when this schedule owns the last stage and a
@@ -935,22 +902,13 @@ class PipelineScheduleSingle(_PipelineSchedule):
             loss_kwargs (dict, optional): Extra keyword arguments forwarded to
                 the configured ``loss_fn``. Default: ``None``.
             arg_mbs (list[tuple], optional): Pre-split positional inputs, one
-                tuple per microbatch. Only valid when
-                ``pre_split_args_kwargs=True``. Default: ``None``.
+                tuple per microbatch. Default: ``None``.
             kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
-                dict per microbatch. Only valid when
-                ``pre_split_args_kwargs=True``. Default: ``None``.
+                dict per microbatch. Default: ``None``.
             target_mbs (list, optional): Pre-split targets, one entry per
-                microbatch. Only valid when ``pre_split_args_kwargs=True``.
-                Default: ``None``.
-            pre_split_args_kwargs (bool, optional): If ``False``, split
-                whole-batch ``args``, ``kwargs``, and ``target`` inside the
-                schedule. If ``True``, consume ``arg_mbs``, ``kwarg_mbs``, and
-                ``target_mbs`` directly. Default: ``False``.
+                microbatch. Default: ``None``.
             \*\*kwargs (Any): Whole-batch keyword inputs for the first pipeline
-                stage. These are split into microbatches unless
-                ``pre_split_args_kwargs=True``. Do not pass keyword inputs when
-                ``pre_split_args_kwargs=True``.
+                stage. Do not pass keyword inputs with pre-split inputs.
 
         Returns:
             Any or None: The merged output from the last stage when this rank
@@ -976,7 +934,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
             ...     arg_mbs=arg_mbs,
             ...     kwarg_mbs=kwarg_mbs,
             ...     target_mbs=target_mbs,
-            ...     pre_split_args_kwargs=True,
             ... )
         """
         if self._has_backward and not torch.is_grad_enabled():
@@ -999,7 +956,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
             arg_mbs,
             kwarg_mbs,
             target_mbs,
-            pre_split_args_kwargs,
         )
 
         # Run microbatches
@@ -2162,26 +2118,21 @@ class PipelineScheduleMulti(_PipelineSchedule):
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
         target_mbs: Any = None,
-        pre_split_args_kwargs: bool = False,
         **kwargs,
     ):
         r"""Run one training iteration of a multi-stage pipeline schedule.
 
         By default, ``args``, ``kwargs``, and ``target`` are full-batch values
-        that the schedule splits into microbatches. Set
-        ``pre_split_args_kwargs=True`` when the caller has already split inputs
-        into microbatches, and pass them through ``arg_mbs``, ``kwarg_mbs``,
-        and ``target_mbs`` instead.
+        that the schedule splits into microbatches. When the caller has already
+        split inputs into microbatches, pass them through ``arg_mbs``,
+        ``kwarg_mbs``, and ``target_mbs`` instead.
 
         Args:
             \*args (Any): Whole-batch positional root inputs when this rank owns
-                the first pipeline stage. These are split into microbatches
-                unless ``pre_split_args_kwargs=True``. Do not pass positional
-                inputs when ``pre_split_args_kwargs=True``.
+                the first pipeline stage. Do not pass positional inputs with
+                pre-split inputs.
             target (Any, optional): Whole-batch target for loss computation.
-                It is split into microbatches unless
-                ``pre_split_args_kwargs=True``. When
-                ``pre_split_args_kwargs=True``, pass targets through
+                When passing pre-split inputs, pass targets through
                 ``target_mbs`` instead. Default: ``None``.
             losses (list, optional): Mutable list populated with one loss per
                 microbatch when this schedule owns the last stage and a
@@ -2191,22 +2142,14 @@ class PipelineScheduleMulti(_PipelineSchedule):
             loss_kwargs (dict, optional): Extra keyword arguments forwarded to
                 the configured ``loss_fn``. Default: ``None``.
             arg_mbs (list[tuple], optional): Pre-split positional inputs, one
-                tuple per microbatch. Only valid when
-                ``pre_split_args_kwargs=True``. Default: ``None``.
+                tuple per microbatch. Default: ``None``.
             kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
-                dict per microbatch. Only valid when
-                ``pre_split_args_kwargs=True``. Default: ``None``.
+                dict per microbatch. Default: ``None``.
             target_mbs (list, optional): Pre-split targets, one entry per
-                microbatch. Only valid when ``pre_split_args_kwargs=True``.
-                Default: ``None``.
-            pre_split_args_kwargs (bool, optional): If ``False``, split
-                whole-batch ``args``, ``kwargs``, and ``target`` inside the
-                schedule. If ``True``, consume ``arg_mbs``, ``kwarg_mbs``, and
-                ``target_mbs`` directly. Default: ``False``.
+                microbatch. Default: ``None``.
             \*\*kwargs (Any): Whole-batch keyword root inputs when this rank owns
-                the first pipeline stage. These are split into microbatches
-                unless ``pre_split_args_kwargs=True``. Do not pass keyword
-                inputs when ``pre_split_args_kwargs=True``.
+                the first pipeline stage. Do not pass keyword inputs with
+                pre-split inputs.
 
         Returns:
             Any or None: The merged output from the last stage when this rank
@@ -2232,7 +2175,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
             ...     arg_mbs=arg_mbs,
             ...     kwarg_mbs=kwarg_mbs,
             ...     target_mbs=target_mbs,
-            ...     pre_split_args_kwargs=True,
             ... )
         """
         if (
@@ -2261,7 +2203,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
             arg_mbs,
             kwarg_mbs,
             target_mbs,
-            pre_split_args_kwargs,
         )
 
         # Run microbatches

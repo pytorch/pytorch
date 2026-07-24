@@ -273,10 +273,10 @@ def step_with_optional_pre_split(
     target=None,
     losses=None,
     return_outputs=True,
-    pre_split_args_kwargs=False,
+    pre_split=False,
 ):
     kwargs = kwargs or {}
-    if not pre_split_args_kwargs:
+    if not pre_split:
         return schedule.step(
             *args,
             target=target,
@@ -288,7 +288,6 @@ def step_with_optional_pre_split(
     step_kwargs = {
         "losses": losses,
         "return_outputs": return_outputs,
-        "pre_split_args_kwargs": True,
     }
     if args or kwargs:
         arg_mbs, kwarg_mbs = split_args_kwargs_into_chunks(
@@ -589,9 +588,9 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    @parametrize("pre_split_args_kwargs", [False, True])
+    @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_kwargs_with_tracer(self, ScheduleClass, pre_split_args_kwargs):
+    def test_kwargs_with_tracer(self, ScheduleClass, pre_split):
         mod = ModelWithKwargs(d_hid, splits=self.world_size)
         mod.to(self.device)
 
@@ -627,7 +626,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 chunks,
                 args=(x,),
                 kwargs={"y": y},
-                pre_split_args_kwargs=pre_split_args_kwargs,
+                pre_split=pre_split,
             )
         elif self.rank == self.world_size - 1:
             out = step_with_optional_pre_split(
@@ -635,13 +634,13 @@ class ScheduleTest(MultiProcContinuousTest):
                 chunks,
                 target=target,
                 losses=losses,
-                pre_split_args_kwargs=pre_split_args_kwargs,
+                pre_split=pre_split,
             )
         else:
             step_with_optional_pre_split(
                 schedule,
                 chunks,
-                pre_split_args_kwargs=pre_split_args_kwargs,
+                pre_split=pre_split,
             )
 
         dist.barrier(device_ids=[self.rank])
@@ -659,9 +658,9 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    @parametrize("pre_split_args_kwargs", [False, True])
+    @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_tracer(self, ScheduleClass, pre_split_args_kwargs):
+    def test_grad_with_tracer(self, ScheduleClass, pre_split):
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
         # Run reference
@@ -684,7 +683,7 @@ class ScheduleTest(MultiProcContinuousTest):
                     schedule,
                     chunks,
                     args=(x,),
-                    pre_split_args_kwargs=pre_split_args_kwargs,
+                    pre_split=pre_split,
                 )
             elif self.rank == self.world_size - 1:
                 out = step_with_optional_pre_split(
@@ -692,13 +691,13 @@ class ScheduleTest(MultiProcContinuousTest):
                     chunks,
                     target=target,
                     losses=losses,
-                    pre_split_args_kwargs=pre_split_args_kwargs,
+                    pre_split=pre_split,
                 )
             else:
                 step_with_optional_pre_split(
                     schedule,
                     chunks,
-                    pre_split_args_kwargs=pre_split_args_kwargs,
+                    pre_split=pre_split,
                 )
 
         dist.barrier(device_ids=[self.rank])
@@ -786,9 +785,9 @@ class ScheduleTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    @parametrize("pre_split_args_kwargs", [False, True])
+    @parametrize("pre_split", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split_args_kwargs):
+    def test_grad_with_manual_interleaved(self, ScheduleClass, pre_split):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -826,7 +825,7 @@ class ScheduleTest(MultiProcContinuousTest):
                         schedule,
                         num_microbatches,
                         args=(x,),
-                        pre_split_args_kwargs=pre_split_args_kwargs,
+                        pre_split=pre_split,
                     )
                 elif self.rank == self.world_size - 1:
                     out = step_with_optional_pre_split(
@@ -834,13 +833,13 @@ class ScheduleTest(MultiProcContinuousTest):
                         num_microbatches,
                         target=target,
                         losses=losses,
-                        pre_split_args_kwargs=pre_split_args_kwargs,
+                        pre_split=pre_split,
                     )
                 else:
                     step_with_optional_pre_split(
                         schedule,
                         num_microbatches,
-                        pre_split_args_kwargs=pre_split_args_kwargs,
+                        pre_split=pre_split,
                     )
 
         self.assertEqual(
@@ -915,7 +914,7 @@ class ScheduleTest(MultiProcContinuousTest):
                     num_microbatches,
                     args=(x,),
                     kwargs={"block_mask": block_mask},
-                    pre_split_args_kwargs=False,
+                    pre_split=False,
                 )
             elif self.rank == self.world_size - 1:
                 auto_out = step_with_optional_pre_split(
@@ -923,13 +922,13 @@ class ScheduleTest(MultiProcContinuousTest):
                     num_microbatches,
                     target=target,
                     losses=auto_losses,
-                    pre_split_args_kwargs=False,
+                    pre_split=False,
                 )
             else:
                 step_with_optional_pre_split(
                     auto_schedule,
                     num_microbatches,
-                    pre_split_args_kwargs=False,
+                    pre_split=False,
                 )
 
             dist.barrier()
@@ -941,7 +940,7 @@ class ScheduleTest(MultiProcContinuousTest):
                     num_microbatches,
                     args=(x,),
                     kwargs={"block_mask": block_mask},
-                    pre_split_args_kwargs=True,
+                    pre_split=True,
                 )
             elif self.rank == self.world_size - 1:
                 pre_split_out = step_with_optional_pre_split(
@@ -949,13 +948,13 @@ class ScheduleTest(MultiProcContinuousTest):
                     num_microbatches,
                     target=target,
                     losses=pre_split_losses,
-                    pre_split_args_kwargs=True,
+                    pre_split=True,
                 )
             else:
                 step_with_optional_pre_split(
                     pre_split_schedule,
                     num_microbatches,
-                    pre_split_args_kwargs=True,
+                    pre_split=True,
                 )
 
             dist.barrier()
@@ -1309,7 +1308,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.assertIn(
                     stage_idx,
                     stage_indices,
-                    f"Callback called for stage {stage_idx} not on rank {self.rank}",
+                    lambda msg: f"{msg}\nCallback called for stage {stage_idx} not on rank {self.rank}",
                 )
 
         # Check gradients using helper method

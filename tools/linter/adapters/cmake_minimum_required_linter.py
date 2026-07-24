@@ -30,16 +30,29 @@ else:
 
 
 REPO_ROOT = Path(__file__).absolute().parents[3]
-sys.path.insert(0, str(REPO_ROOT))
-
-from tools.setup_helpers.env import CMAKE_MINIMUM_VERSION_STRING
-
-
-sys.path.remove(str(REPO_ROOT))
-
 
 LINTER_CODE = "CMAKE_MINIMUM_REQUIRED"
-CMAKE_MINIMUM_VERSION = Version(CMAKE_MINIMUM_VERSION_STRING)
+
+CMAKE_MINIMUM_REQUIRED_PATTERN = re.compile(
+    r"cmake_minimum_required\(VERSION\s+(?P<version>\d+\.\d+(\.\d+)?)\b.*\)",
+    flags=re.IGNORECASE,
+)
+
+
+def _root_cmake_minimum_version() -> Version:
+    # The root CMakeLists.txt is the single source of truth for the minimum
+    # CMake version -- scikit-build-core reads the same cmake_minimum_required
+    # to decide which CMake to provision. Every other file is validated against
+    # it, so bumping the root raises the enforced floor repo-wide.
+    cmakelists = REPO_ROOT / "CMakeLists.txt"
+    with cmakelists.open(encoding="utf-8") as f:
+        for line in f:
+            if match := CMAKE_MINIMUM_REQUIRED_PATTERN.search(line):
+                return Version(match.group("version"))
+    raise RuntimeError(f"No cmake_minimum_required found in {cmakelists}")
+
+
+CMAKE_MINIMUM_VERSION = _root_cmake_minimum_version()
 
 
 class LintSeverity(str, Enum):
@@ -83,30 +96,15 @@ def format_error_message(
     )
 
 
-CMAKE_MINIMUM_REQUIRED_PATTERN = re.compile(
-    r"cmake_minimum_required\(VERSION\s+(?P<version>\d+\.\d+(\.\d+)?)\b.*\)",
-    flags=re.IGNORECASE,
-)
-
-
 def check_cmake(path: Path) -> list[LintMessage]:
+    # The root CMakeLists.txt defines CMAKE_MINIMUM_VERSION, so it trivially
+    # satisfies this check; every other cmake file must not require a newer
+    # CMake than the environment provides.
     with path.open(encoding="utf-8") as f:
         for i, line in enumerate(f, start=1):
             if match := CMAKE_MINIMUM_REQUIRED_PATTERN.search(line):
                 version = match.group("version")
-                if path.samefile(REPO_ROOT / "CMakeLists.txt"):
-                    if Version(version) != CMAKE_MINIMUM_VERSION:
-                        return [
-                            format_error_message(
-                                str(path),
-                                line=i,
-                                message=(
-                                    f"CMake minimum version must be {CMAKE_MINIMUM_VERSION}, "
-                                    f"but found {version}."
-                                ),
-                            )
-                        ]
-                elif Version(version) > CMAKE_MINIMUM_VERSION:
+                if Version(version) > CMAKE_MINIMUM_VERSION:
                     return [
                         format_error_message(
                             str(path),
