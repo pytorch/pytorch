@@ -26,6 +26,8 @@ from torchgen.model import DispatchKey
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.model import NativeFunction, NativeFunctionsGroup
 
 
@@ -128,7 +130,7 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
 
 def validate_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest],
-    grouped_native_functions: list[NativeFunction | NativeFunctionsGroup],
+    grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
 ) -> None:
     """Every manifest op must resolve to exactly one structured op group:
     the stub call site is emitted in the structured wrapper (between meta

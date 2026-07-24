@@ -28,6 +28,7 @@ silently shipping a wheel without the kernels it was asked to embed is
 worse than failing loudly (pass NATIVE_AOT=0 to bypass).
 """
 
+import importlib.util
 import os
 import subprocess
 import sys
@@ -35,6 +36,19 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
+
+
+def _load_export():
+    # By file path (like the sibling tools): `import export` after a
+    # sys.path insert works at runtime but is opaque to type checkers.
+    spec = importlib.util.spec_from_file_location(
+        "export", os.path.join(HERE, "export.py")
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load tools/native_aot/export.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _report(msg: str) -> None:
@@ -54,9 +68,7 @@ def should_run() -> bool:
     if os.getenv("NATIVE_AOT", "1") == "0":
         _report("disabled (NATIVE_AOT=0)")
         return False
-    try:
-        import nvidia_cutlass_dsl  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec("nvidia_cutlass_dsl") is None:
         _report("skipped (nvidia_cutlass_dsl not installed)")
         return False
     if not _torch_importable():
@@ -69,9 +81,7 @@ def should_run() -> bool:
         return False
     arch_list = os.getenv("TORCH_CUDA_ARCH_LIST")
     if arch_list:
-        sys.path.insert(0, HERE)
-        import export as export_mod
-
+        export_mod = _load_export()
         if not export_mod.archs_from_cuda_arch_list(arch_list):
             _report(
                 f"skipped (TORCH_CUDA_ARCH_LIST={arch_list!r} has no "

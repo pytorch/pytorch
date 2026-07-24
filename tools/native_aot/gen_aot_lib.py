@@ -133,14 +133,14 @@ def _arch_gate(d, sidecars: list[dict]) -> str:
     d.ARCHS alone -- the artifact matches the builder by construction.
     Shipped arches outside d.ARCHS are a packaging bug: error here
     rather than gate on kernels the op disowns."""
-    shipped = {sc.get("arch") for sc in sidecars}
-    if shipped - {None} - set(d.ARCHS):
+    shipped = {a for sc in sidecars if isinstance(a := sc.get("arch"), str)}
+    if shipped - set(d.ARCHS):
         raise RuntimeError(
-            f"{d.ATEN_OP}: artifacts exported for {sorted(shipped - {None})} "
+            f"{d.ATEN_OP}: artifacts exported for {sorted(shipped)} "
             f"but the declaration supports only {d.ARCHS}; re-export "
             f"(export.py skips unsupported arches)"
         )
-    gate = sorted(shipped - {None}) or sorted(d.ARCHS)
+    gate = sorted(shipped) or sorted(d.ARCHS)
     majors = sorted({int(a.removeprefix("sm_").rstrip("a")) // 10 for a in gate})
     accept = " || ".join(
         f"at::cuda::getCurrentDeviceProperties()->major == {m}" for m in majors
