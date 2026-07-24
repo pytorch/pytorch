@@ -202,7 +202,7 @@ class SuperVariable(VariableTracker):
             ],
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Check if getattr is a constant. If not, delay the actual work by
@@ -532,42 +532,25 @@ class TracebackVariable(VariableTracker):
             self.tb_next = val
         return variables.ConstantVariable.create(None)
 
-    def _get_tb_next(self, tx: "InstructionTranslatorBase"):
-        return self.tb_next
-
-    def _set_tb_next(self, tx: "InstructionTranslatorBase", val):
-        if not self.is_valid_traceback(val):
-            raise_observed_exception(TypeError, tx)
-        if not isinstance(val, (TracebackVariable, ConstantVariable)):
-            raise AssertionError(
-                f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "tb_next":
+            return self.tb_next
+        elif name == "tb_lineno":
+            return self.frame_summary.getattro_impl(tx, "lineno")
+        elif name == "frame_summary":
+            return self.frame_summary
+        elif name == "tb_lasti":
+            unimplemented(
+                gb_type="traceback.tb_lasti not supported",
+                context=f"{self} accessing 'tb_lasti'",
+                explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
-        if self.has_reference_cycle(val) or (
-            istype(val, TracebackVariable) and val.has_reference_cycle(self)
-        ):
-            raise_observed_exception(ValueError, tx)
-        self.tb_next = val
-        return variables.ConstantVariable.create(None)
+        return super().getattro_impl(tx, name)
 
-    def _get_tb_lineno(self, tx: "InstructionTranslatorBase"):
-        return self.frame_summary.getattro_impl(tx, "lineno")
-
-    # ref: CPython Objects/traceback.c tb_getsetters. `tb_next` is a getset with
-    # getter+setter (tb_next_get / tb_next_set, which runs a reference-cycle
-    # check); `tb_lineno` is a get-only getset. `frame_summary` is dynamo-internal
-    # (not a real CPython traceback attribute).
-    tp_getset = {
-        "tb_next": GetSet(_get_tb_next, _set_tb_next),
-        "tb_lineno": GetSet(_get_tb_lineno, None),
-        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
-    }
-
-    # ref: CPython Objects/traceback.c tb_memberlist.
-    tp_members = {
-        "tb_lasti": Member(unsupported_attr("tb_lasti")),
-    }
-
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -654,7 +637,7 @@ class ExceptionVariable(VariableTracker):
     def python_type(self) -> type:
         return self.exc_type
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -669,27 +652,113 @@ class ExceptionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            attr = args[0].as_python_constant()
-            # Writable attributes route through their tp_getset/tp_members
-            # setter. Anything else becomes a custom instance-dict attribute.
-            getset = self.lookup_tp_getset_member(attr)
-            if getset is not None and getset.setter is not None:
-                result = getset.setter(self, tx, args[1])
-                if result is not None:
-                    return result
+            name = args[0].as_python_constant()
+            val = args[1]
+            if name == "__context__":
+                # Constant can be either an Exceptior or None
+                if not (
+                    val.is_constant_none()
+                    or isinstance(
+                        val,
+                        (
+                            variables.ExceptionVariable,
+                            variables.UserDefinedExceptionClassVariable,
+                            variables.UserDefinedExceptionObjectVariable,
+                        ),
+                    )
+                ):
+                    raise_type_error(
+                        tx,
+                        "exception context must be None or derive from BaseException",
+                    )
+                self.set_context(val)
+            elif name == "__cause__":
+                if val.is_constant_none() or isinstance(
+                    val,
+                    (
+                        variables.BuiltinVariable,
+                        variables.ExceptionVariable,
+                        variables.UserDefinedExceptionClassVariable,
+                        variables.UserDefinedExceptionObjectVariable,
+                    ),
+                ):
+                    self.__cause__ = val
+                    self.__suppress_context__ = variables.ConstantVariable.create(True)
+                else:
+                    raise_type_error(
+                        tx, "exception cause must be None or derive from BaseException"
+                    )
+            elif name == "__suppress_context__":
+                if val.is_constant_match(True, False):
+                    self.__suppress_context__ = val
+                else:
+                    raise_type_error(
+                        tx, "exception cause must be None or derive from BaseException"
+                    )
+            elif name == "__traceback__":
+                if not TracebackVariable.is_valid_traceback(val):
+                    raise_type_error(tx, "__traceback__ must be a traceback or None")
+                self.__traceback__ = val
+            elif name == "args":
+                # CPython coerces any iterable to a tuple (PySequence_Tuple).
+                self.args = unpack_iterable(tx, val)
             else:
                 # Arbitrary user attribute -> store in the instance __dict__
                 # via the side effects table.
                 se = tx.output.side_effects
                 if not se.is_attribute_mutation(self):
                     se.track_attribute_mutation_new(self)
-                se.store_instance_dict_attr(self, attr, args[1])
+                se.store_instance_dict_attr(self, name, val)
             return variables.ConstantVariable.create(None)
-        return super().call_method(tx, name, args, kwargs)
+        elif name == "__setstate__":
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"__setstate__() takes exactly one argument ({len(args)} given)"
+                )
+            [state] = args
+            # BaseException.__setstate__(None) is a documented no-op.
+            if state.is_constant_none():
+                return variables.ConstantVariable.create(None)
+            if not isinstance(state, variables.ConstDictVariable):
+                raise_type_error(tx, "state is not a dictionary")
+            for key, value in state.keys_as_python_constant().items():
+                self.call_method(
+                    tx, "__setattr__", [ConstantVariable.create(key), value], {}
+                )
+            return variables.ConstantVariable.create(None)
+        elif name == "with_traceback":
+            if len(args) != 1:
+                raise_type_error(
+                    tx,
+                    f"with_traceback() takes exactly one argument ({len(args)} given)",
+                )
+            [tb] = args
+            if not TracebackVariable.is_valid_traceback(tb):
+                raise_type_error(tx, "__traceback__ must be a traceback or None")
+            self.__traceback__ = tb
+            return self
+        else:
+            return super().call_method(tx, name, args, kwargs)
 
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if name == "__class__":
+            return VariableTracker.build(tx, self.exc_type)
+        elif name == "__context__":
+            return self.__context__
+        elif name == "__cause__":
+            return self.__cause__
+        elif name == "__suppress_context__":
+            return self.__suppress_context__
+        elif name == "__traceback__":
+            return self.__traceback__
+        elif name == "args":
+            return VariableTracker.build(
+                tx,
+                tuple(self.args),
+                source=self.source and AttrSource(self.source, "args"),
+            )
         try:
             # Custom attributes are stored in the side effects instance dict and
             # resolved by generic_getattr before reaching here, so a fall-through
@@ -704,130 +773,7 @@ class ExceptionVariable(VariableTracker):
                 args=[f"'{self.exc_type.__name__}' object has no attribute '{name}'"],
             )
 
-    def _set_context(self, tx: "InstructionTranslatorBase", val):
-        # Constant can be either an Exception or None
-        if not (
-            val.is_constant_none()
-            or isinstance(
-                val,
-                (
-                    variables.ExceptionVariable,
-                    variables.UserDefinedExceptionClassVariable,
-                    variables.UserDefinedExceptionObjectVariable,
-                ),
-            )
-        ):
-            raise_type_error(
-                tx, "exception context must be None or derive from BaseException"
-            )
-        self.set_context(val)
-        return variables.ConstantVariable.create(None)
-
-    def _set_cause(self, tx: "InstructionTranslatorBase", val):
-        if val.is_constant_none() or isinstance(
-            val,
-            (
-                variables.BuiltinVariable,
-                variables.ExceptionVariable,
-                variables.UserDefinedExceptionClassVariable,
-                variables.UserDefinedExceptionObjectVariable,
-            ),
-        ):
-            self.__cause__ = val
-            self.__suppress_context__ = variables.ConstantVariable.create(True)
-        else:
-            raise_type_error(
-                tx, "exception cause must be None or derive from BaseException"
-            )
-        return variables.ConstantVariable.create(None)
-
-    def _set_suppress_context(self, tx: "InstructionTranslatorBase", val):
-        if val.is_constant_match(True, False):
-            self.__suppress_context__ = val
-        else:
-            raise_type_error(
-                tx, "exception cause must be None or derive from BaseException"
-            )
-        return variables.ConstantVariable.create(None)
-
-    def _set_traceback(self, tx: "InstructionTranslatorBase", val):
-        if not TracebackVariable.is_valid_traceback(val):
-            raise_type_error(tx, "__traceback__ must be a traceback or None")
-        self.__traceback__ = val
-        return variables.ConstantVariable.create(None)
-
-    def with_traceback(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if len(args) != 1:
-            raise_type_error(
-                tx,
-                f"with_traceback() takes exactly one argument ({len(args)} given)",
-            )
-        [tb] = args
-        if not TracebackVariable.is_valid_traceback(tb):
-            raise_type_error(tx, "__traceback__ must be a traceback or None")
-        self.__traceback__ = tb
-        return self
-
-    def setstate(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if len(args) != 1:
-            raise_type_error(
-                tx, f"__setstate__() takes exactly one argument ({len(args)} given)"
-            )
-        [state] = args
-        # BaseException.__setstate__(None) is a documented no-op.
-        if state.is_constant_none():
-            return variables.ConstantVariable.create(None)
-        if not isinstance(state, variables.ConstDictVariable):
-            raise_type_error(tx, "state is not a dictionary")
-        for key, value in state.keys_as_python_constant().items():
-            self.call_method(
-                tx, "__setattr__", [ConstantVariable.create(key), value], {}
-            )
-        return variables.ConstantVariable.create(None)
-
-    tp_methods = {
-        "with_traceback": Method(with_traceback),
-        "__setstate__": Method(setstate),
-    }
-
-    def _get_args(self, tx: "InstructionTranslatorBase"):
-        return VariableTracker.build(
-            tx,
-            tuple(self.args),
-            source=self.source and AttrSource(self.source, "args"),
-        )
-
-    def _set_args(self, tx: "InstructionTranslatorBase", val):
-        # CPython coerces any iterable to a tuple (PySequence_Tuple).
-        self.args = unpack_iterable(tx, val)
-        return variables.ConstantVariable.create(None)
-
-    tp_getset = {
-        "__class__": GetSet(getset_build(lambda s: s.exc_type)),
-        "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
-        "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
-        "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
-        "args": GetSet(_get_args, _set_args),
-    }
-    # __suppress_context__ is a writable PyMemberDef on BaseException, not a
-    # getset, so it lives in tp_members.
-    tp_members = {
-        "__suppress_context__": Member(
-            getset_read(lambda s: s.__suppress_context__), _set_suppress_context
-        ),
-    }
-
-    def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
@@ -855,7 +801,7 @@ class ExceptionVariable(VariableTracker):
         args = ", ".join(self._debug_format_arg(arg) for arg in self.args)
         return f"{self.python_type_name()}({args})"
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
         return VariableTracker.build(tx, self.debug_repr())
 
@@ -872,10 +818,12 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    # ref: StopIteration_members in CPython Objects/exceptions.c
-    tp_members = {
-        "value": Member(getset_read(lambda s: s.value)),
-    }
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "value":
+            return self.value
+        return super().getattro_impl(tx, name)
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -897,6 +845,13 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         none = variables.ConstantVariable.create(None)
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in self._attrs:
+            return self._attrs[name]
+        return super().getattro_impl(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
@@ -969,7 +924,7 @@ class ComptimeVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError("comptime is special form")
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         from ..comptime import comptime
@@ -1502,7 +1457,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
@@ -1516,7 +1471,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class AutogradEngineVariable(UserDefinedObjectVariable):
@@ -1682,13 +1637,13 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import generic_richcompare
 
         try:
-            resolved = self.obj.getattro_impl(tx, self.name)
+            resolved = self.obj.tp_getattro_impl(tx, self.name)
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
@@ -1698,7 +1653,7 @@ class GetAttrVariable(VariableTracker):
             else:
                 unimplemented(
                     gb_type="Unresolved GetAttrVariable comparison",
-                    context=f"richcompare_impl {self} {op}",
+                    context=f"tp_richcompare_impl {self} {op}",
                     explanation=f"Cannot compare {self} because the attribute "
                     f"could not be resolved to a concrete value.",
                     hints=[*graph_break_hints.SUPPORTABLE],
@@ -1763,7 +1718,7 @@ class CallMethodVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -1813,7 +1768,7 @@ class PythonModuleVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"PythonModuleVariable({self.value})"
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
@@ -1831,7 +1786,7 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -1860,7 +1815,7 @@ class TypingVariable(VariableTracker):
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         if op in ("__eq__", "__ne__"):
@@ -1906,7 +1861,7 @@ class TypingVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
@@ -2004,7 +1959,7 @@ class NumpyVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -2304,7 +2259,7 @@ class ObjectVariable(VariableTracker):
     def python_type(self) -> type[object]:
         return object
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -2525,7 +2480,7 @@ class ConstantLikeVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import python_constant_richcompare_impl
@@ -2571,7 +2526,7 @@ class ConstantLikeVariable(VariableTracker):
             ],
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         result = getattr(self.value, name)
@@ -2707,8 +2662,12 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
-    # contextvars.ContextVar.name is a read-only member.
-    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        if name == "name":
+            return ConstantVariable.create(self.cv_obj.name)
+        return super().getattro_impl(tx, name)
 
 
 class RandomClassVariable(VariableTracker):
@@ -3053,7 +3012,7 @@ class WeakRefVariable(VariableTracker):
 
         return generic_hash_impl(tx, self.referent_vt)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import generic_richcompare
