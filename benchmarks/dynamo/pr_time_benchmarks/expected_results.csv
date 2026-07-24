@@ -127,3 +127,7 @@ nn_module_guard_eval,instruction_count,83710,0.1
 
 
 nn_module_guard_eval_dynamic,instruction_count,116300,0.1
+
+
+
+autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
