@@ -4,8 +4,6 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING
 
-import torch
-
 from ..ir import MultiTemplateBuffer
 from ..scheduler import (
     BaseSchedulerNode,
@@ -30,6 +28,7 @@ if TYPE_CHECKING:
 
     from sympy import Expr
 
+    import torch
     from torch.utils._ordered_set import OrderedSet
 
     from .common import BackendFeature
