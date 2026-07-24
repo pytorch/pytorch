@@ -197,7 +197,10 @@ def _collect_jobs(ops_filter, out_root: str, force: bool, archs):
                 # builder machine is the target by construction.
                 if arch is not None and arch not in d.ARCHS:
                     continue
-                root = os.path.join(out_root, arch) if multi else out_root
+                # `multi` implies explicit sm strings (a [None] arch
+                # list is always length 1); the arch check narrows for
+                # the type checker.
+                root = os.path.join(out_root, arch) if multi and arch else out_root
                 out_dir = os.path.join(root, did)
                 os.makedirs(out_dir, exist_ok=True)
                 for point in expand_specs(d.kernel_precompile_grid()):
