@@ -478,6 +478,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void attachMemoryHook();
   void detachMemoryHook();
 
+  // Publish/retire nccl_comm_ to the symmetric-memory registry via the NCCL
+  // comm-registration hook (NCCLCommRegistrationHook.hpp), so this class does
+  // not depend on the symm_mem DevCommManager header. Fired from
+  // initNcclResources() and the comm-teardown paths, respectively.
+  void publishComm();
+  void retireComm();
+
   // Member variables (port of TorchCommNCCL).
   ncclComm_t nccl_comm_{};
   at::Device device_;
