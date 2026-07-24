@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import tempfile
 import unittest
@@ -41,7 +40,15 @@ class TestExportJobs(unittest.TestCase):
             job = ("fakeop", "aot_kernel.py", point, d)
             self.assertTrue(export._job_needed(job, force=False))
             with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump({"version": export.SIDECAR_VERSION, "prefix": "x", "spec": point, "sources": current}, f)
+                _json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "x",
+                        "spec": point,
+                        "sources": current,
+                    },
+                    f,
+                )
             self.assertFalse(export._job_needed(job, force=False))
             self.assertTrue(export._job_needed(job, force=True))
             other = ("fakeop", "aot_kernel.py", {"dtype": "bfloat16"}, d)
@@ -63,7 +70,12 @@ class TestExportJobs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             point = {"aten": "add.Tensor", "in_dtypes": ("float32", "bfloat16")}
             job = ("fakeop", "aot_kernel.py", point, d)
-            sidecar = {"version": export.SIDECAR_VERSION, "prefix": "x", "spec": export._json_normal(point), "sources": current}  # noqa: B950
+            sidecar = {
+                "version": export.SIDECAR_VERSION,
+                "prefix": "x",
+                "spec": export._json_normal(point),
+                "sources": current,
+            }
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(sidecar, f)
             self.assertFalse(export._job_needed(job, force=False))
@@ -111,9 +123,7 @@ class TestSourceStaleness(unittest.TestCase):
         self.assertFalse(export.sources_current({"version": 0, "sources": {rel: h}}))
         self.assertFalse(export.sources_current({"sources": {rel: "0" * 16}}))
         self.assertFalse(export.sources_current({}))
-        self.assertFalse(
-            export.sources_current({"sources": {"no/such/file.py": "aa"}})
-        )
+        self.assertFalse(export.sources_current({"sources": {"no/such/file.py": "aa"}}))
 
     def test_stale_point_reexports_without_force(self):
         import json as _json
@@ -127,7 +137,15 @@ class TestSourceStaleness(unittest.TestCase):
             )
             current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
             with open(os.path.join(d, "x.json"), "w") as f:
-                _json.dump({"version": export.SIDECAR_VERSION, "prefix": "x", "spec": point, "sources": current}, f)
+                _json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "x",
+                        "spec": point,
+                        "sources": current,
+                    },
+                    f,
+                )
             self.assertFalse(export._job_needed(job, force=False))
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(
@@ -148,8 +166,6 @@ class TestToolchainRegistry(unittest.TestCase):
         tc = toolchains.get_toolchain("cutedsl")
         with self.assertRaisesRegex(RuntimeError, "missing keys.*fake_args"):
             tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
-
-
 
 
 if __name__ == "__main__":
