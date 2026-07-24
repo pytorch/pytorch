@@ -11,8 +11,10 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -47,6 +49,90 @@ class DeterministicTest(TestCase):
                 self.assertEqual(inductor_config.deterministic, new_val)
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
+
+    def _run_cumsum_and_get_code(
+        self,
+        shape,
+        dim,
+        input_dtype=torch.float32,
+        output_dtype=None,
+    ):
+        def fn(x):
+            return torch.cumsum(x, dim=dim, dtype=output_dtype)
+
+        if input_dtype.is_floating_point:
+            x = torch.randn(shape, device=GPU_TYPE, dtype=input_dtype)
+        else:
+            x = torch.randint(-8, 9, shape, device=GPU_TYPE, dtype=input_dtype)
+
+        actual, codes = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x), atol=1e-3, rtol=1e-3)
+        self.assertTrue(codes)
+        return "\n".join(codes)
+
+    @parametrize("deterministic", [False, True])
+    @skipIfRocm
+    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    def test_cumsum_split_scan_codegen(self, deterministic):
+        with DeterministicGuard(deterministic):
+            code = self._run_cumsum_and_get_code((1_000_003,), 0)
+
+        if deterministic:
+            FileCheck().check("torch.ops.aten.cumsum.default(").run(code)
+            FileCheck().check_not("exclusive_scan_decoupled_lookback").run(code)
+        else:
+            FileCheck().check_not("torch.ops.aten.cumsum.default(").run(code)
+            FileCheck().check("exclusive_scan_decoupled_lookback").run(code)
+
+    @parametrize(
+        "shape, dim, input_dtype, output_dtype, fallback",
+        [
+            ((2, 500_003), 1, torch.int32, torch.float32, True),
+            ((1_000_003,), 0, torch.float32, torch.int64, False),
+        ],
+    )
+    @skipIfRocm
+    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    def test_cumsum_split_scan_output_dtype(
+        self, shape, dim, input_dtype, output_dtype, fallback
+    ):
+        with DeterministicGuard(True):
+            code = self._run_cumsum_and_get_code(shape, dim, input_dtype, output_dtype)
+
+        if fallback:
+            FileCheck().check("torch.ops.aten.cumsum.default(").run(code)
+            FileCheck().check_not("exclusive_scan_decoupled_lookback").run(code)
+        else:
+            FileCheck().check_not("torch.ops.aten.cumsum.default(").run(code)
+            FileCheck().check("exclusive_scan_decoupled_lookback").run(code)
+
+    @skipIfRocm
+    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    def test_cumsum_nonsplit_scan_deterministic(self):
+        with DeterministicGuard(True):
+            code = self._run_cumsum_and_get_code((32_768, 128), 1)
+
+        FileCheck().check_not("torch.ops.aten.cumsum.default(").run(code)
+        FileCheck().check_not("exclusive_scan_decoupled_lookback").run(code)
+        FileCheck().check("tl.associative_scan").run(code)
+
+    @parametrize("config_name", ["deterministic", "batch_invariant"])
+    @skipIfRocm
+    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    def test_cumsum_inductor_deterministic_config(self, config_name):
+        config_values = {
+            "deterministic": config_name == "deterministic",
+            "batch_invariant": config_name == "batch_invariant",
+        }
+        with (
+            DeterministicGuard(False),
+            inductor_config.patch(**config_values),
+        ):
+            code = self._run_cumsum_and_get_code((1_000_003,), 0)
+
+        FileCheck().check_not("torch.ops.aten.cumsum.default(").run(code)
+        FileCheck().check_not("exclusive_scan_decoupled_lookback").run(code)
+        FileCheck().check("tl.associative_scan").run(code)
 
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):

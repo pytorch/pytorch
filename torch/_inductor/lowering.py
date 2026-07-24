@@ -7847,7 +7847,11 @@ def cumsum(x, axis=None, dtype=None):
         return (ops.add(a, b),)
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    (result,) = ir.Scan.create(
+        **kwargs,
+        combine_fn=combine_fn,
+        aten_fallback_is_deterministic=True,
+    )
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result

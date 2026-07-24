@@ -2875,6 +2875,8 @@ class WelfordReduction(MultiOutputReduction):
 
 @ir_dataclass
 class Scan(Loops):
+    """IR node representing an associative prefix scan over one tensor axis."""
+
     scan_ranges: list[Integer]
     size: list[Integer]
     combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]]
@@ -2964,6 +2966,7 @@ class Scan(Loops):
         *,
         # Whether we have the option to fallback to aten
         can_fallback_to_aten: bool = True,
+        aten_fallback_is_deterministic: bool = False,
         **kwargs: Any,
     ) -> Sequence[TensorBox | None]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
@@ -3006,6 +3009,26 @@ class Scan(Loops):
             scan_numel=scan_numel,
         )
         scan_type = Scan
+        if num_splits > 1:
+            deterministic = (
+                config.deterministic
+                or config.batch_invariant
+                or torch.are_deterministic_algorithms_enabled()
+            )
+            if (
+                is_float_dtype(dtypes[0])
+                and deterministic
+                and aten_fallback_is_deterministic
+            ):
+                if (
+                    can_fallback_to_aten
+                    and torch.are_deterministic_algorithms_enabled()
+                ):
+                    return [None] * len(dtypes)
+                # ATen consults only the global deterministic flag, so keep
+                # Inductor-only deterministic modes on the fixed-order Scan.
+                num_splits = 1
+
         if num_splits > 1:
             supports_split = (
                 # pyrefly: ignore [unsupported-operation]
