@@ -41,10 +41,10 @@ jobs:
 
           fail=0
           check () {  # $1 desc  $2 expected_rc
-            local desc="$1" exp="$2"
+            local desc="$1" exp="$2" rc=0
             echo "== ${desc} =="
-            parse t/pr-metadata.txt || true
-            parse t/pr-metadata.txt >/dev/null 2>&1; local rc=$?
+            # capture rc in a set -e-safe way (the runner adds `-e`)
+            if parse t/pr-metadata.txt; then rc=0; else rc=$?; fi
             if [ "${rc}" -ne "${exp}" ]; then
               echo "  FAIL: rc=${rc}, expected ${exp}"; fail=1
             else
