@@ -2,16 +2,105 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
+import platform
 import shutil
 import sys
+import tarfile
 from pathlib import Path
 from subprocess import check_call
 from tempfile import TemporaryDirectory
+from urllib.request import urlopen
 
 
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
+
+_PTXAS_13_4_46_TRITON_PIN = "ef4ab63bf41fc21e63bf3d77d11d9365837d0254"
+_PTXAS_13_4_46_PACKAGES = {
+    "x86_64": (
+        "amd64",
+        "x86_64",
+        "4664ae5f28e4eaebf8fea98eca879299a71ee9e54943a5c5a30774f18b69b44e",
+    ),
+    "aarch64": (
+        "arm64",
+        "sbsa",
+        "88cfe8bee7b12d380a05286545462be1de9c6f303ee9bef2a045b3f06ad2fe4e",
+    ),
+}
+
+
+def _read_ar_member(archive: bytes, wanted_name: str) -> bytes:
+    """Read one member from the simple ar container used by Debian packages."""
+    if not archive.startswith(b"!<arch>\n"):
+        raise RuntimeError("The ptxas preview package is not a Debian archive")
+
+    offset = 8
+    while offset < len(archive):
+        header = archive[offset : offset + 60]
+        if len(header) != 60 or header[58:60] != b"`\n":
+            raise RuntimeError("The ptxas preview package has an invalid ar header")
+        name = header[:16].decode("ascii").strip().rstrip("/")
+        size = int(header[48:58].decode("ascii").strip())
+        start = offset + 60
+        end = start + size
+        if end > len(archive):
+            raise RuntimeError("The ptxas preview package has a truncated ar member")
+        if name == wanted_name:
+            return archive[start:end]
+        offset = end + size % 2
+
+    raise RuntimeError(f"Can't find {wanted_name} in the ptxas preview package")
+
+
+def seed_preview_ptxas(commit_hash: str) -> None:
+    """Seed Triton's cache when testing the ptxas 13.4.46 preview pin."""
+    if commit_hash != _PTXAS_13_4_46_TRITON_PIN:
+        return
+
+    machine = platform.machine().lower()
+    machine = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    if machine not in _PTXAS_13_4_46_PACKAGES:
+        raise RuntimeError(f"Unsupported architecture for ptxas 13.4.46: {machine}")
+    package_arch, triton_arch, expected_sha256 = _PTXAS_13_4_46_PACKAGES[machine]
+    package = f"cuda-nvcc-13-4_13.4.46-1_{package_arch}.deb"
+    package_url = (
+        f"https://packages.nvidia.com/jammy/pool/{package_arch}/"
+        f"5B515474-7E78-11F1-8656-C51E4F4B317F/{package}"
+    )
+
+    print(f"Downloading ptxas 13.4.46 preview package from {package_url}")
+    with urlopen(package_url, timeout=60) as response:
+        package_contents = response.read()
+    actual_sha256 = hashlib.sha256(package_contents).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise RuntimeError(
+            f"ptxas preview package checksum mismatch: expected {expected_sha256}, "
+            f"got {actual_sha256}"
+        )
+
+    data_archive = _read_ar_member(package_contents, "data.tar.xz")
+    with tarfile.open(fileobj=io.BytesIO(data_archive), mode="r:xz") as archive:
+        ptxas = archive.extractfile("./usr/local/cuda-13.4/bin/ptxas")
+        if ptxas is None:
+            raise RuntimeError("Can't extract ptxas from the preview package")
+        triton_home = Path(os.environ.get("TRITON_HOME", Path.home()))
+        cache_path = (
+            triton_home
+            / ".triton"
+            / "nvidia"
+            / "nvcc-blackwell"
+            / f"cuda_nvcc-linux-{triton_arch}-13.4.46-archive"
+            / "bin"
+            / "ptxas"
+        )
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(ptxas.read())
+        cache_path.chmod(0o755)
+        print(f"Seeded Triton ptxas cache at {cache_path}")
 
 
 def read_triton_pin(device: str = "cuda") -> str:
@@ -103,6 +192,8 @@ def build_triton(
         else:
             check_call(["git", "fetch", "origin", commit_hash], cwd=triton_basedir)
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+
+        seed_preview_ptxas(commit_hash)
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
