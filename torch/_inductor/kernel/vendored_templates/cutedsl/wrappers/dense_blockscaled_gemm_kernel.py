@@ -199,7 +199,9 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if alpha is None:
             alpha = _ones_alpha()
 
-        epilogue_op = lambda v: v
+        def epilogue_op(v):
+            return v
+
         if getattr(args, "epilogue", None) is not None:
             epilogue_op = args.epilogue.epilogue_fn
             if isinstance(epilogue_op, str):
