@@ -141,7 +141,6 @@ from ..source import (
     DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
-    GlobalSource,
     GradSource,
     is_constant_source,
     is_from_closure_source,
@@ -648,17 +647,6 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
 
 class _missing:
     pass
-
-
-def _is_torch_module_attr_source(source: Source) -> bool:
-    if not isinstance(source, ChainedSource):
-        return False
-    base_source = source.get_base()
-    return isinstance(base_source, GlobalSource) and (
-        base_source.global_name == "torch"
-        or base_source.global_name == "__import_torch"
-        or base_source.global_name.startswith("__import_torch_dot")
-    )
 
 
 @dataclasses.dataclass
@@ -2808,21 +2796,12 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
-                    frame_state_entry = process_automatic_dynamic(
+                    process_automatic_dynamic(
                         self.tx,
                         self.source.name,
                         FrameStateSizeEntry.make_scalar(value),
                         is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
                     )
-                    if (
-                        config.automatic_dynamic_shapes
-                        and frame_state_entry.scalar is auto_dynamic
-                        and not self.source.guard_source.is_unspecialized_builtin_nn_module()
-                        and not _is_torch_module_attr_source(self.source)
-                    ):
-                        return self.wrap_symint(
-                            value, frame_state_entry=frame_state_entry
-                        )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
@@ -3314,7 +3293,6 @@ class VariableBuilder:
         value: int,
         dynamism: DimDynamic | None = None,
         context: SymIntSymbolicContext | None = None,
-        frame_state_entry: FrameStateSizeEntry | None = None,
     ) -> VariableTracker:
         if type(value) is not int:
             raise AssertionError(f"Expected exact int type, got {type(value)}")
@@ -3323,6 +3301,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         shape_env = self.tx.output.shape_env
+        frame_state_entry: FrameStateSizeEntry | None = None
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
@@ -3345,13 +3324,12 @@ class VariableBuilder:
 
             name = self.source.name
 
-            if frame_state_entry is None:
-                frame_state_entry = process_automatic_dynamic(
-                    self.tx,
-                    name,
-                    FrameStateSizeEntry.make_scalar(value),
-                    is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
-                )
+            frame_state_entry = process_automatic_dynamic(
+                self.tx,
+                name,
+                FrameStateSizeEntry.make_scalar(value),
+                is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
+            )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
