@@ -75,6 +75,35 @@ def make_bulk_reduce_add(ptx_suffix: str):
     return _op
 
 
+@dsl_user_op
+def trap_if_oob(val_i64, bound_i64, *, loc=None, ip=None):
+    """Predicated device trap unless ``0 <= val < bound``.
+
+    The bounds-check equivalent of aten's ``CUDA_KERNEL_ASSERT`` (see
+    TmaScatterAddKernel.cu): two ``setp`` + predicated ``trap``
+    instructions, effectively free on the happy path. This replaces
+    ``cute_testing.assert_`` + ``--enable-assertions``, whose DSL
+    assert machinery cost ~10% device time on these kernels. The trap
+    aborts the kernel before any OOB write and surfaces as a CUDA
+    launch error (sticky, fails the next sync), matching the intent --
+    though not the exact error text -- of aten's device-side assert.
+    """
+    _inline_asm(
+        None,
+        [as_ir(val_i64, loc=loc, ip=ip), as_ir(bound_i64, loc=loc, ip=ip)],
+        "{\n"
+        ".reg .pred %oob;\n"
+        "setp.lt.s64 %oob, $0, 0;\n"
+        "@%oob trap;\n"
+        "setp.ge.s64 %oob, $0, $1;\n"
+        "@%oob trap;\n"
+        "}",
+        "l,l",
+        loc=loc,
+        ip=ip,
+    )
+
+
 def make_packed_half_atomic_add(ptx_suffix: str):
     """Emit ``red.global.add.noftz.<suffix>`` with a single ``i32`` packed
     register holding two halves. Used by the vec-scatter kernel for
