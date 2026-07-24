@@ -2016,6 +2016,15 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
+    def test_index_propagation_to_dtype_inf(self):
+        def fn():
+            x = torch.full((2,), 0.0, device=self.device)
+            y = torch.log(x)
+            return torch.sum(y, dtype=torch.int32).float()
+
+        self.common(fn, ())
+
     def test_index_propagation_floordiv(self):
         def repeat_interleave(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
