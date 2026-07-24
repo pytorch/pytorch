@@ -31,31 +31,69 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       check_experiments: lf
 
-  # Fail fast (minutes, not hours) if the runner/docker policy forbids the BPF
-  # caps the trace job needs. Uses a tiny image on the same runner+caps combo.
-  bpf-canary:
-    name: bpf-canary
+  # Canary variants -- test three BPF-caps hypotheses in ONE run so we spend
+  # one CI round-trip, not one per hypothesis. All three are independent and
+  # non-blocking on each other; build/test gate on canary-capadd only.
+  #
+  #   control  -- same runner label, plain container, no extra options. If this
+  #               schedules but canary-capadd does not, the cap options (not the
+  #               label/pool) are what blocks scheduling.
+  #   capadd   -- job-level container with cap-add set (the test-job approach).
+  #   bare     -- no job-level container; docker run --privileged on the bare
+  #               runner (the proven _rocm-test / _s390x pattern).
+
+  canary-control:
+    name: canary-control
     needs: get-label-type
     runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.4xlarge
+    timeout-minutes: 20
     container:
       image: ubuntu:22.04
-      options: "--privileged"
     steps:
-      - name: Install bpftrace
-        run: |
-          apt-get update -y
-          apt-get install -y bpftrace
-      - name: Attach a probe
+      - name: Scheduled and started
+        run: true
+
+  canary-capadd:
+    name: canary-capadd
+    needs: get-label-type
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.4xlarge
+    timeout-minutes: 20
+    container:
+      image: ubuntu:22.04
+      options: "--cap-add=SYS_ADMIN --cap-add=PERFMON --cap-add=BPF --security-opt seccomp=unconfined"
+    steps:
+      - name: Install bpftrace and attach a probe
         run: |
           set -eux
+          apt-get update -y && apt-get install -y bpftrace
           timeout 30 bpftrace -e \
             'tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }'
+
+  canary-bare:
+    name: canary-bare
+    needs: get-label-type
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.4xlarge
+    timeout-minutes: 20
+    steps:
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: docker run --privileged + bpftrace
+        run: |
+          set -eux
+          docker run --rm --privileged --security-opt seccomp=unconfined ubuntu:22.04 \
+            bash -c "apt-get update -qq && apt-get install -qq -y bpftrace && \
+              timeout 30 bpftrace -e \
+              'tracepoint:syscalls:sys_enter_openat { @n = count(); exit(); }'"
 
   build:
     name: linux-jammy-py3.10-gcc11
     needs:
       - get-label-type
-      - bpf-canary
+      - canary-capadd
     uses: ./.github/workflows/_linux-build.yml
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -90,7 +128,7 @@ jobs:
       build-environment: ${{ needs.build.outputs.build-environment }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      docker-container-options: "--gpus all --privileged"
+      docker-container-options: "--gpus all --cap-add=SYS_ADMIN --cap-add=PERFMON --cap-add=BPF --security-opt seccomp=unconfined"
       bpf-td: "1"
       python-version: "3.10"
       compiler: gcc11
