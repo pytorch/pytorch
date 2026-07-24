@@ -2299,6 +2299,121 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         expected = torch.mm(x, w) * self.world_size
         self.assertEqual(y, expected)
 
+    def _mempool_barrier_roundtrip(self, mempool, numel, dtype, group_name):
+        # Allocate a symmetric tensor from the pool, then run a bounded
+        # barrier / buffer round-trip. A polluted signal pad would deadlock the
+        # CAS barrier, so timeout_ms makes a regression fail cleanly.
+        with torch.cuda.use_mem_pool(mempool):
+            t = torch.empty(numel, dtype=dtype, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=group_name)
+        t.fill_(self.rank)
+        hdl.barrier(timeout_ms=60000)
+        for peer in range(self.world_size):
+            buf = hdl.get_buffer(peer, (numel,), dtype)
+            self.assertTrue(buf.eq(peer).all())
+        hdl.barrier(timeout_ms=60000)
+        return t, hdl
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_recycled_alloc_signal_pad(self):
+        # Regression test for the signal-pad pollution bug: the symmetric
+        # allocator (ncclMemAlloc / cuMemCreate) does not zero memory, so a
+        # fresh allocation whose region is recycled from a previously-used block
+        # could start the CAS-based barrier() protocol from a non-zero signal
+        # pad and deadlock. alloc() zeros the pad up front. Allocate from the
+        # SymmMem MemPool and run a barrier round-trip, free, then allocate the
+        # same size again (recycling the freed block) and confirm the round-trip
+        # still works on the recycled region.
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel, dtype = 1024, torch.float
+
+        t1, hdl1 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+        del hdl1, t1
+        t2, hdl2 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+        del hdl2, t2
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_large_alloc_barrier(self):
+        # alloc() only zeros the signal pad, not the whole (much larger) data
+        # buffer. Confirm the signaling protocol still initializes correctly on
+        # a large allocation: run a barrier / buffer round-trip and check data.
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel, dtype = 4 * 1024 * 1024, torch.float
+        self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_storage_reuse(self):
+        """MemPool with no_split=True returns the same VA for same-size allocs."""
+        self._init_process()
+
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel = 1024
+        dtype = torch.float
+
+        with torch.cuda.use_mem_pool(mempool):
+            t1 = torch.empty(numel, dtype=dtype, device=self.device)
+        ptr1 = t1.data_ptr()
+        del t1
+
+        with torch.cuda.use_mem_pool(mempool):
+            t2 = torch.empty(numel, dtype=dtype, device=self.device)
+        ptr2 = t2.data_ptr()
+
+        self.assertEqual(
+            ptr1,
+            ptr2,
+            "MemPool should return the same storage block for same-size re-allocation",
+        )
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_symm_mem_empty_storage_reuse(self):
+        """symm_mem.empty() reuses storage across alloc/free cycles via the MemPool."""
+        self._init_process()
+
+        size = (1024,)
+        stride = (1,)
+        alloc_id = 13 + random.randint(0, 2147483647)
+        dtype = torch.float
+
+        # We must use the alloc_id argument to guarantee the reuse of previously
+        # allocated memory
+        t1 = _SymmetricMemory.empty_strided_p2p(
+            size, stride, dtype=dtype, device=self.device, alloc_id=alloc_id
+        )
+        ptr1 = t1.data_ptr()
+        del t1
+
+        t2 = _SymmetricMemory.empty_strided_p2p(
+            size, stride, dtype=dtype, device=self.device, alloc_id=alloc_id
+        )
+        ptr2 = t2.data_ptr()
+
+        self.assertEqual(
+            ptr1,
+            ptr2,
+            "symm_mem.empty() should reuse the same storage block via the implicit MemPool",
+        )
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()

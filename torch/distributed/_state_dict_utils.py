@@ -534,9 +534,6 @@ class _TensorInfo(NamedTuple):
     dtype: torch.dtype
 
 
-torch.serialization.add_safe_globals([_TensorInfo])
-
-
 def _broadcast_tensors(
     full_state_dict: dict[str, Any],
     local_state_dict: dict[str, Any],
@@ -662,7 +659,7 @@ def _broadcast_state_dict(
                 ret[key] = _TensorInfo(value.size(), value.dtype)
 
     broadcast_list = [ret]
-    dist.broadcast_object_list(broadcast_list, src=0, group=pg, weights_only=True)
+    dist.broadcast_object_list(broadcast_list, src=0, group=pg)
     ret = broadcast_list[0]
     # Gather values
     keys = []
