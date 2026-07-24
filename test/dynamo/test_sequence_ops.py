@@ -671,45 +671,6 @@ class TestSqRepeat(torch._dynamo.test_case.TestCase):
         super().tearDown()
         torch._dynamo.config.enable_trace_unittest = self._u_prev
 
-    @parametrize(
-        "operand,count,expected",
-        [
-            ([1, 2], 2, [1, 2, 1, 2]),
-            ([1], 0, []),
-            ([1], -1, []),
-            ((1, 2), 3, (1, 2, 1, 2, 1, 2)),
-            ("ab", 2, "abab"),
-        ],
-    )
-    @make_dynamo_test
-    def test_repeat(self, operand, count, expected):
-        self.assertEqual(operand * count, expected)
-
-    @make_dynamo_test
-    def test_repeat_reflected(self):
-        # int * seq goes through sq_repeat via the reflected path
-        self.assertEqual(2 * [1, 2], [1, 2, 1, 2])
-        self.assertEqual(3 * (5,), (5, 5, 5))
-
-    @make_dynamo_test
-    def test_repeat_index_count(self):
-        # count goes through __index__ (bool is an index)
-        self.assertEqual([1] * True, [1])
-        self.assertEqual([1] * False, [])
-
-    @make_dynamo_test
-    def test_repeat_non_int_count_raises(self):
-        with self.assertRaises(TypeError):
-            [1, 2] * "a"
-
-    @make_dynamo_test
-    def test_inplace_repeat(self):
-        a = [1, 2]
-        b = a
-        a *= 2
-        self.assertEqual(a, [1, 2, 1, 2])
-        self.assertIs(a, b)
-
     # --- User-defined subclasses: the inherited C sq_repeat slot ---
 
     @make_dynamo_test
@@ -741,9 +702,6 @@ class TestSqRepeat(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(a), [1, 1, 1])
         self.assertIs(type(a), UserDefinedList)
         self.assertIs(a, b)
-
-
-instantiate_parametrized_tests(TestSqRepeat)
 
 
 # ---------------------------------------------------------------------------

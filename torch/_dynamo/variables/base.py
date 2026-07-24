@@ -423,6 +423,8 @@ def _wrap_unaryfunc(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 0:
         raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
     return func(self, tx)
@@ -435,6 +437,8 @@ def _wrap_binaryfunc(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
     other = args[0]
@@ -449,6 +453,8 @@ def _wrap_binaryfunc_r(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # Reflected binary op (``__radd__``): same impl, operands from the right.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
     other = args[0]
@@ -463,6 +469,8 @@ def _wrap_ternaryfunc(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # __pow__ is binary or ternary: ``x.__pow__(y)`` or ``x.__pow__(y, z)`` (mod).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) not in (1, 2):
         raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
     z = args[1] if len(args) == 2 else None
@@ -477,6 +485,8 @@ def _wrap_ternaryfunc_r(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # Reflected __rpow__: operands from the right.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) not in (1, 2):
         raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
     z = args[1] if len(args) == 2 else None
@@ -490,6 +500,8 @@ def _wrap_sq_setitem(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
     if len(args) != 2:
@@ -506,6 +518,8 @@ def _wrap_sq_item(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
     if len(args) != 1:
@@ -523,6 +537,8 @@ def _wrap_indexargfunc(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import pynumber_as_ssize_t
 
     if len(args) != 1:
@@ -540,6 +556,8 @@ def _wrap_objobjargproc(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 2:
         raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
     [key, value] = args
@@ -553,6 +571,8 @@ def _wrap_delitem(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
     [key] = args
@@ -566,6 +586,8 @@ def _wrap_sq_delitem(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
     if len(args) != 1:
@@ -583,6 +605,8 @@ def _wrap_objobjproc(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # sq_contains via __contains__: one arg, impl returns a bool.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
     [other] = args
@@ -609,6 +633,8 @@ def _make_richcmp(
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(tx, "this method takes no keyword arguments")
         if len(args) != 1:
             raise_type_error(tx, f"expected 1 argument, got {len(args)}")
         return func(self, tx, args[0], op)
@@ -655,6 +681,8 @@ def _wrap_setattr(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_setattro via __setattr__: (name, value).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 2:
         raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
     return func(self, tx, args[0], args[1])
@@ -668,6 +696,8 @@ def _wrap_delattr(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_setattro via __delattr__: (name,).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
     return func(self, tx, args[0])
@@ -681,6 +711,8 @@ def _wrap_getattro(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_getattro via __getattribute__: impl takes the attribute name as a str.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
     return func(self, tx, args[0].as_python_constant())
@@ -694,6 +726,8 @@ def _wrap_descr_get(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_descr_get via __get__(obj, owner=None): owner defaults to type(obj).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) not in (1, 2):
         raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
     obj = args[0]
@@ -709,6 +743,8 @@ def _wrap_descr_set(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_descr_set via __set__(obj, value): 2 args.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 2:
         raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
     return func(self, tx, args[0], args[1])
@@ -723,6 +759,8 @@ def _wrap_descr_delete(
 ) -> VariableTracker:
     # tp_descr_set via __delete__(obj): value=None signals delete (CPython
     # passes value==NULL to the shared tp_descr_set slot).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
     return func(self, tx, args[0], None)
