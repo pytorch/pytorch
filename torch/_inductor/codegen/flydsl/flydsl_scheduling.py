@@ -185,10 +185,9 @@ class FlyDSLScheduling(BaseScheduling):
     @staticmethod
     def _build_flydsl_gpu_arch(device_index) -> str | None:
         """Best-effort ROCm arch string for FlyDSL worker precompilation."""
-        for env_var in ("FLYDSL_GPU_ARCH", "ARCH"):
-            arch = os.environ.get(env_var)
-            if arch:
-                return arch.split(":", 1)[0]
+        arch = os.environ.get("FLYDSL_GPU_ARCH")
+        if arch:
+            return arch.split(":", 1)[0]
 
         hsa_arch = os.environ.get("HSA_OVERRIDE_GFX_VERSION")
         if hsa_arch:
@@ -196,7 +195,10 @@ class FlyDSLScheduling(BaseScheduling):
                 return hsa_arch
             if hsa_arch.count(".") == 2:
                 major, minor, stepping = hsa_arch.split(".")
-                return f"gfx{major}{minor}{stepping}"
+                try:
+                    return f"gfx{major}{minor}{int(stepping):x}"
+                except ValueError:
+                    log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", hsa_arch)
 
         try:
             import torch
