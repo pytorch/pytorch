@@ -714,6 +714,80 @@ class TestCodegenTriton(InductorTestCase):
         self.assertNotIn("tt.pointer_range", code_str)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_preserves_root_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        class FakeSizeVars:
+            class ShapeEnv:
+                @staticmethod
+                def has_guarding_hint(x):
+                    return True
+
+            shape_env = ShapeEnv()
+
+            @staticmethod
+            def statically_known_equals(x, y):
+                return False
+
+            @staticmethod
+            def statically_known_true(x):
+                return bool(x)
+
+            @staticmethod
+            def statically_known_multiple_of(x, y):
+                return False
+
+            @staticmethod
+            def guarding_hint_or_throw(x):
+                return int(x)
+
+            @staticmethod
+            def check_leq(x, y):
+                pass
+
+        class FakeGraph:
+            sizevars = FakeSizeVars()
+
+            @staticmethod
+            def get_current_device_or_throw():
+                return torch.device("cuda")
+
+        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
+        wrapper.user_defined_kernel_cache = {}
+        captured = {}
+
+        def define_kernel(name, body, metadata=None):
+            captured["body"] = body
+
+        wrapper.define_kernel = define_kernel
+        props = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+        )
+        with (
+            V.set_graph_handler(FakeGraph()),
+            patch.object(DeviceProperties, "create", return_value=props),
+        ):
+            wrapper.define_user_defined_triton_kernel(
+                noinline_helper_for_codegen,
+                configs=[],
+                kwargs={"x": 2},
+                restore_value_args=[],
+                reset_to_zero_args=[],
+                grids=[[1, 1, 1]],
+                epilogue_fusion=None,
+                launch_kwargs=(),
+            )
+
+        self.assertIn("@triton.jit(", captured["body"])
+        self.assertIn("noinline=True", captured["body"])
+        self.assertIn("debug=True", captured["body"])
+        self.assertIn('do_not_specialize=["x"]', captured["body"])
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_kernel_preserves_jit_decorator(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
@@ -753,7 +827,7 @@ class TestCodegenTriton(InductorTestCase):
     def test_user_defined_triton_kernel_jit_decorator_parse_failure_falls_back(self):
         from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
 
-        for raw_src in ("", "@triton.jit(\n", ["@triton.jit(\n"]):
+        for raw_src in (None, "", "@triton.jit(\n", ["@triton.jit(\n"]):
             self.assertEqual(
                 _triton_jit_decorator_from_source(SimpleNamespace(raw_src=raw_src)),
                 "@triton.jit",
