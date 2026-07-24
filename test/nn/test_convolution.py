@@ -1181,6 +1181,25 @@ class TestConvolutionNN(NNTestCase):
 
 
 class TestConvolutionNNDeviceType(NNTestCase):
+    @skipMPS
+    @expectedFailureXPU
+    def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
+        inp = torch.full((1, 2, 4, 5, 4), 0.5, device=device)
+        weight = torch.full((2, 3, 2, 3, 2), 0.5, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "kernel_size.*must match weight spatial dimensions"
+        ):
+            torch.ops.aten.slow_conv_transpose3d(
+                inp,
+                weight,
+                [1, 1, 1],
+                torch.full((3,), 0.5, device=device),
+                [1, 1, 1],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
+            )
+
     def run_conv_double_back_test(
         self,
         kern,
@@ -4091,6 +4110,7 @@ class TestConvolutionNNCUDA(NNTestCase):
         m(x)
 
     @skipCUDAIfNoCudnn
+    @tf32_on_and_off(0.015)
     def test_cudnn_not_mutate_stride(self, device):
         weight = torch.randn(64, 64, 1, 1, device=device)
         x = torch.randn(2, 64, 10, 10, device=device).to(
