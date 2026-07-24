@@ -40,6 +40,7 @@ from ..utils import istype
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    maybe_get_python_type,
     NO_SUCH_SUBOBJ,
     VariableTracker,
 )
@@ -328,21 +329,6 @@ def pycallable_check(obj_type: type) -> bool:
     ref: https://github.com/python/cpython/blob/v3.13.0/Objects/call.c#L52-L57
     """
     return type_implements_tp_call(obj_type)
-
-
-def maybe_get_python_type(obj: VariableTracker) -> type:
-    try:
-        return obj.python_type()
-    except NotImplementedError:
-        unimplemented(
-            gb_type="Unsupported python_type() call",
-            context=f"{obj} does not implement python_type()",
-            explanation="This VariableTracker does not implement python_type(), "
-            "which is required for object protocol operations.",
-            hints=[
-                *graph_break_hints.DYNAMO_BUG,
-            ],
-        )
 
 
 def pyiter_send(
