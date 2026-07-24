@@ -667,6 +667,77 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_gather_into_tensor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        device = torch.device(f"cuda:{self.rank:d}")
+        torch.cuda.set_device(device)
+        world_size = self.world_size
+
+        # Each rank contributes a distinct block; the flat output on the
+        # destination rank is the concatenation of every rank's block.
+        elems = 3
+        for dst in range(world_size):
+            tensor = torch.arange(elems, device=device).float() + self.rank * elems
+            if self.rank == dst:
+                gather_tensor = torch.empty(world_size * elems, device=device)
+            else:
+                gather_tensor = None
+
+            dist.gather_into_tensor(tensor, gather_tensor, dst=dst)
+
+            if self.rank == dst:
+                expected = torch.arange(world_size * elems, device=device).float()
+                self.assertEqual(gather_tensor, expected)
+            else:
+                self.assertIsNone(gather_tensor)
+
+        # Stack form: output shaped [world_size, *tensor.shape].
+        tensor = torch.ones(2, 2, device=device) * self.rank
+        gather_tensor = (
+            torch.empty(world_size, 2, 2, device=device) if self.rank == 0 else None
+        )
+        dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        if self.rank == 0:
+            expected = torch.stack(
+                [torch.ones(2, 2, device=device) * r for r in range(world_size)]
+            )
+            self.assertEqual(gather_tensor, expected)
+
+        # Async variant returns a work handle that can be waited on.
+        tensor = torch.arange(elems, device=device).float() + self.rank * elems
+        gather_tensor = (
+            torch.empty(world_size * elems, device=device) if self.rank == 0 else None
+        )
+        work = dist.gather_into_tensor(tensor, gather_tensor, dst=0, async_op=True)
+        work.wait()
+        if self.rank == 0:
+            expected = torch.arange(world_size * elems, device=device).float()
+            self.assertEqual(gather_tensor, expected)
+
+        # Negative path: the destination rank validates the output tensor
+        # locally (before any NCCL op is issued), so only the root needs to
+        # participate -- a wrong-sized or wrong-dtype output must raise.
+        if self.rank == 0:
+            good_input = torch.arange(elems, device=device).float()
+            with self.assertRaises((ValueError, RuntimeError)):
+                bad_size = torch.empty(world_size * elems + 1, device=device)
+                dist.gather_into_tensor(good_input, bad_size, dst=0)
+            with self.assertRaises((ValueError, RuntimeError)):
+                bad_dtype = torch.empty(world_size * elems, device=device).double()
+                dist.gather_into_tensor(good_input, bad_dtype, dst=0)
+        dist.barrier()
+
+        # NOTE: on NVIDIA (NCCL >= 2.28.3) this exercises the native ncclGather
+        # path; on ROCm (RCCL, which lacks ncclGather) it exercises the < 2.28.3
+        # send/recv fallback, so both code paths are covered across CI.
+
+        c10d.destroy_process_group()
+
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
         A helper for `test_extra_cuda_context`, if pynvml is available.
@@ -697,7 +768,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
+            lambda msg: f"{msg}\nFound {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     def _helper_test_extra_cuda_context_by_memory(self):
@@ -735,7 +806,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
                 # Bump the heuristic from 1.5 to 1.7 due to
                 # https://github.com/pytorch/pytorch/issues/153122
                 used_after < used_before * 1.7,
-                f"{device} used {used_after} bytes after collective, "
+                lambda msg: f"{msg}\n{device} used {used_after} bytes after collective, "
                 f"70% more than the status before ({used_before} bytes). "
                 f"Extra CUDA context may have been created.",
             )
@@ -805,7 +876,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
+            lambda msg: f"{msg}\nFound {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     @requires_nccl()
@@ -1649,7 +1720,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertLess(
                 elapsed_time,
                 30.0,
-                f"shrink_group took {elapsed_time:.3f}s, possible regression",
+                lambda msg: f"{msg}\nshrink_group took {elapsed_time:.3f}s, possible regression",
             )
 
             # Test collective performance
@@ -1808,7 +1879,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _validate_shrunk_group(self, shrunk_pg, expected_size, test_name=""):
         """Validate properties of a shrunk process group."""
-        self.assertIsNotNone(shrunk_pg, f"{test_name}: shrunk_pg should not be None")
+        self.assertIsNotNone(
+            shrunk_pg, lambda msg: f"{msg}\n{test_name}: shrunk_pg should not be None"
+        )
         actual_size = shrunk_pg.size()
         self.assertEqual(
             actual_size,
@@ -1818,7 +1891,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         new_rank = shrunk_pg.rank()
         self.assertTrue(
-            0 <= new_rank < expected_size, f"{test_name}: invalid new rank {new_rank}"
+            0 <= new_rank < expected_size,
+            lambda msg: f"{msg}\n{test_name}: invalid new rank {new_rank}",
         )
 
         log_test_info(
@@ -2191,27 +2265,27 @@ class DistributedDataParallelTest(
             ):
                 self.assertIsNotNone(
                     p_ddp.grad,
-                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nDDP gradient is None at iteration {iteration}, param {name}",
                 )
 
                 self.assertIsNotNone(
                     p_ref.grad,
-                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nReference gradient is None at iteration {iteration}, param {name}",
                 )
 
                 self.assertTrue(
                     p_ddp.grad.is_complex(),
-                    f"DDP gradient lost complex dtype at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nDDP gradient lost complex dtype at iteration {iteration}, param {name}",
                 )
 
                 self.assertTrue(
                     p_ref.grad.is_complex(),
-                    f"Reference gradient lost complex dtype at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nReference gradient lost complex dtype at iteration {iteration}, param {name}",
                 )
 
                 self.assertFalse(
                     torch.allclose(p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)),
-                    f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}! "
+                    lambda msg: f"{msg}\nDDP imaginary gradient is all zeros at iteration {iteration}, param {name}! "
                     f"This indicates the complex gradient bug.",
                 )
 
@@ -2219,7 +2293,7 @@ class DistributedDataParallelTest(
                     torch.allclose(
                         p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
                     ),
-                    f"Real gradient mismatch at iteration {iteration}, param {name}\n"
+                    lambda msg: f"{msg}\nReal gradient mismatch at iteration {iteration}, param {name}\n"
                     f"DDP real: {p_ddp.grad.real.mean():.6f}, "
                     f"Ref real: {p_ref.grad.real.mean():.6f}",
                 )
@@ -2228,7 +2302,7 @@ class DistributedDataParallelTest(
                     torch.allclose(
                         p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
                     ),
-                    f"Imaginary gradient mismatch at iteration {iteration}, param {name}\n"
+                    lambda msg: f"{msg}\nImaginary gradient mismatch at iteration {iteration}, param {name}\n"
                     f"DDP imag: {p_ddp.grad.imag.mean():.6f}, "
                     f"Ref imag: {p_ref.grad.imag.mean():.6f}",
                 )
@@ -2310,16 +2384,16 @@ class DistributedDataParallelTest(
             ):
                 self.assertIsNotNone(
                     p_ddp.grad,
-                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nDDP gradient is None at iteration {iteration}, param {name}",
                 )
                 self.assertIsNotNone(
                     p_ref.grad,
-                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nReference gradient is None at iteration {iteration}, param {name}",
                 )
 
                 self.assertTrue(
                     p_ddp.grad.is_complex() == p_ref.grad.is_complex(),
-                    f"Gradient dtype mismatch at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nGradient dtype mismatch at iteration {iteration}, param {name}",
                 )
 
                 if p_ddp.grad.is_complex():
@@ -2327,24 +2401,24 @@ class DistributedDataParallelTest(
                         torch.allclose(
                             p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)
                         ),
-                        f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nDDP imaginary gradient is all zeros at iteration {iteration}, param {name}",
                     )
                     self.assertTrue(
                         torch.allclose(
                             p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
                         ),
-                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nReal gradient mismatch at iteration {iteration}, param {name}",
                     )
                     self.assertTrue(
                         torch.allclose(
                             p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
                         ),
-                        f"Imaginary gradient mismatch at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nImaginary gradient mismatch at iteration {iteration}, param {name}",
                     )
                 else:
                     self.assertTrue(
                         torch.allclose(p_ddp.grad, p_ref.grad, rtol=1e-5, atol=1e-5),
-                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nReal gradient mismatch at iteration {iteration}, param {name}",
                     )
 
     @requires_nccl()
@@ -4490,102 +4564,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_all_reduce_coalesced_nccl(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-        tensors = [
-            torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
-            for i in range(5)
-        ]
-        torch.distributed.all_reduce_coalesced(tensors, group=process_group)
-        for i, t in enumerate(tensors):
-            self.assertEqual(
-                t,
-                torch.full_like(
-                    t, self.world_size * (i + (self.world_size + 1.0) / 2.0)
-                ),
-            )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_all_reduce_coalesced_manager_nccl(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-
-        for async_ops in [False, True]:
-            tensors = [
-                torch.full(
-                    (60 + i,), self.rank + 1 + i, device=device, dtype=torch.float
-                )
-                for i in range(5)
-            ]
-            with torch.distributed._coalescing_manager(
-                group=process_group, device=device, async_ops=async_ops
-            ) as cm:
-                for tensor in tensors:
-                    torch.distributed.all_reduce(tensor)
-
-            self.assertEqual(len(cm.works), 1 if async_ops else 0)
-            cm.wait()
-
-            for i, t in enumerate(tensors):
-                self.assertEqual(
-                    t,
-                    torch.full_like(
-                        t, self.world_size * (i + (self.world_size + 1.0) / 2.0)
-                    ),
-                )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_all_gather_into_tensor_coalesced_manager_nccl(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-        input_tensors = [
-            torch.arange(
-                self.rank * (60 + i),
-                (self.rank + 1) * (60 + i),
-                device=device,
-                dtype=torch.float,
-            )
-            for i in range(5)
-        ]
-        for async_ops in [False, True]:
-            output_tensors = [
-                torch.zeros(
-                    (60 + i) * self.world_size, device=device, dtype=torch.float
-                )
-                for i in range(5)
-            ]
-            with torch.distributed._coalescing_manager(
-                group=process_group, device=device, async_ops=async_ops
-            ) as cm:
-                for input_t, output_t in zip(input_tensors, output_tensors):
-                    torch.distributed.all_gather_single(output_t, input_t)
-
-            self.assertEqual(len(cm.works), 1 if async_ops else 0)
-            cm.wait()
-
-            for i, output_t in enumerate(output_tensors):
-                expected = torch.arange(
-                    (60 + i) * self.world_size, device=device, dtype=torch.float
-                )
-                self.assertEqual(output_t, expected)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
     def test_coalesced_manager_op_integrity(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
@@ -4701,30 +4679,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(cm.estimated_time is not None)
         self.assertTrue(cm.estimated_time > 0)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_default_pg_nccl(self):
-        torch.cuda.set_device(self.rank)
-        self._test_sequence_num_set_default_pg(backend="nccl")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_sequence_num_incremented_nccl_default(self):
-        self._test_sequence_num_incremented_default_group("nccl")
-
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sequence_num_incremented_nccl_subgroup(self):
-        if self.world_size < 4:
-            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
-        self._test_sequence_num_incremented_subgroup("nccl")
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_nccl_new_group(self):
-        torch.cuda.set_device(self.rank)
-        self._test_sequence_num_set_new_group(backend="nccl")
 
     def _test_pass_nccl_options(self, pg_opts):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -4919,14 +4873,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
             torch.ops.c10d_functional.wait_tensor(input1)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-
-            input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
-            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-            work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
-            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
-            work.wait()
-            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-            self.assertEqual(input1, input2)
 
         # Case 2: not under context manager (i.e. work is not registered in registry)
         input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")

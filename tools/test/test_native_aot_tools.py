@@ -13,6 +13,8 @@ def _load(name: str):
     spec = importlib.util.spec_from_file_location(
         name, os.path.join(TOOLS_DIR, f"{name}.py")
     )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module {name}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -124,7 +126,6 @@ class TestArch(unittest.TestCase):
         self.assertEqual(len(blackwell), 1)
         self.assertEqual(len(hopper), 0)
         self.assertEqual(len(on_device), 1)
-
 
     def test_sm_number_parsing(self):
         tc = toolchains.Toolchain

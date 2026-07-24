@@ -1103,11 +1103,20 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def generate_debug_sync(self, buffer):
         if self.device == "cuda":
-            buffer.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+            # The fbcode JIT cpp_wrapper CUDA build links only the CUDA driver
+            # (libcuda), not libcudart, so the runtime cudaDeviceSynchronize symbol
+            # is undefined at dlopen -> use the driver-API cuCtxSynchronize there.
+            # On ROCm the driver-context sync hipCtxSynchronize returns
+            # hipErrorNotSupported at runtime, so keep the runtime cudaDeviceSynchronize
+            # (which hipifies to hipDeviceSynchronize and IS linked in the ROCm build).
+            if torch.version.hip is not None:
+                buffer.writeline(
+                    maybe_hipify_code_wrapper(
+                        "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+                    )
                 )
-            )
+            else:
+                buffer.writeline("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
             return
 
         raise NotImplementedError(
@@ -1363,7 +1372,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     if ((reinterpret_cast<std::uintptr_t>({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
                         AOTI_TORCH_WARN("{warn_msg}");
                         AtenTensorHandle {input_name}_aligned;
-                        aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
+                        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned));
                         {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
                     }}
                     """
