@@ -25,8 +25,8 @@ set XPU_EXTRA_INSTALLED=0
 set XPU_EXTRA_UNINSTALL=0
 
 if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2026.1] (
-    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/fb0535f3-9be5-4426-9283-d79009e0851e/intel-deep-learning-essentials-2026.1.0.196_offline.exe
-    set XPU_BUNDLE_VERSION=2026.1.0+178
+    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/5d44690a-84fb-4d3b-bc5d-caed4bab56fc/intel-deep-learning-essentials-2026.1.2.22_offline.exe
+    set XPU_BUNDLE_VERSION=2026.1.2+17
 )
 
 :: Check if XPU bundle is target version or already installed
