@@ -696,7 +696,13 @@ def generic_int(
     obj_type = maybe_get_python_type(obj)
 
     if type_implements_nb_int(obj_type):
-        return obj.nb_int_impl(tx)
+        res = obj.nb_int_impl(tx)
+        if res.python_type() is not int:
+            raise_type_error(
+                tx,
+                f"__int__ returned non-int (type {res.python_type_name()})",
+            )
+        return res
 
     if type_implements_nb_index(obj_type):
         return obj.nb_index_impl(tx)
@@ -738,7 +744,13 @@ def generic_float(
     obj_type = maybe_get_python_type(obj)
 
     if type_implements_nb_float(obj_type):
-        return obj.nb_float_impl(tx)
+        res = obj.nb_float_impl(tx)
+        if res.python_type() is not float:
+            raise_type_error(
+                tx,
+                f"__float__ returned non-float (type {res.python_type_name()})",
+            )
+        return res
 
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1674-L1685
     if type_implements_nb_index(obj_type):
@@ -746,7 +758,7 @@ def generic_float(
 
     # PyFloat_FromString fallback — handles str and bytes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1691
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), (str, bytes)):
+    if issubclass(obj.python_type(), (str, bytes)):
         try:
             return ConstantVariable.create(float(obj.as_python_constant()))
         except ValueError as e:
