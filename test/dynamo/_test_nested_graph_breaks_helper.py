@@ -27,12 +27,6 @@ def fn_with_module_global(x):
     return x + _MODULE_CONST + 1
 
 
-def ngb_suppressed_fn(x):
-    x = x + 1
-    torch._dynamo.graph_break()
-    return x + 2
-
-
 HELPER_CONSTANT = torch.tensor([100.0])
 
 

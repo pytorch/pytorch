@@ -17136,7 +17136,6 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt()
         self.assertEqual(result.shape, (3, 7))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_module_hook_handle_references_real_dict(self):
         """A RemovableHandle created inside a compiled function must reference
         the real module's (empty) hooks dict. This requires reconstructing the
@@ -17161,11 +17160,13 @@ def forward(self, L_x_ : torch.Tensor):
         h.remove()
         self.assertEqual(len(m._forward_hooks), 0)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_custom_op_register_fake_inside_traced_function(self):
         """Custom op defined with register_fake inside a traced function must
-        work under NGB. The register_fake side effect mutates _abstract_fn on
-        the real CustomOpDef, which NGB suppress ensures happens eagerly.
+        produce correct results. register_fake mutates _abstract_fn on the real
+        CustomOpDef as a side effect, so when the op is called before that
+        side effect is applied, get_fake_value graph-breaks ("Custom op missing
+        fake impl during tracing") and the op call falls back to eager. The
+        surrounding tensor ops still compile (exercising the resume path).
         """
         from typing import Tuple
 
@@ -17181,6 +17182,7 @@ def forward(self, L_x_ : torch.Tensor):
             return ngb_id
 
         def fn(x):
+            x = x + 1  # non-empty prefix so a partial graph compiles
             my_op = get_my_op()
             return my_op(x)
 
@@ -17190,8 +17192,27 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt(x)
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], x)
+        self.assertEqual(result[0], x + 1)
+        # The op call graph-breaks to eager; the surrounding ops still compile.
         self.assertGreaterEqual(cnt.frame_count, 1)
+
+    def test_custom_op_missing_fake_impl_hard_errors(self):
+        """A custom op genuinely missing its fake impl (register_fake never
+        called) must still hard-error under compile. The missing-fake-impl
+        graph break is scoped to the register_fake-side-effect-pending case, so
+        it must NOT silently swallow this into an eager fallback.
+        """
+
+        @torch.library.custom_op("test::ngb_missing_fake", mutates_args=[])
+        def ngb_missing_fake(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return ngb_missing_fake(x) + 1
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
 
 
 instantiate_parametrized_tests(MiscTests)
