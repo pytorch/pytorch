@@ -153,29 +153,29 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang18)
+  pytorch-linux-jammy-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.11-clang18)
+  pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.12-clang18)
+  pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.13-clang18)
+  pytorch-linux-jammy-py3.13-clang21)
     ANACONDA_PYTHON_VERSION=3.13
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.14-clang18)
+  pytorch-linux-jammy-py3.14-clang21)
     ANACONDA_PYTHON_VERSION=3.14
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -229,15 +229,15 @@ case "$tag" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang18-executorch)
+  pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
