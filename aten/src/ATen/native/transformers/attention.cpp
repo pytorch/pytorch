@@ -801,7 +801,7 @@ Tensor scaled_dot_product_attention(
           query_, key, value, attn_mask);
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
-      return std::get<0>(out_and_lse);
+      return std::get<0>(std::move(out_and_lse));
     }
     case SDPBackend::overrideable: {
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(

@@ -768,6 +768,7 @@ _efficient_attention_backward(
     TORCH_INTERNAL_ASSERT(delta.size(1) == nH);
     TORCH_INTERNAL_ASSERT(delta.size(2) == M);
 
+    // TODO: Initialize unconditional Params fields with C++20 designated initializers.
     typename Kernel::Params p;
     p.query_ptr = (const scalar_t*)query.const_data_ptr();
     p.key_ptr = (const scalar_t*)key.const_data_ptr();
@@ -776,8 +777,10 @@ _efficient_attention_backward(
     p.output_ptr = (const scalar_t*)out.const_data_ptr();
     p.grad_output_ptr = (const scalar_t*)grad_out.const_data_ptr();
     p.grad_query_ptr = (scalar_t*)grad_q.data_ptr();
-    p.grad_key_ptr = (scalar_t*)grad_k_expanded.data_ptr();
-    p.grad_value_ptr = (scalar_t*)grad_v_expanded.data_ptr();
+    p.grad_key_ptr =
+        static_cast<scalar_t*>(grad_k_expanded.mutable_data_ptr());
+    p.grad_value_ptr =
+        static_cast<scalar_t*>(grad_v_expanded.mutable_data_ptr());
     p.delta_ptr = (float*)delta.data_ptr();
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
