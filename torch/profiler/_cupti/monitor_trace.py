@@ -358,6 +358,8 @@ def _trace_window_entries(
                 c["dst_kind"].tolist(),
             )
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -377,6 +379,8 @@ def _trace_window_entries(
                         "src kind": _MEMORY_KIND_NAMES.get(sk_l[i], sk_l[i]),
                         "dst kind": _MEMORY_KIND_NAMES.get(dk_l[i], dk_l[i]),
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -386,6 +390,8 @@ def _trace_window_entries(
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -404,6 +410,8 @@ def _trace_window_entries(
                         "value": val_l[i],
                         "memory kind": mk_l[i],
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -726,14 +734,9 @@ def _gpu_user_annotation_events(
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
-        # Follow graphed ops onto their reassigned logical lane so the spanning annotation
-        # lands on the same lane as its kernels (else it stays on the capture stream).
-        stream_arr = c["stream_id"]
-        lane_col = c.get("logical_lane")
-        if lane_col is not None:
-            reassign = (c["graph_node_id"] != 0) & (lane_col != stream_arr)
-            stream_arr = np.where(reassign, lane_col, stream_arr)
-        str_l = stream_arr.tolist()
+        # Keep the annotation on the kernel's real capture stream; do not follow graphed
+        # ops onto the synthetic logical lanes assigned by the lane resolver.
+        str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
         for i in range(len(corr_l)):
