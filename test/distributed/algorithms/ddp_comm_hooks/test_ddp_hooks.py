@@ -220,9 +220,9 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
 
 if __name__ == "__main__":
-    if torch.cuda._initialized:
+    if torch.accelerator.current_accelerator() is not None:
         raise AssertionError(
-            "test_distributed must not have initialized CUDA context on main process"
+            "test_distributed must not have initialized accelerator context on main process"
         )
 
     run_tests()
