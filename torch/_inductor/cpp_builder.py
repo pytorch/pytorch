@@ -2101,6 +2101,16 @@ def get_cpp_torch_device_options(
     libraries_dirs: list[str] = []
     libraries: list[str] = []
     passthrough_args: list[str] = []
+    # Optional aoti_torch_* shim symbol prefix (see config.aot_inductor.
+    # shim_symbol_prefix and aoti_torch/c/macros.h). Routed through the
+    # validating accessor so an invalid prefix fails cleanly here too, not just
+    # at codegen time. Empty default appends nothing, keeping build flags /
+    # cache keys byte-identical.
+    from torch._inductor.codegen.cpp_wrapper_cpu import _shim_symbol_prefix
+
+    shim_symbol_prefix = _shim_symbol_prefix()
+    if shim_symbol_prefix:
+        definitions.append(" AOTI_SHIM_SYMBOL_PREFIX=" + shim_symbol_prefix)
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
@@ -2747,6 +2757,23 @@ class CppBuilder:
 
                 """
             )
+            # The standalone branch intentionally omits the CPU-oriented
+            # `definitions` above, but the aoti_torch_* shim symbol prefix must be
+            # defined here too: codegen bakes the prefixed shim call names into the
+            # .cpp, so without this -D the AOTI runtime headers stay unprefixed and
+            # the model half-renames (unresolved / wrong-bind at load). Validated
+            # via the accessor so a bad value fails cleanly instead of corrupting
+            # the generated CMakeLists.
+            from torch._inductor.codegen.cpp_wrapper_cpu import _shim_symbol_prefix
+
+            shim_symbol_prefix = _shim_symbol_prefix()
+            if shim_symbol_prefix:
+                contents += textwrap.dedent(
+                    f"""
+                    target_compile_definitions({self._target_name} PRIVATE AOTI_SHIM_SYMBOL_PREFIX={shim_symbol_prefix})
+
+                    """
+                )
 
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codegen.cuda import compile_utils
