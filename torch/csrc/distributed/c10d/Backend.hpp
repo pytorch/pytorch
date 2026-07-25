@@ -740,4 +740,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
 } // namespace c10d
 
+namespace c10::detail {
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+} // namespace c10::detail
+
 #undef C10D_BACKEND_FORWARDING_GUARD
