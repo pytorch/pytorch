@@ -5934,6 +5934,17 @@ class TestMPS(TestCaseMPS):
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
 
+    @parametrize("n", [33, 64, 100, 1000, 20000, 262185, 1 << 20])
+    def test_int64_minmax_partial_simdgroups(self, n):
+        # simd_max/min<long> is emulated on top of simd_shuffle_and_fill_down and
+        # reads its neighbours' registers, so a reduction stage that leaves fewer
+        # than 32 lanes active used to fold their zeros into the result. Sizes
+        # span threadgroups of 64 to 1024 threads over the single-pass and
+        # split-K paths.
+        x = -torch.arange(1, n + 1, dtype=torch.int64, device="mps")
+        self.assertEqual(x.amax().cpu(), x.cpu().amax())
+        self.assertEqual((-x).amin().cpu(), (-x).cpu().amin())
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
