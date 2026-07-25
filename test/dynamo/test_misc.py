@@ -10824,7 +10824,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend=counter)
         def fn(x):
-            return x * x
+            return torch.ones(2) * x
 
         fn(0)
         fn(1)
