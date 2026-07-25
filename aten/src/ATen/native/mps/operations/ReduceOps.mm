@@ -1036,6 +1036,11 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
             [ce dispatchThreads:MTLSizeMake(num_groups * TPG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TPG, 1, 1)];
           } else {
             mtl_setArgs(ce, input, partials, params1);
+            // Round up to a full simdgroup: c10::metal::simd_max/min<long>
+            // reads its neighbours' registers, and a partially populated
+            // simdgroup yields undefined data (0 in practice) rather than the
+            // op's identity. Padding threads skip the load loop (tid >= rsize)
+            // and contribute Op::identity() instead.
             auto tpg1 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(elems_per_group, 32u));
             [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
           }
