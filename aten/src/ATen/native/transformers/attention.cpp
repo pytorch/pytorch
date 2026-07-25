@@ -795,12 +795,13 @@ Tensor scaled_dot_product_attention(
     }
     case SDPBackend::efficient_attention: {
       if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
+        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
       }
-      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(query_, key, value, attn_mask);
+      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(
+          query_, key, value, attn_mask);
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
-      return std::get<0>(out_and_lse);
+      return std::get<0>(std::move(out_and_lse));
     }
     case SDPBackend::overrideable: {
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(

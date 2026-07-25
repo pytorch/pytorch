@@ -1207,6 +1207,30 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
         with unittest.mock.patch.object(sympy.Basic, "subs", fail_subs):
             self.assertEqual(sizevars.optimization_hint(expr, fallback=0), 0)
 
+    def test_hint_respects_symbolic_upper_bound_assert(self):
+        # A reducing slice x[u0:] is sized s0 - u0. The invariant u0 <= s0 lives
+        # only in deferred_runtime_asserts, not var_to_range (which keeps the loose
+        # [0, fallback]). optimization_hint must honor it so u0 is capped at s0's
+        # hint rather than the generic fallback; otherwise s0 - u0 hints negative
+        # (16 - fallback) and overflows downstream allocations such as the AOTI
+        # autotuning example tensors.
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        s0 = shape_env.create_symbol(
+            16,
+            source=ConstantSource("__test_s0"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            constraint_dim=None,
+        )
+        u0 = shape_env.create_unbacked_symint().node.expr
+        shape_env.guard_or_defer_runtime_assert(u0 <= s0, "u0 <= s0")
+
+        self.assertLessEqual(sizevars.optimization_hint(u0, fallback=1024), 16)
+        self.assertGreaterEqual(sizevars.optimization_hint(s0 - u0, fallback=1024), 0)
+
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):
     """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""

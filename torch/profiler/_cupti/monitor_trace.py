@@ -384,6 +384,8 @@ def _trace_window_entries(
                 c["dst_kind"].tolist(),
             )
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -403,6 +405,8 @@ def _trace_window_entries(
                         "src kind": _MEMORY_KIND_NAMES.get(sk_l[i], sk_l[i]),
                         "dst kind": _MEMORY_KIND_NAMES.get(dk_l[i], dk_l[i]),
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -412,6 +416,8 @@ def _trace_window_entries(
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -430,6 +436,8 @@ def _trace_window_entries(
                         "value": val_l[i],
                         "memory kind": mk_l[i],
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -752,14 +760,9 @@ def _gpu_user_annotation_events(
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
-        # Follow graphed ops onto their reassigned logical lane so the spanning annotation
-        # lands on the same lane as its kernels (else it stays on the capture stream).
-        stream_arr = c["stream_id"]
-        lane_col = c.get("logical_lane")
-        if lane_col is not None:
-            reassign = (c["graph_node_id"] != 0) & (lane_col != stream_arr)
-            stream_arr = np.where(reassign, lane_col, stream_arr)
-        str_l = stream_arr.tolist()
+        # Keep the annotation on the kernel's real capture stream; do not follow graphed
+        # ops onto the synthetic logical lanes assigned by the lane resolver.
+        str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
         for i in range(len(corr_l)):
@@ -990,9 +993,7 @@ def _merge_annotation_metadata(annotation: Any, metadata: Any) -> str | None:
     if metadata is not None:
         try:
             decoded = (
-                json.loads(metadata)
-                if isinstance(metadata, (str, bytes))
-                else metadata
+                json.loads(metadata) if isinstance(metadata, (str, bytes)) else metadata
             )
         except (json.JSONDecodeError, TypeError):
             decoded = None
@@ -1164,9 +1165,7 @@ def _build_render_stages(
         else:
             ml = mc.tolist() if mc is not None else [None] * n
             al = ac.tolist() if has_ann else [None] * n
-            meta_p.append(
-                [_merge_annotation_metadata(a, m) for a, m in zip(al, ml)]
-            )
+            meta_p.append([_merge_annotation_metadata(a, m) for a, m in zip(al, ml)])
     if not ts_p:
         return None
     ts, dur, gpu = np.concatenate(ts_p), np.concatenate(dur_p), np.concatenate(gpu_p)
@@ -1566,8 +1565,8 @@ def _gpu_annotation_render_column(
 ) -> dict[str, Any] | None:
     """Synthetic ``gpu_annotation`` render-stage column for the pftrace GPU hardware queues,
     built from the columnar window via the same synthesizer as the chrome gpu_user_annotation
-    events -- so it inherits their graphed-op logical-lane reassignment and lands on the kernels'
-    lane. None when there are no GPU annotations. Kineto emits no gpu_user_annotation in
+    events -- so it lands on the kernels' capture stream, never a reassigned logical lane.
+    None when there are no GPU annotations. Kineto emits no gpu_user_annotation in
     cupti_monitor mode, so cpu_data cannot be the source (the chrome path synthesizes them too)."""
     gua = _gpu_user_annotation_events(trace_window, base_ns=base_ns)
     if not gua:
@@ -1806,12 +1805,17 @@ def _window_to_pftrace(
     # (one lane per stream, with launch stats + scalar args + collective metadata) by
     # _build_render_stages -- not as duplicate track_event slices here.
 
-    # Pre-pass: assign a unique event_id per GPU render-stage row (incl. the synthesized
-    # gpu_annotation column, so the row order matches _build_render_stages) and derive the
-    # host-launch link (corr_to_event_ids) + the graph node->node dependency arrows (the
-    # event_wait CSR). Done before the runtime/driver group so its gpu_correlation can list the
-    # per-replay node event_ids; _build_render_stages is still called later with these.
+    # Pre-pass: assign a unique event_id per GPU render-stage row (row order matches
+    # _build_render_stages) and derive the host-launch link (corr_to_event_ids) + the graph
+    # node->node dependency arrows (the event_wait CSR). Done before the runtime/driver group so
+    # its gpu_correlation can list the per-replay node event_ids; _build_render_stages is still
+    # called later with these.
     graph_deps = {int(k): v for k, v in (trace_window.get("graph_deps") or {}).items()}
+    # GPU-side user annotations (gpu_user_annotation): a synthetic "Annotation" render stage on
+    # the kernels' capture-stream lane -- never a reassigned logical lane (matching the chrome
+    # path). Added to render_columns before event-id assignment so the annotation rows share the
+    # render-stage row order. Synthesized from the columnar window (kineto emits no
+    # gpu_user_annotation in monitor mode; the chrome path builds them the same way).
     render_columns = columns
     ann_col = _gpu_annotation_render_column(trace_window, base_ns)
     if ann_col is not None:
@@ -2025,10 +2029,7 @@ def _window_to_pftrace(
                 cat_ids,
             )
         )
-    # GPU-side user annotations (gpu_user_annotation) emit as render stages (an "Annotation"
-    # stage) on the same hardware-queue lane as the kernels they span, so the collective/phase
-    # ranges nest over them; render_columns (with the synthesized gpu_annotation column) and the
-    # per-row event_id / event_wait CSR were built in the pre-pass above.
+    # render_columns and the per-row event_id / event_wait CSR were built in the pre-pass above.
     # Graphics context attaches the render stages to the main (first-registered => upid 1)
     # process, matching the reference traces.
     gfx_pid = next((k[1] for k in uuids if isinstance(k, tuple) and k[0] == "p"), 0)

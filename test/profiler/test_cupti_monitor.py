@@ -541,11 +541,10 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(names[(0, 8)], "side comms")
         self.assertEqual(names[(0, 7)].strip(), "stream 7")
 
-    def test_gpu_user_annotation_follows_reassigned_lane(self):
-        # A GPU-side user annotation spanning graphed kernels that the lane resolver moved
-        # onto a logical lane is emitted on that same lane -- not the capture stream -- so it
-        # nests over its kernels. An annotation over non-reassigned (eager) kernels stays on
-        # the kernel's CUDA stream. No CUDA.
+    def test_gpu_user_annotation_stays_on_capture_stream(self):
+        # A GPU-side user annotation is emitted on the kernel's real capture stream, even for
+        # graphed kernels the lane resolver reassigned to a logical lane -- the annotation is
+        # never moved onto those synthetic lanes. No CUDA.
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import _gpu_user_annotation_events
@@ -564,7 +563,7 @@ class TestCuptiRecords(TestCase):
                 "stream_id": i64(7, 9),  # both replayed on their capture streams
                 "start_ns": i64(1000, 3000),
                 "end_ns": i64(2000, 4000),
-                # first is graphed and moved to lane 8; second is eager (no reassign)
+                # first is graphed (lane resolver would move it to lane 8); second is eager
                 "graph_node_id": i64(101, 0),
                 "logical_lane": i64(8, 9),
             },
@@ -576,17 +575,18 @@ class TestCuptiRecords(TestCase):
         events = _gpu_user_annotation_events(trace_window, base_ns=0)
         by_name = {e["name"]: e for e in events}
 
-        # reassigned: the annotation follows its kernels onto lane 8
+        # graphed: annotation stays on the capture stream (7), not the logical lane (8)
         self.assertEqual(by_name["all_reduce"]["cat"], "gpu_user_annotation")
         self.assertEqual(by_name["all_reduce"]["pid"], 0)
-        self.assertEqual(by_name["all_reduce"]["tid"], 8)
-        # not reassigned: stays on the kernel's capture stream
+        self.assertEqual(by_name["all_reduce"]["tid"], 7)
+        # eager: stays on the kernel's capture stream
         self.assertEqual(by_name["matmul"]["tid"], 9)
 
     def test_pftrace_render_stages_reassign_lane(self):
         # The pftrace render-stage builder reassigns a graphed kernel onto its logical lane
-        # (named by the resolver); a GPU annotation remapped onto that lane shares it, so it
-        # nests over its kernels. An eager kernel keeps its "stream N" lane. No CUDA.
+        # (named by the resolver); a GPU annotation stays on its capture-stream lane (as
+        # _window_to_pftrace builds it), not the kernel's reassigned lane. An eager kernel
+        # keeps its "stream N" lane. No CUDA.
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import (
@@ -608,12 +608,12 @@ class TestCuptiRecords(TestCase):
                 "lane_name": np.array(["side comms", None], dtype=object),
                 "name": np.array(["graphKernel", "eagerKernel"], dtype=object),
             },
-            # annotation column as _window_to_pftrace builds it: already remapped onto lane 8.
+            # annotation column as _window_to_pftrace builds it: on its capture stream (7).
             "gpu_annotation": {
                 "start_ns": i64(900),
                 "end_ns": i64(4100),
                 "device_id": i64(0),
-                "stream_id": i64(8),
+                "stream_id": i64(7),
                 "name": np.array(["all_reduce"], dtype=object),
             },
         }
@@ -630,7 +630,10 @@ class TestCuptiRecords(TestCase):
         self.assertTrue(
             lanes[0].endswith("side comms")
         )  # graphed kernel moved to named lane
-        self.assertEqual(lanes[2], lanes[0])  # annotation shares the reassigned lane
+        self.assertNotEqual(
+            lanes[2], lanes[0]
+        )  # annotation stays off the reassigned lane
+        self.assertIn("stream", lanes[2])  # annotation on its capture-stream lane
         self.assertNotEqual(lanes[1], lanes[0])  # eager kernel is elsewhere
         self.assertIn("stream", lanes[1])  # eager kept its default "stream N" lane
 
@@ -679,8 +682,8 @@ class TestCuptiRecords(TestCase):
 
     def test_pftrace_annotation_column_from_window(self):
         # pftrace builds its GPU annotation render column from the columnar window (kineto emits
-        # no gpu_user_annotation in monitor mode), placed on the graphed kernels' reassigned
-        # logical lane -- so annotations appear in the hardware queues over their kernels. No CUDA.
+        # no gpu_user_annotation in monitor mode), placed on the kernels' capture stream, not
+        # the graphed kernels' reassigned logical lane. No CUDA.
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import _gpu_annotation_render_column
@@ -711,8 +714,8 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(col["name"].tolist(), ["all_reduce"])
         self.assertEqual(col["device_id"].tolist(), [0])
         self.assertEqual(
-            col["stream_id"].tolist(), [8]
-        )  # on the reassigned logical lane
+            col["stream_id"].tolist(), [7]
+        )  # on the capture stream, not the reassigned lane
         # no annotations in the window -> no column
         self.assertIsNone(
             _gpu_annotation_render_column(
@@ -903,6 +906,8 @@ class TestCuptiRecords(TestCase):
                 "src_kind": i64(1),
                 "dst_kind": i64(3),
                 "flags": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
             },
             "gpu_memset": {
                 "start_ns": i64(7000),
@@ -918,6 +923,8 @@ class TestCuptiRecords(TestCase):
                 "value": i64(0),
                 "memory_kind": i64(3),
                 "flags": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
             },
             # eager cudaLaunchKernel records on two distinct CPU threads, correlated to the
             # two kernels (11 -> eager, 12 -> graphed) -> the ac2g / gpu_correlation arrows.
@@ -1438,7 +1445,9 @@ class TestCuptiRecords(TestCase):
                 "graph_node_id": i64((1 << 32) | 10, (1 << 32) | 11),
                 "name": np.array(["ar_a", "ar_b"], dtype=object),
                 "annotation": ann,
-                "metadata": np.array([None, json.dumps({"dtype": "bf16"})], dtype=object),
+                "metadata": np.array(
+                    [None, json.dumps({"dtype": "bf16"})], dtype=object
+                ),
                 "grid_x": i64(1, 1),
                 "grid_y": i64(1, 1),
                 "grid_z": i64(1, 1),

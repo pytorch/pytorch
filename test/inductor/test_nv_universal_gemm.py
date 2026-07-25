@@ -190,6 +190,40 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    def test_cudagraphs_intermediate_addmm(self):
+        """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
+        downstream must not leave that output retained by the cached EFC kernel,
+        or CUDA graph capture fails ("tensor(s) in the cudagraph pool not tracked
+        as outputs") and the tensor leaks. The cached kernel is built from
+        meta-device tensors, so runtime outputs flow only through the per-call
+        arguments.
+        """
+        dtype = torch.bfloat16
+        m, k = 512, 512
+        # Scaled down so the chained bf16 matmul stays well-conditioned.
+        bias = torch.randn(k, dtype=dtype, device="cuda") * 0.1
+        x = torch.randn(m, k, dtype=dtype, device="cuda") * 0.1
+        w = torch.randn(k, k, dtype=dtype, device="cuda") * 0.1
+
+        def chain(bias, x, w):
+            # h is an NVGEMM addmm output consumed downstream (not the graph's
+            # final output), which is what triggers the retention bug.
+            h = torch.addmm(bias, x, w.t())
+            return torch.addmm(bias, h, w.t())
+
+        expected = chain(bias.float(), x.float(), w.float()).to(dtype)
+
+        torch._dynamo.reset()
+
+        cfg = _nvgemm_config()
+        cfg["triton.cudagraphs"] = True
+        with config.patch(cfg):
+            compiled_fn = torch.compile(chain)
+            for _ in range(3):
+                result = compiled_fn(bias, x, w)
+
+        torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
+
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
         kernel is not pre-resolved and misses the args cache, calls
@@ -862,6 +896,66 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
         torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "pointwise op was NOT fused into epilogue")
+
+    def test_matmul_multi_store_epilogue_fusion(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = (a @ b).float()
+            return torch.relu(result), result + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertIn("out_ptr1", code)
+
+    def test_scaled_mm_pointwise_epilogue_fusion(self):
+        """Unary pointwise op is fused into an NVFP4 scaled GEMM epilogue."""
+        m, n, k = self.M, self.N, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return result * 0.5
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b
+        )
+        torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
+        self.assertTrue(epilogue_fused, "multiply was NOT fused into scaled epilogue")
+
+    def test_matmul_single_store_epilogue_chain(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return torch.relu((a @ b).float()) + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertNotIn("out_ptr1", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
