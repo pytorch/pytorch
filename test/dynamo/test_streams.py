@@ -1666,10 +1666,12 @@ class <lambda>(torch.nn.Module):
             s = torch.Stream(device="cuda")
             e1 = torch.Event()
             e2 = torch.Event()
+            e3 = torch.Event()
             with s:
                 a = x + 1
                 e1.record()
                 e2.record()  # deps reset by e1 -> would be bare without the fix
+                e3.record()
             return a
 
         inp = (torch.ones(2, 2, device="cuda"),)
@@ -1687,14 +1689,16 @@ class <lambda>(torch.nn.Module):
 
         from torch._inductor.fx_passes.control_dependencies import control_deps
 
-        # Both records must be wrapped -- e2 must not be left a bare node.
+        # All records must be wrapped -- e2/e3 must not be left bare nodes.
         ctrl_nodes = list(graph.find_nodes(op="call_function", target=control_deps))
-        self.assertEqual(len(ctrl_nodes), 2)
-        record1_ctrl, record2_ctrl = ctrl_nodes[0], ctrl_nodes[1]
+        self.assertEqual(len(ctrl_nodes), 3)
+        record1_ctrl, record2_ctrl, record3_ctrl = ctrl_nodes
 
-        # The second record is ordered after the first (its control_deps depends
-        # on the first record's control_deps node).
+        # Each record depends only on its immediate predecessor, keeping the
+        # per-stream sync frontier a linear chain rather than its full history.
         self.assertIn(record1_ctrl, record2_ctrl.args[0])
+        self.assertIn(record2_ctrl, record3_ctrl.args[0])
+        self.assertNotIn(record1_ctrl, record3_ctrl.args[0])
 
         graph.lint()
 
@@ -1709,8 +1713,10 @@ class <lambda>(torch.nn.Module):
         def fn(x) -> torch.Tensor:
             default = torch.cuda.current_stream()
             side = torch.cuda.Stream()
+            ready = torch.cuda.Event()
             e = torch.cuda.Event()
             a = x @ x
+            ready.record(default)
             with torch.cuda.stream(side):
                 side.wait_stream(default)
                 e.record()  # bare on the waiting stream without the fix
@@ -1738,14 +1744,120 @@ class <lambda>(torch.nn.Module):
             list(bare_records), [], "record_event on the waiting stream floated bare"
         )
 
-        # The record's control_deps must depend on the wait_stream's control_deps.
+        # The wait must depend on the waited-on stream's retained record frontier,
+        # and the following record must depend on the wait on its own stream.
         ctrl_nodes = list(graph.find_nodes(op="call_function", target=control_deps))
         record_ctrl = [n for n in ctrl_nodes if "record_event" in n.args[1].name]
         wait_ctrl = [n for n in ctrl_nodes if "wait_stream" in n.args[1].name]
-        self.assertTrue(record_ctrl and wait_ctrl)
-        self.assertIn(wait_ctrl[0], record_ctrl[0].args[0])
+        self.assertEqual(len(record_ctrl), 2)
+        self.assertEqual(len(wait_ctrl), 1)
+        self.assertIn(record_ctrl[0], wait_ctrl[0].args[0])
+        self.assertIn(wait_ctrl[0], record_ctrl[1].args[0])
 
         graph.lint()
+
+    @requires_cuda
+    def test_cross_stream_event_rerecord_without_work(self) -> None:
+        def fn(x) -> torch.Tensor:
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            s3 = torch.cuda.Stream()
+            e = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                y = x + 1
+                e.record()
+            with torch.cuda.stream(s2):
+                e.record()
+            with torch.cuda.stream(s3):
+                e.wait()
+                z = x + 2
+            return y + z
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        _, _, fw_graphs, _ = extract_graph(fn, *inp)
+        graph = fw_graphs[0].graph
+
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        ctrl_nodes = list(graph.find_nodes(op="call_function", target=control_deps))
+        record_ctrl = [n for n in ctrl_nodes if "record_event" in n.args[1].name]
+        wait_ctrl = [n for n in ctrl_nodes if "wait_event" in n.args[1].name]
+        self.assertEqual(len(record_ctrl), 2)
+        self.assertEqual(len(wait_ctrl), 1)
+        self.assertIn(record_ctrl[0], record_ctrl[1].args[0])
+        self.assertIn(record_ctrl[1], wait_ctrl[0].args[0])
+        self.assertNotIn(record_ctrl[0], wait_ctrl[0].args[0])
+
+        graph.lint()
+
+    @requires_cuda
+    def test_wait_stream_preserves_waited_on_work(self) -> None:
+        def fn(x) -> torch.Tensor:
+            default = torch.cuda.current_stream()
+            side = torch.cuda.Stream()
+            a = x @ x
+            side.wait_stream(default)
+            torch.cuda.Event().record(default)
+            return a
+
+        inp = (torch.ones(4, 4, device="cuda"),)
+        _, _, fw_graphs, _ = extract_graph(fn, *inp)
+        graph = fw_graphs[0].graph
+
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        ctrl_nodes = list(graph.find_nodes(op="call_function", target=control_deps))
+        record_ctrl = [n for n in ctrl_nodes if "record_event" in n.args[1].name]
+        self.assertEqual(len(record_ctrl), 1)
+        self.assertTrue(record_ctrl[0].args[0])
+
+        graph.lint()
+
+    @requires_cuda
+    def test_leading_synchronize_stream_orders_following_work(self) -> None:
+        def fn(x) -> torch.Tensor:
+            torch.cuda.current_stream().synchronize()
+            return x + 1
+
+        inp = (torch.ones(4, 4, device="cuda"),)
+        _, _, fw_graphs, _ = extract_graph(fn, *inp)
+        graph = fw_graphs[0].graph
+
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        ctrl_nodes = list(graph.find_nodes(op="call_function", target=control_deps))
+        sync_ctrl = [n for n in ctrl_nodes if "synchronize_stream" in n.args[1].name]
+        self.assertEqual(len(sync_ctrl), 1)
+        adds = list(
+            graph.find_nodes(op="call_function", target=torch.ops.aten.add.Tensor)
+        )
+        self.assertEqual(len(adds), 1)
+        self.assertIs(adds[0].args[0].args[0], sync_ctrl[0])
+
+        graph.lint()
+
+    def test_full_barrier_forward_deps_respect_partition(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            _collect_full_barrier_forward_deps,
+        )
+
+        graph = torch.fx.Graph()
+        fw_input = graph.placeholder("fw_input")
+        fw_input.meta["val"] = torch.ones(1)
+        bw_input = graph.placeholder("bw_input")
+        bw_input.meta["val"] = torch.ones(1)
+        barrier = graph.call_function(
+            torch.ops.streams.synchronize_stream.default, (0,)
+        )
+        fw_node = graph.call_function(torch.ops.aten.add.Tensor, (fw_input, 1))
+        fw_node.meta["val"] = torch.ones(1)
+        bw_node = graph.call_function(torch.ops.aten.add.Tensor, (bw_input, 1))
+        bw_node.meta["val"] = torch.ones(1)
+        bw_node.meta["partitioner_tag"] = "is_backward"
+        graph.output((fw_node, bw_node))
+
+        deps = _collect_full_barrier_forward_deps(graph)
+        self.assertEqual(deps[barrier], [fw_input])
 
     @requires_cuda
     def test_epilogue_copy_stream_tracking(self):
