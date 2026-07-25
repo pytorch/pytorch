@@ -5934,6 +5934,25 @@ class TestMPS(TestCaseMPS):
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
 
+    def test_sum_family_generic_reduction(self):
+        cpu = (torch.arange(2 * 4 * 3 * 5, dtype=torch.float32).reshape(2, 4, 3, 5) - 37) / 10
+        cpu = cpu[:, ::2, :, :]
+        self.assertFalse(cpu.is_contiguous())
+        mps = cpu.to("mps")
+        dims = (1, 3)
+
+        for keepdim in (False, True):
+            kw = {"dim": dims, "keepdim": keepdim}
+            self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
+            self.assertEqual(mps.mean(**kw).cpu(), cpu.mean(**kw))
+
+            nans_cpu = cpu.clone()
+            nans_cpu[nans_cpu > 2] = torch.nan
+            nans_mps = nans_cpu.to("mps")
+            self.assertEqual(torch.nansum(nans_mps, **kw).cpu(), torch.nansum(nans_cpu, **kw))
+
+        self.assertEqual(torch.count_nonzero(mps, dim=dims).cpu(), torch.count_nonzero(cpu, dim=dims))
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
@@ -6477,6 +6496,127 @@ class TestMPS(TestCaseMPS):
 
         for dtype in [torch.float32, torch.int32, torch.int64, torch.bool]:
             helper((2, 3), dtype)
+
+    def test_prod_reduction_boundaries(self):
+        # Regression for the prod -> value_reduction<ProdOp> migration: pins the
+        # dispatch boundaries this change fixes against CPU. prod's simd_prod is
+        # a manual shuffle (no hardware simd product); run over a partial final
+        # simdgroup it folded in inactive lanes (0), zeroing the result -- this
+        # hit complex full-reduce of N in 33-512 and, via the emulated
+        # simd_prod<long>, ALL integer prod (int64 default output) of >32
+        # elements. Also covers the inner thin/wide specializations (N=32/33,
+        # M=63/64) and the super-wide batched two-pass (M<32, N>=4096). Float
+        # inputs are bounded near 1 with the CPU ref built from the same values
+        # upcast so it measures accumulation; integer inputs are mostly ones with
+        # a couple of small factors so the product is exact and never overflows.
+        def check(shape, dtype, dim):
+            if dtype.is_complex:
+                x_t = torch.complex(1.0 + 0.02 * torch.randn(shape),
+                                    0.02 * torch.randn(shape)).to(dtype)
+                ref_dtype = torch.complex64
+                tol = 2e-2 if dtype == torch.complex32 else 1e-4
+            elif dtype.is_floating_point:
+                x_t = (1.0 + 0.02 * torch.randn(shape)).to(dtype)
+                ref_dtype = torch.float32
+                tol = 2e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+            else:
+                x_t = torch.ones(shape, dtype=dtype)
+                if dtype != torch.bool:
+                    flat = x_t.view(-1)
+                    flat[3], flat[7] = 2, 3
+                ref_dtype = dtype
+                tol = 0
+            cpu_ref = x_t.to(ref_dtype)
+            x_mps = x_t.to("mps")
+            res = torch.prod(x_mps) if dim is None else torch.prod(x_mps, dim=dim)
+            ref = torch.prod(cpu_ref) if dim is None else torch.prod(cpu_ref, dim=dim)
+            self.assertEqual(res.cpu().to(ref.dtype), ref, atol=tol, rtol=tol,
+                             msg=f"prod {tuple(shape)} {dtype} dim={dim}")
+
+        for n in (32, 33, 64, 100, 255, 256, 384, 512, 1024):
+            for dtype in (torch.complex64, torch.complex32,
+                          torch.int32, torch.int64, torch.bool):
+                check((n,), dtype, None)
+        for shape in ((64, 32), (64, 33), (63, 64), (64, 64), (128, 16),
+                      (2, 8192), (4, 16384), (1, 65536)):
+            for dtype in (torch.float32, torch.float16, torch.bfloat16,
+                          torch.int64, torch.complex64, torch.complex32):
+                for dim in (None, 0, -1):
+                    check(shape, dtype, dim)
+        # dim=0 outer specializations the shapes above do not reach: the bucketed
+        # two-pass (M >= 262144, N <= 8) and outer_thin (M <= 32, N >= 1024).
+        # Integer dtypes give a bit-exact product (ones with small factors) at
+        # these large reduction lengths where a random float product overflows.
+        for dtype in (torch.int32, torch.int64):
+            check((262144, 8), dtype, 0)
+            for shape in ((2, 4096), (16, 2048)):
+                check(shape, dtype, 0)
+        # Scalar full-reduce two-pass (output.numel() == 1, large reduction):
+        # prod stores opmath partials, so a slice whose product overflows the
+        # half range is not corrupted when the full product is finite. complexHalf
+        # is excluded from the two-pass (falls to the fp32 single-pass).
+        for dtype in (torch.float16, torch.bfloat16, torch.float32,
+                      torch.complex64, torch.complex32):
+            x = torch.ones(32768, dtype=dtype)
+            x[:30] = 2  # an early slice: product 2^30, overflows the half range
+            x[16384:16414] = 0.5  # a later slice: product 2^-30; full product 1
+            ref_dt = torch.complex64 if dtype.is_complex else torch.float32
+            res = torch.prod(x.to("mps")).cpu().to(ref_dt)
+            self.assertEqual(res, torch.prod(x.to(ref_dt)), atol=2e-2, rtol=2e-2,
+                             msg=f"scalar two-pass overflow {dtype}")
+        # dtype routing: each registered (in, out) prod kernel pair plus the
+        # cast-and-recurse fallback for unregistered pairs, so a mutation to
+        # prod_kernel_registered / the dtype guards mis-routes and is caught.
+        for in_dt, out_dt in (
+            (torch.float16, torch.float32), (torch.bfloat16, torch.float32),
+            (torch.int32, torch.int64), (torch.int16, torch.int64),
+            (torch.int8, torch.int64), (torch.uint8, torch.int64),
+            (torch.bool, torch.int64), (torch.bool, torch.int32),
+            (torch.int32, torch.float32), (torch.float32, torch.float16),
+            (torch.float32, torch.float32), (torch.int64, torch.int64),
+        ):
+            x = torch.ones(64, dtype=in_dt)
+            if in_dt != torch.bool:
+                x[0] = 2
+            res = torch.prod(x.to("mps"), dtype=out_dt).cpu()
+            self.assertEqual(res, torch.prod(x, dtype=out_dt),
+                             msg=f"prod dtype {in_dt}->{out_dt}")
+        # bool output: nonzero-product (True with no zeros, False with a zero).
+        b = torch.ones(64)
+        self.assertEqual(torch.prod(b.to("mps"), dtype=torch.bool).cpu(), torch.tensor(True))
+        b[5] = 0
+        self.assertEqual(torch.prod(b.to("mps"), dtype=torch.bool).cpu(), torch.tensor(False))
+        # uint outputs are rejected (the explicit TORCH_CHECK), not silently
+        # miscomputed -- pin the intended message, not just any exception.
+        for ud in (torch.uint16, torch.uint32, torch.uint64):
+            with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                torch.prod(torch.ones(8, device="mps"), dtype=ud)
+        # Unsupported dtype=float64 should terminate on the normal MPS dtype
+        # error instead of recursing indefinitely through the cast-and-recurse
+        # fallback.
+        with self.assertRaisesRegex(TypeError, "doesn't support float64"):
+            torch.prod(torch.ones(8, device="mps"), dtype=torch.float64)
+        # The native Metal reduction parameter block supports up to max_ndim.
+        # Higher-rank prod should fail cleanly before filling fixed-size arrays.
+        high_rank = torch.ones(1, device="mps").as_strided((1,) * 17, (0,) * 17)
+        with self.assertRaisesRegex(RuntimeError, "tensor rank >"):
+            torch.prod(high_rank)
+        # bucketed kernel domain: N > 8 with M >= 262144 (dim=0) must route to the
+        # fallback, not the acc[MAXN=8] bucketed kernel.
+        for dtype in (torch.int32, torch.int64):
+            check((262144, 16), dtype, 0)
+        # non-contiguous large reductions: the outer/inner specializations require
+        # contiguous I/O, so a transposed input reaches the general strided path
+        # and exercises the scalar two-pass gate (output.numel() vs 1) and the
+        # has_strided_pass1 routing.
+        for rows, cols, dim in ((8192, 48, 0), (48, 8192, 1), (16384, 24, 0)):
+            x = torch.ones(cols, rows, dtype=torch.int64)
+            x[0, 0] = 2
+            x[0, 1] = 3
+            xt = x.t()  # non-contiguous view, shape (rows, cols)
+            res = torch.prod(xt.to("mps"), dim=dim).cpu()
+            self.assertEqual(res, torch.prod(xt, dim=dim),
+                             msg=f"non-contig prod ({rows},{cols}) dim={dim}")
 
     # Test forward mean
     def test_mean(self):
