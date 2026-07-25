@@ -1548,6 +1548,23 @@ class CallMethodVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return getattr(self.obj.as_python_constant(), self.method_name)
 
+    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        try:
+            return VariableTracker.build(tx, repr(self.as_python_constant()))
+        except (AsPythonConstantNotImplementedError, AttributeError):
+            pass
+        # The receiver is not a compile-time constant, so we cannot reconstruct
+        # the bound method (whose repr would also embed a non-reproducible
+        # memory address). Fall back to a best-effort address-free repr rather
+        # than hard-erroring under fullgraph.
+        try:
+            obj_type_name = self.obj.python_type_name()
+        except NotImplementedError:
+            obj_type_name = "object"
+        return VariableTracker.build(
+            tx, f"<method '{self.method_name}' of '{obj_type_name}' object>"
+        )
+
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             return hash(self.as_python_constant()), False
