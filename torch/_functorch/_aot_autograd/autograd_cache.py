@@ -172,6 +172,11 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # Dynamo-inserted autocast CM nodes. Behavior is fully determined by
+        # their graph args (device_type/dtype/enabled/cache_enabled); ambient
+        # autocast dtype is keyed separately in _record_runtime_state.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
