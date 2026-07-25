@@ -541,11 +541,10 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(names[(0, 8)], "side comms")
         self.assertEqual(names[(0, 7)].strip(), "stream 7")
 
-    def test_gpu_user_annotation_follows_reassigned_lane(self):
-        # A GPU-side user annotation spanning graphed kernels that the lane resolver moved
-        # onto a logical lane is emitted on that same lane -- not the capture stream -- so it
-        # nests over its kernels. An annotation over non-reassigned (eager) kernels stays on
-        # the kernel's CUDA stream. No CUDA.
+    def test_gpu_user_annotation_stays_on_capture_stream(self):
+        # A GPU-side user annotation is emitted on the kernel's real capture stream, even for
+        # graphed kernels the lane resolver reassigned to a logical lane -- the annotation is
+        # never moved onto those synthetic lanes. No CUDA.
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import _gpu_user_annotation_events
@@ -564,7 +563,7 @@ class TestCuptiRecords(TestCase):
                 "stream_id": i64(7, 9),  # both replayed on their capture streams
                 "start_ns": i64(1000, 3000),
                 "end_ns": i64(2000, 4000),
-                # first is graphed and moved to lane 8; second is eager (no reassign)
+                # first is graphed (lane resolver would move it to lane 8); second is eager
                 "graph_node_id": i64(101, 0),
                 "logical_lane": i64(8, 9),
             },
@@ -576,11 +575,11 @@ class TestCuptiRecords(TestCase):
         events = _gpu_user_annotation_events(trace_window, base_ns=0)
         by_name = {e["name"]: e for e in events}
 
-        # reassigned: the annotation follows its kernels onto lane 8
+        # graphed: annotation stays on the capture stream (7), not the logical lane (8)
         self.assertEqual(by_name["all_reduce"]["cat"], "gpu_user_annotation")
         self.assertEqual(by_name["all_reduce"]["pid"], 0)
-        self.assertEqual(by_name["all_reduce"]["tid"], 8)
-        # not reassigned: stays on the kernel's capture stream
+        self.assertEqual(by_name["all_reduce"]["tid"], 7)
+        # eager: stays on the kernel's capture stream
         self.assertEqual(by_name["matmul"]["tid"], 9)
 
     def test_chrome_counter_events_from_pm(self):

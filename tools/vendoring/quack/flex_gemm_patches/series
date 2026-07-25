@@ -13,3 +13,4 @@
 0008-flex-gemm-local-reduce-feed-main.patch
 0009-flex-gemm-fragment-group-32.patch
 0010-flex-gemm-scalar-epilogue-args.patch
+0011-flex-gemm-local-reduce-layout-assert.patch
