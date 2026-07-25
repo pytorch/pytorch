@@ -440,7 +440,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
   return work;
 }
 
-c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_into_tensor(
+c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::GatherOptions& opts) {

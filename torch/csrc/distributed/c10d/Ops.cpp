@@ -508,7 +508,7 @@ IMPL_GATHER(PrivateUse1)
         HookOpName::GATHER, asyncOp, root_rank, input_tensor, output_tensor); \
     auto work =                                                               \
         process_group->getBackend(c10::DeviceType::DEV)                       \
-            ->gather_into_tensor(                                             \
+            ->gather_single(                                                  \
                 output_tensor,                                                \
                 input_tensor,                                                 \
                 GatherOptions{                                                \
