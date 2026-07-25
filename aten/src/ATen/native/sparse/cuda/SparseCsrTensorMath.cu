@@ -492,7 +492,7 @@ Tensor reduce_sparse_csr_dim0_cuda_template(const Tensor& sparse, ReductionOp ro
       at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
           values.options(), values.scalar_type(), new_nnz);
   scalar_t* values_ptr = values.data_ptr<scalar_t>();
-  acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
+  acc_t* new_values_acc_ptr = new_values_acc.template data_ptr<acc_t>();
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int64_t BLOCKS = (new_nnz + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -603,7 +603,8 @@ Tensor reduce_sparse_csr_dim1_cuda_template(const Tensor& sparse, ReductionOp ro
                             new_values_acc.resize_(new_nnz);
 
                             scalar_t* values_ptr = values.data_ptr<scalar_t>();
-                            acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
+                            acc_t* new_values_acc_ptr =
+                                new_values_acc.template data_ptr<acc_t>();
                             reduce_sparse_csr_dim1_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(new_values_acc_ptr,
                                                                                                values_ptr,
                                                                                                crow_indices_ptr,

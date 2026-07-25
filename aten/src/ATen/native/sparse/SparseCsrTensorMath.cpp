@@ -1101,7 +1101,7 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   const int64_t* columns_map_ptr = columns_map.const_data_ptr<int64_t>();
   const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
   acc_t* new_values_acc_ptr =
-      new_values_acc.data_ptr<acc_t>();
+      new_values_acc.template data_ptr<acc_t>();
 
   // There is no point in parallelizing the following for-loop
   // because about 99.3% of the computation time is spent in the
@@ -1204,7 +1204,8 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     new_values_acc.resize_(nnz);
 
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
+    acc_t* new_values_acc_ptr =
+        new_values_acc.template data_ptr<acc_t>();
 
     at::parallel_for(
         0,
