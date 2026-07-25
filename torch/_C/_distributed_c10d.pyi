@@ -632,6 +632,12 @@ class ProcessGroup:
         root: int,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def gather_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     def gather_into_tensor(
         self,
         output: Tensor,
