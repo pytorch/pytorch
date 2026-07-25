@@ -773,7 +773,7 @@ Tensor scaled_dot_product_attention(
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-      return std::get<0>(out_lse_softmax);
+      return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::flash_attention: {
       if(query_device_type == DeviceType::CUDA ||
@@ -806,7 +806,7 @@ Tensor scaled_dot_product_attention(
     case SDPBackend::overrideable: {
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
           query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-      return std::get<0>(out_lse_softmax);
+      return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::math: {
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
