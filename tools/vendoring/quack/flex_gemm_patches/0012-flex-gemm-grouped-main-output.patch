@@ -6,7 +6,7 @@ index f6bbf7f..0fc8cc0 100644
 +def validate_grouped_n_contract_device(
 +    group: int | None, device_capacity: tuple[int, int]
 +) -> None:
-+    """Validate grouped-main support consistently before and during compilation."""
++    """Validate grouped-main support at the public dispatch boundary."""
 +    if group is None:
 +        return
 +    if device_capacity[0] == 12:
@@ -146,32 +146,24 @@ index f6bbf7f..0fc8cc0 100644
 +            11: GemmGroupedNContractSm100,
 +            12: GemmGroupedNContractSm120,
 +        },
-@@ -690,0 +800,10 @@ def _compile_gemm_act(
-+    if gemm_cls_name == "grouped_n_contract":
-+        validate_grouped_n_contract_device(
-+            main_output_transform_group, device_capacity
-+        )
-+    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group != 2:
-+        GemmCls = {4: GemmGroupedNContract4Sm100}.get(main_output_transform_group)
-+        if GemmCls is None:
-+            raise NotImplementedError(
-+                f"unsupported grouped_n_contract group={main_output_transform_group}"
-+            )
-@@ -706 +825,5 @@ def _compile_gemm_act(
+@@ -690,0 +800,2 @@ def _compile_gemm_act(
++    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group == 4:
++        GemmCls = GemmGroupedNContract4Sm100
+@@ -706 +817,5 @@ def _compile_gemm_act(
 -    pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
 +    pa_n = (
 +        cute.sym_int()
 +        if gemm_cls_name in ("gated", "grouped_n_contract")
 +        else n
 +    )
-@@ -720 +843,3 @@ def _compile_gemm_act(
+@@ -720 +835,3 @@ def _compile_gemm_act(
 -        pa_leading_dim = 1 if gemm_cls_name == "gated" else pa_leading
 +        pa_leading_dim = (
 +            1 if gemm_cls_name in ("gated", "grouped_n_contract") else pa_leading
 +        )
-@@ -900,0 +1026 @@ def gemm_act(
+@@ -900,0 +1018 @@ def gemm_act(
 +    main_output_transform_group: int | None = None,
-@@ -950,0 +1077,16 @@ def gemm_act(
+@@ -950,0 +1069,16 @@ def gemm_act(
 +    if main_output_transform_group is not None:
 +        if main_output_transform_group not in (2, 4):
 +            raise NotImplementedError(
@@ -188,12 +180,12 @@ index f6bbf7f..0fc8cc0 100644
 +                "grouped_n_contract does not compose with auxiliary outputs"
 +            )
 +        gemm_cls_name = "grouped_n_contract"
-@@ -957,0 +1100,4 @@ def gemm_act(
+@@ -957,0 +1092,4 @@ def gemm_act(
 +    if main_output_transform_group is not None and any(
 +        tensor.stride(-1) != 1 for tensor in postact_tensors
 +    ):
 +        raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
-@@ -1034,0 +1181 @@ def gemm_act(
+@@ -1034,0 +1173 @@ def gemm_act(
 +    validate_grouped_n_contract_device(main_output_transform_group, device_capacity)
-@@ -1158,0 +1306 @@ def gemm_act(
+@@ -1158,0 +1298 @@ def gemm_act(
 +        0 if main_output_transform_group is None else main_output_transform_group,

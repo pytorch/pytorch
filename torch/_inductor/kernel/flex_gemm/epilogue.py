@@ -293,27 +293,16 @@ class FlexGemmOutputLocalReducePlan:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmMainOutputPlan:
-    """Describe the logical main output independently of physical GEMM shape."""
-
-    value: torch.fx.Node
-    transform: FlexGemmGroupedMainOutputTransform | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.value, torch.fx.Node):
-            raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
-
-
-@dataclasses.dataclass(frozen=True)
 class FlexGemmOutputPlan:
     """Classify the values returned by a FlexGEMM body."""
 
-    main: FlexGemmMainOutputPlan
+    main: torch.fx.Node
     aux_outputs: tuple[torch.fx.Node, ...] = ()
     local_reduce: FlexGemmOutputLocalReducePlan | None = None
+    main_transform: FlexGemmGroupedMainOutputTransform | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.main, FlexGemmMainOutputPlan) or not all(
+        if not isinstance(self.main, torch.fx.Node) or not all(
             isinstance(aux_output, torch.fx.Node) for aux_output in self.aux_outputs
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
@@ -804,7 +793,7 @@ class FlexGemmLocalReduceAnalysis:
         if match is None:
             return None
         return FlexGemmOutputPlan(
-            FlexGemmMainOutputPlan(output),
+            output,
             aux_outputs,
             match.to_plan(store=None, feeds_main=True),
         )
@@ -843,7 +832,7 @@ def tuple_output_plan(
                 feeds_main=True,
             )
         return FlexGemmOutputPlan(
-            FlexGemmMainOutputPlan(output),
+            output,
             tuple(
                 aux_output
                 for index, aux_output in enumerate(aux_outputs)
@@ -854,7 +843,7 @@ def tuple_output_plan(
     feed_main_plan = analysis.feed_main_output_plan(output, aux_outputs)
     if feed_main_plan is not None:
         return feed_main_plan
-    return FlexGemmOutputPlan(FlexGemmMainOutputPlan(output), aux_outputs)
+    return FlexGemmOutputPlan(output, aux_outputs)
 
 
 def output_plan(
@@ -876,9 +865,7 @@ def output_plan(
         raise NotImplementedError("FlexGEMM expects one tensor output")
     feed_main_plan = local_reduce.feed_main_output_plan(output_value)
     return (
-        FlexGemmOutputPlan(FlexGemmMainOutputPlan(output_value))
-        if feed_main_plan is None
-        else feed_main_plan
+        FlexGemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
     )
 
 
@@ -889,8 +876,6 @@ def grouped_main_output_transform(
 ) -> FlexGemmGroupedMainOutputTransform | None:
     """Recognize one innermost-axis grouping feeding the logical main output."""
     selected_key: tuple[torch.fx.Node, tuple[Any, ...], int, bool] | None = None
-    selected_group: int | None = None
-    selected_chunked = False
     selected_indices: OrderedSet[int] = OrderedSet()
     seen: OrderedSet[torch.fx.Node] = OrderedSet()
     pending_grouped: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = {}
@@ -915,15 +900,13 @@ def grouped_main_output_transform(
         chunked: bool,
         index: int,
     ) -> bool:
-        nonlocal selected_chunked, selected_group, selected_key
+        nonlocal selected_key
         key = (grouped_source(source), shape, group, chunked)
         if selected_key is not None and selected_key != key:
             return False
         if not -group <= index < group:
             return False
         selected_key = key
-        selected_group = group
-        selected_chunked = chunked
         selected_indices.add(index % group)
         return True
 
@@ -1012,22 +995,20 @@ def grouped_main_output_transform(
             return False
         return all(visit(arg) for arg in iter_fx_node_inputs((node.args, node.kwargs)))
 
-    if not visit(output) or selected_group is None:
+    if not visit(output) or selected_key is None:
         return None
-    if selected_indices != OrderedSet(range(selected_group)):
+    _, _, group, chunked = selected_key
+    if selected_indices != OrderedSet(range(group)):
         return None
     gemm_meta = gemm.meta.get("val")
     output_meta = output.meta.get("val")
     if gemm_meta is None or output_meta is None or len(gemm_meta.shape) != 2:
         return None
-    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // selected_group)
+    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // group)
     if not statically_known_shape_equal(output_meta.shape, expected_shape):
         raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
     local_reduce.grouped_tensors.update(pending_grouped)
-    return FlexGemmGroupedMainOutputTransform(
-        group=selected_group,
-        chunked=selected_chunked,
-    )
+    return FlexGemmGroupedMainOutputTransform(group=group, chunked=chunked)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1049,18 +1030,13 @@ class FlexGemmEpilogueAnalysis:
         """Analyze grouped values and classify logical output consumers."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
         outputs = output_plan(graph_module, local_reduce)
-        transform = grouped_main_output_transform(
-            outputs.main.value, gemm, local_reduce
-        )
+        transform = grouped_main_output_transform(outputs.main, gemm, local_reduce)
         if transform is not None:
             if outputs.aux_outputs or outputs.local_reduce is not None:
                 raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
-            outputs = dataclasses.replace(
-                outputs,
-                main=dataclasses.replace(outputs.main, transform=transform),
-            )
+            outputs = dataclasses.replace(outputs, main_transform=transform)
         else:
-            main_shape = tensor_meta_shape(outputs.main.value)
+            main_shape = tensor_meta_shape(outputs.main)
             gemm_shape = tensor_meta_shape(gemm)
             if (
                 main_shape is None
@@ -1078,10 +1054,10 @@ class FlexGemmEpilogueAnalysis:
         )
         if self.outputs.local_reduce is not None:
             geometries.add(self.outputs.local_reduce.match.geometry)
-        if self.outputs.main.transform is not None:
+        if self.outputs.main_transform is not None:
             geometries.add(
                 FlexGemmLocalReduceGeometry(
-                    group=self.outputs.main.transform.group,
+                    group=self.outputs.main_transform.group,
                     axis=1,
                 )
             )
@@ -1458,7 +1434,7 @@ class FlexGemmEpilogueEmitter:
             [LOCAL_REDUCE_FEED_MAIN_ARG_NAME] if self.feed_main is not None else []
         )
         epilogue_params = ", ".join(["acc", *aux_args, *feed_main_args])
-        result = _cute_arg(self.outputs.main.value, self.env)
+        result = _cute_arg(self.outputs.main, self.env)
         aux_result = self.aux_result(self.aux, self.store_sources)
         if self.outputs.aux_outputs or aux_result is not None:
             tuple_items = [result]
