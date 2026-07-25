@@ -306,7 +306,7 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
           auto ps = lib.getPipelineStateForFunc(kernel_name);
           getMPSProfiler().beginProfileKernel(ps, "norm_reduction_inner", {input});
           [ce setComputePipelineState:ps];
-          mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, 0.0f);
+          mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, 0.0f, std::array<uint32_t, 2>{1, N});
           [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
           getMPSProfiler().endProfileKernel(ps);
         }
@@ -522,6 +522,15 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
   }
 
   return output_t;
+}
+
+static bool strides_collapse(const Tensor& t, int lo, int hi) {
+  for (int i = hi; i > lo; i--) {
+    if (t.stride(i - 1) != t.stride(i) * t.size(i)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
@@ -805,7 +814,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
           struct {
             uint32_t M, N;
           } sizes_s = {M, N};
-          mtl_setArgs(ce, input, output_t, sizes_s);
+          const std::array<uint32_t, 2> strides_s{1, N};
+          mtl_setArgs(ce, input, output_t, sizes_s, strides_s);
           [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
         }
         getMPSProfiler().endProfileKernel(ps);
@@ -895,18 +905,192 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
   const auto out_str = scalarToMetalTypeString(opts.output_kernel_dtype);
   const auto partial_str = scalarToMetalTypeString(opts.partial_dtype);
 
-  // Outer-dim (dim=0 on contiguous input) and inner-dim (last dim on
-  // contiguous input) specializations: handle the dim-reduction case with
-  // dedicated kernels that have better thread layout than the generic kernel.
-  if (output.numel() > 1 && input_orig.is_contiguous() && output.is_contiguous()) {
-    int num_reduced = 0;
-    int reduced_dim = -1;
-    for (int64_t d = 0; d < input_orig.dim(); d++) {
-      if (input_orig.size(d) != output.size(d)) {
-        num_reduced++;
-        reduced_dim = d;
+  auto encode_inner_strided = [&](const Tensor& in,
+                                  const Tensor& out,
+                                  uint32_t M,
+                                  uint32_t N,
+                                  const std::string& prefix,
+                                  ScalarType in_dt,
+                                  ScalarType out_dt,
+                                  std::optional<float> divisor,
+                                  uint32_t sK,
+                                  uint32_t sRow) {
+    auto kname =
+        fmt::format("{}reduction_inner_{}_{}", prefix, scalarToMetalTypeString(in_dt), scalarToMetalTypeString(out_dt));
+    constexpr uint32_t TG_SIZE = 256;
+    const auto num_tgs = c10::metal::ceil_div(M, TG_SIZE / 32);
+    id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+    auto ps = lib.getPipelineStateForFunc(kname);
+    getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_inner", {in});
+    [ce setComputePipelineState:ps];
+    const std::array<uint32_t, 2> sizes_s{M, N};
+    const std::array<uint32_t, 2> strides_s{sK, sRow};
+    if (divisor.has_value()) {
+      mtl_setArgs(ce, in, out, sizes_s, *divisor, strides_s);
+    } else {
+      mtl_setArgs(ce, in, out, sizes_s, strides_s);
+    }
+    [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
+    getMPSProfiler().endProfileKernel(ps);
+  };
+  auto encode_inner = [&](const Tensor& in,
+                          const Tensor& out,
+                          uint32_t M,
+                          uint32_t N,
+                          const std::string& prefix,
+                          ScalarType in_dt,
+                          ScalarType out_dt,
+                          std::optional<float> divisor) {
+    encode_inner_strided(in, out, M, N, prefix, in_dt, out_dt, divisor, 1u, N);
+  };
+  auto largest_divisor_leq = [](uint32_t x, uint32_t cap) -> uint32_t {
+    uint32_t best = 1;
+    for (uint32_t g = 2; g <= cap; ++g) {
+      if (x % g == 0) {
+        best = g;
       }
     }
+    return best;
+  };
+  auto pick_lanes = [](uint32_t k) -> uint32_t {
+    uint32_t l = 1;
+    while (l < 32u && c10::metal::ceil_div(k, l) > 16u) {
+      l *= 2;
+    }
+    return l;
+  };
+  auto encode_chunk = [&](const Tensor& in,
+                          const Tensor& out,
+                          uint32_t M,
+                          uint32_t K,
+                          uint32_t L,
+                          uint32_t G,
+                          const std::string& prefix,
+                          ScalarType in_dt,
+                          ScalarType out_dt,
+                          std::optional<float> divisor,
+                          uint32_t sK,
+                          uint32_t sRow) {
+    auto kname = fmt::format(
+        "{}reduction_inner_chunk_{}_{}", prefix, scalarToMetalTypeString(in_dt), scalarToMetalTypeString(out_dt));
+    constexpr uint32_t TG_SIZE = 256;
+    const auto rows_per_simd = 32u / L;
+    const auto total_simds = c10::metal::ceil_div(M * G, rows_per_simd);
+    const auto num_tgs = c10::metal::ceil_div(total_simds, TG_SIZE / 32);
+    id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+    auto ps = lib.getPipelineStateForFunc(kname);
+    getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_inner_chunk", {in});
+    [ce setComputePipelineState:ps];
+    const std::array<uint32_t, 4> sizes_s{M, K, L, G};
+    const std::array<uint32_t, 2> strides_s{sK, sRow};
+    if (divisor.has_value()) {
+      mtl_setArgs(ce, in, out, sizes_s, *divisor, strides_s);
+    } else {
+      mtl_setArgs(ce, in, out, sizes_s, strides_s);
+    }
+    [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
+    getMPSProfiler().endProfileKernel(ps);
+  };
+  auto pick_split_segments = [](uint32_t M, uint32_t K) -> uint32_t {
+    const auto cap = std::min<uint32_t>(2048u, c10::metal::ceil_div(K, 64u));
+    const auto g0 = std::clamp<uint32_t>(c10::metal::ceil_div(2048u, std::max(M, 1u)), 2u, std::max(cap, 2u));
+    return c10::metal::ceil_div(K, c10::metal::ceil_div(K, g0));
+  };
+
+  const int nd = input_orig.dim();
+  int num_reduced = 0;
+  int reduced_dim = -1;
+  for (int d = 0; d < nd; d++) {
+    if (input_orig.size(d) != output.size(d)) {
+      num_reduced++;
+      reduced_dim = d;
+    }
+  }
+  const std::optional<float> p1_div = opts.divisor.has_value() ? std::optional<float>(0.0f) : std::nullopt;
+
+  if (output.numel() > 1 && !input_orig.is_contiguous() && output.is_contiguous()) {
+    if (num_reduced == 1 && reduced_dim == nd - 1 && nd >= 2) {
+      const bool collapses = strides_collapse(input_orig, 0, nd - 2);
+      const auto K = static_cast<uint32_t>(input_orig.size(nd - 1));
+      const auto M = static_cast<uint32_t>(input_orig.numel() / K);
+      const auto sK = input_orig.stride(nd - 1);
+      const auto sRow = input_orig.stride(nd - 2);
+      const auto max_off = static_cast<int64_t>(M - 1) * sRow + static_cast<int64_t>(K - 1) * sK;
+      if (collapses && max_off <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+        const auto sK32 = static_cast<uint32_t>(sK);
+        const auto sRow32 = static_cast<uint32_t>(sRow);
+        if (K <= 256u) {
+          dispatch_sync_with_rethrow(stream->queue(), ^() {
+            @autoreleasepool {
+              encode_chunk(input_orig,
+                           output,
+                           M,
+                           K,
+                           pick_lanes(K),
+                           1u,
+                           opts.prefix,
+                           opts.input_kernel_dtype,
+                           opts.output_kernel_dtype,
+                           opts.divisor,
+                           sK32,
+                           sRow32);
+            }
+          });
+          return;
+        }
+        if (c10::metal::ceil_div(M, 8u) < 64u && K >= 2048u) {
+          const auto G = pick_split_segments(M, K);
+          auto partials = at::empty({(int64_t)M, (int64_t)G}, output.options().dtype(opts.partial_dtype));
+          dispatch_sync_with_rethrow(stream->queue(), ^() {
+            @autoreleasepool {
+              encode_chunk(input_orig,
+                           partials,
+                           M,
+                           K,
+                           32u,
+                           G,
+                           opts.prefix,
+                           opts.input_kernel_dtype,
+                           opts.partial_dtype,
+                           p1_div,
+                           sK32,
+                           sRow32);
+              encode_chunk(partials,
+                           output,
+                           M,
+                           G,
+                           pick_lanes(G),
+                           1u,
+                           opts.pass2_prefix,
+                           opts.partial_dtype,
+                           opts.output_kernel_dtype,
+                           opts.divisor,
+                           1u,
+                           G);
+            }
+          });
+          return;
+        }
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            encode_inner_strided(input_orig,
+                                 output,
+                                 M,
+                                 K,
+                                 opts.prefix,
+                                 opts.input_kernel_dtype,
+                                 opts.output_kernel_dtype,
+                                 opts.divisor,
+                                 sK32,
+                                 sRow32);
+          }
+        });
+        return;
+      }
+    }
+  }
+
+  if (output.numel() > 1 && input_orig.is_contiguous() && output.is_contiguous()) {
     if (num_reduced == 1 && reduced_dim == 0 && input_orig.dim() >= 2) {
       uint32_t M = input_orig.size(0);
       uint32_t N = input_orig.numel() / M;
@@ -935,28 +1119,126 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       return;
     }
     if (num_reduced == 1 && reduced_dim == input_orig.dim() - 1) {
-      uint32_t N = input_orig.size(input_orig.dim() - 1);
-      uint32_t M = input_orig.numel() / N;
-      auto inner_kernel = fmt::format("{}reduction_inner_{}_{}", opts.prefix, in_str, out_str);
-      constexpr uint32_t TG_SIZE = 256;
-      constexpr uint32_t rows_per_tg = TG_SIZE / 32;
-      const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
+      const auto N = static_cast<uint32_t>(input_orig.size(input_orig.dim() - 1));
+      const auto M = static_cast<uint32_t>(input_orig.numel() / N);
+      if (N <= 256u) {
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            encode_chunk(input_orig,
+                         output,
+                         M,
+                         N,
+                         pick_lanes(N),
+                         1u,
+                         opts.prefix,
+                         opts.input_kernel_dtype,
+                         opts.output_kernel_dtype,
+                         opts.divisor,
+                         1u,
+                         N);
+          }
+        });
+        return;
+      }
+      if (c10::metal::ceil_div(M, 8u) < 64u && N >= 2048u) {
+        const auto g_cap = std::min(N / 512u, std::max(2u, 16384u / std::max(M, 1u)));
+        const auto G = largest_divisor_leq(N, g_cap);
+        if (G >= 2) {
+          const auto C = N / G;
+          auto partials = at::empty({(int64_t)M * G}, output.options().dtype(opts.partial_dtype));
+          dispatch_sync_with_rethrow(stream->queue(), ^() {
+            @autoreleasepool {
+              encode_inner(
+                  input_orig, partials, M * G, C, opts.prefix, opts.input_kernel_dtype, opts.partial_dtype, p1_div);
+              encode_inner(partials,
+                           output,
+                           M,
+                           G,
+                           opts.pass2_prefix,
+                           opts.partial_dtype,
+                           opts.output_kernel_dtype,
+                           opts.divisor);
+            }
+          });
+          return;
+        }
+      }
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
-          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
-          auto ps = lib.getPipelineStateForFunc(inner_kernel);
-          getMPSProfiler().beginProfileKernel(ps, opts.prefix + "reduction_inner", {input_orig});
-          struct {
-            uint32_t M, N;
-          } sizes_s = {M, N};
-          [ce setComputePipelineState:ps];
-          if (opts.divisor.has_value()) {
-            mtl_setArgs(ce, input_orig, output, sizes_s, *opts.divisor);
+          encode_inner(
+              input_orig, output, M, N, opts.prefix, opts.input_kernel_dtype, opts.output_kernel_dtype, opts.divisor);
+        }
+      });
+      return;
+    }
+  }
+
+  if (output.numel() == 1 && !input_orig.is_contiguous() && nd >= 1) {
+    const bool collapses = strides_collapse(input_orig, 0, nd - 2);
+    const auto K = static_cast<uint32_t>(input_orig.size(nd - 1));
+    const auto M = static_cast<uint32_t>(input_orig.numel() / K);
+    const auto sK = input_orig.stride(nd - 1);
+    const auto sRow = nd >= 2 ? input_orig.stride(nd - 2) : 0;
+    const auto max_off = static_cast<int64_t>(M - 1) * sRow + static_cast<int64_t>(K - 1) * sK;
+    if (collapses && M <= 4096u && sK >= 0 && sRow >= 0 &&
+        max_off <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+      const auto sK32 = static_cast<uint32_t>(sK);
+      const auto sRow32 = static_cast<uint32_t>(sRow);
+      const auto G = (K >= 2048u && M < 64u) ? pick_split_segments(M, K) : 1u;
+      const auto P = M * G;
+      auto partials = at::empty({(int64_t)P}, output.options().dtype(opts.partial_dtype));
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          if (G > 1) {
+            encode_chunk(input_orig,
+                         partials,
+                         M,
+                         K,
+                         32u,
+                         G,
+                         opts.prefix,
+                         opts.input_kernel_dtype,
+                         opts.partial_dtype,
+                         p1_div,
+                         sK32,
+                         sRow32);
+          } else if (K <= 256u) {
+            encode_chunk(input_orig,
+                         partials,
+                         M,
+                         K,
+                         pick_lanes(K),
+                         1u,
+                         opts.prefix,
+                         opts.input_kernel_dtype,
+                         opts.partial_dtype,
+                         p1_div,
+                         sK32,
+                         sRow32);
           } else {
-            mtl_setArgs(ce, input_orig, output, sizes_s);
+            encode_inner_strided(input_orig,
+                                 partials,
+                                 M,
+                                 K,
+                                 opts.prefix,
+                                 opts.input_kernel_dtype,
+                                 opts.partial_dtype,
+                                 p1_div,
+                                 sK32,
+                                 sRow32);
           }
-          [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
-          getMPSProfiler().endProfileKernel(ps);
+          encode_chunk(partials,
+                       output,
+                       1u,
+                       P,
+                       32u,
+                       1u,
+                       opts.pass2_prefix,
+                       opts.partial_dtype,
+                       opts.output_kernel_dtype,
+                       opts.divisor,
+                       1u,
+                       P);
         }
       });
       return;
@@ -980,8 +1262,15 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       const uint32_t elems_per_group = reduction_size / num_groups;
       auto partials = at::empty({(int64_t)num_groups}, output.options().dtype(opts.partial_dtype));
 
-      auto p1_kernel =
-          fmt::format("{}reduction{}_{}_{}", opts.prefix, use_strided ? "_strided" : "", in_str, partial_str);
+      const bool vec_ok = opts.input_kernel_dtype == kFloat || opts.input_kernel_dtype == kHalf ||
+          opts.input_kernel_dtype == kBFloat16 || opts.input_kernel_dtype == kInt || opts.input_kernel_dtype == kLong ||
+          opts.input_kernel_dtype == kShort;
+      const bool vec_op = opts.prefix == "sum_" || opts.prefix == "nansum_" || opts.prefix == "min_" ||
+          opts.prefix == "max_" || opts.prefix == "all_" || opts.prefix == "any_";
+      const bool use_vec = !use_strided && vec_op && vec_ok && (elems_per_group % 4 == 0);
+      auto p1_kernel = use_vec
+          ? fmt::format("{}reduction_vec_{}_{}", opts.prefix, in_str, partial_str)
+          : fmt::format("{}reduction{}_{}_{}", opts.prefix, use_strided ? "_strided" : "", in_str, partial_str);
       auto p2_kernel = fmt::format("{}reduction_{}_{}", opts.pass2_prefix, partial_str, out_str);
 
       NormParams params1{};
@@ -1022,19 +1311,16 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           auto ps1 = lib.getPipelineStateForFunc(p1_kernel);
           getMPSProfiler().beginProfileKernel(ps1, opts.prefix + "reduction_pass1", {input});
           [ce setComputePipelineState:ps1];
-          mtl_setArgs(ce, input, partials, params1);
-          // Round both passes' TG sizes up to a full simdgroup. Required
-          // because c10::metal::simd_max/min<long> emulates 64-bit simd
-          // via simd_shuffle_and_fill_down, and inactive lanes (when active
-          // count < 32) return undefined data (in practice 0) instead of
-          // the op's identity — corrupting min/max of all-positive or
-          // all-negative longs. The fill value itself is fixed in
-          // reduction_utils.h, but the fill only applies to past-end
-          // shuffles, not to inactive-lane reads within the simdgroup.
-          // Padding threads here skip the load loop (tid >= rsize) and
-          // contribute Op::identity().
-          auto tpg1 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(elems_per_group, 32u));
-          [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
+          if (use_vec) {
+            const std::array<uint32_t, 2> vparams{num_groups, elems_per_group};
+            mtl_setArgs(ce, input, partials, vparams);
+            constexpr uint32_t TPG = 256;
+            [ce dispatchThreads:MTLSizeMake(num_groups * TPG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TPG, 1, 1)];
+          } else {
+            mtl_setArgs(ce, input, partials, params1);
+            auto tpg1 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(elems_per_group, 32u));
+            [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
+          }
           getMPSProfiler().endProfileKernel(ps1);
 
           auto ps2 = lib.getPipelineStateForFunc(p2_kernel);
