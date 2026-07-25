@@ -495,5 +495,31 @@ struct MinOp {
   }
 };
 
+// Sum reduction op functor, sharing the identity / combine / simd_reduce /
+// threadgroup_reduce concept with MaxOp / MinOp so sum and mean can route
+// through the same value_reduction kernels. T is the accumulator type
+// (opmath_t<TO> for sum, keeping fp32 accumulation from being lost when TO is
+// fp16/bf16). No `replace` member: that is arg-reduction-only (argmax/argmin
+// reuse MaxOp/MinOp).
+template <typename T>
+struct SumOp {
+  static inline constexpr T identity() {
+    return T(0);
+  }
+  static inline T combine(T a, T b) {
+    return a + b;
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_sum(val);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_sum(shared, val, tid, tptg);
+  }
+};
+
 } // namespace metal
 } // namespace c10
