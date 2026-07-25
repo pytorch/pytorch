@@ -20,6 +20,14 @@ if torch.backends.mps.is_available():
 
         # Supported complex OPS
         SUPPORTED_COMPLEX_OPS = {
+            "std",
+            "std_mean",
+            "var",
+            "var_mean",
+            "stdunbiased",
+            "std_meanunbiased",
+            "varunbiased",
+            "var_meanunbiased",
             "__radd__",
             "__rmul__",
             "__rsub__",
