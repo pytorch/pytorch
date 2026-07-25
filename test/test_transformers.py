@@ -3098,20 +3098,18 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @parametrize("enable_gqa", [False, True])
     def test_mqa_singleton_head_broadcast(self, device, enable_gqa):
         """Singleton KV heads should use fused attention with either GQA mode."""
-        dtype = torch.float16 if TEST_WITH_ROCM else torch.float32
-        forward_tolerance = 1e-2 if dtype == torch.float16 else 1e-5
-        grad_tolerance = 1e-1 if dtype == torch.float16 else 1e-4
         make_tensor = partial(
-            torch.randn, device=device, dtype=dtype, requires_grad=True
+            torch.randn, device=device, dtype=torch.float32, requires_grad=True
         )
         query = make_tensor(2, 8, 16, 32)
         key = make_tensor(2, 1, 32, 32)
         value = make_tensor(2, 1, 32, 32)
-        grad_out = torch.randn(2, 8, 16, 32, device=device, dtype=dtype)
+        grad_out = torch.randn(2, 8, 16, 32, device=device)
 
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             expected = scaled_dot_product_attention(
@@ -3129,19 +3127,9 @@ class TestSDPACudaOnly(NNTestCase):
                 actual, (query, key, value), grad_out
             )
 
-        self.assertEqual(
-            actual,
-            expected,
-            atol=forward_tolerance,
-            rtol=forward_tolerance,
-        )
+        self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
-            self.assertEqual(
-                actual_grad,
-                expected_grad,
-                atol=grad_tolerance,
-                rtol=grad_tolerance,
-            )
+            self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")

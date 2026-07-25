@@ -1100,13 +1100,15 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   if (has_only_dense_inputs(params)) {
 #ifdef USE_ROCM
     constexpr bool supports_gqa = false;
+    constexpr bool supports_mqa = false;
 #else
     constexpr bool supports_gqa = true;
+    constexpr bool supports_mqa = true;
 #endif
     constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
-        check_batch_size_and_num_heads_dense<supports_gqa, true, true /*supports_mqa*/>});
+        check_batch_size_and_num_heads_dense<supports_gqa, true, supports_mqa>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
