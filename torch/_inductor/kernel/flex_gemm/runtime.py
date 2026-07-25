@@ -259,20 +259,6 @@ def swap_local_reduce_plan(
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmRuntimeMainOutputPlan:
-    """Describe the logical main-output transform selected by lowering."""
-
-    transform: FlexGemmGroupedMainOutputTransform | None = None
-
-    def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
-        if self.transform is None:
-            return physical_shape
-        if physical_shape[-1] % self.transform.group != 0:
-            raise RuntimeError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
-        return (*physical_shape[:-1], physical_shape[-1] // self.transform.group)
-
-
-@dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeOutputPlan:
     """Bundle allocated returns and their structural output plans.
 
@@ -280,18 +266,27 @@ class FlexGemmRuntimeOutputPlan:
         aux_outs: Full-shape auxiliary buffers in QuACK store order. The local
             reduction buffer is represented separately by ``local_reduce``.
         local_reduce: Optional compressed-reduction runtime plan and output.
-        main: Logical transform applied to the first user-visible return.
+        main_transform: Logical transform applied to the first user-visible return.
     """
 
     aux_outs: tuple[torch.Tensor, ...] = ()
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None
-    main: FlexGemmRuntimeMainOutputPlan = dataclasses.field(
-        default_factory=FlexGemmRuntimeMainOutputPlan
-    )
+    main_transform: FlexGemmGroupedMainOutputTransform | None = None
 
     def __post_init__(self) -> None:
-        if self.main.transform is not None and self.aux_outs:
+        if self.main_transform is not None and self.aux_outs:
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+
+    def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
+        """Return the logical shape after applying the grouped-main transform."""
+        if self.main_transform is None:
+            return physical_shape
+        if physical_shape[-1] % self.main_transform.group != 0:
+            raise RuntimeError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
+        return (
+            *physical_shape[:-1],
+            physical_shape[-1] // self.main_transform.group,
+        )
 
 
 def validate_runtime_local_reduce(
@@ -464,7 +459,7 @@ def dispatch_gemm_act(
 
     # QuACK consumes A as (l, m, k) and B as (l, n, k); b is (k, n) so b.mT is (n, k).
     quack_a, quack_b = a, b.mT
-    main_transform = output_plan.main.transform
+    main_transform = output_plan.main_transform
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
     local_reduce_layout = None if local_reduce is None else local_reduce.output_layout
@@ -575,9 +570,7 @@ def gemm_epilogue(
     beta: float = 1.0,
     out_dtype: torch.dtype | None = None,
     out: torch.Tensor | None = None,
-    aux_outs: tuple[torch.Tensor, ...] = (),
-    local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
-    output_plan: FlexGemmRuntimeOutputPlan | None = None,
+    output_plan: FlexGemmRuntimeOutputPlan = FlexGemmRuntimeOutputPlan(),
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey | None = None,
@@ -598,8 +591,7 @@ def gemm_epilogue(
         beta: Scale applied to ``C`` when ``C`` is present.
         out_dtype: Optional output dtype. Defaults to ``a.dtype``.
         out: Optional preallocated output tensor with shape ``[M, N]`` or ``[B, M, N]``.
-        aux_outs: Preallocated same-shape aux tensors for tuple epilogues.
-        local_reduce: Optional structural local-reduce plan from generated code.
+        output_plan: Structural plan for auxiliary and transformed outputs.
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, ``col``, or ``scalar`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
@@ -624,17 +616,9 @@ def gemm_epilogue(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
     physical_output_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
-    if output_plan is None:
-        output_plan = FlexGemmRuntimeOutputPlan(
-            aux_outs=aux_outs, local_reduce=local_reduce
-        )
-    elif aux_outs or local_reduce is not None:
-        raise RuntimeError(
-            "output_plan cannot be combined with legacy aux_outs/local_reduce kwargs"
-        )
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
-    main_transform = output_plan.main.transform
+    main_transform = output_plan.main_transform
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         gemm_config_from_key,
@@ -652,7 +636,7 @@ def gemm_epilogue(
             else torch.cuda.get_device_capability(a.device)
         )
         main_transform.validate_quack(device_capacity[0])
-    logical_output_shape = output_plan.main.output_shape(physical_output_shape)
+    logical_output_shape = output_plan.output_shape(physical_output_shape)
     if main_transform is not None and (
         a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args
     ):

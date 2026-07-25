@@ -482,7 +482,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     local_reduce_layout = (
         None if local_reduce_store is None else local_reduce_store.output_layout
     )
-    output_meta = outputs.main.value.meta.get("val")
+    output_meta = outputs.main.meta.get("val")
     if output_meta is None:
         raise NotImplementedError(
             "FlexGEMM generated epilogues require output metadata"
@@ -492,7 +492,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         *gemm_args[mat1_index].get_size()[:-1],
         gemm_args[mat2_index].get_size()[-1],
     ]
-    main_transform = outputs.main.transform
+    main_transform = outputs.main_transform
     if (
         main_transform is not None
         and main_transform.chunked

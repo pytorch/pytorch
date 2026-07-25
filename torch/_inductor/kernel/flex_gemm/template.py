@@ -169,7 +169,6 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             )
             from torch._inductor.kernel.flex_gemm.runtime import (
                 FlexGemmRuntimeLocalReducePlan,
-                FlexGemmRuntimeMainOutputPlan,
                 FlexGemmRuntimeOutputPlan,
                 gemm_epilogue as flex_gemm_epilogue,
             )
@@ -298,8 +297,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         return (
             "FlexGemmRuntimeOutputPlan("
             f"aux_outs={aux_expr}, local_reduce={local_reduce_expr}, "
-            "main=FlexGemmRuntimeMainOutputPlan("
-            f"transform={transform_expr}))"
+            f"main_transform={transform_expr})"
         )
 
     def _epilogue_kwargs(
