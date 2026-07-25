@@ -1433,9 +1433,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 #ifdef USE_ROCM
   TORCH_CHECK(num_heads == num_heads_kv);
 #else
-  TORCH_CHECK(num_heads_kv > 0);
   TORCH_CHECK(
-      num_heads % num_heads_kv == 0,
+      (num_heads == 0 && num_heads_kv == 0) ||
+          (num_heads > 0 && num_heads_kv > 0 &&
+           num_heads % num_heads_kv == 0),
       "Number of heads in key/value must divide number of heads in query");
 #endif
 
@@ -1747,6 +1748,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
          num_heads,
          compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
         query.options().dtype(at::ScalarType::Float));
+    if (num_heads == 0) {
+      return;
+    }
     typename Kernel::Params p;
     p.query_ptr = (const scalar_t*)query.const_data_ptr();
     p.key_ptr = (const scalar_t*)key.const_data_ptr();

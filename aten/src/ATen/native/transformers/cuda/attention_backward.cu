@@ -425,9 +425,9 @@ _efficient_attention_backward(
 #ifdef USE_ROCM
   TORCH_CHECK(nH == nHkv);
 #else
-  TORCH_CHECK(nHkv > 0);
   TORCH_CHECK(
-      nH % nHkv == 0,
+      (nH == 0 && nHkv == 0) ||
+          (nH > 0 && nHkv > 0 && nH % nHkv == 0),
       "Number of heads in key/value must divide number of heads in query");
 #endif
 
@@ -748,6 +748,14 @@ _efficient_attention_backward(
 
     kernel_launched = true;
 
+    if (M == 0 || N == 0 || B == 0 || nH == 0 ||
+        (cu_seqlens_q.has_value() && cu_seqlens_q->size(0) == 1)) {
+      grad_k_expanded.zero_();
+      grad_v_expanded.zero_();
+      grad_q.zero_();
+      return;
+    }
+
     // TODO: Fuse this into a kernel?
     // This is a bottleneck for smaller sequences (M <= 128)
     auto delta = Kernel::kKernelComputesDelta
@@ -913,14 +921,6 @@ _efficient_attention_backward(
       }
     }
 
-    // Handle the edge-cases where some tensors are empty
-    if (p.num_queries == 0 || p.num_keys == 0 || p.num_batches == 0 ||
-        p.num_heads == 0) {
-      grad_k_expanded.zero_();
-      grad_v_expanded.zero_();
-      grad_q.zero_();
-      return;
-    }
     Kernel::check_supported(p);
 
     if (smem_bytes > 0xc000) {

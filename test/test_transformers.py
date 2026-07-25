@@ -3360,6 +3360,57 @@ class TestSDPACudaOnly(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    def test_mem_efficient_attention_zero_heads(self, device):
+        """Zero-head low-level attention should return empty outputs and gradients."""
+        query = torch.empty(2, 3, 0, 8, device=device)
+        key = torch.empty(2, 4, 0, 8, device=device)
+        value = torch.empty(2, 4, 0, 16, device=device)
+        output, logsumexp, seed, offset, max_q, max_k = (
+            torch.ops.aten._efficient_attention_forward.default(
+                query,
+                key,
+                value,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                0,
+                True,
+            )
+        )
+        grad_query, grad_key, grad_value, _ = (
+            torch.ops.aten._efficient_attention_backward.default(
+                torch.empty_like(output),
+                query,
+                key,
+                value,
+                None,
+                output,
+                None,
+                None,
+                max_q,
+                max_k,
+                logsumexp,
+                0.0,
+                seed,
+                offset,
+                0,
+                False,
+            )
+        )
+
+        self.assertEqual(output.shape, (2, 3, 0, 16))
+        self.assertEqual(logsumexp.shape[:2], (2, 0))
+        for grad, source in zip(
+            (grad_query, grad_key, grad_value), (query, key, value)
+        ):
+            self.assertEqual(grad.shape, source.shape)
+            self.assertEqual(grad.numel(), 0)
+
     @parametrize(
         "fused_kernel",
         [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
