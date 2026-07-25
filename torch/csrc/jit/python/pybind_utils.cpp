@@ -552,12 +552,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           target = obj.attr("real_obj");
         }
         auto cpp_obj = target.cast<c10::intrusive_ptr<c10d::ProcessGroup>>();
-        return IValue::make_capsule(cpp_obj);
+        return IValue::make_capsule(std::move(cpp_obj));
       }
       if (py::isinstance<c10d::ReduceOp>(obj)) {
         const auto& op = obj.cast<const c10d::ReduceOp&>();
         auto cpp_obj = c10::make_intrusive<c10d::ReduceOp>(op);
-        return IValue::make_capsule(cpp_obj);
+        return IValue::make_capsule(std::move(cpp_obj));
       }
 #endif
 
