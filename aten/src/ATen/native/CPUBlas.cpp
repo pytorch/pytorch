@@ -370,12 +370,12 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * m_;
+      size_t c_size = static_cast<size_t>(n) * static_cast<size_t>(m);
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c_size, 0.0f);
       for (const auto j : c10::irange(n)) {
         for (const auto i : c10::irange(m)) {
-          float_v[j * m_ + i] = c10::convert<float>(c[j * ldc_ + i]);
+          float_v[j * static_cast<size_t>(m_) + i] = c10::convert<float>(c[j * ldc_ + i]);
         }
       }
       sbgemm_(&transa_, &transb_,
@@ -387,7 +387,7 @@ void gemm(
               float_v.data(), &m_);
       for (const auto j : c10::irange(n)) {
         for (const auto i : c10::irange(m)) {
-          c[j * ldc_ + i] = c10::convert<at::BFloat16>(float_v[j * m_ + i]);
+          c[j * ldc_ + i] = c10::convert<at::BFloat16>(float_v[j * static_cast<size_t>(m_) + i]);
         }
       }
       return;
@@ -431,12 +431,12 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * m_;
+      size_t c_size = static_cast<size_t>(n) * static_cast<size_t>(m);
       // C matrix in OpenBLAS shgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c_size, 0.0f);
       for (const auto j : c10::irange(n)) {
         for (const auto i : c10::irange(m)) {
-          float_v[j * m_ + i] = c10::convert<float>(c[j * ldc_ + i]);
+          float_v[j * static_cast<size_t>(m_) + i] = c10::convert<float>(c[j * ldc_ + i]);
         }
       }
       shgemm_(&transa_, &transb_,
@@ -448,7 +448,7 @@ void gemm(
               float_v.data(), &m_);
       for (const auto j : c10::irange(n)) {
         for (const auto i : c10::irange(m)) {
-          c[j * ldc_ + i] = c10::convert<at::Half>(float_v[j * m_ + i]);
+          c[j * ldc_ + i] = c10::convert<at::Half>(float_v[j * static_cast<size_t>(m_) + i]);
         }
       }
       return;
