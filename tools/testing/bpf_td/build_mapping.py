@@ -65,15 +65,27 @@ def subtree_pids(forks, owner, start_ns, end_ns):
     return included
 
 
+# Runtime writes under the repo that are not source dependencies.
+_NOISE = ("/.git/", "/.pytest_cache/", "/test/test-reports/", "/.additional_ci_files/")
+
+
 def normalize(path, repo_root, torch_root):
     """Map an absolute path to a repo-relative path, or None if outside scope."""
-    if repo_root and path.startswith(repo_root):
+    if any(n in path for n in _NOISE):
+        return None
+    if repo_root and path.startswith(repo_root + os.sep):
         rel = os.path.relpath(path, repo_root)
         if not rel.startswith(".."):
             return rel
-    if torch_root and path.startswith(torch_root):
-        # torch_root is .../site-packages/torch; key generated/installed files
-        # under a stable "torch/..." prefix.
+    # Tests import the INSTALLED torch from site/dist-packages; map it back to
+    # the repo-relative "torch/..." so a changed repo file joins to the runtime
+    # open. This pattern is independent of torch_root env detection (which has
+    # proven unreliable in CI).
+    for marker in ("/site-packages/", "/dist-packages/"):
+        i = path.find(marker + "torch/")
+        if i != -1:
+            return path[i + len(marker):]
+    if torch_root and path.startswith(torch_root + os.sep):
         rel = os.path.relpath(path, os.path.dirname(torch_root))
         if not rel.startswith(".."):
             return rel

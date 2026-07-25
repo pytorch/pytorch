@@ -85,7 +85,10 @@ set -e
 stop_tracer
 trap - EXIT
 
-TORCH_ROOT="$(python -c 'import os,torch; print(os.path.dirname(torch.__file__))' 2>/dev/null || true)"
+# Fallback only: build_mapping.py also pattern-matches site-packages/torch, so
+# an empty TORCH_ROOT is not fatal. Use python3 (matches the wheel install).
+TORCH_ROOT="$(python3 -c 'import os,torch; print(os.path.dirname(torch.__file__))' 2>/dev/null || true)"
+[ -z "${TORCH_ROOT}" ] && echo "run_traced.sh: WARN torch not importable here; relying on path pattern" >&2
 OUT="${REPO_ROOT}/test/test-reports/bpf_td_mapping_${TEST_CONFIG:-unknown}_${SHARD_NUMBER:-0}.json"
 
 echo "run_traced.sh: building mapping -> ${OUT}" >&2
