@@ -2712,6 +2712,7 @@ PyObject* initModule() {
       py::arg("name"),
       py::arg("value"),
       py::arg("overwrite") = true);
+  py_module.def("_unsetenv", &c10::utils::unset_env);
 
   {
     using at::impl::FakeDispatchCategory;
