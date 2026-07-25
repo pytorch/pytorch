@@ -38,8 +38,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import TYPE_CHECKING, Any, NoReturn, Union, cast
-
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -54,9 +53,9 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
+    handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
-    handle_observed_exception,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -107,10 +106,10 @@ from ..utils import (
 )
 from .base import (
     _RICHCOMPARE_OPS,
-    NO_SUCH_SUBOBJ,
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     MutationType,
+    NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
 )
@@ -124,6 +123,7 @@ from .object_protocol import (
     type_implements_nb_slot,
 )
 from .sets import SetVariable
+
 
 try:
     import numpy as np

@@ -14,31 +14,30 @@ import sys
 import types
 import typing
 from functools import lru_cache, partial
-from typing import TYPE_CHECKING, NoReturn
+from typing import NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
     PyMappingSlots,
     PyNumberSlots,
     PySequenceSlots,
     PyTypeSlots,
-    get_type_slots,
-    has_slot,
 )
 
 from .. import graph_break_hints, polyfills, variables
 from ..exc import (
-    ObservedTypeError,
-    UnhandledDescriptorError,
     handle_observed_exception,
+    ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
+    UnhandledDescriptorError,
     unimplemented,
 )
 from ..source import AttrSource, Source
 from ..utils import istype
 from .base import (
-    NO_SUCH_SUBOBJ,
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     maybe_get_python_type,
@@ -46,6 +45,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+
 
 if TYPE_CHECKING:
     from ..symbolic_convert import InstructionTranslatorBase
@@ -647,7 +647,7 @@ def generic_delitem(
     if pyindex_check(key_type):
         key_value = key.nb_index_impl(tx)
         return pysequence_delitem(tx, o, key_value)
-    elif type_implements_sq_ass_item(o_type):
+    elif o.tp_as_sequence.sq_ass_item is not None:
         raise_type_error(
             tx, f"sequence index must be integer, not {key.python_type_name()}"
         )

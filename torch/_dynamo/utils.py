@@ -51,17 +51,16 @@ from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
+    cast,
     ClassVar,
     Generic,
     Literal,
     NoReturn,
+    overload,
     TypeAlias,
     TypeGuard,
     TypeVar,
-    cast,
-    overload,
 )
-
 from typing_extensions import ParamSpec, TypeIs
 
 import torch
@@ -95,6 +94,7 @@ from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
 from .graph_utils import _get_flat_args
+
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
@@ -1339,7 +1339,7 @@ def lazily_unpack(
     tx: InstructionTranslatorBase,
     iterable: VariableTracker,
 ):
-    from .exc import ObservedUserStopIteration, handle_observed_exception
+    from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
@@ -4008,7 +4008,7 @@ def _get_fake_value_impl(
     from torch.utils._sympy.value_ranges import ValueRangeError
 
     from . import graph_break_hints
-    from .exc import Unsupported, UserError, UserErrorType, unimplemented
+    from .exc import unimplemented, Unsupported, UserError, UserErrorType
 
     op = node.op
 

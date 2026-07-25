@@ -63,9 +63,9 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
+    generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
-    generic_getitem,
 )
 
 
