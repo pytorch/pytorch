@@ -69,9 +69,17 @@ def process_inputs(
     # here prevents ACT from appearing in the traced metadata.
     AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
     act_input_paths: list[ActInputPath] = []
+    # Unwrapping a grad-requiring top-level ACT below yields its waited inner
+    # tensor, which drops the wrapper's requires_grad. The fake built from it
+    # then reads requires_grad=False, so AOTAutograd treats the graph as
+    # non-differentiable and drops the input gradient. Record these inputs to
+    # re-sync requires_grad onto their fakes below.
+    grad_act_indices: list[int] = []
     if AsyncCollectiveTensor is not None:
         tracing_context = torch._guards.TracingContext.try_get()
         for i, a in enumerate(flat_args):
+            if isinstance(a, AsyncCollectiveTensor) and a.requires_grad:
+                grad_act_indices.append(i)
             resolved_arg = _resolve_input_async_collectives(
                 a, i, (), act_input_paths, AsyncCollectiveTensor
             )
@@ -170,9 +178,17 @@ def process_inputs(
             )
             return result
 
-        return FakifiedFlatArgs(
-            [convert(idx, x) for idx, x in enumerate(flat_args)]
-        ), act_input_paths
+        fakified = [convert(idx, x) for idx, x in enumerate(flat_args)]
+        # Re-sync requires_grad onto the fakes for the grad-requiring ACTs
+        # unwrapped above (see grad_act_indices). Mutate in place rather than
+        # substitute a fresh tensor: `convert` keys per-tensor symbolic-shape
+        # context in `tracing_context.tensor_to_context` by object identity, so a
+        # replacement object would miss that mapping.
+        for i in grad_act_indices:
+            fi = fakified[i]
+            if isinstance(fi, torch.Tensor) and not fi.requires_grad:
+                fi.requires_grad_(True)
+        return FakifiedFlatArgs(fakified), act_input_paths
 
 
 def _resolve_input_async_collectives(
