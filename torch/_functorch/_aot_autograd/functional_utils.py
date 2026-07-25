@@ -16,7 +16,7 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
@@ -231,7 +231,7 @@ def was_shallow_copy_data(t: object) -> bool:
 # Assumption: arg promises to be the "original" tensor wrapped by f_arg
 # Note: "storage mutations" coming from set_() are a type of metadata mutation. So:
 # - check_only_storage_mutation=True: only return true if there was a storage mutation
-# - check_only_storage_mutation=Flse: return true if there was any metadata mutation (including a storage mutation)
+# - check_only_storage_mutation=False: return true if there was any metadata mutation (including a storage mutation)
 def has_metadata_mutation(
     f_arg: object, arg: object, *, check_only_storage_mutation: bool
 ) -> bool:
@@ -267,7 +267,7 @@ def has_metadata_mutation(
             raise AssertionError(
                 f"expected FunctionalTensor for f_arg, got {type(f_arg)}"
             )
-        if not isinstance(arg, FakeTensor):
+        if not is_fake_tensor(arg):
             raise AssertionError(f"expected FakeTensor for arg, got {type(arg)}")
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
