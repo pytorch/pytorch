@@ -7,7 +7,8 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable, Sequence
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -42,6 +43,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
+from torch.distributed.fsdp._fully_shard._custom_comm_backends import (
+    MoriSdmaAllGather,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
@@ -72,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -2371,6 +2376,103 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+# =============================================================================
+# Runtime-free unit tests for the custom all-gather backend contract
+# =============================================================================
+
+
+class TestMoriSdmaAllGather(TestCase):
+    """Backend-level tests that do not require the ``mori`` runtime or GPUs."""
+
+    def test_missing_mori_dependency_error(self):
+        def import_module(name: str):
+            if name == "mori.shmem":
+                raise ModuleNotFoundError("No module named 'mori'", name="mori")
+            raise AssertionError(f"unexpected import: {name}")
+
+        comm = MoriSdmaAllGather()
+        group = SimpleNamespace(rank=lambda: 0, size=lambda: 1)
+        with patch(
+            "torch.distributed.fsdp._fully_shard._custom_comm_backends"
+            "._mori_sdma_allgather.importlib.import_module",
+            side_effect=import_module,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "requires the optional ROCm MORI Python package"
+            ):
+                comm._get_collective(group)
+
+    def test_zero_copy_output_disabled(self):
+        comm = MoriSdmaAllGather(zero_copy_output=False)
+        metadata = comm.prepare_output(
+            [],
+            0,
+            1,
+            torch.float32,
+            torch.device("cpu"),
+            [],
+            [],
+            [],
+        )
+        self.assertIsNone(metadata)
+
+
+class TestParamContiguousEligibility(TestCase):
+    """Runtime-free tests for the conservative param-contiguous eligibility gate."""
+
+    @staticmethod
+    def _make_param(
+        *,
+        dim: int = 0,
+        is_dtensor: bool = False,
+        pre_all_gather: bool = False,
+        post_all_gather: bool = False,
+        sharded_state: ShardedState = ShardedState.SHARDED,
+    ):
+        sharded_local_tensor = SimpleNamespace()
+        if pre_all_gather:
+            sharded_local_tensor.fsdp_pre_all_gather = lambda *a, **k: None
+        if post_all_gather:
+            sharded_local_tensor.fsdp_post_all_gather = lambda *a, **k: None
+        return SimpleNamespace(
+            fsdp_placement=SimpleNamespace(dim=dim),
+            is_dtensor=is_dtensor,
+            _sharded_local_tensor=sharded_local_tensor,
+            sharded_state=sharded_state,
+        )
+
+    def _can_use(self, param) -> bool:
+        return DefaultAllGather().can_use_param_contiguous_output(
+            [param], [[torch.float32]], [[8]], torch.float32
+        )
+
+    def test_eligible_base_case(self):
+        self.assertTrue(self._can_use(self._make_param()))
+
+    def test_excludes_ineligible_params(self):
+        # Any parameter that still needs the rank-major copy-out disables the
+        # fast path: non dim-0 sharding, DTensor, an all-gather extension, a
+        # post-forward mesh reshard, or a dtype-changing (mixed precision / fp8)
+        # input.
+        self.assertFalse(self._can_use(self._make_param(dim=1)))
+        self.assertFalse(self._can_use(self._make_param(is_dtensor=True)))
+        self.assertFalse(self._can_use(self._make_param(pre_all_gather=True)))
+        self.assertFalse(self._can_use(self._make_param(post_all_gather=True)))
+        self.assertFalse(
+            self._can_use(
+                self._make_param(sharded_state=ShardedState.SHARDED_POST_FORWARD)
+            )
+        )
+        self.assertFalse(
+            DefaultAllGather().can_use_param_contiguous_output(
+                [self._make_param()], [[torch.bfloat16]], [[8]], torch.float32
+            )
+        )
+        # torch.compile / compiled autograd cannot trace the in-place aliasing.
+        with patch("torch.compiler.is_compiling", return_value=True):
+            self.assertFalse(self._can_use(self._make_param()))
 
 
 if __name__ == "__main__":
