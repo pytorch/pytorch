@@ -221,9 +221,6 @@ class ModuleInfo:
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  dtypesIfMPS=(torch.float16, torch.float32,),  # dtypes this function is expected to work with on MPS
                  dtypesIfHpu=(torch.bfloat16, torch.float32,),
-                 dtypesIf: dict[str, tuple] | None = None,  # generic per-device-type dtype
-                                                            # overrides, e.g. dtypesIf={"xpu": (...),
-                                                            # "openreg": (...)}.
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  module_memformat_affects_out=False,  # whether converting module to channels last will generate
@@ -240,7 +237,6 @@ class ModuleInfo:
         self.dtypes = dtypes
         self.dtypesIfMPS = dtypesIfMPS
         self.dtypesIfHpu = dtypesIfHpu
-        self.dtypesIf = dict(dtypesIf) if dtypesIf else {}
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.module_memformat_affects_out = module_memformat_affects_out
@@ -264,9 +260,8 @@ class ModuleInfo:
             return self.dtypesIfMPS
         elif device_type == 'hpu':
             return self.dtypesIfHpu
-        elif device_type == 'privateuse1':
-            device_type = torch._C._get_privateuse1_backend_name()
-        return self.dtypesIf.get(device_type, self.dtypes)
+        else:
+            return self.dtypes
 
     @property
     def name(self):

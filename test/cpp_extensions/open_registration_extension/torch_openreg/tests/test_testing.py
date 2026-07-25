@@ -337,13 +337,6 @@ module_combined_supported = _make_dummy_module("module_combined_supported")
 module_combined_skip = _make_dummy_module("module_combined_skip")
 module_combined_unsupported = _make_dummy_module("module_combined_unsupported")
 
-# Declares openreg dtype support via the generic ModuleInfo.dtypesIf dict:
-# on openreg only float64 variants should generate, overriding the base
-# dtypes (float32).
-module_dtypesif = _make_dummy_module(
-    "module_dtypesif", dtypesIf={"openreg": (torch.float64,)}
-)
-
 
 class TestModuleTypeOpenReg(TestCase):
     _executed: dict = defaultdict(int)
@@ -408,30 +401,6 @@ class TestModuleAllowlistWithOverrides(TestCase):
         type(self)._executed_combined[module_info.name] += 1
 
 
-class TestModuleDtypesIf(TestCase):
-    """Verify ModuleInfo.dtypesIf drives per-backend dtype variant generation.
-
-    module_dtypesif has base dtypes=(float32,) but declares
-    dtypesIf={"openreg": (float64,)}; on openreg exactly the declared float64
-    variant must generate, and the base float32 variant must not.
-    """
-
-    executed_dtypes: list = []
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls.executed_dtypes != [torch.float64]:
-            raise AssertionError(
-                f"dtypesIf failed: expected exactly [torch.float64], "
-                f"got {cls.executed_dtypes}"
-            )
-        super().tearDownClass()
-
-    @modules([module_dtypesif])
-    def test_dtypesif(self, device, dtype, module_info, training):
-        type(self).executed_dtypes.append(dtype)
-
-
 OPENREG_MODULE_OVERRIDES = {
     "module_skip": [DecorateInfo(unittest.skip("skip module_skip"))],
     "module_xfail": [DecorateInfo(unittest.expectedFailure)],
@@ -453,9 +422,6 @@ with _temp_test_configs(
     instantiate_device_type_tests(
         TestModuleAllowlistWithOverrides, globals(), only_for=("openreg",)
     )
-
-# dtypesIf lives on the ModuleInfo itself, so no _temp_test_configs is needed.
-instantiate_device_type_tests(TestModuleDtypesIf, globals(), only_for=("openreg",))
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
