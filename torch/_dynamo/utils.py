@@ -2976,10 +2976,11 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
 def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
+    from .variables.lazy import ComputedLazyConstantVariable
 
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized():
+        if not arg.is_realized() and not isinstance(arg, ComputedLazyConstantVariable):
             # Find if the arg would be realized as SymNodeVariable later on. If yes,
             # realize it and specialize. Else return the arg.
 
@@ -4046,7 +4047,10 @@ def _get_fake_value_impl(
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
-        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+        if (
+            is_lazy_module(nnmodule)
+            and inspect.getattr_static(nnmodule, "_initialize_hook", None) is not None
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
@@ -4070,7 +4074,9 @@ def _get_fake_value_impl(
         )
 
     try:
-        with fake_mode, enable_python_dispatcher():
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
+        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )

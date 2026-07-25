@@ -103,6 +103,10 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy.SRC_KIND,
         Memcpy.DST_KIND,
         Memcpy.FLAGS,
+        # Copies run on their own channel (CUPTI_CHANNEL_TYPE_ASYNC_MEMCPY), distinct from the
+        # compute channel kernels use -- select it like the kernel path does.
+        Memcpy.CHANNEL_ID,
+        Memcpy.CHANNEL_TYPE,
     },
     # Peer-to-peer / cross-device copies (e.g. tensor.to(other_gpu), pipeline sends). CUPTI
     # records these under MEMCPY2, NOT MEMCPY, so without this they never appear as GPU spans
@@ -122,6 +126,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy2.SRC_KIND,
         Memcpy2.DST_KIND,
         Memcpy2.FLAGS,
+        Memcpy2.CHANNEL_ID,
+        Memcpy2.CHANNEL_TYPE,
     },
     ActivityKind.MEMSET: {
         Memset.START,
@@ -136,6 +142,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memset.VALUE,
         Memset.MEMORY_KIND,
         Memset.FLAGS,
+        Memset.CHANNEL_ID,
+        Memset.CHANNEL_TYPE,
     },
     ActivityKind.RUNTIME: {
         Api.CBID,
@@ -733,6 +741,8 @@ def _memcpy_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -758,6 +768,8 @@ def _memcpy2_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy2.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy2.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy2.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy2.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy2.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -778,6 +790,8 @@ def _memset_columns(cols, convert, resolver):
         "value": cols[Memset.VALUE.id].astype(np.int64),
         "memory_kind": cols[Memset.MEMORY_KIND.id].astype(np.int64),
         "flags": cols[Memset.FLAGS.id].astype(np.int64),
+        "channel": cols[Memset.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memset.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
