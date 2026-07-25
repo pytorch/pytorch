@@ -1488,7 +1488,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmLocalReduceAnalysis,
             FlexGemmLocalReduceMatch,
             FlexGemmLocalReduceStore,
-            FlexGemmMainOutputPlan,
             FlexGemmOutputLocalReducePlan,
             FlexGemmOutputPlan,
             tuple_output_plan,
@@ -1501,11 +1500,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         match = FlexGemmLocalReduceMatch(aux, geometry)
         analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}))
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
-            FlexGemmMainOutputPlan(object())
-        with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
-            FlexGemmOutputPlan(FlexGemmMainOutputPlan(node), (object(),))
+            FlexGemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
             FlexGemmLocalReduceMatch(object(), geometry)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
@@ -1521,14 +1518,14 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(node, (object(),), analysis)
         FlexGemmOutputPlan(
-            FlexGemmMainOutputPlan(node),
+            node,
             (aux,),
             FlexGemmOutputLocalReducePlan(
                 match, store=FlexGemmLocalReduceStore(aux, 0)
             ),
         )
         FlexGemmOutputPlan(
-            FlexGemmMainOutputPlan(node),
+            node,
             (aux,),
             FlexGemmOutputLocalReducePlan(match, feeds_main=True),
         )
@@ -1564,6 +1561,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
+            FlexGemmRuntimeOutputPlan,
             gemm_epilogue,
         )
 
@@ -1585,9 +1583,11 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 self.relu_epilogue,
                 "test_flex_gemm_swap_ab_local_reduce_requires_callbacks",
                 out_dtype=torch.float32,
-                local_reduce=FlexGemmRuntimeLocalReducePlan(
-                    FlexGemmLocalReduceGeometry(group, 1),
-                    out=local_reduce_out,
+                output_plan=FlexGemmRuntimeOutputPlan(
+                    local_reduce=FlexGemmRuntimeLocalReducePlan(
+                        FlexGemmLocalReduceGeometry(group, 1),
+                        out=local_reduce_out,
+                    )
                 ),
                 config_key=swap_key,
             )
@@ -1689,6 +1689,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
+            FlexGemmRuntimeOutputPlan,
             gemm_epilogue,
         )
 
@@ -1729,7 +1730,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                     f"{config.tile_m}_{config.tile_n}_{config.cluster_m}_{config.cluster_n}"
                 ),
                 out_dtype=torch.float32,
-                local_reduce=local_reduce,
+                output_plan=FlexGemmRuntimeOutputPlan(local_reduce=local_reduce),
                 config_key=gemm_config_key(config),
             )
             torch.testing.assert_close(out.double(), expected, atol=1e-4, rtol=1e-4)
@@ -1885,7 +1886,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_swap_ab_captured_args_tuple_aux_matches_non_swap(self):
-        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeOutputPlan,
+            gemm_epilogue,
+        )
 
         torch.manual_seed(10)
         m, n, k = 128, 384, 256
@@ -1905,7 +1909,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 self.captured_tuple_aux_epilogue,
                 name,
                 out=out,
-                aux_outs=(aux,),
+                output_plan=FlexGemmRuntimeOutputPlan(aux_outs=(aux,)),
                 epilogue_args=(col_bias, row_scale, tile_bias),
                 epilogue_arg_kinds=("col", "row", "tile"),
                 config_key=config_key,
@@ -1959,7 +1963,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_writes_tuple_aux_out(self):
-        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeOutputPlan,
+            gemm_epilogue,
+        )
 
         torch.manual_seed(8)
         m, n, k = 128, 128, 64
@@ -1980,7 +1987,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             "test_flex_gemm_tuple_aux",
             out_dtype=torch.float32,
             out=out,
-            aux_outs=(aux,),
+            output_plan=FlexGemmRuntimeOutputPlan(aux_outs=(aux,)),
         )
 
         self.assertIs(actual, out)
@@ -2993,7 +3000,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     if node.target is torch.ops.aten.split.Tensor
                 ]
                 self.assertTrue(split_nodes)
-                self.assertEqual(analysis.outputs.main.transform, expected_transform)
+                self.assertEqual(analysis.outputs.main_transform, expected_transform)
                 registered = [
                     node
                     for node in split_nodes
