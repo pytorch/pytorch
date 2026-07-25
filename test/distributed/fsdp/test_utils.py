@@ -41,7 +41,8 @@ if TEST_HPU:
 elif TEST_XPU:
     list_device = "xpu"
 else:
-    list_device = "cuda"
+    _acc = torch.accelerator.current_accelerator()
+    list_device = _acc.type if _acc is not None else "cuda"
 
 
 class TestUtils(TestCase):
