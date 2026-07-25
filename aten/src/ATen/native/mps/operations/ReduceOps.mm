@@ -756,8 +756,21 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   int64_t reduce_dim = 0;
   if (dim.has_value()) {
     input = input_t;
-    output_view = keepdim ? output_t : output_t.unsqueeze(dim_);
     reduce_dim = dim_;
+    output_view = keepdim ? output_t : output_t.unsqueeze(dim_);
+    if (!input.is_contiguous()) {
+      auto mv_inner = input_t.movedim(dim_, -1);
+      if (mv_inner.is_contiguous()) {
+        input = mv_inner;
+        reduce_dim = input.dim() - 1;
+      } else {
+        auto mv_outer = input_t.movedim(dim_, 0);
+        if (mv_outer.is_contiguous()) {
+          input = mv_outer;
+          reduce_dim = 0;
+        }
+      }
+    }
   } else {
     input = input_t.contiguous().view(-1);
     output_view = output_t.view({1});
@@ -778,46 +791,235 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   const auto op_prefix = is_argmax ? "argmax" : "argmin";
   const auto in_str = scalarToMetalTypeString(in_kdtype);
   MPSStream* stream = getCurrentMPSStream();
+  const ScalarType val_dtype = (in_kdtype == kHalf || in_kdtype == kBFloat16 || in_kdtype == kFloat) ? kFloat
+      : (in_kdtype == kLong)                                                                         ? kLong
+                                                                                                     : kInt;
+  const auto p2_name = fmt::format("{}_combine_inner_{}", op_prefix, scalarToMetalTypeString(val_dtype));
+  auto encode_arg_combine = [&](const Tensor& vals, const Tensor& idxs, uint32_t X, uint32_t G) {
+    id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+    constexpr uint32_t TG = 256, RPT = TG / 32;
+    auto ps2 = lib.getPipelineStateForFunc(p2_name);
+    getMPSProfiler().beginProfileKernel(ps2, func_name, {vals});
+    [ce setComputePipelineState:ps2];
+    const std::array<uint32_t, 2> s2{X, G};
+    mtl_setArgs(ce, vals, idxs, output_t, s2);
+    const auto ntg2 = c10::metal::ceil_div(X, RPT);
+    [ce dispatchThreads:MTLSizeMake(ntg2 * TG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG, 1, 1)];
+    getMPSProfiler().endProfileKernel(ps2);
+  };
 
-  // Fast paths: when the reduced dim is the outermost or innermost dim of a
-  // contiguous input (and the output is contiguous), dispatch a specialized
-  // kernel with a tuned grid layout, mirroring value_reduction_outer /
-  // value_reduction_inner.
-  if (dim.has_value() && input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 2 &&
-      (reduce_dim == 0 || reduce_dim == input.dim() - 1)) {
-    const bool is_outer = (reduce_dim == 0);
-    const uint32_t M = is_outer ? static_cast<uint32_t>(input.size(0))
-                                : static_cast<uint32_t>(input.numel() / input.size(input.dim() - 1));
-    const uint32_t N = is_outer ? static_cast<uint32_t>(input.numel() / input.size(0))
-                                : static_cast<uint32_t>(input.size(input.dim() - 1));
-    const auto kernel_name = fmt::format("{}_reduction_{}_{}_long", op_prefix, is_outer ? "outer" : "inner", in_str);
+  if (dim.has_value() && !input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 2) {
+    const int nd = input.dim();
+    const int a_top = reduce_dim == nd - 1 ? nd - 2 : reduce_dim - 1;
+    const bool collapses = strides_collapse(input, reduce_dim + 1, nd - 1) && strides_collapse(input, 0, a_top);
+    if (collapses && input.stride(0) < static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+      if (reduce_dim != nd - 1) {
+        const auto A = static_cast<uint32_t>(c10::multiply_integers(input.sizes().slice(0, reduce_dim)));
+        const auto K = static_cast<uint32_t>(input.size(reduce_dim));
+        const auto B = static_cast<uint32_t>(input.numel() / (static_cast<int64_t>(A) * K));
+        const auto sK32 = static_cast<uint32_t>(input.stride(reduce_dim));
+        const auto sB32 = static_cast<uint32_t>(input.stride(nd - 1));
+        const std::array<uint32_t, 4> strides_s{
+            sK32, sB32, reduce_dim > 0 ? static_cast<uint32_t>(input.stride(reduce_dim - 1)) : 0u, 0u};
+        const auto natural_tgs = c10::metal::ceil_div(B, 32u);
+        if (A == 1 && K >= 4096u && natural_tgs < 32u) {
+          const auto G = std::clamp<uint32_t>(256u / natural_tgs, 2u, 2048u);
+          auto val_partials = at::empty({(int64_t)B * G}, input.options().dtype(val_dtype));
+          auto idx_partials = at::empty({(int64_t)B * G}, input.options().dtype(kInt));
+          const auto p1_name = fmt::format("{}_outer_p1_{}", op_prefix, in_str);
+          dispatch_sync_with_rethrow(stream->queue(), ^() {
+            @autoreleasepool {
+              id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+              constexpr uint32_t TG_X = 32, TG_Y = 32;
+              auto ps1 = lib.getPipelineStateForFunc(p1_name);
+              getMPSProfiler().beginProfileKernel(ps1, func_name, {input});
+              [ce setComputePipelineState:ps1];
+              const std::array<uint32_t, 3> s1{K, B, G};
+              const std::array<uint32_t, 2> st1{sK32, sB32};
+              mtl_setArgs(ce, input, val_partials, idx_partials, s1, st1);
+              [ce dispatchThreads:MTLSizeMake(natural_tgs * TG_X, G * TG_Y, 1)
+                  threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
+              getMPSProfiler().endProfileKernel(ps1);
+              encode_arg_combine(val_partials, idx_partials, B, G);
+            }
+          });
+          return;
+        }
+        const auto kname = fmt::format("{}_reduction_outer_{}_long", op_prefix, in_str);
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+            auto ps = lib.getPipelineStateForFunc(kname);
+            getMPSProfiler().beginProfileKernel(ps, func_name, {input});
+            [ce setComputePipelineState:ps];
+            constexpr uint32_t TG_X = 32, TG_Y = 32;
+            const std::array<uint32_t, 4> sizes_s{K, B, 1, 0};
+            mtl_setArgs(ce, input, output_t, sizes_s, strides_s);
+            const auto num_tg_x = c10::metal::ceil_div(B, TG_X);
+            [ce dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, A) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
+            getMPSProfiler().endProfileKernel(ps);
+          }
+        });
+        return;
+      }
+      const auto K = static_cast<uint32_t>(input.size(nd - 1));
+      const auto M = static_cast<uint32_t>(input.numel() / K);
+      const auto sK32 = static_cast<uint32_t>(input.stride(nd - 1));
+      const auto sRow32 = static_cast<uint32_t>(input.stride(nd - 2));
+      const std::array<uint32_t, 2> strides_s{sK32, sRow32};
+      if (c10::metal::ceil_div(M, 8u) < 512u && K >= 2048u) {
+        const auto g_cap = std::min(K / 512u, std::max(2u, 16384u / std::max(M, 1u)));
+        const auto G = c10::metal::ceil_div(K, c10::metal::ceil_div(K, std::max(g_cap, 2u)));
+        if (G >= 2) {
+          const auto C = c10::metal::ceil_div(K, G);
+          auto val_partials = at::empty({(int64_t)M * G}, input.options().dtype(val_dtype));
+          auto idx_partials = at::empty({(int64_t)M * G}, input.options().dtype(kInt));
+          const auto p1_name = fmt::format("{}_inner_p1_{}", op_prefix, in_str);
+          dispatch_sync_with_rethrow(stream->queue(), ^() {
+            @autoreleasepool {
+              id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+              constexpr uint32_t TG = 256, RPT = TG / 32;
+              auto ps1 = lib.getPipelineStateForFunc(p1_name);
+              getMPSProfiler().beginProfileKernel(ps1, func_name, {input});
+              [ce setComputePipelineState:ps1];
+              const std::array<uint32_t, 4> s1{M * G, C, G, K};
+              mtl_setArgs(ce, input, val_partials, idx_partials, s1, strides_s);
+              const auto ntg1 = c10::metal::ceil_div(M * G, RPT);
+              [ce dispatchThreads:MTLSizeMake(ntg1 * TG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG, 1, 1)];
+              getMPSProfiler().endProfileKernel(ps1);
+              encode_arg_combine(val_partials, idx_partials, M, G);
+            }
+          });
+          return;
+        }
+      }
+      const auto kname = fmt::format("{}_reduction_inner_{}_long", op_prefix, in_str);
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+          auto ps = lib.getPipelineStateForFunc(kname);
+          getMPSProfiler().beginProfileKernel(ps, func_name, {input});
+          [ce setComputePipelineState:ps];
+          constexpr uint32_t TG_SIZE = 256, rows_per_tg = TG_SIZE / 32;
+          const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
+          const std::array<uint32_t, 2> sizes_s{M, K};
+          mtl_setArgs(ce, input, output_t, sizes_s, strides_s);
+          [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
+          getMPSProfiler().endProfileKernel(ps);
+        }
+      });
+      return;
+    }
+  }
+
+  if (input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 1 && reduce_dim == input.dim() - 1) {
+    const auto N = static_cast<uint32_t>(input.size(input.dim() - 1));
+    const auto M = static_cast<uint32_t>(input.numel() / N);
+    if (c10::metal::ceil_div(M, 8u) < 512u && N >= 2048u) {
+      const auto g_cap = std::min(N / 512u, std::max(2u, 16384u / std::max(M, 1u)));
+      const auto C = c10::metal::ceil_div(N, std::max(g_cap, 2u));
+      const auto G = c10::metal::ceil_div(N, C);
+      if (G >= 2) {
+        auto val_partials = at::empty({(int64_t)M * G}, input.options().dtype(val_dtype));
+        auto idx_partials = at::empty({(int64_t)M * G}, input.options().dtype(kInt));
+        const auto p1_name = fmt::format("{}_inner_p1_{}", op_prefix, in_str);
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+            constexpr uint32_t TG = 256, RPT = TG / 32;
+            auto ps1 = lib.getPipelineStateForFunc(p1_name);
+            getMPSProfiler().beginProfileKernel(ps1, func_name, {input});
+            [ce setComputePipelineState:ps1];
+            const std::array<uint32_t, 4> s1{M * G, C, G, N};
+            const std::array<uint32_t, 2> st1{1u, N};
+            mtl_setArgs(ce, input, val_partials, idx_partials, s1, st1);
+            const auto ntg1 = c10::metal::ceil_div(M * G, RPT);
+            [ce dispatchThreads:MTLSizeMake(ntg1 * TG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG, 1, 1)];
+            getMPSProfiler().endProfileKernel(ps1);
+            encode_arg_combine(val_partials, idx_partials, M, G);
+          }
+        });
+        return;
+      }
+    }
+  }
+
+  if (input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 1) {
+    if (reduce_dim != input.dim() - 1) {
+      const auto A = static_cast<uint32_t>(c10::multiply_integers(input.sizes().slice(0, reduce_dim)));
+      const auto K = static_cast<uint32_t>(input.size(reduce_dim));
+      const auto B = static_cast<uint32_t>(input.numel() / (static_cast<int64_t>(A) * K));
+      const auto natural_tgs = c10::metal::ceil_div(B, 32u);
+      if (A == 1 && K >= 4096u && natural_tgs < 32u) {
+        const bool use_narrow = B < 32u && 256u % B == 0u;
+        auto G = std::clamp<uint32_t>(256u / natural_tgs, 2u, 2048u);
+        if (use_narrow) {
+          const auto g0 = std::clamp<uint32_t>((static_cast<uint64_t>(K) * B) / (256 * 32), 2u, 2048u);
+          G = c10::metal::ceil_div(K, c10::metal::ceil_div(K, g0));
+        }
+        auto val_partials = at::empty({(int64_t)B * G}, input.options().dtype(val_dtype));
+        auto idx_partials = at::empty({(int64_t)B * G}, input.options().dtype(kInt));
+        const auto p1_name = use_narrow ? fmt::format("{}_narrow_p1_{}", op_prefix, in_str)
+                                        : fmt::format("{}_outer_p1_{}", op_prefix, in_str);
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+            constexpr uint32_t TG_X = 32, TG_Y = 32;
+            auto ps1 = lib.getPipelineStateForFunc(p1_name);
+            getMPSProfiler().beginProfileKernel(ps1, func_name, {input});
+            [ce setComputePipelineState:ps1];
+            const std::array<uint32_t, 3> s1{K, B, G};
+            if (use_narrow) {
+              mtl_setArgs(ce, input, val_partials, idx_partials, s1);
+              [ce dispatchThreads:MTLSizeMake(256, G, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+            } else {
+              const std::array<uint32_t, 2> st1{B, 1};
+              mtl_setArgs(ce, input, val_partials, idx_partials, s1, st1);
+              [ce dispatchThreads:MTLSizeMake(natural_tgs * TG_X, G * TG_Y, 1)
+                  threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
+            }
+            getMPSProfiler().endProfileKernel(ps1);
+            encode_arg_combine(val_partials, idx_partials, B, G);
+          }
+        });
+        return;
+      }
+      const auto kernel_name = fmt::format("{}_reduction_outer_{}_long", op_prefix, in_str);
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+          auto ps = lib.getPipelineStateForFunc(kernel_name);
+          getMPSProfiler().beginProfileKernel(ps, func_name, {input});
+          [ce setComputePipelineState:ps];
+          constexpr uint32_t TG_X = 32, TG_Y = 32;
+          const std::array<uint32_t, 4> sizes_s{K, B, 1, 0};
+          const std::array<uint32_t, 4> strides_s{B, 1, K * B, 0};
+          mtl_setArgs(ce, input, output_t, sizes_s, strides_s);
+          const auto num_tg_x = c10::metal::ceil_div(B, TG_X);
+          [ce dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, A) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
+          getMPSProfiler().endProfileKernel(ps);
+        }
+      });
+      return;
+    }
+    const auto N = static_cast<uint32_t>(input.size(input.dim() - 1));
+    const auto M = static_cast<uint32_t>(input.numel() / N);
+    const auto kernel_name = fmt::format("{}_reduction_inner_{}_long", op_prefix, in_str);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
         auto ps = lib.getPipelineStateForFunc(kernel_name);
         getMPSProfiler().beginProfileKernel(ps, func_name, {input});
         [ce setComputePipelineState:ps];
-        if (is_outer) {
-          constexpr uint32_t TG_X = 32, TG_Y = 32;
-          // 4th element is trailing pad so the host-side bind matches the
-          // kernel's `constant uint3&` slot (uint3 has 16-byte alignment in
-          // Metal even though only 12 bytes are read). Without this Metal
-          // API validation flags a buffer-length mismatch.
-          const std::array<uint32_t, 4> sizes_s{M, N, 1, 0};
-          mtl_setArgs(ce, input, output_t, sizes_s);
-          const auto num_tg_x = c10::metal::ceil_div(N, TG_X);
-          [ce dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, 1) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
-        } else {
-          constexpr uint32_t TG_SIZE = 256;
-          constexpr uint32_t rows_per_tg = TG_SIZE / 32;
-          const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
-          struct {
-            uint32_t M, N;
-          } sizes_s = {M, N};
-          const std::array<uint32_t, 2> strides_s{1, N};
-          mtl_setArgs(ce, input, output_t, sizes_s, strides_s);
-          [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
-        }
+        constexpr uint32_t TG_SIZE = 256;
+        constexpr uint32_t rows_per_tg = TG_SIZE / 32;
+        const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
+        struct {
+          uint32_t M, N;
+        } sizes_s = {M, N};
+        const std::array<uint32_t, 2> strides_s{1, N};
+        mtl_setArgs(ce, input, output_t, sizes_s, strides_s);
+        [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
         getMPSProfiler().endProfileKernel(ps);
       }
     });

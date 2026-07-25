@@ -1701,7 +1701,6 @@ kernel void value_reduction_inner(
   if (row >= M) {
     return;
   }
-
   const uint sK = strides.x;
   const uint row_base = row * strides.y;
 
@@ -2078,7 +2077,6 @@ kernel void arg_reduction_inner(
   if (row >= M) {
     return;
   }
-
   const uint sK = strides.x;
   const uint row_base = row * strides.y;
 
@@ -2093,6 +2091,85 @@ kernel void arg_reduction_inner(
   }
 
   auto rc = simd_arg_reduce<OpFn>(best_val, best_idx);
+  if (simd_lane_id == 0) {
+    output[row] = static_cast<long>(rc.second);
+  }
+}
+
+template <template <typename> class OpFn, typename TI>
+kernel void arg_reduction_inner_p1(
+    constant TI* input [[buffer(0)]],
+    device opmath_t<TI>* val_out [[buffer(1)]],
+    device int* idx_out [[buffer(2)]],
+    constant uint4& sizes [[buffer(3)]],
+    constant uint2& strides [[buffer(4)]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  using TA = opmath_t<TI>;
+  using Op = OpFn<TA>;
+  const uint MG = sizes.x;
+  const uint C = sizes.y;
+  const uint G = sizes.z;
+  const uint K = sizes.w;
+  const uint sK = strides.x;
+  const uint num_simd_groups = tptg / simdgroup_size;
+  const uint r = tgid * num_simd_groups + simdgroup_id;
+  if (r >= MG) {
+    return;
+  }
+  const uint chunk_off = (r % G) * C;
+  const uint span = min(chunk_off + C, K) - min(chunk_off, K);
+  const uint base = (r / G) * strides.y + chunk_off * sK;
+  TA best_val = Op::identity();
+  uint32_t best_idx = 0;
+  for (uint i = simd_lane_id; i < span; i += simdgroup_size) {
+    const TA val = static_cast<TA>(input[base + i * sK]);
+    if (Op::replace(val, best_val)) {
+      best_val = val;
+      best_idx = i;
+    }
+  }
+  auto rc = simd_arg_reduce<OpFn>(best_val, best_idx);
+  if (simd_lane_id == 0) {
+    val_out[r] = rc.first;
+    idx_out[r] = static_cast<int>(chunk_off + rc.second);
+  }
+}
+
+template <template <typename> class OpFn, typename VT>
+kernel void arg_combine_inner(
+    constant VT* val_in [[buffer(0)]],
+    constant int* idx_in [[buffer(1)]],
+    device long* output [[buffer(2)]],
+    constant uint2& sizes [[buffer(3)]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  using TA = VT;
+  using Op = OpFn<TA>;
+  const uint M = sizes.x;
+  const uint G = sizes.y;
+  const uint num_simd_groups = tptg / simdgroup_size;
+  const uint row = tgid * num_simd_groups + simdgroup_id;
+  if (row >= M) {
+    return;
+  }
+  constant VT* vp = val_in + row * G;
+  constant int* ip = idx_in + row * G;
+  TA best_val = Op::identity();
+  uint32_t best_gidx = ::metal::numeric_limits<uint32_t>::max();
+  for (uint g = simd_lane_id; g < G; g += simdgroup_size) {
+    const TA v = vp[g];
+    const uint32_t gi = static_cast<uint32_t>(ip[g]);
+    if (arg_replace<OpFn>(v, gi, best_val, best_gidx)) {
+      best_val = v;
+      best_gidx = gi;
+    }
+  }
+  auto rc = simd_arg_reduce<OpFn>(best_val, best_gidx);
   if (simd_lane_id == 0) {
     output[row] = static_cast<long>(rc.second);
   }
@@ -2113,13 +2190,17 @@ kernel void arg_reduction_outer(
     constant TI* input [[buffer(0)]],
     device long* output [[buffer(1)]],
     constant uint3& sizes [[buffer(2)]], // [M, N, output_stride]
-    uint2 tid_tg [[thread_position_in_threadgroup]],
-    uint2 tg_pos [[threadgroup_position_in_grid]]) {
+    constant uint4& strides [[buffer(3)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
   using TA = opmath_t<TI>;
   using Op = OpFn<TA>;
   const uint M = sizes.x;
   const uint N = sizes.y;
   const uint out_stride = sizes.z;
+  const uint sK = strides.x;
+  const uint sB = strides.y;
+  const uint batch_in = tg_pos.z * strides.z;
 
   const uint col = tg_pos.x * TG_X + tid_tg.x;
   if (col >= N) {
@@ -2129,11 +2210,12 @@ kernel void arg_reduction_outer(
   const uint rows_per_y = ceil_div(M, TG_Y);
   const uint row_start = tid_tg.y * rows_per_y;
   const uint row_end = min(row_start + rows_per_y, M);
+  const uint col_off = batch_in + col * sB;
 
   TA best_val = Op::identity();
   uint32_t best_idx = 0;
   for (uint row = row_start; row < row_end; row++) {
-    const TA val = static_cast<TA>(input[row * N + col]);
+    const TA val = static_cast<TA>(input[col_off + row * sK]);
     if (Op::replace(val, best_val)) {
       best_val = val;
       best_idx = row;
@@ -2161,11 +2243,137 @@ kernel void arg_reduction_outer(
   }
 
   if (tid_tg.y == 0) {
-    output[col * out_stride] = static_cast<long>(shared_idxs[0][tid_tg.x]);
+    output[tg_pos.z * N + col * out_stride] =
+        static_cast<long>(shared_idxs[0][tid_tg.x]);
+  }
+}
+
+template <
+    template <typename> class OpFn,
+    typename TI,
+    uint TG_X = 32,
+    uint TG_Y = 32>
+[[max_total_threads_per_threadgroup(TG_X * TG_Y)]]
+kernel void arg_reduction_outer_p1(
+    constant TI* input [[buffer(0)]],
+    device opmath_t<TI>* val_out [[buffer(1)]],
+    device int* idx_out [[buffer(2)]],
+    constant uint3& sizes [[buffer(3)]],
+    constant uint2& strides [[buffer(4)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  using TA = opmath_t<TI>;
+  using Op = OpFn<TA>;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint G = sizes.z;
+  const uint sK = strides.x;
+  const uint sB = strides.y;
+
+  const uint col = tg_pos.x * TG_X + tid_tg.x;
+  if (col >= N) {
+    return;
+  }
+  const uint seg = tg_pos.y;
+  const uint seg_rows = ceil_div(M, G);
+  const uint seg_start = seg * seg_rows;
+  const uint seg_end = min(seg_start + seg_rows, M);
+
+  const uint rows_per_y = ceil_div(seg_rows, TG_Y);
+  const uint row_start = seg_start + tid_tg.y * rows_per_y;
+  const uint row_end = min(row_start + rows_per_y, seg_end);
+  const uint col_off = col * sB;
+
+  TA best_val = Op::identity();
+  uint32_t best_idx = ::metal::numeric_limits<uint32_t>::max();
+  for (uint row = row_start; row < row_end; row++) {
+    const TA val = static_cast<TA>(input[col_off + row * sK]);
+    if (Op::replace(val, best_val)) {
+      best_val = val;
+      best_idx = row;
+    }
+  }
+
+  threadgroup TA shared_vals[TG_Y][TG_X];
+  threadgroup uint32_t shared_idxs[TG_Y][TG_X];
+  shared_vals[tid_tg.y][tid_tg.x] = best_val;
+  shared_idxs[tid_tg.y][tid_tg.x] = best_idx;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint stride = TG_Y / 2; stride > 0; stride >>= 1) {
+    if (tid_tg.y < stride) {
+      const TA other_val = shared_vals[tid_tg.y + stride][tid_tg.x];
+      const uint32_t other_idx = shared_idxs[tid_tg.y + stride][tid_tg.x];
+      const TA self_val = shared_vals[tid_tg.y][tid_tg.x];
+      const uint32_t self_idx = shared_idxs[tid_tg.y][tid_tg.x];
+      if (arg_replace<OpFn>(other_val, other_idx, self_val, self_idx)) {
+        shared_vals[tid_tg.y][tid_tg.x] = other_val;
+        shared_idxs[tid_tg.y][tid_tg.x] = other_idx;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (tid_tg.y == 0) {
+    val_out[col * G + seg] = shared_vals[0][tid_tg.x];
+    idx_out[col * G + seg] = static_cast<int>(shared_idxs[0][tid_tg.x]);
+  }
+}
+
+template <template <typename> class OpFn, typename TI, uint TG_SIZE = 256>
+kernel void arg_reduction_narrow_p1(
+    constant TI* input [[buffer(0)]],
+    device opmath_t<TI>* val_out [[buffer(1)]],
+    device int* idx_out [[buffer(2)]],
+    constant uint3& sizes [[buffer(3)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  using TA = opmath_t<TI>;
+  using Op = OpFn<TA>;
+  const uint tid = tid_tg.x;
+  const uint K = sizes.x;
+  const uint B = sizes.y;
+  const uint G = sizes.z;
+  const uint seg_rows = ceil_div(K, G);
+  const uint r0 = tg_pos.y * seg_rows;
+  const uint r1 = min(r0 + seg_rows, K);
+  const uint col = tid % B;
+  const uint rstep = TG_SIZE / B;
+  TA best_val = Op::identity();
+  uint32_t best_idx = ::metal::numeric_limits<uint32_t>::max();
+  for (uint row = r0 + tid / B; row < r1; row += rstep) {
+    const TA val = static_cast<TA>(input[row * B + col]);
+    if (Op::replace(val, best_val)) {
+      best_val = val;
+      best_idx = row;
+    }
+  }
+  threadgroup TA sv[TG_SIZE];
+  threadgroup uint32_t si[TG_SIZE];
+  sv[tid] = best_val;
+  si[tid] = best_idx;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (tid < B) {
+    for (uint t = tid + B; t < TG_SIZE; t += B) {
+      if (arg_replace<OpFn>(sv[t], si[t], best_val, best_idx)) {
+        best_val = sv[t];
+        best_idx = si[t];
+      }
+    }
+    val_out[tid * G + tg_pos.y] = best_val;
+    idx_out[tid * G + tg_pos.y] = static_cast<int>(best_idx);
   }
 }
 
 #define REGISTER_ARG_REDUCTION_IMPL(TI, NAME, OP)              \
+  template [[host_name(NAME "_narrow_p1_" #TI)]]               \
+  kernel void arg_reduction_narrow_p1<OP, TI, 256>(            \
+      constant TI * input [[buffer(0)]],                       \
+      device opmath_t<TI> * val_out [[buffer(1)]],             \
+      device int* idx_out [[buffer(2)]],                       \
+      constant uint3& sizes [[buffer(3)]],                     \
+      uint3 tid_tg [[thread_position_in_threadgroup]],         \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);          \
   template [[host_name(NAME "_reduction_" #TI "_long")]]       \
   kernel void arg_reduction<OP, TI>(                           \
       constant TI * input [[buffer(0)]],                       \
@@ -2189,8 +2397,49 @@ kernel void arg_reduction_outer(
       constant TI * input [[buffer(0)]],                       \
       device long* output [[buffer(1)]],                       \
       constant uint3& sizes [[buffer(2)]],                     \
-      uint2 tid_tg [[thread_position_in_threadgroup]],         \
-      uint2 tg_pos [[threadgroup_position_in_grid]]);
+      constant uint4& strides [[buffer(3)]],                   \
+      uint3 tid_tg [[thread_position_in_threadgroup]],         \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);          \
+  template [[host_name(NAME "_inner_p1_" #TI)]]                \
+  kernel void arg_reduction_inner_p1<OP, TI>(                  \
+      constant TI * input [[buffer(0)]],                       \
+      device opmath_t<TI> * val_out [[buffer(1)]],             \
+      device int* idx_out [[buffer(2)]],                       \
+      constant uint4& sizes [[buffer(3)]],                     \
+      constant uint2& strides [[buffer(4)]],                   \
+      uint tptg [[threads_per_threadgroup]],                   \
+      uint tgid [[threadgroup_position_in_grid]],              \
+      uint simd_lane_id [[thread_index_in_simdgroup]],         \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);   \
+  template [[host_name(NAME "_outer_p1_" #TI)]]                \
+  kernel void arg_reduction_outer_p1<OP, TI, 32, 32>(          \
+      constant TI * input [[buffer(0)]],                       \
+      device opmath_t<TI> * val_out [[buffer(1)]],             \
+      device int* idx_out [[buffer(2)]],                       \
+      constant uint3& sizes [[buffer(3)]],                     \
+      constant uint2& strides [[buffer(4)]],                   \
+      uint3 tid_tg [[thread_position_in_threadgroup]],         \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);
+
+#define REGISTER_ARG_COMBINE_IMPL(VT, NAME, OP)        \
+  template [[host_name(NAME "_combine_inner_" #VT)]]   \
+  kernel void arg_combine_inner<OP, VT>(               \
+      constant VT * val_in [[buffer(0)]],              \
+      constant int* idx_in [[buffer(1)]],              \
+      device long* output [[buffer(2)]],               \
+      constant uint2& sizes [[buffer(3)]],             \
+      uint tptg [[threads_per_threadgroup]],           \
+      uint tgid [[threadgroup_position_in_grid]],      \
+      uint simd_lane_id [[thread_index_in_simdgroup]], \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+
+#define REGISTER_ARG_COMBINE_FOR_VT(VT)          \
+  REGISTER_ARG_COMBINE_IMPL(VT, "argmax", MaxOp) \
+  REGISTER_ARG_COMBINE_IMPL(VT, "argmin", MinOp)
+
+REGISTER_ARG_COMBINE_FOR_VT(float);
+REGISTER_ARG_COMBINE_FOR_VT(int);
+REGISTER_ARG_COMBINE_FOR_VT(long);
 
 #define REGISTER_ARG_REDUCTIONS_FOR_TYPE(T)       \
   REGISTER_ARG_REDUCTION_IMPL(T, "argmax", MaxOp) \
