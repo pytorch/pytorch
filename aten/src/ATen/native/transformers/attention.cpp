@@ -652,6 +652,31 @@ bool should_compute_logsumexp_with_attn_mask(
   return any_inputs_require_grad && gradmode_enabled;
 }
 
+std::tuple<at::Tensor, at::Tensor> expand_singleton_kv_heads(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value) {
+  if (query.is_nested() || key.is_nested() || value.is_nested() ||
+      query.dim() != 4 || key.dim() != 4 || value.dim() != 4) {
+    return std::make_tuple(key, value);
+  }
+
+  const auto query_num_heads = query.sym_size(-3);
+  if (query_num_heads == 0 || query_num_heads == 1) {
+    return std::make_tuple(key, value);
+  }
+
+  const auto expand_kv = [query_num_heads](const at::Tensor& kv) -> at::Tensor {
+    if (kv.sym_size(-3) != 1) {
+      return kv;
+    }
+    auto expanded_size = kv.sym_sizes().vec();
+    expanded_size[expanded_size.size() - 3] = query_num_heads;
+    return kv.expand_symint(expanded_size);
+  };
+  return std::make_tuple(expand_kv(key), expand_kv(value));
+}
+
 std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
     const at::Tensor& query,
     const at::Tensor& key,
@@ -794,12 +819,16 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case SDPBackend::efficient_attention: {
+      auto [expanded_key, expanded_value] =
+          expand_singleton_kv_heads(query_, key, value);
       if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
+        attn_mask.value() = preprocess_mask(
+            attn_mask.value(), query_, expanded_key, expanded_value);
       }
-      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(query_, key, value, attn_mask);
+      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(
+          query_, expanded_key, expanded_value, attn_mask);
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
+          query_, expanded_key, expanded_value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case SDPBackend::overrideable: {

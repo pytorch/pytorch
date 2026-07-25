@@ -29,6 +29,8 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_permuted.h>
 #include <ATen/ops/pad.h>
+#include <ATen/ops/reshape.h>
+#include <ATen/ops/sum.h>
 #include <ATen/ops/_cudnn_attention_backward.h>
 #include <ATen/ops/_cudnn_attention_backward_native.h>
 #include <ATen/ops/_flash_attention_backward.h>
@@ -416,9 +418,18 @@ _efficient_attention_backward(
   TORCH_CHECK(query.size(1) == grad_out_.size(1));
 
   // Num heads
-  TORCH_CHECK(query.size(2) == key.size(2));
-  TORCH_CHECK(query.size(2) == value.size(2));
-  TORCH_CHECK(query.size(2) == grad_out_.size(2));
+  const int64_t nH = query.size(2);
+  const int64_t nHkv = key.size(2);
+  TORCH_CHECK(nHkv == value.size(2));
+  TORCH_CHECK(nH == grad_out_.size(2));
+#ifdef USE_ROCM
+  TORCH_CHECK(nH == nHkv);
+#else
+  TORCH_CHECK(nHkv > 0);
+  TORCH_CHECK(
+      nH % nHkv == 0,
+      "Number of heads in key/value must divide number of heads in query");
+#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -461,12 +472,14 @@ _efficient_attention_backward(
   int64_t B = query.size(0);
   int64_t M = query.size(1);
   int64_t N = key.size(1);
-  int64_t nH = query.size(2);
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
 
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   if (shared_storage_dqdkdv) {
+    TORCH_CHECK(
+        nH == nHkv,
+        "`shared_storage_dqdkdv` does not support grouped query attention");
     // Create one big contiguous chunk
     // This is because q, k and v usually come from a single
     // output of a linear layer that is chunked.
@@ -493,6 +506,15 @@ _efficient_attention_backward(
     grad_k = at::empty(key.sizes(), key.options());
     grad_v = at::empty(value.sizes(), value.options());
   }
+
+  at::Tensor grad_k_expanded = grad_k;
+  at::Tensor grad_v_expanded = grad_v;
+#ifndef USE_ROCM
+  if (nH != nHkv) {
+    grad_k_expanded = at::empty({B, N, nH, K}, key.options());
+    grad_v_expanded = at::empty({B, N, nH, Kv}, value.options());
+  }
+#endif
 
   if (bias_requires_grad) {
     TORCH_CHECK(
@@ -746,8 +768,8 @@ _efficient_attention_backward(
     p.output_ptr = (const scalar_t*)out.const_data_ptr();
     p.grad_output_ptr = (const scalar_t*)grad_out.const_data_ptr();
     p.grad_query_ptr = (scalar_t*)grad_q.data_ptr();
-    p.grad_key_ptr = (scalar_t*)grad_k.data_ptr();
-    p.grad_value_ptr = (scalar_t*)grad_v.data_ptr();
+    p.grad_key_ptr = (scalar_t*)grad_k_expanded.data_ptr();
+    p.grad_value_ptr = (scalar_t*)grad_v_expanded.data_ptr();
     p.delta_ptr = (float*)delta.data_ptr();
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
@@ -755,6 +777,7 @@ _efficient_attention_backward(
     p.num_keys = max_seqlen_k;
     p.num_batches = cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     p.num_heads = nH;
+    p.q_heads_per_kv = nH / nHkv;
     p.custom_mask_type = custom_mask_type;
     p.scale = sdp::calculate_scale(query, scale).expect_float();
     if (cu_seqlens_q.has_value()) {
@@ -775,15 +798,15 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.o_strideH, out.stride(2));
 
     ASSIGN_CHECK_OVERFLOW(p.gQ_strideB, grad_q.stride(0));
-    ASSIGN_CHECK_OVERFLOW(p.gK_strideB, grad_k.stride(0));
-    ASSIGN_CHECK_OVERFLOW(p.gV_strideB, grad_v.stride(0));
+    ASSIGN_CHECK_OVERFLOW(p.gK_strideB, grad_k_expanded.stride(0));
+    ASSIGN_CHECK_OVERFLOW(p.gV_strideB, grad_v_expanded.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.gQ_strideH, grad_q.stride(2));
-    ASSIGN_CHECK_OVERFLOW(p.gK_strideH, grad_k.stride(2));
-    ASSIGN_CHECK_OVERFLOW(p.gV_strideH, grad_v.stride(2));
+    ASSIGN_CHECK_OVERFLOW(p.gK_strideH, grad_k_expanded.stride(2));
+    ASSIGN_CHECK_OVERFLOW(p.gV_strideH, grad_v_expanded.stride(2));
     p.gQKV_strideM_multiplier = shared_storage_dqdkdv ? 3 : 1;
     TORCH_INTERNAL_ASSERT(p.gQ_strideM() == grad_q.stride(1));
-    TORCH_INTERNAL_ASSERT(p.gK_strideM() == grad_k.stride(1));
-    TORCH_INTERNAL_ASSERT(p.gV_strideM() == grad_v.stride(1));
+    TORCH_INTERNAL_ASSERT(p.gK_strideM() == grad_k_expanded.stride(1));
+    TORCH_INTERNAL_ASSERT(p.gV_strideM() == grad_v_expanded.stride(1));
 
     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
@@ -893,8 +916,8 @@ _efficient_attention_backward(
     // Handle the edge-cases where some tensors are empty
     if (p.num_queries == 0 || p.num_keys == 0 || p.num_batches == 0 ||
         p.num_heads == 0) {
-      grad_k.zero_();
-      grad_v.zero_();
+      grad_k_expanded.zero_();
+      grad_v_expanded.zero_();
       grad_q.zero_();
       return;
     }
@@ -940,6 +963,16 @@ _efficient_attention_backward(
                  }));
   TORCH_CHECK(kernel_launched, "cutlassB: no kernel found to launch!");
   AT_CUDA_CHECK(cudaGetLastError());
+  if (nH != nHkv) {
+    at::sum_out(
+        grad_k,
+        at::reshape(grad_k_expanded, {B, N, nHkv, nH / nHkv, K}),
+        {3});
+    at::sum_out(
+        grad_v,
+        at::reshape(grad_v_expanded, {B, N, nHkv, nH / nHkv, Kv}),
+        {3});
+  }
 #endif // USE_ROCM
   return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
   #endif // defined(USE_MEM_EFF_ATTENTION)

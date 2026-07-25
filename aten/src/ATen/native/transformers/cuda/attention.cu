@@ -1427,8 +1427,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   TORCH_CHECK(key.size(1) == value.size(1));
 
   // Num heads
-  TORCH_CHECK(query.size(2) == key.size(2));
-  TORCH_CHECK(query.size(2) == value.size(2));
+  const int64_t num_heads = query.size(2);
+  const int64_t num_heads_kv = key.size(2);
+  TORCH_CHECK(num_heads_kv == value.size(2));
+#ifdef USE_ROCM
+  TORCH_CHECK(num_heads == num_heads_kv);
+#else
+  TORCH_CHECK(num_heads_kv > 0);
+  TORCH_CHECK(
+      num_heads % num_heads_kv == 0,
+      "Number of heads in key/value must divide number of heads in query");
+#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -1462,7 +1471,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   int64_t B = query.size(0);
   int64_t M = query.size(1);
   int64_t N = key.size(1);
-  int64_t num_heads = query.size(-2);
   int64_t K = query.size(-1);
   int64_t Kv = value.size(-1);
 
@@ -1766,6 +1774,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     }
 
     p.num_heads = num_heads;
+    p.q_heads_per_kv = num_heads / num_heads_kv;
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
     p.num_queries = max_seqlen_q;
