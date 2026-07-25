@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/addmm.h>
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
 #include <ATen/ops/mm.h>
@@ -19,6 +20,16 @@ using namespace mps;
 static bool needs_nd_workaround(const Tensor& input) {
   static const bool is_m5_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
   return input.dim() > 2 && is_m5_or_newer && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
+}
+
+// Apple7/8 (M1/M2) MPSGraph matmul silently returns wrong results once a GEMM dimension
+// exceeds 2^15; Apple9+ is fine. mm/addmm already divert such shapes to the stride-aware
+// metal kernels, but linear builds its own graph, so it has to test the GEMM it would form
+// and delegate instead. Threshold mirrors use_metal_mm in LinearAlgebra.mm.
+static bool needs_mm_overflow_fallback(int64_t m, int64_t k, int64_t n) {
+  static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
+  constexpr int64_t max_mpsgraph_dim = 32768;
+  return is_affected_gpu && (m > max_mpsgraph_dim || k > max_mpsgraph_dim || n > max_mpsgraph_dim);
 }
 
 static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const Tensor& bias, Tensor& output) {
@@ -136,22 +147,22 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return weight_arg.dim() != 1 ? output : output.squeeze(-1);
   }
 
-  // Apple7/8 (M1/M2) MPSGraph silently produces wrong results when K exceeds 2^15;
-  // M3+ are fine. Route through at::mm instead. See pytorch/pytorch#177116.
-  constexpr int64_t mpsgraph_k_overflow = 32768;
-  static const bool needs_k_overflow_fallback = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
-  if (needs_k_overflow_fallback && input.size(-1) > mpsgraph_k_overflow && !input.is_complex() &&
-      !weight.is_complex() && (!is_bias_defined || !bias.is_complex())) {
-    const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
-    auto output_2d = at::mm(input_2d, weight.t());
-    if (is_bias_defined) {
-      output_2d.add_(bias);
-    }
-    auto reshaped = output_2d.view(output_size);
-    return weight_arg.dim() != 1 ? reshaped : reshaped.squeeze(-1);
-  }
-
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
+
+  // See pytorch/pytorch#177116. Delegating to addmm/mm reaches the metal kernels, which
+  // take the weight's real strides, so the transposed (column-major) operand costs nothing.
+  if (!is_complex && needs_mm_overflow_fallback(input.numel() / input.size(-1), input.size(-1), weight.size(0))) {
+    const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
+    // addmm fuses the bias and routes rank-1 shapes to the GEMV kernels. A multi-dim bias
+    // cannot broadcast against the 2D result, so it is added after the reshape instead.
+    const bool fuse_bias = is_bias_defined && bias.dim() <= 1;
+    auto result = (fuse_bias ? at::addmm(bias, input_2d, weight.t()) : at::mm(input_2d, weight.t())).view(output_size);
+    if (is_bias_defined && !fuse_bias) {
+      result.add_(bias);
+    }
+    // Squeeze last dim of 1D linear
+    return weight_arg.dim() != 1 ? result : result.squeeze(-1);
+  }
 
   // No-graph execution causes nonsense if these are non-contiguous.
   const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
