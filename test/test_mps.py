@@ -5934,6 +5934,14 @@ class TestMPS(TestCaseMPS):
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
 
+    def test_sum_integer_no_overflow(self):
+        # int sums must accumulate in int64: 2**30 overflows int32 after 4 adds
+        cases = (((1 << 20,), None), ((1024, 1024), None), ((131072, 16), 1), ((65536, 16), 0))
+        for shape, dim in cases:
+            x = torch.full(shape, 2**30, dtype=torch.int32, device="mps")
+            args = () if dim is None else (dim,)
+            self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
