@@ -3084,7 +3084,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
     @parametrize(
         "operation,tuned",
-        (("silu_mul", False), ("sub", False), ("silu_mul", True)),
+        (
+            ("silu_mul", False),
+            ("sub", False),
+            ("uint8_sub", False),
+            ("silu_mul", True),
+        ),
     )
     def test_mm_grouped_n_main_output_compiled_matches_reference(
         self, operation, tuned
@@ -3094,12 +3099,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         def epilogue(acc):
             gate = acc.float().view(m, n, group)[..., 0]
             up = acc.float().view(m, n, group)[..., 1]
-            result = (
-                torch.nn.functional.silu(gate) * up
-                if operation == "silu_mul"
-                else gate - up
-            )
-            return result.to(acc.dtype)
+            match operation:
+                case "silu_mul":
+                    return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
+                case "sub":
+                    return (gate - up).to(acc.dtype)
+                case "uint8_sub":
+                    return (gate - up).to(torch.uint8)
 
         def fn(a, b):
             return flex_gemm(
@@ -3109,13 +3115,24 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK", "tuned": tuned},
             )
 
-        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
-        b = torch.randn(k, group * n, device="cuda", dtype=torch.float16)
+        if operation == "uint8_sub":
+            a = torch.eye(m, k, device="cuda", dtype=torch.float16)
+            columns = torch.arange(group * n, device="cuda")
+            pair = (columns // group) % 8
+            b = torch.where(columns % group == 0, 3 * pair + 2, pair)
+            b = b.expand(k, -1).contiguous().to(torch.float16)
+        else:
+            a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+            b = torch.randn(k, group * n, device="cuda", dtype=torch.float16)
         actual, (code,) = run_and_get_code(
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
 
-        torch.testing.assert_close(actual, fn(a, b), atol=1e-1, rtol=1e-1)
+        expected = fn(a, b)
+        if operation == "uint8_sub":
+            self.assertEqual(actual, expected)
+        else:
+            torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
         self.assertEqual(actual.shape, (m, n))
         FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check_not(
             "activation="
