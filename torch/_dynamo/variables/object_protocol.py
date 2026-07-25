@@ -1316,7 +1316,7 @@ def pysequence_repeat(
     seq: VariableTracker,
     n: VariableTracker,
 ) -> VariableTracker:
-    """Mirrors CPython's pysequence_repeat helper.
+    """Mirrors CPython's sequence_repeat helper.
 
     Validates that ``n`` is index-like, converts it to an int, and dispatches
     to ``seq.sq_repeat_impl(tx, count)``.
