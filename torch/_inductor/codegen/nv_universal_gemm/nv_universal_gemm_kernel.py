@@ -1235,7 +1235,7 @@ class NVUniversalGemmKernel(Kernel):
         )
 
         input_tensor_names = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
-        output_buffers = self._ordered_output_buffers()
+        output_buffers = self.ordered_output_buffers()
         input_params = list(input_tensor_names)
         input_params.extend(f"out_ptr{i}" for i in range(len(output_buffers)))
         input_params.extend(self.epilogue_reads)
@@ -1460,7 +1460,7 @@ class NVUniversalGemmKernel(Kernel):
 
         return code.getvalue()
 
-    def _ordered_output_buffers(self) -> list[str]:
+    def ordered_output_buffers(self) -> list[str]:
         """Graph-output buffer names in out_ptr order.
 
         out_ptr0 is the primary GEMM output (the epilogue's `D` store, passed as
@@ -1498,11 +1498,11 @@ class NVUniversalGemmKernel(Kernel):
 
         Each epilogue variable maps to either an output pointer -- the `D` store
         and any additional multi-store outputs become out_ptr0, out_ptr1, ... in
-        _ordered_output_buffers order -- or, for a read, the aux input buffer.
+        ordered_output_buffers order -- or, for a read, the aux input buffer.
         `accum` is the kernel-supplied accumulator and is not a kwarg.
         """
         out_ptr_of = {
-            buf: f"out_ptr{i}" for i, buf in enumerate(self._ordered_output_buffers())
+            buf: f"out_ptr{i}" for i, buf in enumerate(self.ordered_output_buffers())
         }
         kwargs_parts = []
         for var_name, buffer_name in self.epilogue_var_renames.items():
@@ -1558,7 +1558,7 @@ class NVUniversalGemmKernel(Kernel):
         # The kernel writes the epilogue's output store(s), not the GEMM buffer
         # (which is removed via removed_buffers aliasing). out_ptr0 is the primary
         # (`D`) output; a multi-store epilogue adds out_ptr1, ... in order.
-        for i, output_name in enumerate(self._ordered_output_buffers()):
+        for i, output_name in enumerate(self.ordered_output_buffers()):
             call_args.append(output_name)
             arg_types.append(V.graph.get_dtype(output_name))
             raw_args.append(None)  # Output buffer is findable by name
