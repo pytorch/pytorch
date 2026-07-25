@@ -1093,15 +1093,15 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  auto [new_values, new_values_acc] =
-      at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
-          values.options(), values.scalar_type(), nnz);
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type(), nnz);
+  Tensor new_values = std::move(std::get<0>(acc_buffer));
+  Tensor new_values_acc = std::move(std::get<1>(acc_buffer));
   new_values_acc.fill_(rop.identity());
 
   const int64_t* columns_map_ptr = columns_map.const_data_ptr<int64_t>();
   const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
-  acc_t* new_values_acc_ptr =
-      new_values_acc.template data_ptr<acc_t>();
+  acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
 
   // There is no point in parallelizing the following for-loop
   // because about 99.3% of the computation time is spent in the
@@ -1180,9 +1180,10 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  auto [new_values, new_values_acc] =
-      at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
-          values.options(), values.scalar_type());
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type());
+  Tensor new_values = std::move(std::get<0>(acc_buffer));
+  Tensor new_values_acc = std::move(std::get<1>(acc_buffer));
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
@@ -1204,8 +1205,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     new_values_acc.resize_(nnz);
 
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    acc_t* new_values_acc_ptr =
-        new_values_acc.template data_ptr<acc_t>();
+    acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
 
     at::parallel_for(
         0,
