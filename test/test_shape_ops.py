@@ -320,10 +320,14 @@ class TestShapeOps(TestCase):
         if isinstance(max_vals, torch.Tensor):
             max_vals = max_vals.cpu().numpy()
 
-        # Use NumPy implementation as reference
-        X_clamped = torch.tensor(
-            np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals), device=device
-        )
+        # Use NumPy implementation as reference. np.clip against a Python int
+        # bound can widen a uint64 array to the distinct `ulonglong` scalar type,
+        # which torch cannot ingest. Cast back to the input dtype so from_numpy
+        # stays on a supported type.
+        X_np = X.cpu().numpy()
+        X_clamped = torch.from_numpy(
+            np.clip(X_np, a_min=min_vals, a_max=max_vals).astype(X_np.dtype)
+        ).to(device)
         return X, X_clamped
 
     # Tests clamp and its alias, clip
@@ -369,14 +373,13 @@ class TestShapeOps(TestCase):
                     op(X, min=min_val, max=max_val, out=Y_out)
                     self.assertEqual(Y_expected, Y_out)
 
-        # Two-sided tensor bounds dispatch the ternary kernel. One-sided tensor
-        # bounds lower to maximum/minimum, which do not support the unsigned dtypes.
         min_t = torch.full((100,), min_bound, device=device, dtype=dtype)
         max_t = torch.full((100,), max_bound, device=device, dtype=dtype)
-        X, Y_expected = self.generate_clamp_baseline(
-            device, dtype, min_vals=min_t, max_vals=max_t, with_nans=False
-        )
-        self.assertEqual(Y_expected, torch.clamp(X, min_t, max_t))
+        for min_tv, max_tv in ((min_t, max_t), (min_t, None), (None, max_t)):
+            X, Y_expected = self.generate_clamp_baseline(
+                device, dtype, min_vals=min_tv, max_vals=max_tv, with_nans=False
+            )
+            self.assertEqual(Y_expected, torch.clamp(X, min=min_tv, max=max_tv))
 
     def test_clamp_propagates_nans(self, device):
         op_list = (
