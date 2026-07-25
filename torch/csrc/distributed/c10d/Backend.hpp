@@ -651,9 +651,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual ErrorType getError() {
-    TORCH_CHECK(
-        false,
-        c10::str("Backend ", getBackendName(), " does not support getError"));
+    return ErrorType::SUCCESS;
   }
 
   virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
