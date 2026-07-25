@@ -255,20 +255,26 @@ class FlexGemmLocalReduceMatch:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmLocalReduceStore:
-    """Describe where a compressed local reduction appears in graph outputs.
+    """Describe a compressed reduction value and its returned storage.
 
     Attributes:
-        node: FX node returned as the compressed local-reduction output.
-        aux_index: Position of that node among the graph's auxiliary outputs.
-        output_layout: Validated physical storage layout for this output.
+        output_node: FX node returned to the user.
+        value_node: Logical value written to that output.
+        aux_index: Position of the output among auxiliary returns.
+        output_layout: Validated physical storage layout for the output.
     """
 
-    node: torch.fx.Node
+    output_node: torch.fx.Node
+    value_node: torch.fx.Node
     aux_index: int
     output_layout: FlexGemmOutputStorageLayout | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.node, torch.fx.Node) or self.aux_index < 0:
+        if (
+            not isinstance(self.output_node, torch.fx.Node)
+            or not isinstance(self.value_node, torch.fx.Node)
+            or self.aux_index < 0
+        ):
             raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
 
 
@@ -821,7 +827,7 @@ class FlexGemmLocalReduceAnalysis:
         elif not statically_known_shape_equal(expected_aux_shape, aux_meta.shape):
             return None
         return match.to_plan(
-            store=FlexGemmLocalReduceStore(aux, aux_index, output_layout),
+            store=FlexGemmLocalReduceStore(aux, source, aux_index, output_layout),
             feeds_main=False,
         )
 
@@ -905,7 +911,7 @@ def validate_output_layout_transforms(
         and plan.local_reduce.store is not None
         and plan.local_reduce.store.output_layout is not None
     ):
-        selected_node = plan.local_reduce.store.node
+        selected_node = plan.local_reduce.store.output_node
     if any(
         node.op == "call_function"
         and node.target is torch.ops.flex_gemm.to_blocked.default
@@ -1314,16 +1320,11 @@ class FlexGemmEpilogueEmitter:
                 if reduction is None or not isinstance(reduction[0], torch.fx.Node):
                     raise AssertionError("feed-main plans require a matched reduction")
                 self.feed_main_input = reduction[0]
-                self.aux = None if store is None else store.node
+                self.aux = None if store is None else store.value_node
             case FlexGemmOutputLocalReducePlan(
-                match=local_reduce_match,
-                store=FlexGemmLocalReduceStore(node=store_node),
+                store=FlexGemmLocalReduceStore(value_node=store_value),
             ):
-                self.aux = (
-                    local_reduce_match.value_node
-                    if self.local_reduce.store.output_layout is not None
-                    else store_node
-                )
+                self.aux = store_value
             case None:
                 pass
 

@@ -1602,9 +1602,11 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmOutputLocalReducePlan(match)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(object(), 0)
+            FlexGemmLocalReduceStore(object(), aux, 0)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(aux, -1)
+            FlexGemmLocalReduceStore(aux, object(), 0)
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmLocalReduceStore(aux, aux, -1)
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(object(), (), analysis, ())
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
@@ -1613,7 +1615,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmMainOutputPlan(node),
             (aux,),
             FlexGemmOutputLocalReducePlan(
-                match, store=FlexGemmLocalReduceStore(aux, 0)
+                match, store=FlexGemmLocalReduceStore(aux, aux, 0)
             ),
         )
         FlexGemmOutputPlan(
@@ -3203,7 +3205,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
     @parametrize(
         "operation,tuned",
-        (("silu_mul", False), ("sub", False), ("silu_mul", True)),
+        (
+            ("silu_mul", False),
+            ("sub", False),
+            ("uint8_sub", False),
+            ("silu_mul", True),
+        ),
     )
     def test_mm_grouped_n_main_output_compiled_matches_reference(
         self, operation, tuned
@@ -3213,12 +3220,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         def epilogue(acc):
             gate = acc.float().view(m, n, group)[..., 0]
             up = acc.float().view(m, n, group)[..., 1]
-            result = (
-                torch.nn.functional.silu(gate) * up
-                if operation == "silu_mul"
-                else gate - up
-            )
-            return result.to(acc.dtype)
+            match operation:
+                case "silu_mul":
+                    return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
+                case "sub":
+                    return (gate - up).to(acc.dtype)
+                case "uint8_sub":
+                    return (gate - up).to(torch.uint8)
 
         def fn(a, b):
             return flex_gemm(
@@ -3228,13 +3236,24 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK", "tuned": tuned},
             )
 
-        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
-        b = torch.randn(k, group * n, device="cuda", dtype=torch.float16)
+        if operation == "uint8_sub":
+            a = torch.eye(m, k, device="cuda", dtype=torch.float16)
+            columns = torch.arange(group * n, device="cuda")
+            pair = (columns // group) % 8
+            b = torch.where(columns % group == 0, 3 * pair + 2, pair)
+            b = b.expand(k, -1).contiguous().to(torch.float16)
+        else:
+            a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+            b = torch.randn(k, group * n, device="cuda", dtype=torch.float16)
         actual, (code,) = run_and_get_code(
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
 
-        torch.testing.assert_close(actual, fn(a, b), atol=1e-1, rtol=1e-1)
+        expected = fn(a, b)
+        if operation == "uint8_sub":
+            self.assertEqual(actual, expected)
+        else:
+            torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
         self.assertEqual(actual.shape, (m, n))
         FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check_not(
             "activation="
@@ -4814,6 +4833,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             output_dtype=torch.bfloat16,
         )
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        self.assertNotIn("triton_poi_fused", code)
         FileCheck().check("nvfp4_pack_intrinsic").check(
             "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
         ).check("FlexGemmGroupedMainOutputTransform(group=2").check(

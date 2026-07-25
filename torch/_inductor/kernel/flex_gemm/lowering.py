@@ -34,6 +34,7 @@ from .constraints import (
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known,
+    statically_known_equal,
     statically_known_multiple,
     statically_known_shape_equal,
     validate_flex_gemm_local_reduce_config,
@@ -182,7 +183,7 @@ def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
     """Return metadata for the optional compressed local-reduce output."""
     if local_reduce is None or local_reduce.store is None:
         return ()
-    return (local_reduce.store.node.meta["val"],)
+    return (local_reduce.store.output_node.meta["val"],)
 
 
 def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
@@ -536,20 +537,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ]
     aux_outs = allocate_flex_gemm_aux_outs(aux_metas, gemm_args[mat1_index])
     zero_init_local_reduce = False
-    if local_reduce_layout is FlexGemmOutputStorageLayout.BLOCKED_128X4:
-        logical_reduce_meta = (
-            None
-            if outputs.local_reduce is None
-            else outputs.local_reduce.match.value_node.meta.get("val")
-        )
-        if logical_reduce_meta is None:
-            raise NotImplementedError(
-                "blocked local-reduce outputs require logical output metadata"
-            )
-        logical_reduce_shape = logical_reduce_meta.shape
-        zero_init_local_reduce = not (
-            statically_known_multiple(logical_reduce_shape[-2], 128)
-            and statically_known_multiple(logical_reduce_shape[-1], 4)
+    if local_reduce_store is not None and local_reduce_store.output_layout is not None:
+        zero_init_local_reduce = not statically_known_equal(
+            local_reduce_store.output_node.meta["val"].numel(),
+            local_reduce_store.value_node.meta["val"].numel(),
         )
     if zero_init_local_reduce:
         local_reduce_outs = tuple(

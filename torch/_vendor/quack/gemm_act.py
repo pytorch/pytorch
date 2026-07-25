@@ -502,25 +502,21 @@ class GemmActMixin(ComposableEpiMixin):
                         tDrLocalReduce = tDrLocalReduce.local_reduce
                     tDrLocalReduce.store(epilogue_result[len(params.mAuxOut) + 1])
                 tRS_rAuxOut = tuple(aux_results)
-            elif const_expr(params.tensor_epilogue_returns_local_reduce):
-                tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
-                if const_expr(params.local_reduce_feeds_main):
-                    tDrLocalReduce = tDrLocalReduce.local_reduce
-                tDrLocalReduce.store(epilogue_result[1])
-                aux_out_dtype = self.acc_dtype
-                if const_expr(self.grouped_n_contract_group == 1):
-                    tRS_rD.store(epilogue_result[0])
-                else:
-                    aux_out_dtype = epilogue_result[0].element_type
-                tRS_rAuxOut = cute.make_rmem_tensor(
-                    epilogue_result[0].shape, aux_out_dtype
-                )
-                tRS_rAuxOut.store(epilogue_result[0])
             else:
-                tRS_rAuxOut = cute.make_rmem_tensor(
-                    epilogue_result.shape, self.acc_dtype
-                )
-                tRS_rAuxOut.store(epilogue_result)
+                main_result = epilogue_result
+                if const_expr(params.tensor_epilogue_returns_local_reduce):
+                    tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
+                    if const_expr(params.local_reduce_feeds_main):
+                        tDrLocalReduce = tDrLocalReduce.local_reduce
+                    tDrLocalReduce.store(epilogue_result[1])
+                    main_result = epilogue_result[0]
+                    if const_expr(self.grouped_n_contract_group == 1):
+                        tRS_rD.store(main_result)
+                result_dtype = self.acc_dtype
+                if const_expr(self.grouped_n_contract_group != 1):
+                    result_dtype = main_result.element_type
+                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
+                tRS_rAuxOut.store(main_result)
         elif const_expr(params.act_fn is not None):
             tRS_rAuxOut = cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
             if const_expr(self.arch != 100):
