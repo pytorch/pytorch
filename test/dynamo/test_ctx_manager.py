@@ -1791,7 +1791,9 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(inp), opt_fn(inp))
 
-    def test_store_attr_graph_break_key_error(self):
+    def test_store_attr_on_function(self):
+        # setattr on a function object is traced as a generic attribute
+        # mutation and replayed at runtime -- no graph break.
         def dummy():
             pass
 
@@ -1803,8 +1805,11 @@ class GraphModule(torch.nn.Module):
 
         inp = torch.ones(3)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(inp), opt_fn(inp))
+        # Check the compiled run applied the mutation before the eager run
+        # below overwrites dummy.attr1.
+        compiled_res = opt_fn(inp)
         self.assertEqual(dummy.attr1, inp + 2)
+        self.assertEqual(fn(inp), compiled_res)
 
     @parametrize("gb", (True, False))
     def test_functorch_low_level(self, gb):
