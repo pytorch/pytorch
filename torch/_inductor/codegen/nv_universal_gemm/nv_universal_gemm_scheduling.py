@@ -26,6 +26,12 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
+from ...kernel.gemm_epilogue_ir import (
+    centered_mean_consumer_type_unrolled_ir,
+    GemmEpilogueIRAnalysis,
+    grouped_reduction_ir,
+    single_source_affine_ir,
+)
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -201,60 +207,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if not all(isinstance(buffer, ComputedBuffer) for buffer in buffers):
             return None
         buffers = [cast(ComputedBuffer, buffer) for buffer in buffers]
-        origin_targets = OrderedSet(
-            str(origin.target)
-            for buffer in buffers
-            for origin in buffer.get_origins()
-            if hasattr(origin, "target")
-        )
-        reduction_targets = {
-            "aten.sum.dim_IntList": "sum",
-            "aten.mean.dim": "mean",
-            "aten.prod.dim_int": "prod",
-            "aten.amax.default": "max",
-            "aten.amin.default": "min",
-        }
-        source_targets = OrderedSet(["aten.pow.Tensor_Scalar"])
-        matched_reductions = origin_targets & reduction_targets.keys()
-        allowed_targets = OrderedSet(
-            ("aten.reshape.default", "prims.convert_element_type.default")
-        ) | OrderedSet(reduction_targets) | source_targets
-        if (
-            len(matched_reductions) != 1
-            or not origin_targets.issubset(allowed_targets)
-        ):
-            return None
-        reduction_type = reduction_targets[next(iter(matched_reductions))]
-        source_origins = OrderedSet(
-            origin
-            for buffer in buffers
-            for origin in buffer.get_origins()
-            if str(getattr(origin, "target", "")) in source_targets
-        )
-        if not source_origins:
-            source_type = "identity"
-        elif len(source_origins) == 1 and next(iter(source_origins)).args[1] == 2:
-            source_type = "square"
-        else:
-            return None
         node = buffers[0]
         access_node = scheduler_node
         output_name = node.get_name()
-        if len(buffers) == 2:
-            finalizer = buffers[1]
-            if (
-                reduction_type != "mean"
-                or not cls._is_mean_finalizer(nodes[0], nodes[1])
-            ):
-                return None
-            access_node = nodes[0]
-            output_name = finalizer.get_name()
         if len(node.data.ranges) != 2 or len(gemm_node.get_size()) != 2:
             return None
         try:
-            m, n = (
-                V.graph.sizevars.optimization_hint(v) for v in gemm_node.get_size()
-            )
+            m, n = (V.graph.sizevars.optimization_hint(v) for v in gemm_node.get_size())
             out_m, out_n = (
                 V.graph.sizevars.optimization_hint(v) for v in node.data.ranges
             )
@@ -263,15 +222,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         if isinstance(node.data, Reduction):
             reduction = node.data
-            if (
-                reduction.reduction_type
-                != ("sum" if reduction_type == "mean" else reduction_type)
-                or len(reduction.reduction_ranges) != 1
-            ):
+            if len(reduction.reduction_ranges) != 1:
                 return None
-            group = V.graph.sizevars.optimization_hint(
-                reduction.reduction_ranges[0]
-            )
+            group = V.graph.sizevars.optimization_hint(reduction.reduction_ranges[0])
             if m == out_m and n % group == 0 and out_n == n // group:
                 axis = 1
                 expected_strides = [n, group, 1]
@@ -293,6 +246,40 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return None
         if group <= 1 or group > max_group:
             return None
+
+        store = GemmEpilogueIRAnalysis.store_from_buffer(node)
+        classified = (
+            grouped_reduction_ir(store, gemm_node.get_name(), group)
+            if store is not None
+            else None
+        )
+        if classified is None:
+            return None
+        reduction_type, source_type = classified
+        if (
+            reduction_type not in ("sum", "mean", "prod", "max", "min")
+            or source_type not in ("identity", "square")
+        ):
+            return None
+        if (
+            isinstance(node.data, Reduction)
+            and node.data.reduction_type != reduction_type
+        ):
+            return None
+        if len(buffers) == 2:
+            finalizer = buffers[1]
+            finalizer_store = GemmEpilogueIRAnalysis.store_from_buffer(finalizer)
+            if (
+                reduction_type != "sum"
+                or not cls._is_mean_finalizer(nodes[0], nodes[1])
+                or finalizer_store is None
+                or single_source_affine_ir(finalizer_store, node.get_name())
+                != (1.0 / group, 0.0)
+            ):
+                return None
+            reduction_type = "mean"
+            access_node = nodes[0]
+            output_name = finalizer.get_name()
 
         reads = list(access_node.read_writes.reads)
         if not reads or any(read.name != gemm_node.get_name() for read in reads):
@@ -333,41 +320,6 @@ class NVUniversalGemmScheduling(BaseScheduling):
         node = cast(ComputedBuffer, nodes[0].node)
         if not isinstance(node.data, Pointwise):
             return None
-        targets = OrderedSet(
-            str(origin.target)
-            for origin in node.get_origins()
-            if hasattr(origin, "target")
-        )
-        required_targets = OrderedSet(("aten.sub.Tensor", "aten.mean.dim"))
-        allowed_targets = OrderedSet(
-            (
-                "aten.sub.Tensor",
-                "aten.reshape.default",
-                "prims.convert_element_type.default",
-                "aten.mean.dim",
-                "aten.expand.default",
-                "aten.clone.default",
-                "aten._unsafe_view.default",
-            )
-        )
-        if not required_targets.issubset(targets) or not targets.issubset(
-            allowed_targets
-        ):
-            return None
-        sub_origins = [
-            origin
-            for origin in node.get_origins()
-            if str(getattr(origin, "target", "")) == "aten.sub.Tensor"
-        ]
-        if len(sub_origins) != 1:
-            return None
-        lhs, rhs = sub_origins[0].args[:2]
-        if (
-            str(getattr(lhs, "target", ""))
-            != "prims.convert_element_type.default"
-            or str(getattr(rhs, "target", "")) != "aten.reshape.default"
-        ):
-            return None
         reads = list(scheduler_node.read_writes.reads)
         range_vars = scheduler_node.read_writes.range_vars
         if range_vars is None or len(reads) <= 2:
@@ -378,6 +330,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return None
         group = len(reads) - 1
         if group <= 1 or group > 4:
+            return None
+        store = GemmEpilogueIRAnalysis.store_from_buffer(node)
+        if (
+            store is None
+            or centered_mean_consumer_type_unrolled_ir(
+                store, gemm_node.get_name(), group
+            )
+            != "mean_linear:1:-1:0"
+        ):
             return None
         if any(read.name != gemm_node.get_name() for read in reads):
             return None
@@ -434,7 +395,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 and cls._is_mean_finalizer(node, epilogue_nodes[index + 1])
             ):
                 finalizer = epilogue_nodes[index + 1]
-                config = (finalizer.get_nodes()[0].node.get_name(), *config[1:])
+                finalizer_buffer = finalizer.get_nodes()[0].node
+                if not isinstance(finalizer_buffer, ComputedBuffer):
+                    index += 1
+                    continue
+                config = (finalizer_buffer.get_name(), *config[1:])
                 reduction_nodes.add(finalizer)
                 index += 1
             reductions.append(config)
@@ -623,8 +588,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
         fused_buffer_names = OrderedSet(
             n.get_name() for n in [gemm_template_node, *all_epilogue_nodes]
         )
-        preserve_gemm_output = not V.graph.scheduler.can_buffer_be_removed_through_fusion(
-            ir_node.get_name(), fused_buffer_names
+        preserve_gemm_output = (
+            not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+                ir_node.get_name(), fused_buffer_names
+            )
         )
         # Multi-store epilogues wire each output to its own destination tensor.
         trial_removed_buffers = V.graph.removed_buffers.copy()
@@ -776,10 +743,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if epilogue_nodes:
             scheduler = V.graph.scheduler
             try:
-                local_reductions, local_reduce_nodes = (
-                    self._partition_local_reductions(
-                        original_ir_node, epilogue_nodes
-                    )
+                local_reductions, local_reduce_nodes = self._partition_local_reductions(
+                    original_ir_node, epilogue_nodes
                 )
                 if len(local_reductions) > 1:
                     raise NotImplementedError(
@@ -819,9 +784,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         "D": output_name,
                     }
                 evt_nodes = [
-                    node
-                    for node in epilogue_nodes
-                    if node not in local_reduce_nodes
+                    node for node in epilogue_nodes if node not in local_reduce_nodes
                 ]
                 fused_buffer_names: OrderedSet[str] = OrderedSet(
                     n.get_name() for n in epilogue_nodes
