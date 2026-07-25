@@ -119,6 +119,7 @@ __all__ = [
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
+    "gather_single",
     "gather_into_tensor",
     "gather_object",
     "get_backend_config",
@@ -5353,7 +5354,7 @@ def gather(
 
 
 @_exception_logger
-def gather_into_tensor(
+def gather_single(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
     dst: int | None = None,
@@ -5406,7 +5407,7 @@ def gather_into_tensor(
         >>>     gather_tensor = torch.zeros(2 * 2, dtype=torch.int64, device=device)
         >>> else:
         >>>     gather_tensor = None
-        >>> dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        >>> dist.gather_single(tensor, gather_tensor, dst=0)
         >>> gather_tensor
         tensor([1, 2, 3, 4], device='cuda:0')  # Rank 0
         None                                    # Rank 1
@@ -5415,7 +5416,7 @@ def gather_into_tensor(
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
-            gather_into_tensor,
+            gather_single,
             relevant_args,
             tensor,
             gather_tensor=gather_tensor,
@@ -5428,7 +5429,7 @@ def gather_into_tensor(
     _check_single_tensor(tensor, "tensor")
     group = _group_or_default_group(group)
     if _rank_not_in_group(group):
-        _warn_not_in_group("gather_into_tensor")
+        _warn_not_in_group("gather_single")
         return
     if dst is None and group_dst is None:
         dst = 0
@@ -5449,7 +5450,7 @@ def gather_into_tensor(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    work = group.gather_into_tensor(output_tensor, tensor, opts)
+    work = group.gather_single(output_tensor, tensor, opts)
 
     if async_op:
         return work
@@ -5458,6 +5459,31 @@ def gather_into_tensor(
     ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
+
+
+@_exception_logger
+@deprecated(
+    "`torch.distributed.gather_into_tensor` is deprecated. "
+    "Please use `torch.distributed.gather_single` instead.",
+    category=FutureWarning,
+)
+def gather_into_tensor(
+    tensor: torch.Tensor,
+    gather_tensor: torch.Tensor | None = None,
+    dst: int | None = None,
+    group: ProcessGroup | None = None,
+    async_op: bool = False,
+    group_dst: int | None = None,
+):
+    """
+    Gather the input tensor from all ranks into a single output tensor on ``dst``.
+
+    .. warning::
+        `gather_into_tensor` is deprecated. Users should use `gather_single`
+        instead.
+
+    """
+    return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
 
 
 @_exception_logger
