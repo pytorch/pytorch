@@ -1093,10 +1093,9 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
-      values.options(), values.scalar_type(), nnz);
-  Tensor new_values = std::get<0>(acc_buffer);
-  Tensor new_values_acc = std::get<1>(acc_buffer);
+  auto [new_values, new_values_acc] =
+      at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+          values.options(), values.scalar_type(), nnz);
   new_values_acc.fill_(rop.identity());
 
   const int64_t* columns_map_ptr = columns_map.const_data_ptr<int64_t>();
@@ -1181,10 +1180,9 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
-      values.options(), values.scalar_type());
-  Tensor new_values = std::get<0>(acc_buffer);
-  Tensor new_values_acc = std::get<1>(acc_buffer);
+  auto [new_values, new_values_acc] =
+      at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+          values.options(), values.scalar_type());
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
