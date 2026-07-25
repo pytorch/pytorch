@@ -61,12 +61,27 @@ template <typename To, typename From>
 std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(
     From f,
     bool strict_unsigned [[maybe_unused]] = false) {
-  using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
+  using ToScalar = typename scalar_value_type<To>::type;
+  using limit = std::numeric_limits<ToScalar>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
   }
   if (!limit::has_quiet_NaN && (f != f)) {
     return true;
+  }
+  if constexpr (std::is_integral_v<ToScalar>) {
+    // limit::max() for wide integer types is NOT exactly representable in
+    // floating point (e.g. int64 max = 2^63-1 rounds up to 2^63), so `f >
+    // limit::max()` lets a just-out-of-range value like 2^63 slip through and
+    // then become INT64_MIN via static_cast. Compare against the
+    // exactly-representable upper bound max()+1 == 2^digits instead. lowest()
+    // is 0 or a negated power of two, so it stays exact. (digits-1 keeps the
+    // shift < 64 for the uint64 case; the *2 recovers 2^digits without a 1<<64
+    // overflow.)
+    constexpr int digits = limit::digits;
+    constexpr From upper =
+        static_cast<From>(uint64_t{1} << (digits - 1)) * From{2};
+    return f < static_cast<From>(limit::lowest()) || f >= upper;
   }
   return f < limit::lowest() || f > limit::max();
 }
