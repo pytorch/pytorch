@@ -459,37 +459,45 @@ template <
 kernel void sum_reduction_outer(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
-    constant uint3& sizes [[buffer(2)]], // [M, N, output_stride]
+    constant uint4& sizes [[buffer(2)]],
     constant float& divisor [[buffer(3)]], // >0 divides accumulator before cast
-    uint2 tid_tg [[thread_position_in_threadgroup]],
-    uint2 tg_pos [[threadgroup_position_in_grid]]) {
+    constant uint4& strides [[buffer(4)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
   using TA = ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
   const uint M = sizes.x;
   const uint N = sizes.y;
   const uint out_stride = sizes.z;
+  const uint num_segs = max(sizes.w, 1u);
+  const uint sK = strides.x;
+  const uint sB = strides.y;
+  const uint batch_in = tg_pos.z * strides.z;
 
   uint col = tg_pos.x * TG_X + tid_tg.x;
   if (col >= N)
     return;
 
-  // Split rows among TG_Y workers
-  uint rows_per_y = ceil_div(M, TG_Y);
-  uint row_start = tid_tg.y * rows_per_y;
-  uint row_end = min(row_start + rows_per_y, M);
+  const uint seg_rows = ceil_div(M, num_segs);
+  const uint seg_start = tg_pos.y * seg_rows;
+  const uint seg_end = min(seg_start + seg_rows, M);
+  uint rows_per_y = ceil_div(seg_rows, TG_Y);
+  uint row_start = seg_start + tid_tg.y * rows_per_y;
+  uint row_end = min(row_start + rows_per_y, seg_end);
 
   // Multiple accumulation chains for ILP
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++)
     acc[j] = 0;
+  const uint col_off = batch_in + col * sB;
 
   uint row = row_start;
   for (; row + NCHAINS <= row_end; row += NCHAINS) {
     for (uint j = 0; j < NCHAINS; j++) {
-      acc[j] += load_val<MODE>(input[(row + j) * N + col]);
+      acc[j] += load_val<MODE>(input[col_off + (row + j) * sK]);
     }
   }
   for (; row < row_end; row++) {
-    acc[row % NCHAINS] += load_val<MODE>(input[row * N + col]);
+    acc[row % NCHAINS] += load_val<MODE>(input[col_off + row * sK]);
   }
 
   TA sum = acc[0];
@@ -512,19 +520,181 @@ kernel void sum_reduction_outer(
     if (divisor > 0) {
       final_val /= static_cast<TA>(divisor);
     }
-    output[col * out_stride] = static_cast<TO>(final_val);
+    const uint out_idx = (num_segs > 1) ? (tg_pos.y * N + col)
+                                        : (tg_pos.z * N + col * out_stride);
+    output[out_idx] = static_cast<TO>(final_val);
   }
 }
 
-#define REGISTER_SUM_OUTER_IMPL(TI, TO, PREFIX, MODE)                 \
-  template [[host_name(PREFIX "reduction_outer_" #TI "_" #TO)]]       \
-  kernel void sum_reduction_outer<TI, TO, 32, 32, SUM_NCHAINS, MODE>( \
-      constant TI * input [[buffer(0)]],                              \
-      device TO * output [[buffer(1)]],                               \
-      constant uint3 & sizes [[buffer(2)]],                           \
-      constant float& divisor [[buffer(3)]],                          \
-      uint2 tid_tg [[thread_position_in_threadgroup]],                \
-      uint2 tg_pos [[threadgroup_position_in_grid]]);
+template <
+    typename TI,
+    typename TO,
+    uint TG_SIZE = 256,
+    uint NCHAINS = SUM_NCHAINS,
+    LoadMode MODE = LOAD_IDENTITY>
+kernel void sum_reduction_narrow(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint4& sizes [[buffer(2)]],
+    constant float& divisor [[buffer(3)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  using TA = ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
+  const uint tid = tid_tg.x;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint num_segs = max(sizes.w, 1u);
+
+  const uint seg_rows = ceil_div(M, num_segs);
+  const uint r0 = tg_pos.y * seg_rows;
+  const uint r1 = min(r0 + seg_rows, M);
+  const uint base = tg_pos.z * M * N + r0 * N;
+  const uint count = (r0 < M) ? (r1 - r0) * N : 0u;
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++) {
+    acc[j] = 0;
+  }
+  const uint stride = TG_SIZE * NCHAINS;
+  uint k = tid;
+  for (; k + (NCHAINS - 1) * TG_SIZE < count; k += stride) {
+    for (uint j = 0; j < NCHAINS; j++) {
+      acc[j] += load_val<MODE>(input[base + k + j * TG_SIZE]);
+    }
+  }
+  for (; k < count; k += TG_SIZE) {
+    acc[0] += load_val<MODE>(input[base + k]);
+  }
+  TA sum = acc[0];
+  for (uint j = 1; j < NCHAINS; j++) {
+    sum += acc[j];
+  }
+
+  threadgroup TA shmem[TG_SIZE];
+  shmem[tid] = sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid < N) {
+    TA s = 0;
+    for (uint t = tid; t < TG_SIZE; t += N) {
+      s += shmem[t];
+    }
+    if (divisor > 0) {
+      s /= static_cast<TA>(divisor);
+    }
+    const uint out_idx =
+        (num_segs > 1) ? (tg_pos.y * N + tid) : (tg_pos.z * N + tid);
+    output[out_idx] = static_cast<TO>(s);
+  }
+}
+
+template <
+    typename TI,
+    typename TO,
+    uint TG_SIZE = 256,
+    uint NCHAINS = SUM_NCHAINS,
+    LoadMode MODE = LOAD_IDENTITY>
+kernel void sum_reduction_narrow_strided(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint4& sizes [[buffer(2)]],
+    constant float& divisor [[buffer(3)]],
+    constant uint3& strides [[buffer(4)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  using TA = ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
+  const uint tid = tid_tg.x;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint num_segs = max(sizes.w, 1u);
+  const uint sK = strides.x;
+  const uint sB = strides.y;
+
+  const uint seg_rows = ceil_div(M, num_segs);
+  const uint r0 = tg_pos.y * seg_rows;
+  const uint r1 = min(r0 + seg_rows, M);
+  const uint base = tg_pos.z * strides.z + r0 * sK;
+  const uint count = (r0 < M) ? (r1 - r0) * N : 0u;
+
+  const uint col_off = (tid % N) * sB;
+  const uint rstep = TG_SIZE / N;
+  uint row = tid / N;
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++) {
+    acc[j] = 0;
+  }
+  const uint stride = TG_SIZE * NCHAINS;
+  uint k = tid;
+  for (; k + (NCHAINS - 1) * TG_SIZE < count; k += stride) {
+    for (uint j = 0; j < NCHAINS; j++) {
+      acc[j] += load_val<MODE>(input[base + (row + j * rstep) * sK + col_off]);
+    }
+    row += rstep * NCHAINS;
+  }
+  for (; k < count; k += TG_SIZE) {
+    acc[0] += load_val<MODE>(input[base + row * sK + col_off]);
+    row += rstep;
+  }
+  TA sum = acc[0];
+  for (uint j = 1; j < NCHAINS; j++) {
+    sum += acc[j];
+  }
+
+  threadgroup TA shmem[TG_SIZE];
+  shmem[tid] = sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid < N) {
+    TA s = 0;
+    for (uint t = tid; t < TG_SIZE; t += N) {
+      s += shmem[t];
+    }
+    if (divisor > 0) {
+      s /= static_cast<TA>(divisor);
+    }
+    const uint out_idx =
+        (num_segs > 1) ? (tg_pos.y * N + tid) : (tg_pos.z * N + tid);
+    output[out_idx] = static_cast<TO>(s);
+  }
+}
+
+#define REGISTER_SUM_OUTER_IMPL(TI, TO, PREFIX, MODE)                       \
+  template [[host_name(PREFIX "reduction_narrow_strided_" #TI "_" #TO)]]    \
+  kernel void sum_reduction_narrow_strided<TI, TO, 256, SUM_NCHAINS, MODE>( \
+      constant TI * input [[buffer(0)]],                                    \
+      device TO * output [[buffer(1)]],                                     \
+      constant uint4 & sizes [[buffer(2)]],                                 \
+      constant float& divisor [[buffer(3)]],                                \
+      constant uint3& strides [[buffer(4)]],                                \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                      \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                       \
+  template [[host_name(PREFIX "reduction_narrow_" #TI "_" #TO)]]            \
+  kernel void sum_reduction_narrow<TI, TO, 256, SUM_NCHAINS, MODE>(         \
+      constant TI * input [[buffer(0)]],                                    \
+      device TO * output [[buffer(1)]],                                     \
+      constant uint4 & sizes [[buffer(2)]],                                 \
+      constant float& divisor [[buffer(3)]],                                \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                      \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                       \
+  template [[host_name(PREFIX "reduction_outer_" #TI "_" #TO)]]             \
+  kernel void sum_reduction_outer<TI, TO, 32, 32, SUM_NCHAINS, MODE>(       \
+      constant TI * input [[buffer(0)]],                                    \
+      device TO * output [[buffer(1)]],                                     \
+      constant uint4 & sizes [[buffer(2)]],                                 \
+      constant float& divisor [[buffer(3)]],                                \
+      constant uint4& strides [[buffer(4)]],                                \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                      \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                       \
+  template [[host_name(PREFIX "reduction_col_" #TI "_" #TO)]]               \
+  kernel void sum_reduction_outer<TI, TO, 32, 1, SUM_NCHAINS, MODE>(        \
+      constant TI * input [[buffer(0)]],                                    \
+      device TO * output [[buffer(1)]],                                     \
+      constant uint4 & sizes [[buffer(2)]],                                 \
+      constant float& divisor [[buffer(3)]],                                \
+      constant uint4& strides [[buffer(4)]],                                \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                      \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);
 
 #define REGISTER_SUM_OUTER(TI, TO) \
   REGISTER_SUM_OUTER_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
@@ -1370,40 +1540,49 @@ template <
 kernel void value_reduction_outer(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
-    constant uint3& sizes [[buffer(2)]], // [M, N, output_stride]
-    uint2 tid_tg [[thread_position_in_threadgroup]],
-    uint2 tg_pos [[threadgroup_position_in_grid]]) {
+    constant uint4& sizes [[buffer(2)]],
+    constant uint4& strides [[buffer(3)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
   using TA = TO;
   using Op = OpFn<TA>;
   const uint M = sizes.x;
   const uint N = sizes.y;
   const uint out_stride = sizes.z;
+  const uint num_segs = max(sizes.w, 1u);
+  const uint sK = strides.x;
+  const uint sB = strides.y;
+  const uint batch_in = tg_pos.z * strides.z;
 
   uint col = tg_pos.x * TG_X + tid_tg.x;
   if (col >= N) {
     return;
   }
 
-  uint rows_per_y = ceil_div(M, TG_Y);
-  uint row_start = tid_tg.y * rows_per_y;
-  uint row_end = min(row_start + rows_per_y, M);
+  const uint seg_rows = ceil_div(M, num_segs);
+  const uint seg_start = tg_pos.y * seg_rows;
+  const uint seg_end = min(seg_start + seg_rows, M);
+  uint rows_per_y = ceil_div(seg_rows, TG_Y);
+  uint row_start = seg_start + tid_tg.y * rows_per_y;
+  uint row_end = min(row_start + rows_per_y, seg_end);
 
   const TA identity_val = Op::identity();
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = identity_val;
   }
+  const uint col_off = batch_in + col * sB;
 
   uint row = row_start;
   for (; row + NCHAINS <= row_end; row += NCHAINS) {
     for (uint j = 0; j < NCHAINS; j++) {
       acc[j] = Op::combine(
-          acc[j], Load::template load<TA>(input[(row + j) * N + col]));
+          acc[j], Load::template load<TA>(input[col_off + (row + j) * sK]));
     }
   }
   for (; row < row_end; row++) {
     acc[row % NCHAINS] = Op::combine(
-        acc[row % NCHAINS], Load::template load<TA>(input[row * N + col]));
+        acc[row % NCHAINS], Load::template load<TA>(input[col_off + row * sK]));
   }
 
   TA val = acc[0];
@@ -1425,7 +1604,71 @@ kernel void value_reduction_outer(
   }
 
   if (tid_tg.y == 0) {
-    output[col * out_stride] = shmem[0][tid_tg.x];
+    const uint out_idx = (num_segs > 1) ? (tg_pos.y * N + col)
+                                        : (tg_pos.z * N + col * out_stride);
+    output[out_idx] = shmem[0][tid_tg.x];
+  }
+}
+
+template <
+    template <typename> class OpFn,
+    typename Load,
+    typename TI,
+    typename TO,
+    uint TG_SIZE = 256,
+    uint NCHAINS = SUM_NCHAINS>
+kernel void value_reduction_narrow(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint4& sizes [[buffer(2)]],
+    uint3 tid_tg [[thread_position_in_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  using TA = TO;
+  using Op = OpFn<TA>;
+  const uint tid = tid_tg.x;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint num_segs = max(sizes.w, 1u);
+
+  const uint seg_rows = ceil_div(M, num_segs);
+  const uint r0 = tg_pos.y * seg_rows;
+  const uint r1 = min(r0 + seg_rows, M);
+  const uint base = tg_pos.z * M * N + r0 * N;
+  const uint count = (r0 < M) ? (r1 - r0) * N : 0u;
+
+  const TA identity_val = Op::identity();
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++) {
+    acc[j] = identity_val;
+  }
+  const uint stride = TG_SIZE * NCHAINS;
+  uint k = tid;
+  for (; k + (NCHAINS - 1) * TG_SIZE < count; k += stride) {
+    for (uint j = 0; j < NCHAINS; j++) {
+      acc[j] = Op::combine(
+          acc[j], Load::template load<TA>(input[base + k + j * TG_SIZE]));
+    }
+  }
+  for (; k < count; k += TG_SIZE) {
+    acc[0] = Op::combine(acc[0], Load::template load<TA>(input[base + k]));
+  }
+  TA val = acc[0];
+  for (uint j = 1; j < NCHAINS; j++) {
+    val = Op::combine(val, acc[j]);
+  }
+
+  threadgroup TA shmem[TG_SIZE];
+  shmem[tid] = val;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid < N) {
+    TA s = identity_val;
+    for (uint t = tid; t < TG_SIZE; t += N) {
+      s = Op::combine(s, shmem[t]);
+    }
+    const uint out_idx =
+        (num_segs > 1) ? (tg_pos.y * N + tid) : (tg_pos.z * N + tid);
+    output[out_idx] = s;
   }
 }
 
@@ -1547,9 +1790,25 @@ kernel void value_reduction_inner_chunk(
   kernel void value_reduction_outer<OP, LOAD, TI, TO, 32, 32, SUM_NCHAINS>( \
       constant TI * input [[buffer(0)]],                                    \
       device TO * output [[buffer(1)]],                                     \
-      constant uint3 & sizes [[buffer(2)]],                                 \
-      uint2 tid_tg [[thread_position_in_threadgroup]],                      \
-      uint2 tg_pos [[threadgroup_position_in_grid]]);                       \
+      constant uint4 & sizes [[buffer(2)]],                                 \
+      constant uint4 & strides [[buffer(3)]],                               \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                      \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                       \
+  template [[host_name(NAME "_reduction_col_" #TI "_" #TO)]]                \
+  kernel void value_reduction_outer<OP, LOAD, TI, TO, 32, 1, SUM_NCHAINS>(  \
+      constant TI * input [[buffer(0)]],                                    \
+      device TO * output [[buffer(1)]],                                     \
+      constant uint4 & sizes [[buffer(2)]],                                 \
+      constant uint4 & strides [[buffer(3)]],                               \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                      \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                       \
+  template [[host_name(NAME "_reduction_narrow_" #TI "_" #TO)]]             \
+  kernel void value_reduction_narrow<OP, LOAD, TI, TO, 256, SUM_NCHAINS>(   \
+      constant TI * input [[buffer(0)]],                                    \
+      device TO * output [[buffer(1)]],                                     \
+      constant uint4 & sizes [[buffer(2)]],                                 \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                      \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                       \
   template [[host_name(NAME "_reduction_inner_" #TI "_" #TO)]]              \
   kernel void value_reduction_inner<OP, LOAD, TI, TO, SUM_NCHAINS>(         \
       constant TI * input [[buffer(0)]],                                    \
