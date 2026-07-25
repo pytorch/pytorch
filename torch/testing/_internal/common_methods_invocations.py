@@ -15336,6 +15336,10 @@ op_db: list[OpInfo] = [
         ref=reference_native_group_norm,
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
+        skips=(
+            # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
+            DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
+        ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
