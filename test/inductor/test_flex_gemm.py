@@ -402,14 +402,17 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 )
 
     def test_grouped_main_output_device_validation(self):
-        from torch._vendor.quack.gemm_act import validate_grouped_n_contract_device
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmGroupedMainOutputTransform,
+        )
 
+        group_4 = FlexGemmGroupedMainOutputTransform(4)
         for capability in (10, 11):
-            validate_grouped_n_contract_device(4, (capability, 0))
+            group_4.validate_quack(capability)
         with self.assertRaisesRegex(NotImplementedError, "not yet supported on SM120"):
-            validate_grouped_n_contract_device(2, (12, 0))
-        with self.assertRaisesRegex(NotImplementedError, "SM100 and SM110"):
-            validate_grouped_n_contract_device(4, (9, 0))
+            FlexGemmGroupedMainOutputTransform(2).validate_quack(12)
+        with self.assertRaisesRegex(NotImplementedError, "group 2"):
+            group_4.validate_quack(9)
 
     def test_explicit_dense_config_supports_partial_constraints(self):
         from torch._inductor.heuristics.template import (
