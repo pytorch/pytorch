@@ -5,7 +5,7 @@ import sys
 
 import torch
 import torch.distributed as dist
-
+from torch.distributed.distributed_c10d import Backend
 
 _PRIOR_FP32_PRECISION: str | None = None
 
@@ -43,7 +43,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-_allowed_backends = ("gloo", "nccl", "ucc")
+_allowed_backends = tuple(Backend.backend_list)
+
 if (
     "BACKEND" not in os.environ
     or "WORLD_SIZE" not in os.environ
@@ -66,7 +67,8 @@ if BACKEND in _allowed_backends:
         def setUp(self):
             super().setUp()
             self._spawn_processes()
-            torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+            if torch.cuda.is_available():
+                torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
