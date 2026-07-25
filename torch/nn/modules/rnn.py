@@ -1619,6 +1619,12 @@ class RNNCell(RNNCellBase):
             raise ValueError(
                 f"RNNCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead"
             )
+        if hx is not None and input.dim() != hx.dim():
+            raise ValueError(
+                f"RNNCell: Expected input and hidden to have the same number of "
+                f"dimensions, but got input.dim()={input.dim()} and "
+                f"hidden.dim()={hx.dim()}"
+            )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1742,6 +1748,12 @@ class LSTMCell(RNNCellBase):
                     raise ValueError(
                         f"LSTMCell: Expected hx[{idx}] to be 1D or 2D, got {value.dim()}D instead"
                     )
+                if input.dim() != value.dim():
+                    raise ValueError(
+                        f"LSTMCell: Expected input and hx[{idx}] to have the same "
+                        f"number of dimensions, but got input.dim()={input.dim()} "
+                        f"and hx[{idx}].dim()={value.dim()}"
+                    )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1849,6 +1861,12 @@ class GRUCell(RNNCellBase):
         if hx is not None and hx.dim() not in (1, 2):
             raise ValueError(
                 f"GRUCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead"
+            )
+        if hx is not None and input.dim() != hx.dim():
+            raise ValueError(
+                f"GRUCell: Expected input and hidden to have the same number of "
+                f"dimensions, but got input.dim()={input.dim()} and "
+                f"hidden.dim()={hx.dim()}"
             )
         is_batched = input.dim() == 2
         if not is_batched:
