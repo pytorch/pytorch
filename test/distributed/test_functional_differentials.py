@@ -439,11 +439,12 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
-    def test_all_reduce_coalesced_backward(self, device):
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_all_reduce_coalesced_backward(self, device, reduce_op):
         """Test all_reduce_coalesced backward does all_reduce on each gradient.
 
         Tensors AND gradients are VARYING (different across ranks).
-        Backward aggregates each gradient via all_reduce(sum).
+        Backward aggregates each gradient via all_reduce.
         """
         group_name = dist.group.WORLD.group_name
 
@@ -451,7 +452,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             torch.randn(3, 3, requires_grad=True, device=device),
             torch.randn(2, 2, requires_grad=True, device=device),
         ]
-        outputs = fcols.all_reduce_coalesced(input_tensors, "sum", group=group_name)
+        outputs = fcols.all_reduce_coalesced(input_tensors, reduce_op, group=group_name)
 
         # Backward with ones
         loss = sum(output.sum() for output in outputs)
@@ -460,9 +461,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         # Each gradient should be aggregated (backward is all_reduce)
         for input_tensor in input_tensors:
             self.assertIsNotNone(input_tensor.grad)
-            expected_grad = torch.full_like(
-                input_tensor, fill_value=float(self.world_size)
-            )
+            expected_value = self.world_size if reduce_op == "sum" else 1
+            expected_grad = torch.full_like(input_tensor, fill_value=expected_value)
             self.assertEqual(input_tensor.grad, expected_grad)
 
     @parametrize("device", devices)
