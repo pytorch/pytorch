@@ -925,38 +925,13 @@ _BIT_FIELD: dict[SlotGroup, dict[int, str]] = {
 
 # The actual slot function (a VariableTracker method) each struct field dispatches to
 _SLOT_FN: dict[SlotGroup, dict[str, str]] = {
-    SlotGroup.NUMBER: {
-        **{f: f"{f}_impl" for f in PyNumberMethods._fields},
-        "nb_bool": "nb_bool_impl",
-    },
-    SlotGroup.SEQUENCE: {
-        "sq_length": "sq_length_impl",
-        "sq_concat": "sq_concat_impl",
-        "sq_repeat": "sq_repeat_impl",
-        "sq_item": "sq_item_impl",
-        "sq_ass_item": "sq_ass_item_impl",
-        "sq_contains": "sq_contains_impl",
-        "sq_inplace_concat": "sq_inplace_concat_impl",
-        "sq_inplace_repeat": "sq_inplace_repeat_impl",
-    },
-    SlotGroup.MAPPING: {
-        "mp_length": "mp_length_impl",
-        "mp_subscript": "mp_subscript_impl",
-        "mp_ass_subscript": "mp_ass_subscript_impl",
-    },
+    SlotGroup.NUMBER: {f: f"{f}_impl" for f in PyNumberMethods._fields},
+    SlotGroup.SEQUENCE: {f: f"{f}_impl" for f in PySequenceMethods._fields},
+    SlotGroup.MAPPING: {f: f"{f}_impl" for f in PyMappingMethods._fields},
     SlotGroup.TYPE: {
-        "tp_repr": "tp_repr_impl",
-        "tp_hash": "tp_hash_impl",
+        **{f: f"{f}_impl" for f in _TYPE_FIELDS},
         "tp_call": "call_function",
-        "tp_str": "tp_str_impl",
-        "tp_getattro": "tp_getattro_impl",
-        "tp_setattro": "tp_setattro_impl",
-        "tp_richcompare": "tp_richcompare_impl",
-        "tp_iter": "tp_iter_impl",
-        "tp_iternext": "tp_iternext_impl",
-        "tp_descr_get": "tp_descr_get_impl",
-        "tp_descr_set": "tp_descr_set_impl",
-        "tp_init": "tp_init_impl",
+        "tp_hash": "hash_impl",
     },
 }
 
