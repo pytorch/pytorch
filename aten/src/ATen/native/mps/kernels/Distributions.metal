@@ -103,10 +103,15 @@ kernel void exponential(
   }
 }
 
+// Layout must stay in sync with `UniformParams` in Distributions.mm.
 template <typename T>
 struct UniformParams {
-  T from;
-  T to;
+  float from;
+  float to;
+  // `from` narrowed to T. The kernel can't narrow it itself: the Metal
+  // compiler miscompiles a thread-invariant `static_cast<bfloat>(float)` into
+  // an f32->f16 convert whose bits are then read back as bfloat.
+  T from_t;
 };
 
 // Uniform[from, to). One Philox round per 4 outputs.
@@ -120,13 +125,16 @@ kernel void uniform_dist(
   uint base = tid * 4;
   uint4 raw =
       c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  float from = static_cast<float>(params.from);
-  float scale = static_cast<float>(params.to) - from;
+  float from = params.from;
+  float scale = params.to - params.from;
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
     T value = static_cast<T>(from + scale * u);
-    output[base + i] = value == params.to ? params.from : value;
+    // `u` is drawn from [0, 1), but narrowing to T can round the sample up
+    // onto the exclusive bound; fold those back to `from` like CUDA does.
+    output[base + i] =
+        static_cast<float>(value) >= params.to ? params.from_t : value;
   }
 }
 
@@ -221,6 +229,8 @@ REGISTER_OP(geometric, short);
 REGISTER_OP(geometric, char);
 REGISTER_OP(geometric, uchar);
 
+// `uniform_dist` takes `UniformParams` rather than `float2`, so it can't go
+// through `REGISTER_OP`.
 #define REGISTER_UNIFORM_OP(DTYPE)                           \
   template [[host_name("uniform_dist_" #DTYPE)]] kernel void \
   uniform_dist<DTYPE>(                                       \

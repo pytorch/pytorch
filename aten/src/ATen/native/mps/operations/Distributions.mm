@@ -221,10 +221,19 @@ static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase
 REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
 REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
 
+// Layout must stay in sync with `UniformParams` in kernels/Distributions.metal.
+template <typename T>
+struct UniformParams {
+  float from;
+  float to;
+  T from_t;
+};
+
 static void uniform_kernel_mps(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "uniform_kernel_mps", [&] {
-    distribution_kernel_mps_impl(
-        iter, std::array<scalar_t, 2>{static_cast<scalar_t>(from), static_cast<scalar_t>(to)}, "uniform_dist", 1, gen);
+    const auto params =
+        UniformParams<scalar_t>{static_cast<float>(from), static_cast<float>(to), static_cast<scalar_t>(from)};
+    distribution_kernel_mps_impl(iter, params, "uniform_dist", 1, gen);
   });
 }
 
