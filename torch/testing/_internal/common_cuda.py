@@ -179,12 +179,13 @@ PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_
 
 
 def evaluate_platform_supports_bf16():
-    if torch.version.cuda:
-        return SM80OrLater
-    elif torch.version.hip:
+    if torch.version.hip:
         return True
-    elif TEST_XPU:
-        return True
+    device_type = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else None
+    if device_type is not None:
+        mod = getattr(torch, device_type, None)
+        if mod is not None and hasattr(mod, "is_bf16_supported"):
+            return mod.is_bf16_supported()
     return False
 
 

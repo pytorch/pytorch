@@ -1598,7 +1598,8 @@ class skipPRIVATEUSE1If(skipIf):
 def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
-    if device_type in ["cuda", "xpu", "mtia"]:
+    _privateuse1_backend = torch._C._get_privateuse1_backend_name()
+    if device_type in ["cuda", "xpu", "mtia", _privateuse1_backend]:
         acc = torch.accelerator.current_accelerator()
         # Case 1: no accelerator found
         if not acc:
@@ -1629,6 +1630,10 @@ def _has_sufficient_memory(device, size):
             # MTIA has no mem_get_info; the dram stats dict exposes free_bytes
             # (see torch/csrc bindings / mtia_hooks.cpp).
             return torch.mtia.memory_stats(device_)["dram"]["free_bytes"] >= size
+
+        if device_type == _privateuse1_backend:
+            # privateuse1 backends (e.g. NPU) may lack mem_get_info; assume sufficient memory
+            return True
 
     if device_type == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
@@ -2385,6 +2390,19 @@ IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
 IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
     torch.xpu.is_available() and torch.utils._triton.has_triton()
 )
+IS_FLEX_ATTENTION_PRIVATEUSE1_SUPPORTED = False
+_privateuse1_backend = torch._C._get_privateuse1_backend_name()
+if _privateuse1_backend and _privateuse1_backend != "privateuseone":
+    try:
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        _privateuse1_interface = get_interface_for_device(_privateuse1_backend)
+        IS_FLEX_ATTENTION_PRIVATEUSE1_SUPPORTED = (
+            _privateuse1_interface.is_available()
+            and torch.utils._triton.has_triton()
+        )
+    except (RuntimeError, ImportError):
+        pass
 IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
     torch.cuda.is_available()
     and torch.utils._triton.has_triton()
@@ -2399,7 +2417,8 @@ flex_attention_supported_platform = unittest.skipUnless(
         and not torch.cuda.is_available()
     )
     or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
-    or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED,
+    or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED
+    or IS_FLEX_ATTENTION_PRIVATEUSE1_SUPPORTED,
     "Requires CUDA and Triton, Intel GPU and triton, MPS, or CPU with avx2 and later",
 )
 if (
