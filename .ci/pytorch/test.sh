@@ -265,8 +265,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     # shellcheck disable=SC1091
     source /opt/intel/oneapi/umf/latest/env/vars.sh
   fi
-  # shellcheck disable=SC1091
-  source /opt/intel/oneapi/tcm/latest/env/vars.sh
+  if [ -f /opt/intel/oneapi/tcm/latest/env/vars.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/intel/oneapi/tcm/latest/env/vars.sh
+  fi
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
