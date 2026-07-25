@@ -2925,6 +2925,16 @@
       ]
     }
   ],
+  "GB8042": [
+    {
+      "Gb_type": "Attribute access on torch.profiler object",
+      "Context": "getattr({self}, {name})",
+      "Explanation": "Dynamo ignores torch.profiler side effects, so runtime attributes like `{name}` on a profiler object cannot be traced.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1042": [
     {
       "Gb_type": "backward() with in-graph created tensor",
