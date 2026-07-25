@@ -120,7 +120,7 @@ def register_local_reduce_fns(
 def validate_grouped_n_contract_device(
     group: int | None, device_capacity: tuple[int, int]
 ) -> None:
-    """Validate grouped-main support consistently before and during compilation."""
+    """Validate grouped-main support at the public dispatch boundary."""
     if group is None:
         return
     if device_capacity[0] == 12:
@@ -797,16 +797,8 @@ def _compile_gemm_act(
         },
     }
     GemmCls = sm_to_cls[gemm_cls_name][device_capacity[0]]
-    if gemm_cls_name == "grouped_n_contract":
-        validate_grouped_n_contract_device(
-            main_output_transform_group, device_capacity
-        )
-    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group != 2:
-        GemmCls = {4: GemmGroupedNContract4Sm100}.get(main_output_transform_group)
-        if GemmCls is None:
-            raise NotImplementedError(
-                f"unsupported grouped_n_contract group={main_output_transform_group}"
-            )
+    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group == 4:
+        GemmCls = GemmGroupedNContract4Sm100
     postact_dtype = postact_dtypes[0]
     postact_major = postact_majors[0]
     pa_leading = 1 if postact_major == "n" else 0
