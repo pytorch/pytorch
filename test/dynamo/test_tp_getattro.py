@@ -850,7 +850,6 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), x + 20)
         self.assertEqual(cnt.frame_count, 2)
 
-
     # --- C descriptor type check (descr_check equivalent) ---
 
 
@@ -916,7 +915,6 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             fn(x, b)
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)(x, b)
-
 
     def test_method_descriptor_compatible_type(self):
         def fn(x):
