@@ -75,3 +75,8 @@ def fn(model, inp):
 model = MyModel()
 fn(model, inp)
 ```
+
+Applying `torch.compile` to a smaller repeated region (such as a single
+transformer block) instead of the whole model can also substantially reduce
+compile time. See the regional and hierarchical compilation sections of
+[Reducing Compile Time](programming_model.reducing_compile_time).
