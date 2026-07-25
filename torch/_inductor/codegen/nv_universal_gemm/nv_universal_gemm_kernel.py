@@ -646,6 +646,7 @@ def _update_reuse_args_tensors(
             wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
     local_reduce = getattr(args, "local_reduce_out", None)
     if local_reduce is not None:
+        assert args_kwargs is not None  # noqa: S101
         local_reduce._runtime_tensor = args_kwargs["local_reduce_out"]
     return True
 
@@ -1380,7 +1381,11 @@ class NVUniversalGemmKernel(Kernel):
             primary_name = self.local_reduce[4]
             V.graph.removed_buffers.discard(primary_name)
             primary_output = V.graph.get_buffer(primary_name)
-            wrapper.codegen_allocation(primary_output or self.output_node)
+            wrapper.codegen_allocation(
+                primary_output
+                if isinstance(primary_output, Buffer)
+                else self.output_node
+            )
 
         call_args: list[str] = []
         arg_types: list[Any] = []

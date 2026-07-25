@@ -1210,14 +1210,20 @@ class _TorchDynamoContext:
                 saved_dynamic_layer_stack_depth = (
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
-                saved_include_set = torch._C._dispatch_tls_local_include_set()
-                saved_exclude_set = torch._C._dispatch_tls_local_exclude_set()
 
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
-                with torch._C._ForceDispatchKeyGuard(
-                    saved_include_set, saved_exclude_set
-                ):
+                # Snapshot the local dispatch key set onto a C++ thread-local
+                # stack so it can be restored after the compiled call, matching
+                # the old _ForceDispatchKeyGuard behavior. Keeping the snapshot
+                # in C++ avoids constructing pybind11 DispatchKeySet /
+                # context-manager instances on every compiled call. The restore
+                # runs in the outer finally below (after the inner finally, i.e.
+                # after pop_dynamic_layer_stack) so the save/restore stack stays
+                # balanced even if the inner finally itself raises (e.g. the
+                # fullgraph "found no compiled frames" error).
+                torch._C._dynamo_save_local_dispatch_key_set()
+                try:
                     call_succeeded = False
                     try:
                         result = fn(*args, **kwargs)
@@ -1273,6 +1279,11 @@ class _TorchDynamoContext:
                         )
                         for cleanup in cleanups:
                             cleanup()
+                finally:
+                    # Restore the local dispatch key set snapshotted above. In an
+                    # outer finally so it runs even if the inner finally raised,
+                    # keeping the save/restore stack balanced.
+                    torch._C._dynamo_restore_local_dispatch_key_set()
                 return result
             finally:
                 if fullgraph_count_enabled:
