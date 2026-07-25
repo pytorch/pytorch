@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -4350,6 +4351,15 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   TORCH_NCCL_ENABLE_TIMING environment variable.
             )")
           .def(
+              "_get_sequence_number",
+              &::c10d::Work::getSequencenumber,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+              Returns:
+                  The process group collective sequence number of the
+                  corresponding collective communication.
+            )")
+          .def(
               "boxed",
               [](c10::intrusive_ptr<::c10d::Work> self) {
                 return torch::jit::toPyObject(c10::IValue(std::move(self)));
@@ -4704,6 +4714,22 @@ with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
 backend has native FlightRecorder support. The hook detaches when remove()
 is called or the returned handle is garbage collected.)")
       .def("remove", &::c10d::FlightRecorderHook::remove);
+
+  py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
+      module, "NanCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::NanCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach a NaN check hook to a process group. Input (send) buffers of
+collectives issued through the group are checked for NaNs, regardless of
+whether the backend has a native NaN checker (ProcessGroupNCCL's
+TORCH_NCCL_NAN_CHECK). Receive buffers are not checked. On CPU a NaN raises
+a RuntimeError; on CUDA it triggers a device-side assert. The process group
+owns the hook, so the returned handle only has to be kept if the check should
+be removed again via remove().)")
+      .def("remove", &::c10d::NanCheckHook::remove);
 
   module.def(
       "_dump_fr_trace_json",
