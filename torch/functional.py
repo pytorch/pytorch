@@ -2040,6 +2040,11 @@ def _unravel_index(indices: Tensor, shape: int | Sequence[int]) -> Tensor:
         lambda: f"'shape' cannot have negative values, but got {tuple(shape)}",
     )
 
+    torch._check_value(
+        all(dim > 0 for dim in shape) or indices.numel() == 0,
+        lambda: f"'shape' cannot have zero dimensions when 'indices' is non-empty, but got {tuple(shape)}",
+    )
+
     coefs = list(
         reversed(
             list(
