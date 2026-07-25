@@ -506,6 +506,7 @@ class TestReductions(TestCase):
                 op(x, dim=-1)
 
     @dtypes(torch.float, torch.bfloat16)
+    @skipIfMPS
     def test_dim_reduction_lastdim(self, device, dtype):
         x = torch.randn(3, 5, 40, device=device, dtype=dtype)
         x = x[:, :, 0:40:2]
@@ -660,6 +661,7 @@ class TestReductions(TestCase):
         if not IS_WINDOWS:
             compare_logcumsumexp(a4_input, a4_expected)
 
+    @skipIfMPS
     def test_sum_parallel(self, device):
         # To use parallel branches we'll need to compare on tensors
         # that are relatively large. Even if this is run on a single
@@ -890,6 +892,7 @@ class TestReductions(TestCase):
             device,
             use_integral=False)
 
+    @skipIfMPS
     def test_mean_int_with_optdtype(self, device):
         a = make_tensor((3, 4, 5), dtype=torch.int64, device=device)
 
@@ -1035,6 +1038,7 @@ class TestReductions(TestCase):
         test_for_dtypes(torch.float32, torch.float32, torch.float64, indices_err)
 
     @onlyAccelerator
+    @skipIfMPS
     def test_mode_wrong_device(self, device):
         # CPU Input Tensor
         x = torch.ones(2)
@@ -1320,6 +1324,7 @@ class TestReductions(TestCase):
         self.assertEqual(tensor.var(0), 0.03125)
 
     @dtypes(torch.bfloat16, torch.float16)
+    @skipIfMPS
     def test_sum_noncontig_lowp(self, device, dtype) -> None:
         dim_sequences = {
             2: [0, 1],
@@ -1363,7 +1368,7 @@ class TestReductions(TestCase):
 
 
     @dtypes(torch.bool, torch.double)
-    @dtypesIfMPS(torch.bool, torch.float)
+    @skipIfMPS
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:
             pylist = tensor.reshape(-1).tolist()
@@ -1425,7 +1430,7 @@ class TestReductions(TestCase):
             self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
 
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float)
+    @skipIfMPS
     def test_sum_out(self, device, dtype: torch.dtype) -> None:
         x = torch.rand(100, 100, dtype=dtype, device=device)
         res1 = torch.sum(x, 1)
@@ -1439,6 +1444,7 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2)
 
     @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.float16, torch.float32)
     def test_prod_gpu(self, device, dtype):
         x = torch.tensor([2, 3, 6, 9, 8], dtype=dtype, device=device)
@@ -1454,6 +1460,7 @@ class TestReductions(TestCase):
             self.assertEqual(output, result_expected)
 
     @dtypes(torch.float)
+    @skipIfMPS
     def test_prod(self, device, dtype):
         x = torch.rand(100, 100, dtype=dtype, device=device)
         res1 = torch.prod(x, 1)
@@ -1462,6 +1469,7 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2)
 
     @dtypes(torch.float16, torch.bfloat16)
+    @skipIfMPS
     def test_prod_lowp(self, device, dtype):
         x = torch.rand(100, 100, dtype=dtype, device=device)
         x_ref = x.float()
@@ -1490,6 +1498,7 @@ class TestReductions(TestCase):
             self.assertEqual(result, expect)
 
     @onlyAccelerator
+    @skipIfMPS
     def test_max_mixed_devices(self, device):
         a = torch.randn(10)
         if torch.accelerator.is_available():
@@ -1501,6 +1510,7 @@ class TestReductions(TestCase):
                               lambda: torch.amax(a, 0, out=values))
 
     @onlyAccelerator
+    @skipIfMPS
     def test_min_mixed_devices(self, device):
         a = torch.randn(10)
         if torch.accelerator.is_available():
@@ -1789,6 +1799,7 @@ class TestReductions(TestCase):
         )
 
     @dtypes(torch.int32, torch.int64)
+    @skipIfMPS
     def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
         # Eager/inductor parity for #183318.
         out_dtype = dtype
@@ -2021,6 +2032,7 @@ class TestReductions(TestCase):
 
     # TODO: update this test to compare against NumPy
     @onlyAccelerator
+    @skipIfMPS
     def test_var(self, device):
         cpu_tensor = torch.randn(2, 3, 3)
         device_tensor = cpu_tensor.to(device)
@@ -2037,6 +2049,7 @@ class TestReductions(TestCase):
 
     # TODO: update this test to compare against NumPy
     @onlyAccelerator
+    @skipIfMPS
     def test_var_large_input(self, device):
         # Large, not-nice input
         cpu_tensor = torch.randn(2 * 32 * 1024 + 1, 2, 67)
@@ -2047,7 +2060,7 @@ class TestReductions(TestCase):
     # TODO: update this to compare against NumPy instead of CPU
     @onlyAccelerator
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float)
+    @skipIfMPS
     def test_sum_noncontig(self, device, dtype):
         x = torch.randn(1, 75, 57, 20, dtype=dtype, device=device).permute(0, 3, 1, 2)
         y = x.cpu()
@@ -2057,6 +2070,7 @@ class TestReductions(TestCase):
 
     # TODO: update this to compare against NumPy instead of CPU
     @onlyAccelerator
+    @skipIfMPS
     def test_min_max_nan(self, device):
         tests = [(lambda x: x.min(), 'min'),
                  (lambda x: x.max(), 'max'),
@@ -2077,6 +2091,7 @@ class TestReductions(TestCase):
 
     # TODO: make this test generic using OpInfos
     @onlyAccelerator
+    @skipIfMPS
     def test_sum_cpu_device_mismatch(self, device):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
@@ -2253,6 +2268,7 @@ class TestReductions(TestCase):
         self.assertEqual(x[:, :2].argmax().item(), 2)
 
     @dtypes(*integral_types_and(torch.bool))
+    @skipIfMPS
     def test_nanmean_integral_types(self, device, dtype):
 
         # List of tensor shapes to test
@@ -2342,6 +2358,7 @@ class TestReductions(TestCase):
         self.assertEqual(x[:, 1], expected, msg=lambda msg: f'{msg}\n{fn_name} with out= kwarg')
 
     @onlyAccelerator
+    @skipIfMPS
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -2352,8 +2369,8 @@ class TestReductions(TestCase):
         self.assertEqual(result, expect)
 
     @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
-    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
     def test_reduction_vectorize_along_input_corner(self, device, dtype):
         # 1D case: sum
         size = 1024 * 1024 * 64 + 3
@@ -3210,6 +3227,7 @@ class TestReductions(TestCase):
         self.assertEqual(3.0, actual.sum())
 
     @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
     def test_histc_min_max_corner_cases_device(self, device, dtype):
         actual = torch.histc(
