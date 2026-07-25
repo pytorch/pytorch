@@ -734,14 +734,9 @@ def _gpu_user_annotation_events(
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
-        # Follow graphed ops onto their reassigned logical lane so the spanning annotation
-        # lands on the same lane as its kernels (else it stays on the capture stream).
-        stream_arr = c["stream_id"]
-        lane_col = c.get("logical_lane")
-        if lane_col is not None:
-            reassign = (c["graph_node_id"] != 0) & (lane_col != stream_arr)
-            stream_arr = np.where(reassign, lane_col, stream_arr)
-        str_l = stream_arr.tolist()
+        # Keep the annotation on the kernel's real capture stream; do not follow graphed
+        # ops onto the synthetic logical lanes assigned by the lane resolver.
+        str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
         for i in range(len(corr_l)):
