@@ -30,6 +30,8 @@ ProcessGroupNCCLLazy::PairFactory makePairFactory(
     pair_options->is_high_priority_stream = options->is_high_priority_stream;
     pair_options->abort_process_on_timeout_or_error =
         options->abort_process_on_timeout_or_error;
+    pair_options->config = cloneNcclConfig(options->config);
+    pair_options->max_event_pool_size = options->max_event_pool_size;
     pair_options->hints = options->hints;
     pair_options->group_name = pair_name;
     return c10::make_intrusive<ProcessGroupNCCL>(

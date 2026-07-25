@@ -41,6 +41,14 @@ void checkSameDtype(
 
 } // namespace
 
+ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
+  ncclConfig_t clone = config;
+  if (clone.netName != nullptr) {
+    clone.netName = strdup(clone.netName);
+  }
+  return clone;
+}
+
 ncclResult_t NCCLException::getResult() const noexcept {
   return result_;
 }
@@ -118,7 +126,8 @@ void ProcessGroupNCCL::init(at::Device device) {
     device_ = bootstrap->getDevice();
 
     if (nccl_comm_ == nullptr) {
-      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->hints);
+      nccl_comm_ = bootstrap->createNcclComm(
+          name_, options_c10d_->config, options_c10d_->hints);
     }
   }
 
@@ -149,7 +158,7 @@ void ProcessGroupNCCL::initNcclResources() {
         c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
   }
 
-  max_event_pool_size_ = kDefaultMaxEventPoolSize;
+  max_event_pool_size_ = options_c10d_->max_event_pool_size;
   if (auto it = options_c10d_->hints.find(std::string(kHintMaxEventPoolSize));
       it != options_c10d_->hints.end()) {
     max_event_pool_size_ = static_cast<size_t>(std::stoull(it->second));

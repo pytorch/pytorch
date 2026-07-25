@@ -119,6 +119,7 @@ __all__ = [
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
+    "gather_single",
     "gather_into_tensor",
     "gather_object",
     "get_backend_config",
@@ -664,25 +665,11 @@ def _create_nccl_process_group(
     return backend_class
 
 
-# NCCLConfig fields that nccl2 accepts as hints, under the same names.
-_NCCL2_CONFIG_HINTS = (
-    "blocking",
-    "cga_cluster_size",
-    "min_ctas",
-    "max_ctas",
-    "split_share",
-    "traffic_class",
-    "collnet_enable",
-    "cta_policy",
-    "nvls_ctas",
-)
-
-
 def _nccl2_options(backend_options: object | None) -> "ProcessGroupNCCL2.Options":
     """
     Resolve the options for an nccl2 backend: a ProcessGroupNCCL2.Options is
-    used as-is, a stock ProcessGroupNCCL.Options is translated into the
-    equivalent hints, anything else falls back to defaults.
+    used as-is, a stock ProcessGroupNCCL.Options has its communicator config
+    carried over, anything else falls back to defaults.
     """
     if isinstance(backend_options, ProcessGroupNCCL2.Options):
         return backend_options
@@ -690,20 +677,7 @@ def _nccl2_options(backend_options: object | None) -> "ProcessGroupNCCL2.Options
     pg_options = ProcessGroupNCCL2.Options()
     if isinstance(backend_options, ProcessGroupNCCL.Options):
         pg_options.is_high_priority_stream = backend_options.is_high_priority_stream
-        # nccl2 takes ncclConfig_t settings as string hints (see
-        # populateNcclConfigFromHints in nccl2/NCCLBootstrap.cpp). Translate
-        # only the known keys, and only where the user changed the value from
-        # the NCCL_CONFIG_INITIALIZER default (which is an undefined sentinel).
-        config = backend_options.config
-        defaults = ProcessGroupNCCL.NCCLConfig()
-        hints = {}
-        for field in _NCCL2_CONFIG_HINTS:
-            value = getattr(config, field, None)
-            if value is not None and value != getattr(defaults, field, None):
-                hints[field] = str(int(value))
-        if config.net_name is not None:
-            hints["net_name"] = config.net_name
-        pg_options.hints = hints
+        pg_options.config = backend_options.config
     return pg_options
 
 
@@ -5384,7 +5358,7 @@ def gather(
 
 
 @_exception_logger
-def gather_into_tensor(
+def gather_single(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
     dst: int | None = None,
@@ -5437,7 +5411,7 @@ def gather_into_tensor(
         >>>     gather_tensor = torch.zeros(2 * 2, dtype=torch.int64, device=device)
         >>> else:
         >>>     gather_tensor = None
-        >>> dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        >>> dist.gather_single(tensor, gather_tensor, dst=0)
         >>> gather_tensor
         tensor([1, 2, 3, 4], device='cuda:0')  # Rank 0
         None                                    # Rank 1
@@ -5446,7 +5420,7 @@ def gather_into_tensor(
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
-            gather_into_tensor,
+            gather_single,
             relevant_args,
             tensor,
             gather_tensor=gather_tensor,
@@ -5459,7 +5433,7 @@ def gather_into_tensor(
     _check_single_tensor(tensor, "tensor")
     group = _group_or_default_group(group)
     if _rank_not_in_group(group):
-        _warn_not_in_group("gather_into_tensor")
+        _warn_not_in_group("gather_single")
         return
     if dst is None and group_dst is None:
         dst = 0
@@ -5480,7 +5454,7 @@ def gather_into_tensor(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    work = group.gather_into_tensor(output_tensor, tensor, opts)
+    work = group.gather_single(output_tensor, tensor, opts)
 
     if async_op:
         return work
@@ -5489,6 +5463,31 @@ def gather_into_tensor(
     ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
+
+
+@_exception_logger
+@deprecated(
+    "`torch.distributed.gather_into_tensor` is deprecated. "
+    "Please use `torch.distributed.gather_single` instead.",
+    category=FutureWarning,
+)
+def gather_into_tensor(
+    tensor: torch.Tensor,
+    gather_tensor: torch.Tensor | None = None,
+    dst: int | None = None,
+    group: ProcessGroup | None = None,
+    async_op: bool = False,
+    group_dst: int | None = None,
+):
+    """
+    Gather the input tensor from all ranks into a single output tensor on ``dst``.
+
+    .. warning::
+        `gather_into_tensor` is deprecated. Users should use `gather_single`
+        instead.
+
+    """
+    return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
 
 
 @_exception_logger

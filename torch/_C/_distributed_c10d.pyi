@@ -632,6 +632,12 @@ class ProcessGroup:
         root: int,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def gather_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     def gather_into_tensor(
         self,
         output: Tensor,
@@ -857,7 +863,6 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
-        net_name: str | None
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
@@ -1122,9 +1127,10 @@ class ProcessGroupXCCL(Backend):
 
 class ProcessGroupNCCL2(Backend):
     class Options(Backend.Options):
+        config: ProcessGroupNCCL.NCCLConfig
         is_high_priority_stream: bool
         abort_process_on_timeout_or_error: bool
-        hints: dict[str, str]
+        max_event_pool_size: int
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 

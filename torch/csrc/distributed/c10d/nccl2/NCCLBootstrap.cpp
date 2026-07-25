@@ -111,7 +111,7 @@ void populateNcclConfigFromHints(
       config.maxCTAs = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.maxCTAs=" << config.maxCTAs;
-    } else if (key == "netName" || key == "net_name") {
+    } else if (key == "netName") {
       config.netName = val.c_str();
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.netName=" << config.netName;
@@ -169,6 +169,7 @@ void populateNcclConfigFromHints(
 
 ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
+    const ncclConfig_t& base_config,
     const std::unordered_map<std::string, std::string>& hints) {
   c10::cuda::CUDAGuard gpuGuard(device_);
   ncclUniqueId uniqueId;
@@ -179,7 +180,7 @@ ncclComm_t NCCLBootstrap::createNcclComm(
   // TODO: add logging on failures and successes
   // TODO: use scalable init
   // TODO: get the local rank
-  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  ncclConfig_t config = base_config;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name.c_str();
 #endif

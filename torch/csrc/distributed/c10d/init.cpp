@@ -2462,8 +2462,8 @@ Arguments:
 
               See :func:`torch.distributed.gather` for more details.)")
           .def(
-              "gather_into_tensor",
-              &::c10d::ProcessGroup::gather_into_tensor,
+              "gather_single",
+              &::c10d::ProcessGroup::gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -2471,7 +2471,21 @@ Arguments:
               R"(Gathers the input tensor from all processes into a single
               output tensor on the root rank.
 
-              See :func:`torch.distributed.gather_into_tensor` for more details.)")
+              See :func:`torch.distributed.gather_single` for more details.)")
+          // Deprecated alias of gather_single, kept for backward
+          // compatibility. Bound to gather_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
+              "gather_into_tensor",
+              &::c10d::ProcessGroup::gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Gathers the input tensor from all processes into a single
+              output tensor on the root rank.
+
+              See :func:`torch.distributed.gather_single` for more details.)")
           .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
@@ -3227,8 +3241,18 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "gather_single",
+              &::c10d::Backend::gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of gather_single, kept for backward
+          // compatibility. Bound to gather_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
               "gather_into_tensor",
-              &::c10d::Backend::gather_into_tensor,
+              &::c10d::Backend::gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -4051,7 +4075,20 @@ Returns:
               R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
 
   intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
-      processGroupNCCL2, "Options", backendOptions)
+      processGroupNCCL2,
+      "Options",
+      backendOptions,
+      R"(
+ProcessGroup options for the nccl2 backend
+
+Example::
+    >>> import torch.distributed as dist
+    >>>
+    >>> nccl_options = dist.ProcessGroupNCCL2.Options(is_high_priority_stream=True)
+    >>> nccl_options.config.cga_cluster_size = 2
+    >>> nccl_options.config.max_ctas = 4
+    >>> dist.init_process_group("nccl2", pg_options=nccl_options)
+      )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
       .def_readwrite(
           "is_high_priority_stream",
@@ -4061,15 +4098,19 @@ Returns:
           &::c10d::nccl2::ProcessGroupNCCL::Options::
               abort_process_on_timeout_or_error)
       .def_readwrite(
-          "hints",
-          &::c10d::nccl2::ProcessGroupNCCL::Options::hints,
-          R"(
-Dict of str -> str configuring the NCCL communicator, e.g.
-{"cga_cluster_size": "2", "max_ctas": "4", "max_event_pool_size": "128"}.
-Keys are ncclConfig_t fields (see populateNcclConfigFromHints) plus
-backend-level hints; unknown keys are ignored with a warning.  The getter
-returns a copy, so set the whole dict rather than mutating it in place.
-)");
+          "max_event_pool_size",
+          &::c10d::nccl2::ProcessGroupNCCL::Options::max_event_pool_size)
+      .def_property(
+          "config",
+          [](::c10d::nccl2::ProcessGroupNCCL::Options& self) -> ncclConfig_t& {
+            return self.config;
+          },
+          [](::c10d::nccl2::ProcessGroupNCCL::Options& self,
+             const ncclConfig_t& config) {
+            self.config = ::c10d::nccl2::cloneNcclConfig(config);
+          },
+          py::return_value_policy::reference_internal,
+          R"(NCCLConfig for the communicator, see ProcessGroupNCCL.Options.config.)");
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)

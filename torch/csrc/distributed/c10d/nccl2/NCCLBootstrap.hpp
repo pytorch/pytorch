@@ -33,8 +33,11 @@ class NCCLBootstrap {
   NCCLBootstrap(NCCLBootstrap&&) = delete;
   NCCLBootstrap& operator=(NCCLBootstrap&&) = delete;
 
+  // `base_config` is the starting configuration; `hints` are applied on top of
+  // it and win on conflict.
   ncclComm_t createNcclComm(
       const std::string& name,
+      const ncclConfig_t& base_config,
       const std::unordered_map<std::string, std::string>& hints = {});
 
   int getRank() {
