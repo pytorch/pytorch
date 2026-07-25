@@ -333,13 +333,11 @@ Tensor index_plumbing(const Tensor & self, const List<std::optional<Tensor>> & i
   indices_value.reserve(indices.size());
   std::vector<std::optional<int64_t>> indices_bdims;
   indices_bdims.reserve(indices.size());
-  for (const auto&& indRef : indices) {
-    std::optional<Tensor> ind = indRef;
-    std::optional<Tensor> index;
+  for (std::optional<Tensor> index : indices) {
     std::optional<int64_t> index_bdim;
-    if (ind.has_value()) {
+    if (index.has_value()) {
       std::tie(index, index_bdim) =
-          unwrapTensorAtLevel(ind.value(), cur_level);
+          unwrapTensorAtLevel(index.value(), cur_level);
     }
     indices_value.push_back(std::move(index));
     indices_bdims.push_back(index_bdim);
