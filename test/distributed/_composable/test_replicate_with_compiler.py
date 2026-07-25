@@ -35,9 +35,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
-device_type = getattr(
-    torch.accelerator.current_accelerator(), "type", "cpu"
-)
+device_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
 
 DIM = 2000
 
