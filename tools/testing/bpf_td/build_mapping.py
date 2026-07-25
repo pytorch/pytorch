@@ -80,16 +80,18 @@ def normalize(path, repo_root, torch_root):
     return None
 
 
-def build(forks, events, records, repo_root, torch_root):
+def build(forks, events, records, repo_root, torch_root, diag):
     mapping = defaultdict(set)
     for rec in records:
         owner = rec["pid"]
         start_ns, end_ns = rec["start_ns"], rec["end_ns"]
         pids = subtree_pids(forks, owner, start_ns, end_ns)
+        diag["subtree_pids"] += len(pids)
         touched = mapping[rec["test_file"]]
         for pid in pids:
             for ns, path in events.get(pid, ()):
                 if start_ns <= ns <= end_ns:
+                    diag["paths_pre_filter"] += 1
                     rel = normalize(path, repo_root, torch_root)
                     if rel is not None:
                         touched.add(rel)
@@ -118,15 +120,32 @@ def main():
             if line:
                 records.append(json.loads(line))
 
-    mapping = build(forks, events, records, repo_root, torch_root)
+    diag = {"subtree_pids": 0, "paths_pre_filter": 0}
+    mapping = build(forks, events, records, repo_root, torch_root, diag)
+
+    # Diagnostics to distinguish failure modes without shipping the raw trace:
+    # pid_overlap == 0 means the recorded owner pids never appear as fork
+    # parents -> pid-namespace mismatch (need --pid=host). paths_pre_filter > 0
+    # but total_paths == 0 -> the repo/torch normalize filter dropped everything.
+    fork_ppids = {ppid for _, ppid, _ in forks}
+    record_pids = {r["pid"] for r in records}
+    sample_paths = sorted({p for evs in events.values() for _, p in evs})[:10]
+
     out = {tf: sorted(paths) for tf, paths in sorted(mapping.items())}
     out["meta"] = {
         "config": args.config,
         "shard": args.shard,
         "num_test_files": len(mapping),
         "num_fork_events": len(forks),
+        "num_open_events": sum(len(v) for v in events.values()),
         "num_pid_records": len(records),
+        "pid_overlap": len(record_pids & fork_ppids),
+        "subtree_pids": diag["subtree_pids"],
+        "paths_pre_filter": diag["paths_pre_filter"],
         "total_paths": sum(len(v) for v in mapping.values()),
+        "repo_root": repo_root,
+        "torch_root": torch_root,
+        "sample_open_paths": sample_paths,
     }
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as f:

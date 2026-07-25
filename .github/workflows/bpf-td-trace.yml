@@ -105,8 +105,10 @@ jobs:
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       # EC2 docker-on-VM honors these; privileged lets run_traced.sh mount
-      # tracefs. No --gpus all: this is a CPU pool with no nvidia runtime.
-      docker-container-options: "--privileged --security-opt seccomp=unconfined"
+      # tracefs. --pid=host makes container pids equal the host pids that
+      # system-wide bpftrace reports, so the pid-tree join in build_mapping.py
+      # matches (without it every test maps to 0 files). No --gpus all: CPU pool.
+      docker-container-options: "--privileged --pid=host --security-opt seccomp=unconfined"
       bpf-td: "1"
       python-version: "3.10"
       compiler: gcc11
