@@ -332,7 +332,7 @@ static Tensor lexsort_rows_perm_mps(const Tensor& mat_2d) {
   auto perm = arange(rows, mat_2d.options().dtype(kLong));
   for (auto c = cols - 1; c >= 0; --c) {
     auto keys = mat_2d.select(1, c).index_select(0, perm);
-    const auto idx = argsort(keys, /*dim=*/0, /*descending=*/false);
+    const auto idx = argsort(keys, /*stable=*/true, /*dim=*/0, /*descending=*/false);
     perm = perm.index_select(0, idx);
   }
   return perm;

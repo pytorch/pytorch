@@ -16,10 +16,11 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.functional import ScalingType
+from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
+from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune
+from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -27,6 +28,7 @@ from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
+    fallback_handler,
     lowerings,
     make_pointwise,
     make_reduction,
@@ -57,6 +59,7 @@ from ..utils import (
 )
 from .mm_common import (
     _is_static_problem,
+    _use_small_mm_pointwise,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -86,7 +89,7 @@ mm_template = TritonTemplate(
     grid=mm_grid,
     source=load_kernel_template("triton_mm")
     if (torch.version.hip is None) or triton_version >= "3.3.0"
-    # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
+    # FIXME: To get around rocm failures.
     # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
@@ -147,13 +150,6 @@ aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.out
 )
 
-aten_addmm_dtype = ExternKernelChoice(
-    torch.addmm,
-    "at::_addmm_dtype_out_cuda",
-    name="addmm_dtype",
-    op_overload=aten.addmm.dtype_out,
-)
-
 aten__int_mm = ExternKernelChoice(
     torch._int_mm, "at::_int_mm_out", op_overload=aten._int_mm.out
 )
@@ -212,6 +208,17 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
+
+
+def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
+    torch._check(
+        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
+        lambda: "input dtypes must be the same",
+    )
+    torch._check(
+        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
+        lambda: "all inputs must be on the same device",
+    )
 
 
 def decomposeK(a, b, k_splits):
@@ -383,6 +390,18 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
+
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
+        counters["inductor"]["decompose_mm_pointwise"] += 1
+        # Clone both to force contiguous strides (#189401): unrolled sum
+        # reduction computes wrong indices for transposed views. Clone both
+        # rather than detecting the transposed side; scheduler fuses the copy.
+        mat1 = L.clone(mat1)
+        mat2 = L.clone(mat2)
+        mat1 = L.unsqueeze(mat1, -1)
+        mat2 = L.unsqueeze(mat2, 0)
+        return L.sum_(L.mul(mat1, mat2), axis=1)
+
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"
 
@@ -614,12 +633,31 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
-def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None):
+def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if beta == 0 and mat1.get_device().type == "cuda":
+        _check_addmm_input_metadata(inp, mat1, mat2)
+        if alpha == 0:
+            _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+            return lowerings[aten.full](
+                layout.size,
+                0,
+                dtype=layout.dtype,
+                device=layout.device,
+            )
+        if layout is not None:
+            result = lowerings[aten.mm](mat1, mat2, layout=layout)
+        else:
+            result = lowerings[aten.mm](mat1, mat2)
+        if alpha != 1:
+            result = lowerings[aten.mul](alpha, result)
+        return result
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
+            _check_addmm_input_metadata(inp, mat1, mat2)
             arg1 = 0
         else:
             arg1 = lowerings[aten.mul](beta, inp)
@@ -631,50 +669,22 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
 
         return lowerings[aten.add](arg1, arg2)
 
-    if out_dtype is not None:
-        input_dtype = mat1.get_dtype()
-        torch._check(
-            mat2.get_dtype() == input_dtype,
-            lambda: "input dtypes must be the same",
-        )
-        torch._check(
-            inp.get_dtype() == input_dtype,
-            lambda: "input dtypes must be the same",
-        )
-        torch._check(
-            mat1.get_device().type == "cuda",
-            lambda: "out_dtype is only supported for CUDA",
-        )
-        torch._check(
-            out_dtype == input_dtype
-            or (
-                out_dtype == torch.float32
-                and input_dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
-        )
-
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
-    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
-        mat1, mat2, inp, layout=layout, out_dtype=out_dtype
-    )
+    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    inp = realize_inputs(inp)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
 
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
-        [inp_expanded, mat1, mat2],
-        scalars=dict(alpha=alpha, beta=beta),
-        out_dtype=out_dtype,
+        [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
     kernel_inputs_aten = MMKernelInputs(
-        [inp, mat1, mat2],
-        scalars=dict(alpha=alpha, beta=beta),
-        out_dtype=out_dtype,
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
 
     choices: list[ChoiceCaller] = []
-    kwarg_overrides: dict[str, dict[str, Any]] = {}
+
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
     log.info(
@@ -686,23 +696,14 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         mat2.get_dtype(),
         layout,
     )
-    aten_handler: ExternKernelChoice = aten_addmm
-    aten_extra_kwargs: dict[str, Any] = {}
-    if out_dtype is not None:
-        aten_handler = aten_addmm_dtype
-        aten_extra_kwargs = {"out_dtype": out_dtype}
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
-        if aten_extra_kwargs:
-            kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
-
         choices.extend(
             V.choices.get_template_configs(
                 kernel_inputs_aten,
-                [aten_handler],
+                [aten_addmm],
                 name,
-                kwarg_overrides=kwarg_overrides,
             )
         )
         node, _ = autotune_select_algorithm(
@@ -713,12 +714,9 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
 
     if use_aten_gemm_kernels():
-        aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_handler]
-        if aten_extra_kwargs:
-            kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
+        aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
         if (
-            out_dtype is None
-            and inp.get_stride()[0] == 0
+            inp.get_stride()[0] == 0
             and len(inp.get_size()) == 2
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
@@ -727,19 +725,10 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
 
         # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
         choices.extend(
-            V.choices.get_template_configs(
-                kernel_inputs_aten,
-                aten_templates,
-                name,
-                kwarg_overrides=kwarg_overrides,
-            )
+            V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
         )
 
-    if (
-        out_dtype is None
-        and is_nonzero
-        and use_triton_template(layout, check_max_autotune=False)
-    ):
+    if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
         if use_triton_blackwell_tma_template(
@@ -752,59 +741,63 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             else:
                 templates_to_use.append(persistent_mm_template)
 
-        templates_to_use.append(addmm_contiguous_subgraph_template)
-
+        # Manually call get_template_configs as use 1-D bias if possible
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+            )
+        )
     # Single unified call for all templates
     choices.extend(
-        V.choices.get_template_configs(
-            kernel_inputs, templates_to_use, name, kwarg_overrides=kwarg_overrides
-        )
+        V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
-    if out_dtype is not None:
-        log.warning(
-            "Skipping CUTLASS, CK, and CPP GEMM backends because out_dtype is not None "
-            "(out_dtype=%s). These backends do not currently support explicit output dtype.",
-            out_dtype,
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op(name)
+    ):
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            # reorder here because CUTLASS expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
         )
-    else:
-        if (
-            is_nonzero
-            and use_cutlass_template(layout, m, n, k)
-            and _use_cutlass_for_op(name)
-        ):
-            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
-                choices,
-                layout,
-                # reorder here because CUTLASS expects (x, w, bias) but torch
-                # is bias, x, w
-                kernel_inputs.nodes(reorder=[1, 2, 0]),
-                alpha=alpha,
-                beta=beta,
-                input_reorder=[2, 0, 1],
-            )
 
-        if is_nonzero and use_ck_gemm_template(layout, m, n, k):
-            CKGemmTemplate.add_ck_gemm_choices(
-                choices,
-                layout,
-                # reorder here because CK expects (x, w, bias) but torch
-                # is bias, x, w
-                kernel_inputs.nodes(reorder=[1, 2, 0]),
-                alpha=alpha,
-                beta=beta,
-                input_reorder=[2, 0, 1],
-            )
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
+        from ..codegen.nv_universal_gemm import add_nv_universal_addmm_choices
 
-        if use_cpp_gemm_template(layout, mat1, mat2):
-            CppGemmTemplate.add_choices(
-                choices,
-                layout,
-                kernel_inputs.nodes(),
-                alpha=alpha,
-                beta=beta,
-                has_bias=True,
-            )
+        # inp is the original (un-expanded) bias, so a 1D row vector routes to
+        # the row-broadcast epilogue impl.
+        add_nv_universal_addmm_choices(
+            choices, layout, kernel_inputs, inp, alpha=alpha, beta=beta
+        )
+
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(
+            choices,
+            layout,
+            # reorder here because CK expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
+        )
+
+    if use_cpp_gemm_template(layout, mat1, mat2):
+        CppGemmTemplate.add_choices(
+            choices,
+            layout,
+            kernel_inputs.nodes(),
+            alpha=alpha,
+            beta=beta,
+            has_bias=True,
+        )
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
     return node
@@ -833,7 +826,8 @@ def tuned_sparse_semi_structured_mm(
             [n, 1],
         )
     else:
-        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+        if out_dtype is not None:
+            raise AssertionError("out_dtype is ignored if layout is specified.")
 
     choices = (
         [
@@ -952,7 +946,237 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
-@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
+# Inductor has no template or extern choice that understands swizzled scale
+# layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
+# is False because this handler is invoked manually from the lowering below, not
+# registered as the op's global fallback.
+scaled_mm_v2_fallback = fallback_handler(
+    aten._scaled_mm_v2.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)
+def tuned_scaled_mm_v2(
+    mat_a,
+    mat_b,
+    scale_a: list[Any],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[Any],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    bias=None,
+    out_dtype=None,
+    contraction_dim=None,
+    use_fast_accum=False,
+    layout=None,
+):
+    """
+    Performs an optimized matrix multiplication where scaling factors are
+    applied to the inputs per the supplied recipes, and optionally swizzled.
+
+    This is the _scaled_mm_v2 API, which takes scale recipes (ScalingType) and
+    swizzle patterns alongside the scale tensors, and supports multi-level
+    scaling via lists.
+    """
+
+    # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
+    # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,
+    # RowWise, and DeepSeek BlockWise1x128/128x128). Everything else has no
+    # template or extern choice here, so defer to the eager _scaled_mm_v2 op:
+    #   - swizzled scale layouts (e.g. CUDA/Blackwell MXFP8/NVFP4)
+    #   - the blockwise MX/NVFP4 recipes BlockWise1x32/1x16 (also how XPU
+    #     expresses MX/NVFP4, with NO_SWIZZLE)
+    #   - multi-level scales (two-level NVFP4)
+    #   - any non-fp32 block scale
+    # The eager op is called directly so it keeps its native v2 scale_b
+    # convention, unlike the v1 aten__fp8_mm choice used on the supported path.
+    def check_supported_recipe(recipe: list[int]) -> bool:
+        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
+        return all(ScalingType(r) not in disallowed for r in recipe)
+
+    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
+    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
+        recipe_b
+    )
+    if (
+        any(s != 0 for s in swizzle_a)
+        or any(s != 0 for s in swizzle_b)
+        or not supported_recipe
+        or not is_single_level_scale
+        or scale_a[0].dtype != torch.float32
+    ):
+        # contraction_dim is a non-optional int[] in the schema (default []);
+        # this lowering defaults it to None, so coerce before the eager call.
+        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
+        return scaled_mm_v2_fallback(
+            mat_a,
+            mat_b,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            fallback_contraction_dim,
+            use_fast_accum,
+        )
+    # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
+    m, n, k, layout, mat_a, mat_b = mm_args(
+        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    )
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm_v2.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
+    name = "scaled_mm"
+    check_supported_striding(mat_a, mat_b)
+
+    scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
+
+    input_nodes: list[Any]
+
+    if not bias:
+        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
+    else:
+        bias_real = realize_inputs(bias)
+        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
+
+    # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
+    kernel_inputs = MMKernelInputs(
+        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+    )
+
+    choices: list[ChoiceCaller] = []
+
+    # Collect all templates for unified call
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    kwarg_overrides = {}
+
+    if use_aten_gemm_kernels():
+        templates_to_use.append(aten__fp8_mm)
+        kwarg_overrides[aten__fp8_mm.uid] = dict(
+            out_dtype=out_dtype, use_fast_accum=use_fast_accum
+        )
+
+    _, is_nonzero = _is_static_problem(layout)
+
+    if (
+        # We don't have triton lowerings for the MX variants yet
+        is_single_level_scale
+        and supported_recipe
+        and scale_a[0].dtype == torch.float32
+        and is_nonzero
+        and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
+    ):
+        overriders = dict(USE_FAST_ACCUM=use_fast_accum)
+
+        # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
+        #       first scale types passed.
+        scale_option_a, scale_option_b = (
+            ScalingType(recipe_a[0]),
+            ScalingType(recipe_b[0]),
+        )
+
+        # TODO (paulzhan): There is no template that exists for bias and TMA
+        # Don't run tma template currently if bias exist
+        if (
+            use_triton_tma_template(mat_a, mat_b, output_layout=layout, add_guards=True)
+            and not bias
+        ):
+            overriders["SCALE_RECIPE_A"] = scale_option_a.value
+            overriders["SCALE_RECIPE_B"] = scale_option_b.value
+
+            if use_triton_scaling_template(
+                scale_option_a, scale_option_b, epilogue_scaling_types
+            ):
+                templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
+                kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
+                    overriders
+                )
+            elif use_triton_scaling_template(
+                scale_option_a, scale_option_b, main_loop_scaling_types
+            ):
+                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+
+                templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
+                kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
+                    overriders
+                )
+            else:
+                raise AssertionError(
+                    "Inductor Triton does not support scaling options that are present "
+                    + "in both epilogue scaling and main loop scaling"
+                )
+
+        if (
+            use_triton_blackwell_tma_template(
+                mat_a, mat_b, output_layout=layout, add_guards=True
+            )
+            and not bias
+        ):
+            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
+                overriders
+            )
+
+        if use_triton_scaling_template(
+            scale_option_a, scale_option_b, epilogue_scaling_types
+        ):
+            templates_to_use.append(mm_template)
+            kwarg_overrides[mm_template.uid] = overriders
+
+    # Single unified call for all templates
+    choices.extend(
+        V.choices.get_template_configs(
+            kernel_inputs,
+            templates_to_use,
+            name,
+            kwarg_overrides=kwarg_overrides,
+        )
+    )
+
+    # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        add_nv_universal_scaled_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+            kernel_inputs=kernel_inputs,
+        )
+
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op(name)
+    ):
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            kernel_inputs.nodes(),  # type: ignore[arg-type]
+            use_fast_accum=use_fast_accum,  # type: ignore[arg-type]
+        )
+
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
+
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
+
+
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a,
     mat_b,
@@ -1027,7 +1251,7 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We don't have triton lowerings for the MX variants yet
         scale_a.dtype == torch.float32
         and is_nonzero
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
@@ -1123,8 +1347,8 @@ def tuned_scaled_mm(
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
-            kernel_inputs.nodes(),
-            use_fast_accum=use_fast_accum,
+            kernel_inputs.nodes(),  # type: ignore[arg-type]
+            use_fast_accum=use_fast_accum,  # type: ignore[arg-type]
         )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):

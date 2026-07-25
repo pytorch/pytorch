@@ -18,7 +18,7 @@ import dataclasses
 import dis
 import functools
 import itertools
-import operator
+import re
 import sys
 import types
 import uuid
@@ -532,6 +532,53 @@ def create_swap(n: int) -> list[Instruction]:
     ]
 
 
+def get_call_callable_depth(opname: str, arg: int) -> int:
+    """Return the depth of the callable from TOS for a call instruction.
+
+    Depth is 1-indexed: TOS = 1, below-TOS = 2, etc.  This encodes the
+    per-version stack layouts for every call instruction variant.
+
+    Note: on 3.11-3.12, CPython's CALL can have either NULL or self at the
+    bottom depending on function vs method call.  Dynamo's LOAD_METHOD
+    normalizes method calls to NULL + bound_method, so the bottom is always
+    NULL and the callable is always at depth arg + 1.
+
+    Stack layouts (bottom-to-top within the call's frame):
+      CALL (3.13+):            callable  NULL  arg0 ... argN-1
+      CALL (3.11-3.12):        NULL  callable  arg0 ... argN-1
+      CALL_KW (3.13+):         callable  NULL  arg0 ... argN-1  kw_names
+      CALL_FUNCTION (3.10):    callable  arg0 ... argN-1
+      CALL_FUNCTION_KW (3.10): callable  arg0 ... argN-1  kw_names
+      CALL_FUNCTION_EX:
+        3.14+:                 callable  NULL  args_tuple  kwargs_or_null
+        3.13:                  callable  NULL  args_tuple [kwargs_dict]
+        3.11-3.12:             NULL  callable  args_tuple [kwargs_dict]
+        3.10:                  callable  args_tuple [kwargs_dict]
+    """
+    if opname in ("CALL", "CALL_KW"):
+        kw_extra = 1 if opname == "CALL_KW" else 0
+        if sys.version_info >= (3, 13):
+            return arg + 2 + kw_extra
+        else:
+            # 3.11-3.12: NULL is always at bottom (Dynamo normalizes
+            # LOAD_METHOD to NULL + bound_method)
+            return arg + 1 + kw_extra
+    elif opname in ("CALL_FUNCTION", "CALL_FUNCTION_KW"):
+        kw_extra = 1 if opname == "CALL_FUNCTION_KW" else 0
+        return arg + 1 + kw_extra
+    elif opname == "CALL_FUNCTION_EX":
+        if sys.version_info >= (3, 14):
+            return 4
+        elif sys.version_info >= (3, 13):
+            return 3 + (arg & 1)
+        elif sys.version_info >= (3, 11):
+            return 2 + (arg & 1)
+        else:
+            return 2 + (arg & 1)
+    else:
+        raise ValueError(f"not a call instruction: {opname}")
+
+
 def create_binary_slice(
     start: int | None, end: int | None, store: bool = False
 ) -> list[Instruction]:
@@ -609,106 +656,6 @@ def create_binary_subscr() -> Instruction:
     return create_instruction("BINARY_OP", arg=26)
 
 
-# Map operator functions to BINARY_OP arg values (Python 3.11+)
-# or to pre-3.11 opnames. Used by create_binary_op and symbolic_convert.
-if sys.version_info >= (3, 11):
-    _NB_OP_TO_ARG: dict[str, int] = {
-        name: idx
-        for idx, (name, _) in enumerate(
-            dis._nb_ops  # pyrefly: ignore[missing-attribute]
-        )
-    }
-    # List of opnames indexed by arg value, for use by symbolic_convert.BINARY_OP
-    _NB_OP_NAMES: list[str] = [
-        name
-        for name, _ in dis._nb_ops  # pyrefly: ignore[missing-attribute]
-    ]
-    _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {
-        operator.add: _NB_OP_TO_ARG["NB_ADD"],
-        operator.and_: _NB_OP_TO_ARG["NB_AND"],
-        operator.floordiv: _NB_OP_TO_ARG["NB_FLOOR_DIVIDE"],
-        operator.lshift: _NB_OP_TO_ARG["NB_LSHIFT"],
-        operator.matmul: _NB_OP_TO_ARG["NB_MATRIX_MULTIPLY"],
-        operator.mul: _NB_OP_TO_ARG["NB_MULTIPLY"],
-        operator.mod: _NB_OP_TO_ARG["NB_REMAINDER"],
-        operator.or_: _NB_OP_TO_ARG["NB_OR"],
-        operator.pow: _NB_OP_TO_ARG["NB_POWER"],
-        operator.rshift: _NB_OP_TO_ARG["NB_RSHIFT"],
-        operator.sub: _NB_OP_TO_ARG["NB_SUBTRACT"],
-        operator.truediv: _NB_OP_TO_ARG["NB_TRUE_DIVIDE"],
-        operator.xor: _NB_OP_TO_ARG["NB_XOR"],
-    }
-    _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {}
-else:
-    _NB_OP_TO_ARG = {}
-    _NB_OP_NAMES: list[str] = []
-    _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {}
-    _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {
-        operator.add: "BINARY_ADD",
-        operator.and_: "BINARY_AND",
-        operator.floordiv: "BINARY_FLOOR_DIVIDE",
-        operator.lshift: "BINARY_LSHIFT",
-        operator.matmul: "BINARY_MATRIX_MULTIPLY",
-        operator.mul: "BINARY_MULTIPLY",
-        operator.mod: "BINARY_MODULO",
-        operator.or_: "BINARY_OR",
-        operator.pow: "BINARY_POWER",
-        operator.rshift: "BINARY_RSHIFT",
-        operator.sub: "BINARY_SUBTRACT",
-        operator.truediv: "BINARY_TRUE_DIVIDE",
-        operator.xor: "BINARY_XOR",
-    }
-
-
-def create_binary_op(op: Callable[..., Any]) -> Instruction | None:
-    """Create a BINARY_OP instruction for the given operator function.
-
-    Returns None if the operator is not a supported binary operation.
-    """
-    if sys.version_info >= (3, 11):
-        if op not in _OPERATOR_TO_BINARY_OP_ARG:
-            return None
-        return create_instruction("BINARY_OP", arg=_OPERATOR_TO_BINARY_OP_ARG[op])
-    else:
-        if op not in _OPERATOR_TO_BINARY_OPNAME:
-            return None
-        return create_instruction(_OPERATOR_TO_BINARY_OPNAME[op])
-
-
-# Comparison operator to COMPARE_OP arg mapping.
-# The arg encoding changed between Python versions (3.12 vs 3.13), so we
-# compute the values dynamically at import time by disassembling actual bytecode.
-def _get_compare_op_arg(op_str: str) -> int:
-    """Get the COMPARE_OP arg for a comparison operator by disassembling bytecode."""
-    code = compile(f"a {op_str} b", "<compare>", "eval")
-    for instr in dis.get_instructions(code):
-        if instr.opname == "COMPARE_OP":
-            if instr.arg is None:
-                raise RuntimeError(f"COMPARE_OP for {op_str} has no arg")
-            return instr.arg
-    raise RuntimeError(f"Could not find COMPARE_OP for {op_str}")
-
-
-_OPERATOR_TO_COMPARE_OP_ARG: dict[Callable[..., Any], int] = {
-    operator.lt: _get_compare_op_arg("<"),
-    operator.le: _get_compare_op_arg("<="),
-    operator.eq: _get_compare_op_arg("=="),
-    operator.ne: _get_compare_op_arg("!="),
-    operator.gt: _get_compare_op_arg(">"),
-    operator.ge: _get_compare_op_arg(">="),
-}
-
-
-def create_compare_op(op: Callable[..., Any]) -> Instruction | None:
-    """Create a COMPARE_OP instruction for the given comparison operator function.
-
-    Returns None if the operator is not a supported comparison operation.
-    """
-    if op not in _OPERATOR_TO_COMPARE_OP_ARG:
-        return None
-    return create_instruction("COMPARE_OP", arg=_OPERATOR_TO_COMPARE_OP_ARG[op])
-
-
 def create_build_tuple(n: int) -> Instruction:
     if sys.version_info >= (3, 14) and n == 0:
         return create_load_const(())
@@ -720,7 +667,7 @@ def linetable_writer(
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
     Used to create typing.CodeType.co_linetable
-    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
+    See https://github.com/python/cpython/blob/3.10/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
     if sys.version_info[:2] != (3, 10):
@@ -1348,7 +1295,7 @@ def strip_extended_args(instructions: list[Instruction]) -> None:
 def overwrite_instruction(
     old_inst: Instruction, new_insts: list[Instruction]
 ) -> list[Instruction]:
-    # update old_inst.exnt_tab_entry.end if necessary
+    # update old_inst.exn_tab_entry.end if necessary
     if (
         old_inst.exn_tab_entry
         and old_inst.exn_tab_entry.end is old_inst
@@ -1433,6 +1380,27 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
             inst.arg = 2
             inst.argval = 2
             new_insts.append(subscr_inst)
+    instructions[:] = new_insts
+
+
+def remove_load_attr_method_variant(instructions: list[Instruction]) -> None:
+    """On 3.12+, LOAD_ATTR with arg%2==1 is the method variant that pushes 2
+    values (NULL/self + method).  Normalize it to a non-method LOAD_ATTR
+    (1 value) followed by PUSH_NULL (+ SWAP on 3.12 where NULL goes below
+    the callable).  This lets break_graph_if_unsupported handle LOAD_ATTR
+    uniformly as a single-output instruction."""
+    new_insts: list[Instruction] = []
+    for inst in instructions:
+        if inst.opname == "LOAD_ATTR" and inst.arg is not None and inst.arg % 2:
+            replace_insts = [
+                create_instruction("LOAD_ATTR", arg=inst.arg & ~1, argval=inst.argval),
+                create_instruction("PUSH_NULL"),
+            ]
+            if sys.version_info < (3, 13):
+                replace_insts.append(create_instruction("SWAP", arg=2))
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
+        else:
+            new_insts.append(inst)
     instructions[:] = new_insts
 
 
@@ -1774,7 +1742,15 @@ def fix_vars(
                     instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                instructions[i].arg = get_name_index(instructions[i].argval)
+                arg = get_name_index(instructions[i].argval)
+                if (
+                    sys.version_info >= (3, 15)
+                    and instructions[i].opname == "IMPORT_NAME"
+                ):
+                    arg <<= 2
+                    # Set the second bit to ensure eager imports, since lazy imports are only valid at module scope
+                    arg |= 0x02
+                instructions[i].arg = arg
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
@@ -1987,6 +1963,7 @@ def _cached_cleaned_instructions(
             remove_jump_if_none(instructions)
             if sys.version_info >= (3, 12):
                 remove_binary_store_slice(instructions)
+                remove_load_attr_method_variant(instructions)
             if sys.version_info >= (3, 13):
                 remove_fused_load_store(instructions)
         if config.debug_force_graph_break_on_leaf_return:
@@ -2005,6 +1982,21 @@ def unique_id(name: str, with_uuid: bool = False) -> str:
     if with_uuid:
         ret += f"_{uuid.uuid4()}".replace("-", "_")
     return ret
+
+
+COMPILED_FN_PREFIX = "__compiled_fn"
+_COMPILED_FN_NAME_RE = re.compile(
+    rf"^{COMPILED_FN_PREFIX}_\d+_"
+    r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
+)
+
+
+def make_compiled_fn_name() -> str:
+    return unique_id(COMPILED_FN_PREFIX, with_uuid=True)
+
+
+def is_compiled_fn_name(name: str) -> bool:
+    return _COMPILED_FN_NAME_RE.fullmatch(name) is not None
 
 
 def is_generator(code: types.CodeType) -> bool:

@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-A100-perf-nightly
 
 on:
@@ -76,7 +77,6 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc
       opt_out_experiments: lf
 
   build:
@@ -89,6 +89,7 @@ jobs:
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -114,7 +115,6 @@ jobs:
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio fbgemm torchao"
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -136,10 +136,11 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test-weekly:
@@ -159,10 +160,11 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test:
@@ -181,8 +183,9 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit

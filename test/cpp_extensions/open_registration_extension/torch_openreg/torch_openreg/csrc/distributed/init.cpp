@@ -12,6 +12,7 @@
 
 namespace py = pybind11;
 
+// LITERALINCLUDE START: OCCL PYBIND
 void initProcessGroupBindings(py::module& m) {
   py::class_<c10d::ProcessGroupOCCL, c10d::Backend, c10::intrusive_ptr<c10d::ProcessGroupOCCL>>(m, "ProcessGroupOCCL")
       .def(
@@ -26,4 +27,5 @@ void initProcessGroupBindings(py::module& m) {
           py::arg("size"),
           py::arg("timeout") = std::chrono::milliseconds(30 * 60 * 1000));
 }
+// LITERALINCLUDE END: OCCL PYBIND
 #endif // USE_DISTRIBUTED
