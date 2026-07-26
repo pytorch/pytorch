@@ -6299,7 +6299,9 @@ def trace(self: TensorLikeType) -> TensorLikeType:
         self.ndim == 2,
         lambda: f"expected a matrix, but got tensor with dim {self.ndim}",
     )
-    return torch.sum(torch.diag(self, 0))
+    n = self.size(-1)
+    eye = torch.eye(n, dtype=self.dtype, device=self.device)
+    return (self * eye).sum()
 
 
 def _make_r_binary_op(base_op):
