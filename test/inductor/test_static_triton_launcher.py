@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import torch
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
@@ -150,6 +151,55 @@ class TestStaticTritonLauncherUnit(TestCase):
         iface = get_interface_for_device("cpu")
         with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
             pass
+
+    def test_global_scratch_allocation(self):
+        fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
+        src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
+        metadata = SimpleNamespace(
+            num_warps=4,
+            shared=0,
+            num_ctas=1,
+            global_scratch_size=32,
+            global_scratch_align=16,
+        )
+        compiled_kernel = SimpleNamespace(
+            src=src,
+            metadata=metadata,
+            _cubin_path="/tmp/scratch_kernel.cubin",
+            hash="hash",
+            asm={"cubin": b"cubin"},
+        )
+        kernel = StaticallyLaunchedCudaKernel(compiled_kernel)
+        kernel.function = 1
+        scratch = SimpleNamespace(data_ptr=lambda: 2)
+        alloc_fn = mock.Mock(return_value=scratch)
+        launch_kernel = mock.Mock()
+        kernel.C_impl = SimpleNamespace(_launch_kernel=launch_kernel)
+
+        from triton.runtime import _allocation
+
+        allocator = SimpleNamespace(get=lambda: alloc_fn)
+        with mock.patch.object(_allocation, "_allocator", allocator):
+            kernel.run(2, 3, 1, 4, 5)
+
+        alloc_fn.assert_called_once_with(192, 16, 4)
+        launch_kernel.assert_called_once_with(1, 2, 3, 1, 4, 0, "OO", (5, scratch), 4)
+
+        import types
+
+        def launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            launcher_body.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        with mock.patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+        fast_launcher.assert_not_called()
 
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):

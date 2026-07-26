@@ -104,23 +104,17 @@ class StaticallyLaunchedTritonKernel:
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
 
-        def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
-            # pyrefly: ignore [missing-attribute]
-            if hasattr(kernel.metadata, param_name):
-                # pyrefly: ignore [missing-attribute]
-                if getattr(kernel.metadata, param_name) > 0:
-                    raise NotImplementedError(
-                        f"{scratch_name} scratch not yet supported"
-                    )
-                return True
-            return False
-
-        # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
-        # Inductor never uses this field or enables it, but we still have to pass
-        # an extra None into the set of params if its enabled
-        self.has_global_scratch = needs_scratch_arg("Global", "global_scratch_size")
+        # Newer triton versions pass extra scratch parameters to the compiled kernel.
+        self.global_scratch_size = getattr(kernel.metadata, "global_scratch_size", None)
+        self.global_scratch_align = getattr(kernel.metadata, "global_scratch_align", 1)
+        self.has_global_scratch = self.global_scratch_size is not None
         # same situation for profile scratch - triton-lang/triton#7258
-        self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
+        self.profile_scratch_size = getattr(
+            kernel.metadata, "profile_scratch_size", None
+        )
+        if self.profile_scratch_size and self.profile_scratch_size > 0:
+            raise NotImplementedError("Profile scratch not yet supported")
+        self.has_profile_scratch = self.profile_scratch_size is not None
 
         # pyrefly: ignore [missing-attribute]
         self.tensordesc_meta = getattr(kernel.metadata, "tensordesc_meta", None)
@@ -435,10 +429,24 @@ class StaticallyLaunchedTritonKernel:
             args = (*args, None, None)
 
         else:
-            for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
-                if has_scratch:
-                    arg_tys = arg_tys + "O"
-                    args = (*args, None)
+            if self.has_global_scratch:
+                global_scratch = None
+                if self.global_scratch_size:
+                    from triton.runtime import _allocation
+
+                    allocator = _allocation._allocator
+                    if hasattr(allocator, "get"):
+                        allocator = allocator.get()
+                    global_scratch = allocator(
+                        grid_x * grid_y * grid_z * self.global_scratch_size,
+                        self.global_scratch_align,
+                        stream,
+                    )
+                arg_tys = arg_tys + "O"
+                args = (*args, global_scratch)
+            if self.has_profile_scratch:
+                arg_tys = arg_tys + "O"
+                args = (*args, None)
         # pyrefly: ignore [bad-argument-type]
         if len(args) != len(arg_tys):
             raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")

@@ -32,6 +32,7 @@ from typing import (
 )
 
 import torch
+
 from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
 from torch._inductor.config import triton as inductor_triton_config
@@ -2641,6 +2642,8 @@ class CachingAutotuner(KernelInterface):
             # kernel.function is None; the fast launcher binds a single device's
             # function pointer, so fall back to the per-device static launcher.
             if getattr(kernel, "device_agnostic", False):
+                return None
+            if getattr(kernel, "global_scratch_size", 0):
                 return None
             cu_function = kernel.function
             num_warps = kernel.num_warps
