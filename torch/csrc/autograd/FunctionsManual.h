@@ -405,7 +405,7 @@ Tensor mean_backward(
     const Tensor& grad,
     c10::SymIntArrayRef shape,
     at::OptionalIntArrayRef opt_dim,
-    c10::SymInt numel,
+    const c10::SymInt& numel,
     bool keepdim);
 Tensor var_mean_backward(
     const Tensor& gvar,
@@ -641,7 +641,7 @@ Tensor slice_backward_wrapper(
     int64_t dim,
     std::optional<c10::SymInt> start,
     std::optional<c10::SymInt> end,
-    c10::SymInt step);
+    const c10::SymInt& step);
 std::tuple<Tensor, Tensor> linalg_eig_jvp(
     const Tensor& dA,
     const Tensor& L,
@@ -1129,7 +1129,7 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     at::SymIntArrayRef stride,
     at::SymIntArrayRef dilation,
     bool transposed,
-    c10::SymInt groups,
+    const c10::SymInt& groups,
     ::std::array<bool, 2> output_mask);
 
 Tensor scatter_reduce_jvp(

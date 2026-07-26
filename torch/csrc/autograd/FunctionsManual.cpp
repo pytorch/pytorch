@@ -87,6 +87,7 @@ void update_wrapped_number(Tensor& input, Tensor& output) {
   }
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
   TORCH_CHECK(range.second <= out.size());
   TORCH_CHECK(
@@ -94,6 +95,7 @@ void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
   out[range.first] = t;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   TORCH_CHECK(range.second <= out.size());
   TORCH_CHECK(
@@ -128,6 +130,7 @@ Tensor not_implemented(const char* name, const char* reason) {
   return not_implemented_base<Tensor>(name, reason);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<Tensor> not_implemented_list(const char* name, const char* reason) {
   return not_implemented_base<std::vector<Tensor>>(name, reason);
 }
@@ -623,6 +626,7 @@ Tensor _nested_from_padded_backward(
   return grad.to_padded_tensor(0, input.sizes());
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
     const variable_list& grads,
     const Tensor& self,
@@ -714,6 +718,7 @@ Tensor pow_backward(Tensor grad, const Tensor& self, const Scalar& exponent) {
     return pow_backward_self(
         grad, self, at::scalar_tensor(exponent, self.options()));
   }
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   if (exponent.equal(0.0)) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
@@ -782,6 +787,7 @@ Tensor pow_backward_exponent(
   auto base_ = at::isComplexType(promoted_dtype)
       ? Scalar(base.toComplexDouble())
       : Scalar(base.toDouble());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   if (base.equal(0.0)) {
     auto cond = [](const auto& exp) {
       if (exp.is_complex()) {
@@ -854,6 +860,7 @@ template Tensor mul_tensor_backward(const Tensor&, const Tensor&, ScalarType);
 template Tensor mul_tensor_backward(const Tensor&, const Scalar&, ScalarType);
 
 template <typename T>
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor div_tensor_self_backward(
     const Tensor& grad,
     const T& other,
@@ -877,6 +884,7 @@ template Tensor div_tensor_self_backward(
     ScalarType,
     const std::optional<std::string_view>&);
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -979,7 +987,7 @@ Tensor mean_backward(
     const Tensor& grad,
     c10::SymIntArrayRef shape,
     OptionalIntArrayRef opt_dim,
-    c10::SymInt numel,
+    const c10::SymInt& numel,
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
   auto n =
@@ -987,6 +995,7 @@ Tensor mean_backward(
   return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list) {
   auto result = std::vector<c10::SymInt>();
   result.reserve(list.size());
@@ -997,6 +1006,7 @@ std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list) {
   return result;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
   auto result = std::vector<int64_t>();
   result.reserve(list.size());
@@ -1188,6 +1198,7 @@ Tensor logcumsumexp_jvp(
   // NB: for simplicity, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, dim]() {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!at::is_complex(self_p)) {
       return (self_p - std::get<0>(at::max(self_p, dim, true)))
           .exp(); // Use the exp-normalize trick
@@ -1214,6 +1225,7 @@ Tensor logcumsumexp_jvp(
   }
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   c10::SymIntArrayRef sizes;
   at::TensorOptions o;
@@ -1232,6 +1244,7 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   return at::stack(grads_tensors, dim);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor unbind_backward_nested(
     const variable_list& grads,
     const Tensor& nt_sizes,
@@ -1253,6 +1266,7 @@ Tensor unbind_backward_nested(
   return at::_nested_tensor_from_tensor_list(grads_tensors);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor unbind_backward_nested_jagged(
     const variable_list& grads,
     const Tensor& self,
@@ -1305,6 +1319,7 @@ Tensor unsqueeze_to(
   return unsqueeze_to(self, IntArrayRef{dim}, sym_sizes);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<Tensor> cat_tensors_backward(
     const Tensor& grad,
     const std::vector<std::vector<c10::SymInt>>& sizes,
@@ -1345,6 +1360,7 @@ std::vector<Tensor> cat_tensors_backward(
   return grad_inputs;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<Tensor> stack_tensors_backward(
     const Tensor& grad,
     int64_t dim,
@@ -1364,6 +1380,7 @@ std::vector<Tensor> stack_tensors_backward(
   return grad_inputs;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<Tensor> block_diag_backward(
     const Tensor& grad,
     const std::vector<std::vector<int64_t>>& sizes,
@@ -1971,6 +1988,7 @@ Tensor renorm_jvp(
   auto dtype = self_p.scalar_type();
   auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
   Tensor norm = [&self_p, &p, &reduce_dims, acc_type, dtype]() {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (acc_type != dtype) {
       return at::linalg_vector_norm(
           self_p,
@@ -2406,6 +2424,7 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
   }
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor chunk_backward_nested(
     const std::vector<torch::autograd::Variable>& grads,
     const Tensor& self,
@@ -2425,6 +2444,7 @@ Tensor chunk_backward_nested(
   return ret;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
@@ -2451,6 +2471,7 @@ Tensor split_with_sizes_backward(
   return ret;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor _nested_split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
@@ -2486,6 +2507,7 @@ Tensor _nested_split_with_sizes_backward(
   return ret;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     const c10::SymInt& split_size,
@@ -3429,7 +3451,7 @@ static bool _maybe_overlapping_memory(
 static c10::SymInt _min_storage_size(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    c10::SymInt storage_offset) {
+    const c10::SymInt& storage_offset) {
   c10::SymInt storage_size = storage_offset + 1;
   auto dim = sizes.size();
   for (const auto i : c10::irange(dim)) {
@@ -3692,7 +3714,7 @@ Tensor slice_backward_wrapper(
     int64_t dim,
     std::optional<c10::SymInt> start,
     std::optional<c10::SymInt> end,
-    c10::SymInt step) {
+    const c10::SymInt& step) {
   auto start_val = start.has_value() ? start.value() : 0;
   auto end_val = end.has_value() ? end.value() : INT64_MAX;
 
@@ -3989,6 +4011,7 @@ Tensor svd_backward(
       }();
 
       if (gU.defined()) {
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         if (gVh.defined()) {
           return (UhgU * S.unsqueeze(-2) + S.unsqueeze(-1) * VhgV) / E;
         } else {
@@ -4164,6 +4187,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(
       return ret;
     }();
 
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (is_hermitian) {
       return dX;
     } else {
@@ -5682,6 +5706,7 @@ Tensor embedding_dense_double_backward_symint(
   return gg_weight.view(size);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor index_backward(
     Tensor zeros_like_self,
     const torch::List<std::optional<Tensor>>& indices,
@@ -5717,6 +5742,7 @@ Tensor _miopen_ctc_loss_backward(
   return _cudnn_ctc_loss_backward(grad_out, loss, raw_grad, zero_infinity);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool any_variable_defined(const variable_list& variables) {
   for (const auto& variable : variables) {
     if (variable.defined()) {
@@ -7343,6 +7369,7 @@ Tensor lu_factor_ex_jvp(
 
   auto m = dA.size(-2);
   auto n = dA.size(-1);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (m >= n) {
     dL.narrow(-2, 0, n).add_(dU);
     return dL;
@@ -7360,6 +7387,7 @@ Tensor logsumexp_jvp(
   // NB: for simplicity, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, &dim]() {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (self_p.sym_numel() > 0) {
       // Use only the real part for complex tensors
       return (self_p - at::amax(at::real(self_p), dim, true))
@@ -7422,7 +7450,7 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     at::SymIntArrayRef stride,
     at::SymIntArrayRef dilation,
     bool transposed,
-    c10::SymInt groups,
+    const c10::SymInt& groups,
     ::std::array<bool, 2> output_mask) {
   if (!grad_output.defined()) {
     return std::tuple<Tensor, Tensor>();
@@ -7837,7 +7865,7 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
           grad,
           self.sym_sizes(),
           self.options(),
-          /*is_coalesced=*/true);
+          /*is_coalesced=*/true); // NOLINT(bugprone-argument-comment)
     } else if (at::sparse_csr::is_sparse_compressed(self)) {
       auto [compressed_indices, plain_indices] =
           at::sparse_csr::getCompressedPlainIndices(self);
