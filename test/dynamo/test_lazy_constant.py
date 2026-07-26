@@ -580,6 +580,77 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=1)
 
+    def test_unused_unary_ops_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("neg_int", lambda t, a: (t.sin(), -a), [(t, 5), (t, 9)]),
+            ("pos_int", lambda t, a: (t.sin(), +a), [(t, 5), (t, 9)]),
+            ("abs_int", lambda t, a: (t.sin(), abs(a)), [(t, -5), (t, 9)]),
+            ("not_int", lambda t, a: (t.sin(), not a), [(t, 5), (t, 0)]),
+            ("neg_float", lambda t, a: (t.sin(), -a), [(t, 5.5), (t, -9.25)]),
+            ("neg_bool", lambda t, a: (t.sin(), -a), [(t, True), (t, False)]),
+            ("not_bool", lambda t, a: (t.sin(), not a), [(t, True), (t, False)]),
+            ("not_str", lambda t, a: (t.sin(), not a), [(t, "x"), (t, "")]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_invert_falls_back(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), ~a
+
+        opt_fn = torch.compile(fn, backend="eager")
+        for a in (5, 9):
+            self.assertTrue(same(fn(t, a), opt_fn(t, a)))
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_unary_symbolic_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("neg", lambda t, a: t * (-a)),
+            ("pos", lambda t, a: t * (+a)),
+            ("abs", lambda t, a: t * abs(a)),
+            ("not", lambda t, a: t * (not a)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                for a in (5, 7):
+                    self.assertTrue(same(fn(t, a), opt_fn(t, a)))
+
+    def test_unary_type_error_surfaces(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), ~a
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_fn(t, 1.5)
+
+    def test_unary_op_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if -a < 0:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, 5), (t, -5)], expected_frames=2)
+
+    def test_chained_unary_binary_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), -(a + b) * 2
+
+        self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=1)
+
     def test_unused_division_recompiles(self):
         t = torch.ones(2)
 
