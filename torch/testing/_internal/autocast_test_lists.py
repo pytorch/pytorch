@@ -146,7 +146,6 @@ class AutocastTestLists:
             ("softmax", pointwise0_fp16 + (0,)),
             ("log_softmax", pointwise0_fp16 + (0,)),
             ("layer_norm", pointwise0_fp16 + ((pointwise0_fp16[0].numel(),),)),
-            ("rms_norm", pointwise0_fp16 + ((pointwise0_fp16[0].numel(),),)),
             ("group_norm", mat0_fp16 + (1,)),
             ("norm", pointwise0_fp16),
             ("norm", pointwise0_fp16, {"dim": 0}),
@@ -189,6 +188,9 @@ class AutocastTestLists:
                        torch.randn(3, dtype=torch.float16, device=dev))),
             ("dot", pointwise0_fp16 + pointwise1_fp32),
             ("vdot", pointwise0_fp16 + pointwise1_fp32),
+            # weight is an optional arg, so this also covers prioritize()'s
+            # optional<Tensor> overload
+            ("rms_norm", pointwise0_fp16 + ((pointwise0_fp16[0].numel(),), pointwise1_fp32[0])),
             ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
                               torch.randn((2, 22, 11, 2), dtype=torch.float32, device=dev),
                               0, 0, False)),

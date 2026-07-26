@@ -880,7 +880,6 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(softplus)                         \
   _(layer_norm)                       \
   _(native_layer_norm)                \
-  _(rms_norm)                         \
   _(group_norm)                       \
   _(frobenius_norm, dim)              \
   _(nuclear_norm)                     \
@@ -961,4 +960,5 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(grid_sampler)            \
   _(index_put)               \
   _(tensordot)               \
-  _(scatter_add)
+  _(scatter_add)             \
+  _(rms_norm)
