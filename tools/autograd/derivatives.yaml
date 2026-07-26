@@ -431,18 +431,18 @@
   result: auto_element_wise
 
 - name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
-  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
-  min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
-  result: where(self_p >= min_p, self_t, min_t)
+  self: at::where(self == min, grad / 2, grad).masked_fill_(self < min, 0)
+  min: at::where(self == min, grad / 2, grad).masked_fill_(self > min, 0)
+  result: at::where(self_p == min_p, (self_t + min_t) / 2, at::where(self_p > min_p, self_t, min_t))
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: where(self < max, grad, at::scalar_tensor(0., grad.options()))
   result: auto_element_wise
 
 - name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
-  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
-  max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
-  result: where(self_p <= max_p, self_t, max_t)
+  self: at::where(self == max, grad / 2, grad).masked_fill_(self > max, 0)
+  max: at::where(self == max, grad / 2, grad).masked_fill_(self < max, 0)
+  result: at::where(self_p == max_p, (self_t + max_t) / 2, at::where(self_p < max_p, self_t, max_t))
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
@@ -1137,9 +1137,9 @@
   result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
-  self: grad.masked_fill((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
-  other: grad.masked_fill((self >= other).logical_or_(other.isnan()), 0)
-  result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
+  self: at::where(self == other, grad / 2, grad.masked_fill((self >= other).logical_or_(other.isnan()).logical_not_(), 0))
+  other: at::where(self == other, grad / 2, grad.masked_fill((self >= other).logical_or_(other.isnan()), 0))
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where((self_p > other_p).logical_or_(other_p.isnan()), self_t, other_t))
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
@@ -1199,9 +1199,9 @@
   result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
-  self: grad.masked_fill((self <= other).logical_or_(other.isnan()).logical_not_(), 0)
-  other: grad.masked_fill((self <= other).logical_or_(other.isnan()), 0)
-  result: other_t + (self_p <= other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
+  self: at::where(self == other, grad / 2, grad.masked_fill((self <= other).logical_or_(other.isnan()).logical_not_(), 0))
+  other: at::where(self == other, grad / 2, grad.masked_fill((self <= other).logical_or_(other.isnan()), 0))
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where((self_p < other_p).logical_or_(other_p.isnan()), self_t, other_t))
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)

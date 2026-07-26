@@ -1423,17 +1423,15 @@ Tensor clamp_backward(
     const Tensor& self,
     const std::optional<Scalar>& min,
     const std::optional<Scalar>& max) {
-  // clamp: gradients not defined on min and max, so we return the subgradient 1
-  // for these cases.
   if (max && min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where((self >= *min).logical_and_(self <= *max), grad, zero);
+    return where((self > *min).logical_and_(self < *max), grad, zero);
   } else if (min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self >= *min, grad, zero);
+    return where(self > *min, grad, zero);
   } else if (max) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self <= *max, grad, zero);
+    return where(self < *max, grad, zero);
   } else {
     return grad;
   }
@@ -1444,22 +1442,22 @@ Tensor clamp_backward(
     const Tensor& self,
     const Tensor& min,
     const Tensor& max) {
-  // clamp: gradients not defined on min and max, so we return the subgradient 1
-  // for these cases.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    const auto self_ge_min = self >= min;
-    const auto self_le_max = self <= max;
-    const auto& pred = areAnyTensorSubclassLike({self, min, max})
-        ? self_ge_min.logical_and(self_le_max)
-        : self_ge_min.logical_and_(self_le_max);
-    return where(pred, grad, zero);
+    const auto min_lt_max = min < max;
+    const auto min_eq_max = min == max;
+    const auto interior = (self > min).logical_and(self < max);
+    const auto tie =
+        ((self == min).logical_or(self == max)).logical_and(min_lt_max);
+    const auto degenerate_tie = (self == min).logical_and(min_eq_max);
+    return where(
+        interior.logical_or(degenerate_tie), grad, where(tie, grad / 2, zero));
   } else if (min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self >= min, grad, zero);
+    return where(self > min, grad, where(self == min, grad / 2, zero));
   } else if (max.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self <= max, grad, zero);
+    return where(self < max, grad, where(self == max, grad / 2, zero));
   } else {
     return grad;
   }
@@ -1482,23 +1480,30 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     if (grad_input_mask[0]) {
       const auto self_lt_min = self < min;
       const auto min_lt_max = min < max;
-      const auto& pred = areAnyTensorSubclassLike({self, min, max})
-          ? self_lt_min.logical_and(min_lt_max)
-          : self_lt_min.logical_and_(min_lt_max);
-      std::get<0>(ret) = where(pred, grad, zero);
+      const auto self_eq_min = self == min;
+      std::get<0>(ret) = where(
+          min_lt_max,
+          where(self_lt_min, grad, where(self_eq_min, grad / 2, zero)),
+          where((min == max).logical_and(self_lt_min), grad, zero));
     }
     if (grad_input_mask[1]) {
       const auto self_gt_max = self > max;
       const auto max_lt_min = max < min;
-      const auto& pred = areAnyTensorSubclassLike({self, min, max})
-          ? self_gt_max.logical_or(max_lt_min)
-          : self_gt_max.logical_or_(max_lt_min);
-      std::get<1>(ret) = where(pred, grad, zero);
+      const auto self_eq_max = self == max;
+      std::get<1>(ret) = where(
+          max_lt_min,
+          grad,
+          where(
+              min < max,
+              where(self_gt_max, grad, where(self_eq_max, grad / 2, zero)),
+              where(self_gt_max, grad, zero)));
     }
   } else if (min.defined() && grad_input_mask[0]) {
-    std::get<0>(ret) = where(self < min, grad, zero);
+    std::get<0>(ret) =
+        where(self < min, grad, where(self == min, grad / 2, zero));
   } else if (max.defined() && grad_input_mask[1]) {
-    std::get<1>(ret) = where(self > max, grad, zero);
+    std::get<1>(ret) =
+        where(self > max, grad, where(self == max, grad / 2, zero));
   }
   return ret;
 }
@@ -1514,11 +1519,30 @@ at::Tensor clamp_jvp(
     return where(
         min_p > max_p,
         max_t,
-        where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
+        where(
+            min_p == max_p,
+            where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)),
+            where(
+                self_p < min_p,
+                min_t,
+                where(
+                    self_p == min_p,
+                    (self_t + min_t) / 2,
+                    where(
+                        self_p > max_p,
+                        max_t,
+                        where(
+                            self_p == max_p, (self_t + max_t) / 2, self_t))))));
   } else if (min_p.defined()) {
-    return where(self_p > min_p, self_t, min_t);
+    return where(
+        self_p == min_p,
+        (self_t + min_t) / 2,
+        where(self_p > min_p, self_t, min_t));
   } else if (max_p.defined()) {
-    return where(self_p < max_p, self_t, max_t);
+    return where(
+        self_p == max_p,
+        (self_t + max_t) / 2,
+        where(self_p < max_p, self_t, max_t));
   } else {
     return self_t;
   }

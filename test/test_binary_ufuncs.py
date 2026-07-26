@@ -2550,7 +2550,7 @@ class TestBinaryUfuncsDevice(TestCase):
             floating_types_and(torch.half, torch.bfloat16),
         )
     )
-    def test_maximum_and_minimum_subgradient(self, device, dtypes):
+    def test_min_max_and_clamp_subgradient(self, device, dtypes):
         def run_test(f, a, b, expected_a_grad, expected_b_grad):
             a = torch.tensor(a, requires_grad=True, device=device, dtype=dtypes[0])
             b = torch.tensor(b, requires_grad=True, device=device, dtype=dtypes[1])
@@ -2559,47 +2559,286 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(a.grad, expected_a_grad)
             self.assertEqual(b.grad, expected_b_grad)
 
-        run_test(
+        a = [0.0, 1.0, 2.0]
+        b = [1.0, 1.0, 1.0]
+        max_a_grad = [0.0, 0.5, 1.0]
+        max_b_grad = [1.0, 0.5, 0.0]
+        min_a_grad = [1.0, 0.5, 0.0]
+        min_b_grad = [0.0, 0.5, 1.0]
+
+        max_ops = (
             torch.maximum,
-            [0.0, 1.0, 2.0],
-            [1.0, 1.0, 1.0],
-            [0.0, 0.5, 1.0],
-            [1.0, 0.5, 0.0],
+            torch.fmax,
+            torch.clamp_min,
+            lambda x, bound: torch.clamp(x, min=bound),
+            lambda x, bound: torch.clip(x, min=bound),
+        )
+        min_ops = (
+            torch.minimum,
+            torch.fmin,
+            torch.clamp_max,
+            lambda x, bound: torch.clamp(x, max=bound),
+            lambda x, bound: torch.clip(x, max=bound),
+        )
+        for op in max_ops:
+            run_test(op, a, b, max_a_grad, max_b_grad)
+        for op in min_ops:
+            run_test(op, a, b, min_a_grad, min_b_grad)
+
+        for op, expected_a_grad in (
+            (torch.maximum, max_a_grad),
+            (torch.clamp_min, max_a_grad),
+            (lambda x, bound: torch.clamp(x, min=bound), max_a_grad),
+            (lambda x, bound: torch.clip(x, min=bound), max_a_grad),
+            (torch.minimum, min_a_grad),
+            (torch.clamp_max, min_a_grad),
+            (lambda x, bound: torch.clamp(x, max=bound), min_a_grad),
+            (lambda x, bound: torch.clip(x, max=bound), min_a_grad),
+        ):
+            a_tensor = torch.tensor(
+                a, requires_grad=True, device=device, dtype=dtypes[0]
+            )
+            b_tensor = torch.tensor(b, device=device, dtype=dtypes[1])
+            op(a_tensor, b_tensor).sum().backward()
+            self.assertEqual(a_tensor.grad, expected_a_grad)
+
+    def test_min_max_and_clamp_forward_ad(self, device):
+        def run_test(op, expected):
+            a = torch.tensor([0.0, 1.0, 2.0], device=device)
+            b = torch.tensor([1.0, 1.0, 1.0], device=device)
+            a_tangent = torch.tensor([2.0, 4.0, 6.0], device=device)
+            b_tangent = torch.tensor([10.0, 20.0, 30.0], device=device)
+
+            with fwAD.dual_level():
+                a_dual = fwAD.make_dual(a, a_tangent)
+                b_dual = fwAD.make_dual(b, b_tangent)
+                tangent = fwAD.unpack_dual(op(a_dual, b_dual)).tangent
+
+            self.assertEqual(tangent, expected)
+
+        for op in (
+            torch.maximum,
+            torch.fmax,
+            torch.clamp_min,
+            lambda x, bound: torch.clamp(x, min=bound),
+            lambda x, bound: torch.clip(x, min=bound),
+        ):
+            run_test(op, [10.0, 12.0, 6.0])
+        for op in (
+            torch.minimum,
+            torch.fmin,
+            torch.clamp_max,
+            lambda x, bound: torch.clamp(x, max=bound),
+            lambda x, bound: torch.clip(x, max=bound),
+        ):
+            run_test(op, [2.0, 12.0, 30.0])
+
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_scalar_clamp_subgradient(self, device, dtype):
+        def run_test(op, expected_grad, expected_tangent):
+            values = torch.tensor([-1.0, 0.0, 1.0], device=device, dtype=dtype)
+            x = values.clone().requires_grad_()
+            op(x).sum().backward()
+            self.assertEqual(x.grad, expected_grad)
+
+            tangent = torch.tensor([2.0, 4.0, 6.0], device=device, dtype=dtype)
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(values, tangent)
+                actual_tangent = fwAD.unpack_dual(op(dual)).tangent
+            self.assertEqual(actual_tangent, expected_tangent)
+
+        for op in (
+            lambda x: torch.clamp_min(x, 0.0),
+            lambda x: torch.clamp(x, min=0.0),
+            lambda x: torch.clip(x, min=0.0),
+        ):
+            run_test(op, [0.0, 0.0, 1.0], [0.0, 0.0, 6.0])
+
+        for op in (
+            lambda x: torch.clamp_max(x, 0.0),
+            lambda x: torch.clamp(x, max=0.0),
+            lambda x: torch.clip(x, max=0.0),
+        ):
+            run_test(op, [1.0, 0.0, 0.0], [2.0, 0.0, 0.0])
+
+        run_test(
+            lambda x: torch.clamp(x, min=-1.0, max=1.0),
+            [0.0, 1.0, 0.0],
+            [0.0, 4.0, 0.0],
         )
         run_test(
-            torch.minimum,
-            [0.0, 1.0, 2.0],
-            [1.0, 1.0, 1.0],
-            [1.0, 0.5, 0.0],
-            [0.0, 0.5, 1.0],
+            lambda x: torch.clamp(x, min=0.0, max=0.0),
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        )
+        run_test(
+            lambda x: torch.clamp(x, min=1.0, max=0.0),
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
         )
 
-    def test_maximum_minimum_forward_ad_float32(self, device):
-        # TODO: This should really be covered by OpInfo but it isn't. The problem
-        # is that our gradient tests test using float64 but it should also test
-        # float32
-        x = torch.randn(3, device=device, dtype=torch.float32)
-        y = torch.randn(3, device=device, dtype=torch.float32)
-        tx = torch.randn(3, device=device, dtype=torch.float32)
-        ty = torch.randn(3, device=device, dtype=torch.float32)
+    @dtypes(torch.float, torch.double)
+    def test_tensor_clamp_subgradient(self, device, dtype):
+        def run_test(op, primals, tangents, expected_grads, expected_tangent):
+            inputs = [
+                torch.tensor(p, device=device, dtype=dtype, requires_grad=True)
+                for p in primals
+            ]
+            op(inputs[0], min=inputs[1], max=inputs[2]).sum().backward()
+            for input, expected in zip(inputs, expected_grads):
+                self.assertEqual(input.grad, expected)
+
+            with fwAD.dual_level():
+                duals = [
+                    fwAD.make_dual(
+                        torch.tensor(p, device=device, dtype=dtype),
+                        torch.tensor(t, device=device, dtype=dtype),
+                    )
+                    for p, t in zip(primals, tangents)
+                ]
+                actual_tangent = fwAD.unpack_dual(
+                    op(duals[0], min=duals[1], max=duals[2])
+                ).tangent
+            self.assertEqual(actual_tangent, expected_tangent)
+
+        for op in (torch.clamp, torch.clip):
+            run_test(
+                op,
+                ([0.0, 1.0, 2.0, 3.0], [1.0] * 4, [2.0] * 4),
+                ([2.0, 4.0, 6.0, 8.0], [10.0] * 4, [20.0] * 4),
+                ([0.0, 0.5, 0.5, 0.0], [1.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]),
+                [10.0, 7.0, 13.0, 20.0],
+            )
+            run_test(
+                op,
+                ([0.0, 1.0, 2.0], [1.0] * 3, [1.0] * 3),
+                ([2.0, 4.0, 6.0], [10.0] * 3, [20.0] * 3),
+                ([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+                [10.0, 4.0, 20.0],
+            )
+            run_test(
+                op,
+                ([0.0, 1.0, 2.0], [2.0] * 3, [1.0] * 3),
+                ([2.0, 4.0, 6.0], [10.0] * 3, [20.0] * 3),
+                ([0.0] * 3, [0.0] * 3, [1.0] * 3),
+                [20.0] * 3,
+            )
+
+        x = torch.tensor(
+            [[0.0, 1.0, 2.0], [1.0, 1.0, 0.0]],
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        min = torch.ones(3, device=device, dtype=dtype, requires_grad=True)
+        torch.clamp(x, min=min).sum().backward()
+        self.assertEqual(x.grad, [[0.0, 0.5, 1.0], [0.5, 0.5, 0.0]])
+        self.assertEqual(min.grad, [1.5, 1.0, 1.0])
 
         with fwAD.dual_level():
-            x_dual = fwAD.make_dual(x, tx)
-            y_dual = fwAD.make_dual(y, ty)
-            result = torch.maximum(x_dual, y_dual)
-            _, result_tangent = fwAD.unpack_dual(result)
+            x_dual = fwAD.make_dual(
+                x.detach(),
+                torch.tensor(
+                    [[2.0, 4.0, 6.0], [8.0, 10.0, 12.0]],
+                    device=device,
+                    dtype=dtype,
+                ),
+            )
+            min_dual = fwAD.make_dual(
+                min.detach(),
+                torch.tensor([20.0, 30.0, 40.0], device=device, dtype=dtype),
+            )
+            tangent = fwAD.unpack_dual(torch.clamp(x_dual, min=min_dual)).tangent
+        self.assertEqual(tangent, [[20.0, 17.0, 6.0], [14.0, 20.0, 40.0]])
 
-        expected = torch.where(x > y, tx, ty)
-        self.assertEqual(result_tangent, expected)
+        max = torch.ones(3, device=device, dtype=dtype, requires_grad=True)
+        max_x = x.detach().requires_grad_()
+        torch.clamp(max_x, max=max).sum().backward()
+        self.assertEqual(max_x.grad, [[1.0, 0.5, 0.0], [0.5, 0.5, 1.0]])
+        self.assertEqual(max.grad, [0.5, 1.0, 1.0])
 
         with fwAD.dual_level():
-            x_dual = fwAD.make_dual(x, tx)
-            y_dual = fwAD.make_dual(y, ty)
-            result = torch.minimum(x_dual, y_dual)
-            _, result_tangent = fwAD.unpack_dual(result)
+            x_dual = fwAD.make_dual(
+                x.detach(),
+                torch.tensor(
+                    [[2.0, 4.0, 6.0], [8.0, 10.0, 12.0]],
+                    device=device,
+                    dtype=dtype,
+                ),
+            )
+            max_dual = fwAD.make_dual(
+                max.detach(),
+                torch.tensor([20.0, 30.0, 40.0], device=device, dtype=dtype),
+            )
+            tangent = fwAD.unpack_dual(torch.clamp(x_dual, max=max_dual)).tangent
+        self.assertEqual(tangent, [[2.0, 17.0, 40.0], [14.0, 20.0, 12.0]])
 
-        expected = torch.where(x < y, tx, ty)
-        self.assertEqual(result_tangent, expected)
+    @dtypes(torch.float, torch.double)
+    def test_fmin_fmax_nan_subgradient(self, device, dtype):
+        for op in (torch.fmin, torch.fmax):
+            a = torch.tensor(
+                [float("nan"), 1.0], device=device, dtype=dtype, requires_grad=True
+            )
+            b = torch.tensor(
+                [2.0, float("nan")], device=device, dtype=dtype, requires_grad=True
+            )
+            op(a, b).sum().backward()
+            self.assertEqual(a.grad, [0.0, 1.0])
+            self.assertEqual(b.grad, [1.0, 0.0])
+
+            with fwAD.dual_level():
+                a_dual = fwAD.make_dual(
+                    a.detach(), torch.tensor([3.0, 4.0], device=device, dtype=dtype)
+                )
+                b_dual = fwAD.make_dual(
+                    b.detach(), torch.tensor([5.0, 6.0], device=device, dtype=dtype)
+                )
+                tangent = fwAD.unpack_dual(op(a_dual, b_dual)).tangent
+            self.assertEqual(tangent, [5.0, 4.0])
+
+            both_nan_a = torch.tensor(
+                [float("nan")], device=device, dtype=dtype, requires_grad=True
+            )
+            both_nan_b = both_nan_a.detach().clone().requires_grad_()
+            op(both_nan_a, both_nan_b).sum().backward()
+            self.assertEqual(both_nan_a.grad, [1.0])
+            self.assertEqual(both_nan_b.grad, [0.0])
+
+            with fwAD.dual_level():
+                a_dual = fwAD.make_dual(
+                    both_nan_a.detach(), torch.tensor([7.0], device=device, dtype=dtype)
+                )
+                b_dual = fwAD.make_dual(
+                    both_nan_b.detach(), torch.tensor([9.0], device=device, dtype=dtype)
+                )
+                tangent = fwAD.unpack_dual(op(a_dual, b_dual)).tangent
+            self.assertEqual(tangent, [7.0])
+
+        with fwAD.dual_level():
+            inf_tangent = torch.tensor([float("inf")], device=device, dtype=dtype)
+            finite_tangent = torch.ones(1, device=device, dtype=dtype)
+            fmax_tangent = fwAD.unpack_dual(
+                torch.fmax(
+                    fwAD.make_dual(
+                        torch.zeros(1, device=device, dtype=dtype), inf_tangent
+                    ),
+                    fwAD.make_dual(
+                        torch.ones(1, device=device, dtype=dtype), finite_tangent
+                    ),
+                )
+            ).tangent
+            fmin_tangent = fwAD.unpack_dual(
+                torch.fmin(
+                    fwAD.make_dual(
+                        torch.ones(1, device=device, dtype=dtype), inf_tangent
+                    ),
+                    fwAD.make_dual(
+                        torch.zeros(1, device=device, dtype=dtype), finite_tangent
+                    ),
+                )
+            ).tangent
+        self.assertEqual(fmax_tangent, [1.0])
+        self.assertEqual(fmin_tangent, [1.0])
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -4820,9 +5059,26 @@ def generate_not_implemented_tests(cls):
 
 
 generate_not_implemented_tests(TestBinaryUfuncsDevice)
+
+
+class TestBinaryUfuncSubgradientsCPU(TestCase):
+    test_min_max_and_clamp_subgradient = (
+        TestBinaryUfuncsDevice.test_min_max_and_clamp_subgradient
+    )
+    test_min_max_and_clamp_forward_ad = (
+        TestBinaryUfuncsDevice.test_min_max_and_clamp_forward_ad
+    )
+    test_scalar_clamp_subgradient = TestBinaryUfuncsDevice.test_scalar_clamp_subgradient
+    test_tensor_clamp_subgradient = TestBinaryUfuncsDevice.test_tensor_clamp_subgradient
+    test_fmin_fmax_nan_subgradient = (
+        TestBinaryUfuncsDevice.test_fmin_fmax_nan_subgradient
+    )
+
+
 instantiate_device_type_tests(
     TestChebyshevNanPropagation, globals(), only_for=("cpu", "cuda")
 )
+instantiate_device_type_tests(TestBinaryUfuncSubgradientsCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(
     TestBinaryUfuncsDevice, globals(), allow_xpu=True, except_for="cpu"
 )
