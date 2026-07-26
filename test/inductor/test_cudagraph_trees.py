@@ -6700,6 +6700,7 @@ if HAS_CUDA_AND_TRITON:
                 {
                     "triton.cudagraph_trees": True,
                     "triton.cudagraph_or_error": True,
+                    "graph_partition": True,
                 }
             ):
                 compiled_fn = torch.compile(f, mode="reduce-overhead")
