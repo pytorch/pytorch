@@ -105,19 +105,18 @@ class StaticallyLaunchedTritonKernel:
         )
 
         # Newer triton versions pass extra scratch parameters to the compiled kernel.
-        self.global_scratch_size = getattr(kernel.metadata, "global_scratch_size", None)
-        self.global_scratch_align = getattr(kernel.metadata, "global_scratch_align", 1)
+        # pyrefly: ignore [missing-attribute]
+        metadata = kernel.metadata
+        self.global_scratch_size = getattr(metadata, "global_scratch_size", None)
+        self.global_scratch_align = getattr(metadata, "global_scratch_align", 1)
         self.has_global_scratch = self.global_scratch_size is not None
         # same situation for profile scratch - triton-lang/triton#7258
-        self.profile_scratch_size = getattr(
-            kernel.metadata, "profile_scratch_size", None
-        )
+        self.profile_scratch_size = getattr(metadata, "profile_scratch_size", None)
         if self.profile_scratch_size and self.profile_scratch_size > 0:
             raise NotImplementedError("Profile scratch not yet supported")
         self.has_profile_scratch = self.profile_scratch_size is not None
 
-        # pyrefly: ignore [missing-attribute]
-        self.tensordesc_meta = getattr(kernel.metadata, "tensordesc_meta", None)
+        self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)

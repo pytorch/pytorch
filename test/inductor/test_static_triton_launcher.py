@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest import mock
 
 import torch
-
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
@@ -145,7 +144,12 @@ class TestStaticTritonLauncherUnit(TestCase):
             global_scratch_size=32,
             global_scratch_align=16,
         )
-        compiled_kernel = SimpleNamespace(
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
             src=src,
             metadata=metadata,
             _cubin_path="/tmp/scratch_kernel.cubin",
