@@ -100,16 +100,14 @@ log = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class OutputCode:
-    # TODO: Remove underscores here
-
     # None if the output is not remote cacheable
-    _fx_graph_cache_key: str | None = dataclasses.field(default=None, init=False)
-    _fx_graph_cache_debug_lines: list[str] | None = dataclasses.field(
+    fx_graph_cache_key: str | None = dataclasses.field(default=None, init=False)
+    fx_graph_cache_debug_lines: list[str] | None = dataclasses.field(
         default=None, init=False
     )
 
     # How long it took to compile this OutputCode, end to end
-    _time_taken_ns: int | None = dataclasses.field(default=None, init=False)
+    time_taken_ns: int | None = dataclasses.field(default=None, init=False)
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError(type(self))
@@ -820,7 +818,7 @@ class CompiledFxGraph(OutputCode):
                     # Checking the profiler directly is faster than nullcontext
                     if torch.autograd.profiler._is_profiler_enabled:
                         with torch._C._profiler._RecordFunctionFast(
-                            f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                            f"## Call CompiledFxGraph {self.fx_graph_cache_key} ##",
                             keyword_values={"scope": "user_scope"},
                         ):
                             return self.current_callable(inputs)

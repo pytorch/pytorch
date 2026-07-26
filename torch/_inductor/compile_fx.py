@@ -1177,10 +1177,10 @@ def _compile_fx_inner(
                     raise AssertionError(
                         "fx_codegen_and_compile returned None in cache miss path"
                     )
-                mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
+                mb_compiled_graph.time_taken_ns = time.time_ns() - start_time
                 cache_key, debug_lines = key_info
-                mb_compiled_graph._fx_graph_cache_key = cache_key
-                mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
+                mb_compiled_graph.fx_graph_cache_key = cache_key
+                mb_compiled_graph.fx_graph_cache_debug_lines = debug_lines
                 (
                     triton_bundle,
                     triton_bundler_meta,
@@ -1196,7 +1196,7 @@ def _compile_fx_inner(
                 TritonBundler.end_compile()
             if triton_bundler_meta is not None:
                 cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
-            cache_info["time_taken_ns"] = mb_compiled_graph._time_taken_ns
+            cache_info["time_taken_ns"] = mb_compiled_graph.time_taken_ns
             log.debug("Saving compiled graph to FX cache with key: %s", cache_key)
             FxGraphCache._save_graph(
                 cache_key,
@@ -1221,8 +1221,8 @@ def _compile_fx_inner(
                 raise AssertionError("Expected key_info to be set in cache hit path")
             (cache_key, debug_lines) = key_info
             log.debug("FX cache hit with key: %s", cache_key)
-            mb_compiled_graph._fx_graph_cache_key = cache_key
-            mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
+            mb_compiled_graph.fx_graph_cache_key = cache_key
+            mb_compiled_graph.fx_graph_cache_debug_lines = debug_lines
 
         if mb_compiled_graph is None:
             raise AssertionError(

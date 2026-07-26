@@ -2328,7 +2328,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 cache_stats.put("LocalFxGraphCache")
 
             if remote_cache:
-                time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
+                time_taken_ms = int((disk_compiled_graph.time_taken_ns or 0) // 1e6)
                 cache_data: JsonDataTy = {
                     "data": base64.b64encode(content).decode("ascii"),
                     "time_taken_ms": time_taken_ms,
@@ -2445,7 +2445,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
 
-            if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
+            if (time_saved_ns := compiled_graph.time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
                 CompileEventLogger.try_(
                     CompileEventLogger.increment_toplevel,
