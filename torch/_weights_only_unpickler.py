@@ -322,13 +322,19 @@ class Unpickler:
         as ``UnpicklingError`` instead of a bare ``IndexError`` /
         ``struct.error`` / ``KeyError`` / ``UnicodeDecodeError``, so callers
         loading untrusted checkpoints see a single, catchable error type.
+        Note that these exception types can also be raised by genuine errors
+        during object reconstruction (e.g. from a ``__setstate__`` method), in
+        which case the original exception is preserved as ``__cause__``.
         """
         try:
             return self._load()
         except (IndexError, _struct_error, KeyError, UnicodeDecodeError) as e:
             raise UnpicklingError(
-                f"Encountered malformed pickle data ({type(e).__name__}: {e}); "
-                "the input may be corrupted or truncated."
+                f"Failed to load pickle data ({type(e).__name__}: {e}); "
+                "this usually means the input is corrupted or truncated, "
+                "but it can also be a genuine error raised while "
+                "reconstructing an object. See the exception's __cause__ "
+                "for the original traceback."
             ) from e
 
     def _load(self):
