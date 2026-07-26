@@ -6732,7 +6732,11 @@ class TestCudaAllocator(TestCase):
                     )
                     if k in os.environ
                 }
-            return {}
+
+            env = os.environ.copy()
+            env.pop("PYTORCH_ALLOC_CONF", None)
+            env.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+            return env
 
         def check_output(script: str) -> str:
             kwargs = {"env": subprocess_env(), "text": True}

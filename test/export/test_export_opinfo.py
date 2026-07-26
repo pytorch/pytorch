@@ -3,6 +3,7 @@
 # flake8: noqa
 
 import itertools
+import os
 import subprocess
 import sys
 import unittest
@@ -145,9 +146,20 @@ selected_ops = {
 selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
+def _env_without_visible_accelerators():
+    env = os.environ.copy()
+    for variable in (
+        "CUDA_VISIBLE_DEVICES",
+        "HIP_VISIBLE_DEVICES",
+        "ROCR_VISIBLE_DEVICES",
+    ):
+        env[variable] = ""
+    return env
+
+
 class TestExportOnFakeCuda(TestCase):
-    # In CI, this test runs on a CUDA machine with cuda build
-    # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
+    # In CI, this test runs on a CUDA/ROCm machine with an accelerator build.
+    # Hide physical devices to simulate a CPU machine with that build.
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyCUDA
     @unittest.skipIf(
@@ -212,7 +224,7 @@ for op in ops:
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env=_env_without_visible_accelerators(),
                 )
             )
             .decode("ascii")
@@ -279,7 +291,7 @@ cuda_calls_behavior_unchanged()
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env=_env_without_visible_accelerators(),
                 )
             )
             .decode("ascii")
