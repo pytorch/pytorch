@@ -1590,6 +1590,7 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type()) &&
+      result.scalar_type() == self.scalar_type() &&
       ldexp_stub.is_device_supported(self.device().type())) {
     return _ldexp_int_exponent(self, other, result);
   }
