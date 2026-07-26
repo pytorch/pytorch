@@ -4317,13 +4317,9 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         @lowering.force_fallback(torch.ops.prims.device_put.default)
-        def test_graph_partition_view_fallback(self):
+        def test_graph_partition_device_put_fallback(self):
             def f(x):
-                y = x + 1
-                z = torch.ops.aten.view.dtype(y, torch.float8_e4m3fn)
-                z_cpu = z.cpu()
-                u_cuda = z_cpu.cuda()
-                return u_cuda
+                return (x + 1).cpu().cuda()
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
 
@@ -4333,7 +4329,34 @@ if HAS_CUDA_AND_TRITON:
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
 
-            # Without the device_put partition, the H2D fallback forms a second graph.
+            # Without partitioning the H2D fallback, it forms a second graph.
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cross_device_custom_op_fallback(self):
+            device = torch.device("cuda", self.device_idx)
+
+            @torch.library.custom_op("mylib::cpu_to_cuda", mutates_args=())
+            def cpu_to_cuda(x: torch.Tensor) -> torch.Tensor:
+                return x.to(device)
+
+            @cpu_to_cuda.register_fake
+            def _(x):
+                return torch.empty_like(x, device=device)
+
+            def f(x):
+                return cpu_to_cuda(x) + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            for i in range(3):
+                x = torch.full((2,), i, dtype=torch.int32)
+                eager_out = f(x)
+                compiled_out = compiled_f(x)
+                self.assertEqual(eager_out, compiled_out)
+
+            # Only the downstream CUDA add should be recorded.
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @torch._inductor.config.patch("graph_partition", True)

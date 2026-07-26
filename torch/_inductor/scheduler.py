@@ -9050,11 +9050,17 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy) or (
-            isinstance(node.node, ir.FallbackKernel)
-            and node.node.op_overload is torch.ops.prims.device_put.default
+        output_device = node.get_device()
+        if isinstance(ir_node, ir.DeviceCopy) or (
+            isinstance(ir_node, ir.FallbackKernel)
+            and ir.is_node_sequence(ir_node.inputs)
+            and any(
+                (input_device := input_node.get_device()) is not None
+                and input_device != output_device
+                for input_node in ir_node.inputs
+            )
         ):
-            return "DeviceCopy ops"
+            return "cross-device copy ops"
 
         if isinstance(node.node, ir.Conditional):
             return "Conditional ops"
