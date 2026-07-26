@@ -728,6 +728,11 @@ def _gpu_user_annotation_events(
         return []
 
     span_map: dict[tuple[int, int, int], dict[str, int]] = {}
+    # (device, stream) lanes that still render real GPU work after lane reassignment. A graphed
+    # op the resolver moved to a logical lane no longer displays on its capture stream (mirrors
+    # the display rule in _trace_window_entries); a span stranded on such a stream is dropped
+    # below.
+    streams_with_display: set[tuple[int, int]] = set()
     for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
         c = columns.get(ks)
         if not c or not len(c["correlation_id"]):
@@ -739,7 +744,19 @@ def _gpu_user_annotation_events(
         str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
+        lane_col = c.get("logical_lane")
+        gnid_col = c.get("graph_node_id")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        gnid_l = gnid_col.tolist() if gnid_col is not None else None
         for i in range(len(corr_l)):
+            reassigned = (
+                lane_l is not None
+                and gnid_l is not None
+                and gnid_l[i]
+                and lane_l[i] != str_l[i]
+            )
+            if not reassigned:
+                streams_with_display.add((dev_l[i], str_l[i]))
             external_id = correlation_to_user_external.get(corr_l[i])
             if external_id is None:
                 continue
@@ -757,6 +774,10 @@ def _gpu_user_annotation_events(
     for (external_id, device_id, stream_id), span in sorted(span_map.items()):
         name = user_annotations.get(external_id)
         if not isinstance(name, str):
+            continue
+        # Orphaned span: the capture stream's ops all moved to logical lanes, so it would sit
+        # alone on an empty lane divorced from its kernels -- drop it instead.
+        if (device_id, stream_id) not in streams_with_display:
             continue
         start_us = max((span["start_ns"] - base_ns) / 1000.0 - 0.001, 0.0)
         dur_us = max((span["end_ns"] - span["start_ns"]) / 1000.0 + 0.002, 0.0)
