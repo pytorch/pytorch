@@ -542,9 +542,11 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(names[(0, 7)].strip(), "stream 7")
 
     def test_gpu_user_annotation_stays_on_capture_stream(self):
-        # A GPU-side user annotation is emitted on the kernel's real capture stream, even for
-        # graphed kernels the lane resolver reassigned to a logical lane -- the annotation is
-        # never moved onto those synthetic lanes. No CUDA.
+        # A GPU-side user annotation stays on its kernels' real capture stream, never a lane the
+        # resolver reassigned kernels onto. But when a capture stream has no work left to
+        # show (all its ops moved to a logical lane), the span would be orphaned on an empty
+        # lane, so it is dropped instead. A stream that still has non-reassigned work keeps
+        # its annotation. No CUDA.
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import _gpu_user_annotation_events
@@ -554,33 +556,35 @@ class TestCuptiRecords(TestCase):
 
         columns = {
             "external_correlation": {
-                "correlation_id": i64(11, 12),
-                "user_external_id": i64(555, 666),
+                "correlation_id": i64(11, 12, 13, 14),
+                "user_external_id": i64(555, 666, 777, 999),
             },
             "kernel": {
-                "correlation_id": i64(11, 12),
-                "device_id": i64(0, 0),
-                "stream_id": i64(7, 9),  # both replayed on their capture streams
-                "start_ns": i64(1000, 3000),
-                "end_ns": i64(2000, 4000),
-                # first is graphed (lane resolver would move it to lane 8); second is eager
-                "graph_node_id": i64(101, 0),
-                "logical_lane": i64(8, 9),
+                "correlation_id": i64(11, 12, 13, 14),
+                "device_id": i64(0, 0, 0, 0),
+                "stream_id": i64(7, 9, 5, 5),
+                "start_ns": i64(1000, 3000, 5000, 5500),
+                "end_ns": i64(2000, 4000, 6000, 6500),
+                # k11 graphed -> lane 8 (orphans stream 7); k12 eager on 9; k13 graphed -> lane
+                # 6 but k14 is eager on the same stream 5, so stream 5 still shows work.
+                "graph_node_id": i64(101, 0, 103, 0),
+                "logical_lane": i64(8, 9, 6, 5),
             },
         }
         trace_window = {
             "columns": columns,
-            "user_annotations": {555: "all_reduce", 666: "matmul"},
+            "user_annotations": {555: "all_reduce", 666: "matmul", 777: "reduce_scatter"},
         }
         events = _gpu_user_annotation_events(trace_window, base_ns=0)
         by_name = {e["name"]: e for e in events}
 
-        # graphed: annotation stays on the capture stream (7), not the logical lane (8)
-        self.assertEqual(by_name["all_reduce"]["cat"], "gpu_user_annotation")
-        self.assertEqual(by_name["all_reduce"]["pid"], 0)
-        self.assertEqual(by_name["all_reduce"]["tid"], 7)
+        # graphed op moved off stream 7 and nothing else renders there -> annotation dropped
+        self.assertNotIn("all_reduce", by_name)
         # eager: stays on the kernel's capture stream
+        self.assertEqual(by_name["matmul"]["cat"], "gpu_user_annotation")
         self.assertEqual(by_name["matmul"]["tid"], 9)
+        # stream 5 still has non-reassigned work (k14), so its annotation is kept there
+        self.assertEqual(by_name["reduce_scatter"]["tid"], 5)
 
     def test_chrome_counter_events_from_pm(self):
         # PM counters render as chrome "C" (counter) events in a dedicated per-device
