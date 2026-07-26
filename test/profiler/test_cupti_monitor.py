@@ -1529,6 +1529,10 @@ class TestCuptiRecords(TestCase):
         # Row 1: annotation + metadata merge onto the one render stage.
         self.assertEqual(per_stage[51]["Process Group Name"], "6")
         self.assertEqual(per_stage[51]["dtype"], "bf16")
+        # graphNodeId is emitted with only its lower 32-bit node id; the graph id packed in the
+        # upper bits is dropped here (it rides along separately as "graph id").
+        self.assertEqual(per_stage[50]["graph node id"], "10")
+        self.assertEqual(per_stage[51]["graph node id"], "11")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
