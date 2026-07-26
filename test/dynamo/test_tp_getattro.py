@@ -852,7 +852,6 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
     # --- C descriptor type check (descr_check equivalent) ---
 
-
     def test_method_descriptor_incompatible_type(self):
         class Borrower:
             append = list.append
