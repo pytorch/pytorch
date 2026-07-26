@@ -277,11 +277,21 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
+# Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
 _COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
     [
         operator.add,
         operator.sub,
         operator.mul,
+        operator.and_,
+        operator.or_,
+        operator.xor,
+        operator.eq,
+        operator.ne,
+        operator.lt,
+        operator.le,
+        operator.gt,
+        operator.ge,
     ]
 )
 
