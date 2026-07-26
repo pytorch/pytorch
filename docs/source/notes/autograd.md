@@ -100,6 +100,8 @@ To try and reduce the impact of functions that are non-differentiable, we define
 For these rules, the function and its input space are defined by the selected dispatcher overload and its schema signature.
 This applies to built-in operators and user-defined operators, including Python ``custom_op`` definitions.
 Overload resolution occurs before autograd applies these rules; Python-level syntax does not redefine the function's input space.
+For details about how Python values select Scalar and Tensor overloads, see
+{ref}`python-number-overload-resolution`.
 
 All differentiable Tensor arguments in the selected dispatcher signature jointly form the function's input space, regardless of whether a particular argument currently requires grad.
 ``requires_grad`` only controls which gradient components autograd computes.
