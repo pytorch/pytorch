@@ -633,6 +633,41 @@ class ComputedLazyConstantTests(TestCase):
         with self.assertRaises(TypeError):
             opt_fn(t, 1.5)
 
+    def test_unused_builtin_fns_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("len_str", lambda t, a: (t.sin(), len(a)), [(t, "xy"), (t, "pqr")]),
+            ("str_int", lambda t, a: (t.sin(), str(a)), [(t, 5), (t, 9)]),
+            ("bool_int", lambda t, a: (t.sin(), bool(a)), [(t, 5), (t, 0)]),
+            ("min_int", lambda t, a, b: (t.sin(), min(a, b)), [(t, 1, 2), (t, 9, 3)]),
+            ("max_int", lambda t, a, b: (t.sin(), max(a, b)), [(t, 1, 2), (t, 9, 3)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_builtin_fn_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if len(a) > 2:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, "xy"), (t, "pqrs")], expected_frames=2)
+
+    def test_len_on_int_falls_back(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            try:
+                return t.sin(), len(a)
+            except TypeError:
+                return t.cos(), 0
+
+        self._check(fn, [(t, 1), (t, 2)], expected_frames=2)
+
     def test_unary_op_in_branch_recompiles(self):
         t = torch.ones(2)
 
