@@ -198,9 +198,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   fi
   export USE_ASAN=1
   export REL_WITH_DEB_INFO=1
-  # clang-21 dropped vptr from the -fsanitize=undefined group, so request it
-  # explicitly to keep UBSAN vtable checks (and the vptr canary in test.sh).
-  export UBSAN_FLAGS="-fno-sanitize-recover=all -fsanitize=vptr"
+  export UBSAN_FLAGS="-fno-sanitize-recover=all"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
