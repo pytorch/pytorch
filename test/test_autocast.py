@@ -279,11 +279,12 @@ class TestAutocastDevice(TestCase):
     # That means:
     #   (1) double precision is ignored,
     #   (2) if any argument is float, then all arguments are promoted to float,
-    #   (3) if all arguments are of lower precision dtype, then all dtypes must be equal to the same amp autocast dtype.
-    # Since AMP autocast dtype is thread-local, it is not preserved across thread boundaries during autograd execution,
-    # and due to the multi-threaded nature of the autograd, the forward pass is being run in bfloat16, while the backward
-    # pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
-    # For more info see https://github.com/pytorch/pytorch/issues/132715.
+    #   (3) if all arguments share one lower precision dtype, that dtype is kept.
+    # Mixing two different lower precision dtypes also promotes to float, per (2)'s
+    # reasoning: float is the narrowest type covering both. This used to raise
+    # instead, which is what https://github.com/pytorch/pytorch/issues/132715 hit
+    # when autograd ran the backward pass in a different autocast dtype than the
+    # forward pass.
     @onlyAccelerator
     def test_autocast_prioritize(self, device):
         dtype = torch.bfloat16
@@ -299,6 +300,40 @@ class TestAutocastDevice(TestCase):
 
             loss = res.mean()
             loss.backward()
+
+    @onlyAccelerator
+    def test_autocast_prioritize_mixed_low_precision(self, device):
+        # Two different lower precision dtypes meeting in one op promote to float
+        # rather than raising. Every op on the promote policy is affected, so a
+        # pointwise one stands in for the rest.
+        for autocast_dtype, other in (
+            (torch.bfloat16, torch.float16),
+            (torch.float16, torch.bfloat16),
+        ):
+            with torch.autocast(device_type=device, dtype=autocast_dtype):
+                a = torch.randn(8, device=device, dtype=other)
+                b = torch.randn(8, device=device, dtype=autocast_dtype)
+                self.assertEqual(torch.atan2(a, b).dtype, torch.float32)
+
+    @onlyAccelerator
+    def test_autocast_prioritize_optional_arg(self, device):
+        # bilinear's bias is optional, and optional arguments must still count
+        # towards the promote decision. Note the positional arguments are all
+        # lower precision here, so only the bias can force the promotion.
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            i1 = torch.randn(4, 8, device=device, dtype=torch.bfloat16)
+            i2 = torch.randn(4, 6, device=device, dtype=torch.bfloat16)
+            weight = torch.randn(5, 8, 6, device=device, dtype=torch.bfloat16)
+
+            bias_fp32 = torch.randn(5, device=device, dtype=torch.float32)
+            self.assertEqual(
+                torch.bilinear(i1, i2, weight, bias_fp32).dtype, torch.float32
+            )
+
+            bias_bf16 = bias_fp32.bfloat16()
+            self.assertEqual(
+                torch.bilinear(i1, i2, weight, bias_bf16).dtype, torch.bfloat16
+            )
 
     @onlyMPS
     def test_mps_autocast_error_message(self, device):

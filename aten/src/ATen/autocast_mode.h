@@ -238,24 +238,32 @@ inline at::ScalarType prioritize(
     TORCH_CHECK(false, "promote type is double in at::autocast::prioritize");
     return current;
   }
-  at::ScalarType lower_precision_fp =
-      get_lower_precision_fp_from_device_type(device_type);
   if (is_autocast_eligible(nextArg, device_type)) {
     auto next = nextArg.scalar_type();
-    if (next == at::kDouble) {
-      return current; // ignores double tensors
-    } else if (current == at::kFloat || next == at::kFloat) {
-      return at::kFloat; // prioritizes float over lower_precision_fp
-    } else if (current == lower_precision_fp && next == lower_precision_fp) {
-      return lower_precision_fp;
-    } else {
-      TORCH_CHECK(
-          false, "Unexpected floating ScalarType in at::autocast::prioritize");
+    // Double tensors are ignored, and matching types need no widening.
+    if (next == at::kDouble || current == next) {
       return current;
     }
+    // The types differ, so either one of them is already fp32, or they are two
+    // different low precision types (e.g. an fp16 tensor inside a bf16 autocast
+    // region). fp32 is the narrowest type that covers both.
+    return at::kFloat;
   } else {
     return current;
   }
+}
+
+// Overload to catch optional Tensor args. Without this they fall through to the
+// catch-all template below and their dtype is silently left out of the promote
+// decision.
+inline at::ScalarType prioritize(
+    at::ScalarType current,
+    const std::optional<Tensor>& arg,
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
+  if (!arg.has_value()) {
+    return current;
+  }
+  return prioritize(current, *arg, device_type);
 }
 
 // Overload to catch TensorList args (for e.g. cat, stack).
