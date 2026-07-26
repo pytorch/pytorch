@@ -39,6 +39,7 @@ __all__ = [
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
     "GraphExecGroup",
+    "register_determinism_check",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -466,9 +467,9 @@ def checkpoint(
             check to perform. By default it is set to ``"default"`` which
             compares the shapes, dtypes, and devices of the recomputed tensors
             against those the saved tensors. To turn off this check, specify
-            ``"none"``. Currently these are the only two supported values.
-            Please open an issue if you would like to see more determinism
-            checks. This argument is only supported if ``use_reentrant=False``,
+            ``"none"``. Custom checks can be added with
+            :func:`~torch.utils.checkpoint.register_determinism_check`.
+            This argument is only supported if ``use_reentrant=False``,
             if ``use_reentrant=True``, the determinism check is always disabled.
         debug(bool, optional): If ``True``, error messages will also include
             a trace of the operators ran during the original forward computation
@@ -1080,6 +1081,48 @@ _allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
     "none": lambda _: None,
 }
 
+
+def register_determinism_check(
+    name: str, metadata_fn: Callable[[torch.Tensor], Any]
+) -> None:
+    r"""Registers a custom determinism check for use with checkpoint.
+
+    When ``determinism_check=name`` is passed to
+    :func:`~torch.utils.checkpoint.checkpoint` with ``use_reentrant=False``,
+    ``metadata_fn`` is applied to every tensor saved for backward during the
+    original forward pass and again during recomputation. If the two results
+    compare unequal for any tensor, a :class:`CheckpointError` is raised.
+
+    Args:
+        name (str): the value to pass as ``determinism_check`` to select this
+            check. Registering an existing name, including the built-in names
+            ``"default"`` and ``"none"``, raises a :class:`ValueError`.
+        metadata_fn (Callable): a callable that takes a :class:`torch.Tensor`
+            and returns metadata that supports ``==`` comparison, e.g. a dict
+            of tensor properties.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> def check_with_strides(x):
+        ...     return {
+        ...         "shape": x.shape,
+        ...         "dtype": x.dtype,
+        ...         "device": x.device,
+        ...         "stride": x.stride(),
+        ...     }
+        >>> torch.utils.checkpoint.register_determinism_check(
+        ...     "default_and_strides", check_with_strides
+        ... )
+        >>> out = checkpoint(
+        ...     fn, x, use_reentrant=False, determinism_check="default_and_strides"
+        ... )
+    """
+    if not callable(metadata_fn):
+        raise TypeError(f"metadata_fn must be callable, got {type(metadata_fn)}")
+    if name in _allowed_determinism_checks_to_fns:
+        raise ValueError(f"Determinism check '{name}' is already registered")
+    _allowed_determinism_checks_to_fns[name] = metadata_fn
+
 # See Rule 5
 class _StopRecomputationError(Exception):
     pass
@@ -1583,9 +1626,8 @@ def _checkpoint_without_reentrant_generator(
             check to perform. By default it is set to ``"default"`` which
             compares the shapes, dtypes, and devices of the recomputed tensors
             against those the saved tensors. To turn off this check, specify
-            ``"none"``. Currently these are the only two supported values.
-            Please open an issue if you would like to see more determinism
-            checks.
+            ``"none"``. Custom checks can be added with
+            :func:`~torch.utils.checkpoint.register_determinism_check`.
         debug(bool, optional): If ``True``, error messages will also include
             a trace of the operators ran during the original forward computation
             as well as the recomputation.
