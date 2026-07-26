@@ -761,6 +761,13 @@ def _call_while_loop(
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+    if "num_effect_tokens" in kwargs:
+        unimplemented(
+            gb_type="torch.while_loop: effect token marker",
+            context="num_effect_tokens is an internal capture marker",
+            explanation="Effectful while_loop export recompilation is unsupported.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
     cond_fn, body_fn, operands, additional_inputs = args
 
     # Input checks

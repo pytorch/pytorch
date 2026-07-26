@@ -1569,6 +1569,39 @@ class WhileLoopTests(TestCase):
                 dynamic=False,
             )
 
+    def test_while_loop_effect_provenance(self):
+        inv = torch.linalg.inv
+
+        def fn(matrix, post, count, return_loop):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + inv(matrix).contiguous()
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            loop_result = torch.while_loop(cond, body, carries)[1]
+            return loop_result if return_loop else inv(post).contiguous()
+
+        backend = torch._dynamo.testing.InductorAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        matrix = torch.tensor([[2.0, 1.0], [1.0, 3.0]])
+        post = torch.tensor([[3.0, 0.0], [0.0, 4.0]])
+        actual = compiled(matrix, post, torch.tensor(2), True)
+        self.assertEqual(actual, 2 * inv(matrix))
+        singular = torch.tensor([[1.0, 2.0], [2.0, 4.0]])
+        actual = compiled(singular, post, torch.tensor(0), False)
+        self.assertEqual(actual, inv(post))
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, "singular"):
+            compiled(singular, post, torch.tensor(1), False)
+
+        with_effect_nodes = backend.inductor_graphs[-1].graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.with_effects
+        )
+        loop_op = torch.ops.higher_order.while_loop
+        loop = next(node for node in with_effect_nodes if node.args[1] is loop_op)
+        self.assertEqual(len(loop.args[4]), 2)
+
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])

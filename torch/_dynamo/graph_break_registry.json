@@ -2308,6 +2308,16 @@
       "Hints": []
     }
   ],
+  "GB8679": [
+    {
+      "Gb_type": "torch.while_loop: effect token marker",
+      "Context": "num_effect_tokens is an internal capture marker",
+      "Explanation": "Effectful while_loop export recompilation is unsupported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0157": [
     {
       "Gb_type": "Unsupported ndarray attribute access",

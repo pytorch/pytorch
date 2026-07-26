@@ -9335,9 +9335,11 @@ def with_effects(token, op, *args, **kwargs):
     the newly created nodes in the graph.
     """
     from torch._higher_order_ops.effects import _get_effect, _get_schema
+    from torch._library.effects import EffectType
 
     # Get effect type
-    effect_type = _get_effect(op)
+    wrapped_while_loop = op is torch.ops.higher_order.while_loop
+    effect_type = EffectType.ORDERED if wrapped_while_loop else _get_effect(op)
     if effect_type is None and op is torch.ops.higher_order.invoke_subgraph:
         from torch._guards import InvokeSubgraphCache, TracingContext
 
@@ -9361,19 +9363,37 @@ def with_effects(token, op, *args, **kwargs):
     # Track operations before
     operation_len = len(V.graph.operations)
 
+    old_bindings = None
+    bindings = V.graph.current_node.meta.get("unbacked_bindings")
+    if wrapped_while_loop and bindings is not None:
+        if not all(
+            path and isinstance(path[0], pytree.SequenceKey) and path[0].idx > 0
+            for path in bindings.values()
+        ):
+            raise AssertionError("Expected bindings after the effect token")
+        old_bindings = bindings
+        V.graph.current_node.meta["unbacked_bindings"] = {
+            symbol: (pytree.SequenceKey(path[0].idx - 1), *path[1:])
+            for symbol, path in bindings.items()
+        }
+
     # Lower the op
-    if op in lowerings:
-        result = lowerings[op](*args, **kwargs)
-        # Realize so that we can get the ops to show up in V.graph.operations
-        pytree.tree_map_only(TensorBox, lambda a: a.realize(), result)
-    else:
+    try:
+        if op in lowerings:
+            result = lowerings[op](*args, **kwargs)
+            # Realize so that we can get the ops to show up in V.graph.operations
+            pytree.tree_map_only(TensorBox, lambda a: a.realize(), result)
+        else:
 
-        def wrap_tensors(x):
-            return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
+            def wrap_tensors(x):
+                return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
-        result = pytree.tree_map(
-            wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
-        )
+            result = pytree.tree_map(
+                wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
+            )
+    finally:
+        if old_bindings is not None:
+            V.graph.current_node.meta["unbacked_bindings"] = old_bindings
 
     # Get all the operations created during the lowering above, and add StarDeps
     # to the previous node with the same effect
@@ -9393,6 +9413,9 @@ def with_effects(token, op, *args, **kwargs):
         V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
         )
+
+    if wrapped_while_loop:
+        return (token, *result)
 
     try:
 
