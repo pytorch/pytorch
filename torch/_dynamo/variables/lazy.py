@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import functools
 import inspect
+import operator
 from typing import Any, TYPE_CHECKING
 
 from .. import config
@@ -73,6 +74,9 @@ class ComputedLazyCache:
         args: list[VariableTracker],
         op: Callable[..., Any],
     ) -> None:
+        if getattr(operator, op.__name__, None) is not op:
+            # reconstruct() loads the op as operator.<name>; enforce that eagerly
+            raise AssertionError(f"op must be reachable as operator.{op.__name__}")
         self.value = value
         self.lazy_vars = lazy_vars
         self.args = args
