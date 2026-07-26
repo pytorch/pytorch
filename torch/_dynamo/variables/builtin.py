@@ -266,8 +266,10 @@ _MISSING_SENTINEL = object()
 
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
     # invert is excluded: SymNodeVariable has no nb_invert_impl for symbolic realization
-    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_]),
-    2: frozenset([operator.add, operator.sub, operator.mul]),
+    1: frozenset(
+        [operator.neg, operator.pos, operator.abs, operator.not_, len, str, bool]
+    ),
+    2: frozenset([operator.add, operator.sub, operator.mul, min, max]),
 }
 
 _BUILTIN_TO_OPERATOR: dict[Callable[..., Any], Callable[..., Any]] = {abs: operator.abs}

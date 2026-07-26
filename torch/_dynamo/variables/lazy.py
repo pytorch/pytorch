@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import collections
 import functools
 import inspect
@@ -74,9 +75,13 @@ class ComputedLazyCache:
         args: list[VariableTracker],
         op: Callable[..., Any],
     ) -> None:
-        if getattr(operator, op.__name__, None) is not op:
-            # reconstruct() loads the op as operator.<name>; enforce that eagerly
-            raise AssertionError(f"op must be reachable as operator.{op.__name__}")
+        name = op.__name__
+        if (
+            getattr(operator, name, None) is not op
+            and getattr(builtins, name, None) is not op
+        ):
+            # reconstruct() loads the op as operator.<name> or builtins.<name>
+            raise AssertionError(f"op {name} not reachable in operator or builtins")
         self.value = value
         self.lazy_vars = lazy_vars
         self.args = args
@@ -663,9 +668,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         from ..bytecode_transformation import create_call_function
 
         cache = self._cache
-        codegen.add_push_null(
-            lambda: codegen.load_import_from("operator", cache.op.__name__)
-        )
+        name = cache.op.__name__
+        module = "builtins" if getattr(builtins, name, None) is cache.op else "operator"
+        codegen.add_push_null(lambda: codegen.load_import_from(module, name))
         for arg in cache.args:
             codegen(arg)
         codegen.extend_output(create_call_function(len(cache.args), False))
