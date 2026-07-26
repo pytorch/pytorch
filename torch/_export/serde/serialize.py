@@ -426,6 +426,7 @@ def serialize_torch_artifact(
 
 def deserialize_torch_artifact(
     serialized: dict[str, Any] | tuple[Any, ...] | bytes,
+    weights_only: bool | None = None,
 ):
     if isinstance(serialized, (dict, tuple)):
         return serialized
@@ -433,19 +434,22 @@ def deserialize_torch_artifact(
         return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
-    # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
-    try:
-        artifact = torch.load(buffer, weights_only=True)
-    except Exception as e:
-        buffer.seek(0)
-        artifact = torch.load(buffer, weights_only=False)
-        log.warning(
-            "Fallback to weights_only=False succeeded. "
-            "Loaded object of type %s after initial failure: %s",
-            type(artifact),
-            e,
-            exc_info=e,
-        )
+    if weights_only is None:
+        # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
+        try:
+            artifact = torch.load(buffer, weights_only=True)
+        except Exception as e:
+            buffer.seek(0)
+            artifact = torch.load(buffer, weights_only=False)
+            log.warning(
+                "Fallback to weights_only=False succeeded. "
+                "Loaded object of type %s after initial failure: %s",
+                type(artifact),
+                e,
+                exc_info=e,
+            )
+    else:
+        artifact = torch.load(buffer, weights_only=weights_only)
     if not isinstance(artifact, (tuple, dict)):
         raise AssertionError(f"expected tuple or dict, got {type(artifact).__name__}")
     return artifact
@@ -2925,6 +2929,7 @@ class GraphModuleDeserializer(metaclass=Final):
         | bytes
         | None = None,
         symbol_name_to_range: dict[str, symbolic_shapes.ValueRanges] | None = None,
+        weights_only: bool | None = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
         if _CURRENT_DESERIALIZER is not None:
@@ -3000,13 +3005,17 @@ class GraphModuleDeserializer(metaclass=Final):
 
             # Fake tensor constants may reconstruct symbolic sizes, which need
             # the symbol range map initialized above.
-            self.constants = deserialize_torch_artifact(constants)
+            self.constants = deserialize_torch_artifact(
+                constants, weights_only=weights_only
+            )
             self.signature = self.deserialize_signature(
                 serialized_graph_module.signature
             )
 
             if example_inputs is not None and len(example_inputs) > 0:
-                self.example_inputs = deserialize_torch_artifact(example_inputs)
+                self.example_inputs = deserialize_torch_artifact(
+                    example_inputs, weights_only=weights_only
+                )
             else:
                 self.example_inputs = None
             self.deserialize_graph(serialized_graph_module.graph)
@@ -3032,7 +3041,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 signature=self.signature,
                 module_call_graph=module_call_graph,
                 names_to_symbols=self.symbol_name_to_symbol,
-                state_dict=deserialize_torch_artifact(serialized_state_dict),
+                state_dict=deserialize_torch_artifact(
+                    serialized_state_dict, weights_only=weights_only
+                ),
                 constants=self.constants,
                 example_inputs=self.example_inputs,
             )
@@ -3595,6 +3606,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         | None = None,
         *,
         _unsafe_skip_version_check=False,
+        weights_only: bool | None = None,
     ) -> ep.ExportedProgram:
         if not isinstance(exported_program, ExportedProgram):
             raise AssertionError(
@@ -3625,6 +3637,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             constants,
             example_inputs,
             symbol_name_to_range,
+            weights_only=weights_only,
         )
         range_constraints = self.deserialize_range_constraints(
             symbol_name_to_range,
@@ -3797,6 +3810,7 @@ def deserialize(
     expected_opset_version: dict[str, int] | None = None,
     *,
     _unsafe_skip_version_check=False,
+    weights_only: bool | None = None,
 ) -> ep.ExportedProgram:
     if not isinstance(artifact.exported_program, bytes):
         raise AssertionError(
@@ -3811,6 +3825,7 @@ def deserialize(
         artifact.constants,
         artifact.example_inputs,
         _unsafe_skip_version_check=_unsafe_skip_version_check,
+        weights_only=weights_only,
     )
 
 
