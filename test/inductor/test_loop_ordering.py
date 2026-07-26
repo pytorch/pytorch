@@ -764,6 +764,42 @@ class LoopOrderingTest(TestCase):
         # variance reduction + block reduction = 2 kernels
         self.assertEqual(2, metrics.generated_kernel_count)
 
+    def test_upsample_into_reduction_keeps_coalesced_loops(self):
+        """
+        Nearest-neighbour upsample into a conv feeding a GroupNorm. The
+        pointwise leaves ahead of the GroupNorm reduction can be reindexed
+        onto the reduction's split, but doing so makes their reads
+        uncoalesced, and the fusion it unlocks does not pay for that.
+
+        Expected: the reindex is rolled back, so the upsample keeps its
+        coalesced loop order.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/189488
+        """
+
+        class Mod(nn.Module):
+            def __init__(self, channels, groups):
+                super().__init__()
+                self.conv = nn.Conv2d(channels, channels, 3, padding=1)
+                self.norm = nn.GroupNorm(groups, channels, eps=1e-6)
+                self.skip = nn.Conv2d(channels, channels, 1)
+
+            def forward(self, x, residual):
+                x = (x + residual) / 1.41421356237
+                x = F.interpolate(x, scale_factor=2.0, mode="nearest")
+                x = self.conv(x)
+                y = F.silu(self.norm(x))
+                return y + (self.skip(x) * 0.01)
+
+        channels = 128
+        mod = Mod(channels, 32).eval()
+        x = torch.randn(8, channels, 32, 32)
+        residual = torch.randn_like(x)
+
+        with torch.no_grad():
+            self.do_acc_test(mod, x, residual)
+        self.assertEqual(6, metrics.generated_kernel_count)
+
     @inductor_config.patch(
         {
             "assert_indirect_indexing": False,
