@@ -32,6 +32,7 @@ from typing import (
 )
 
 import torch
+
 from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
 from torch._inductor.config import triton as inductor_triton_config
@@ -2611,6 +2612,8 @@ class CachingAutotuner(KernelInterface):
             if not callable(runner):
                 return None
             kernel = runner.__self__
+            if getattr(kernel, "global_scratch_size", 0):
+                return None
             cu_function = kernel.function
             num_warps = kernel.num_warps
             shared = kernel.shared
