@@ -1086,6 +1086,13 @@ elseif(USE_CUDA)
     target_link_libraries(torch_nvshmem PRIVATE torch_cpu torch::cudart)
     set_target_properties(torch_nvshmem PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+    # nvcc's cudafe reformats operator""_if in complex.h into `operator "" _if`,
+    # tripping -Wdeprecated-literal-operator on the clang host compiler.
+    # torch_nvshmem does not go through torch_compile_options (which suppresses
+    # this for other CUDA targets), so mirror that Clang-only guard here (gh-151316).
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler -Wno-deprecated-literal-operator>)
+    endif()
     target_compile_options(torch_nvshmem PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
     target_link_libraries(torch_nvshmem PRIVATE
         ${NVSHMEM_HOST_LIB}
