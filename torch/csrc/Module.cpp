@@ -297,13 +297,9 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
     virtual ~Baz() = default;
   };
   Baz x{};
-  // Purposely cast through `void*` so there's no fixups applied, and launder
-  // the result through a volatile pointer so the optimizer cannot see the exact
-  // dynamic type and devirtualize y->bar(). Such devirtualization elides the
-  // vtable load and defeats -fsanitize=vptr (observed with clang-21, where the
-  // plain void* cast alone no longer prevents it).
+  // Purposely cast through `void*` so there's no fixups applied.
   // NOLINTNEXTLINE(bugprone-casting-through-void,-warnings-as-errors)
-  volatile auto y = static_cast<Foo*>(static_cast<void*>(&x));
+  auto y = static_cast<Foo*>(static_cast<void*>(&x));
   auto rc = y->bar();
   return THPUtils_packInt32(rc);
 }
