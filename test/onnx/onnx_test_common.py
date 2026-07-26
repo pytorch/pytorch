@@ -92,7 +92,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
         onnxruntime.set_seed(0)
-        device_type = getattr(torch.accelerator.current_accelerator(check_available=True), "type", None)
+        device_type = getattr(
+            torch.accelerator.current_accelerator(check_available=True), "type", None
+        )
         if device_type:
             torch.get_device_module(device_type).manual_seed_all(0)
         os.environ["ALLOW_RELEASED_ONNX_OPSET_ONLY"] = "0"
