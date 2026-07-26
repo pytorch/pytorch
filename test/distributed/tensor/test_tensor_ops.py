@@ -1806,6 +1806,7 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
                 torch.zeros(4, 4, device=self.device_type), mesh, [Shard(0)]
             )
             regular = torch.zeros(4, 4, device=self.device_type)
+            versions = (dt._version, regular._version)
 
             torch._foreach_add_([dt, regular], 1)
             hits, misses = _get_fast_path_sharding_prop_cache_stats()
@@ -1814,10 +1815,18 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
                 dt.full_tensor(), torch.ones(4, 4, device=self.device_type)
             )
             self.assertEqual(regular, torch.ones(4, 4, device=self.device_type))
+            self.assertEqual(
+                (dt._version, regular._version),
+                tuple(version + 1 for version in versions),
+            )
 
             torch._foreach_add_([dt, regular], 1)
             hits, misses = _get_fast_path_sharding_prop_cache_stats()
             self.assertEqual(hits, 1)
+            self.assertEqual(
+                (dt._version, regular._version),
+                tuple(version + 2 for version in versions),
+            )
 
     def test_two_list_op_cache_collision(self):
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo

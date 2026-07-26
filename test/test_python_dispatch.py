@@ -1102,6 +1102,24 @@ $1: f32[1] = torch._ops.aten.detach.default($0)""",
         x.data.add_(2)
         self.assertEqual(cur_vc, x._version)
 
+    def test_foreach_inplace_version(self) -> None:
+        tensors = [LoggingTensor(torch.ones(1)), LoggingTensor(torch.ones(1))]
+        other = [LoggingTensor(torch.ones(1)), LoggingTensor(torch.ones(1))]
+        versions = [tensor._version for tensor in tensors]
+
+        torch._foreach_add_(tensors, other)
+        self.assertEqual(
+            [tensor._version for tensor in tensors],
+            [version + 1 for version in versions],
+        )
+        self.assertEqual([tensor._version for tensor in other], [0, 0])
+
+        torch._foreach_mul_(tensors, 2)
+        self.assertEqual(
+            [tensor._version for tensor in tensors],
+            [version + 2 for version in versions],
+        )
+
     def test_subclass_priority(self) -> None:
         class ErrorA(RuntimeError):
             pass
