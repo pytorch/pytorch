@@ -1541,6 +1541,10 @@ class TestCuptiRecords(TestCase):
         # Row 1: annotation + metadata merge onto the one render stage.
         self.assertEqual(per_stage[2]["Process Group Name"], "6")
         self.assertEqual(per_stage[2]["dtype"], "bf16")
+        # graphNodeId is emitted with only its lower 32-bit node id; the graph id packed in the
+        # upper bits is dropped here (it rides along separately as "graph id").
+        self.assertEqual(per_stage[1]["graph node id"], "10")
+        self.assertEqual(per_stage[2]["graph node id"], "11")
 
     def test_pftrace_graph_node_dependency_arrows(self):
         # A CUDA-graph replay's node dependency DAG becomes GpuRenderStageEvent.event_wait_ids
