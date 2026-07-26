@@ -1400,6 +1400,45 @@ backward() with non-leaf tensor
         self.assertEqual(compiled_y, eager_y)
         self.assertEqual(compiled_grad, eager_grad)
 
+    def test_autograd_grad_with_requires_grad_setattr(self):
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            y = x.detach()
+            y.requires_grad = True
+            return torch.autograd.grad(mod(y).sum(), y)[0].detach()
+
+        x = torch.randn(2, 4)
+        eager = fn(x)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(compiled, eager)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_requires_grad_setattr_unsupported_value_graph_breaks(self):
+        x = torch.randn(4)
+        for value in (False, 1, None):
+            with self.subTest(value=value):
+
+                def fn(x):
+                    y = x.detach()
+                    y.requires_grad = value
+                    return y.sum()
+
+                torch._dynamo.reset()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_requires_grad_setattr_non_differentiable_dtype_graph_breaks(self):
+        def fn(x):
+            y = x.detach()
+            y.requires_grad = True
+            return y.sum()
+
+        x = torch.tensor([1, 2, 3])
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
 
 if __name__ == "__main__":
     run_tests()
