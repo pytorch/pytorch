@@ -946,6 +946,13 @@ _COMPUTE_ARGS = (
 # them to be NUM, but GpuRenderStageEvent.extra_data.value is always a string -- the bare
 # names would collide with that numeric expectation and crash the plugin. (device == the
 # render stage's gpu_id and stream == the lane, so this is detail-panel only.)
+def _lower_node_id(c: dict):
+    # graphNodeId packs the graph id in its upper 32 bits (emitted separately as "graph id");
+    # keep only the lower 32-bit node id, matching the chrome export.
+    gnid = c.get("graph_node_id")
+    return None if gnid is None else gnid & 0xFFFFFFFF
+
+
 _RENDER_EXTRA = (
     ("device id", lambda c: c.get("device_id"), False),
     ("context id", lambda c: c.get("context_id"), False),
@@ -956,7 +963,7 @@ _RENDER_EXTRA = (
     ("channel", lambda c: c.get("channel"), True),
     ("channel_type", lambda c: c.get("channel_type"), True),
     ("graph id", lambda c: c.get("graph_id"), True),
-    ("graph node id", lambda c: c.get("graph_node_id"), True),
+    ("graph node id", _lower_node_id, True),
     ("bytes", lambda c: c.get("bytes"), True),
     ("value", lambda c: c.get("value"), True),
     ("memory kind", lambda c: c.get("memory_kind"), True),
