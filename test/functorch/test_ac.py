@@ -5,8 +5,11 @@ from math import prod
 
 import torch
 import torch._functorch.config as config
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
@@ -27,9 +30,10 @@ def compile_with_ac(f, memory_budget):
 def get_act_mem(f):
     out = f()
     out.backward()
-    start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+    device_module = torch.get_device_module()
+    start_mem = device_module.memory_stats()["requested_bytes.all.current"]
     out = f()
-    cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+    cur_mem = device_module.memory_stats()["requested_bytes.all.current"]
     act_mem = (cur_mem - start_mem) / (1024 * 1024)
     out.backward()
     return act_mem
@@ -67,7 +71,8 @@ def get_mem_and_flops(f, memory_budget=None):
 class MemoryBudgetTest(TestCase):
     def setUp(self):
         super().setUp()
-        torch.set_default_device("cuda")
+        self.device = self.get_primary_device()
+        torch.set_default_device(self.device)
 
     def tearDown(self):
         torch.set_default_device(None)
@@ -246,9 +251,10 @@ class MemoryBudgetTest(TestCase):
                 x = torch.ops.testac.triton_relu(torch.mm(x, w))
             return x.sum()
 
-        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        x = torch.randn(512, 512, requires_grad=True, device=self.device)
         ws = [
-            torch.randn(512, 512, requires_grad=True, device="cuda") for _ in range(5)
+            torch.randn(512, 512, requires_grad=True, device=self.device)
+            for _ in range(5)
         ]
 
         def call():
@@ -407,7 +413,11 @@ class MemoryBudgetTest(TestCase):
         self.assertEqual(flops, eager_flops)
 
 
+_desired_test_bases = get_desired_device_type_test_bases(only_for=("cuda",))
+instantiate_device_type_tests(MemoryBudgetTest, globals(), only_for=("cuda",))
+
+
 if __name__ == "__main__":
-    # I'm using the cuda memory allocator to verify memory allocations
-    if HAS_CUDA_AND_TRITON and not TEST_WITH_ROCM:
+    # This test uses accelerator allocator statistics to verify allocations.
+    if _desired_test_bases and has_triton() and not TEST_WITH_ROCM:
         run_tests()
