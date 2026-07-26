@@ -848,6 +848,15 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
       : grad.masked_select(mask).sum();
 }
 
+Tensor masked_fill_inplace_if_safe(
+    Tensor tensor,
+    const Tensor& mask,
+    const Scalar& value) {
+  return areAnyTensorSubclassLike({tensor, mask})
+      ? tensor.masked_fill(mask, value)
+      : tensor.masked_fill_(mask, value);
+}
+
 template <typename T>
 Tensor mul_tensor_backward(
     const Tensor& grad,
@@ -990,8 +999,7 @@ Tensor mean_backward(
     const c10::SymInt& numel,
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
-  auto n =
-      is_all_reduce ? std::move(numel) : _safe_size(shape, opt_dim.value());
+  auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
   return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
 }
 
@@ -1460,21 +1468,23 @@ Tensor clamp_backward(
     const Tensor& min,
     const Tensor& max) {
   if (max.defined() && min.defined()) {
-    auto zero = at::scalar_tensor(0., grad.options());
     const auto min_lt_max = min < max;
     const auto min_eq_max = min == max;
-    const auto interior = (self > min).logical_and(self < max);
     const auto tie =
         ((self == min).logical_or(self == max)).logical_and(min_lt_max);
-    const auto degenerate_tie = (self == min).logical_and(min_eq_max);
-    return where(
-        interior.logical_or(degenerate_tie), grad, where(tie, grad / 2, zero));
+    const auto active = min_lt_max.logical_and(self >= min)
+                            .logical_and(self <= max)
+                            .logical_or(min_eq_max.logical_and(self == min));
+    // Reuse the tie-split output when zeroing inactive entries. The explicit
+    // active mask also makes NaNs inactive and handles equal/reversed bounds.
+    return masked_fill_inplace_if_safe(
+        where(tie, grad / 2, grad), active.logical_not(), 0);
   } else if (min.defined()) {
-    auto zero = at::scalar_tensor(0., grad.options());
-    return where(self > min, grad, where(self == min, grad / 2, zero));
+    return masked_fill_inplace_if_safe(
+        where(self == min, grad / 2, grad), (self >= min).logical_not_(), 0);
   } else if (max.defined()) {
-    auto zero = at::scalar_tensor(0., grad.options());
-    return where(self < max, grad, where(self == max, grad / 2, zero));
+    return masked_fill_inplace_if_safe(
+        where(self == max, grad / 2, grad), (self <= max).logical_not_(), 0);
   } else {
     return grad;
   }
@@ -1492,35 +1502,35 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     return ret;
   }
 
-  auto zero = at::scalar_tensor(0., grad.options());
   if (max.defined() && min.defined()) {
+    const auto min_lt_max = min < max;
+    const auto min_eq_max = min == max;
     if (grad_input_mask[0]) {
-      const auto self_lt_min = self < min;
-      const auto min_lt_max = min < max;
-      const auto self_eq_min = self == min;
-      std::get<0>(ret) = where(
-          min_lt_max,
-          where(self_lt_min, grad, where(self_eq_min, grad / 2, zero)),
-          where((min == max).logical_and(self_lt_min), grad, zero));
+      const auto active = min_lt_max.logical_and(self <= min)
+                              .logical_or(min_eq_max.logical_and(self < min));
+      // min is active below its bound, splits ordinary ties, is inactive at
+      // equal bounds, and is inactive everywhere for reversed bounds.
+      std::get<0>(ret) = masked_fill_inplace_if_safe(
+          where(self == min, grad / 2, grad), active.logical_not(), 0);
     }
     if (grad_input_mask[1]) {
-      const auto self_gt_max = self > max;
       const auto max_lt_min = max < min;
-      const auto self_eq_max = self == max;
-      std::get<1>(ret) = where(
-          max_lt_min,
-          grad,
-          where(
-              min < max,
-              where(self_gt_max, grad, where(self_eq_max, grad / 2, zero)),
-              where(self_gt_max, grad, zero)));
+      const auto active =
+          max_lt_min.logical_or(min_lt_max.logical_and(self >= max))
+              .logical_or(min_eq_max.logical_and(self > max));
+      // max receives the whole gradient for reversed bounds, splits only
+      // ordinary ties, and is inactive at equality when both bounds are equal.
+      std::get<1>(ret) = masked_fill_inplace_if_safe(
+          where((self == max).logical_and(min_lt_max), grad / 2, grad),
+          active.logical_not(),
+          0);
     }
   } else if (min.defined() && grad_input_mask[0]) {
-    std::get<0>(ret) =
-        where(self < min, grad, where(self == min, grad / 2, zero));
+    std::get<0>(ret) = masked_fill_inplace_if_safe(
+        where(self == min, grad / 2, grad), (self <= min).logical_not_(), 0);
   } else if (max.defined() && grad_input_mask[1]) {
-    std::get<1>(ret) =
-        where(self > max, grad, where(self == max, grad / 2, zero));
+    std::get<1>(ret) = masked_fill_inplace_if_safe(
+        where(self == max, grad / 2, grad), (self >= max).logical_not_(), 0);
   }
   return ret;
 }
@@ -1533,24 +1543,28 @@ at::Tensor clamp_jvp(
     const Tensor& max_p,
     const Tensor& max_t) {
   if (min_p.defined() && max_p.defined()) {
-    return where(
-        min_p > max_p,
-        max_t,
-        where(
-            min_p == max_p,
-            where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)),
-            where(
-                self_p < min_p,
-                min_t,
-                where(
-                    self_p == min_p,
-                    (self_t + min_t) / 2,
-                    where(
-                        self_p > max_p,
-                        max_t,
-                        where(
-                            self_p == max_p, (self_t + max_t) / 2, self_t))))));
+    // Build the common selection first, then adjust ordinary ties. This uses
+    // five full-tensor where passes instead of eagerly evaluating eight nested
+    // branches. These cannot use masked_fill_ because every selected value is
+    // a Tensor tangent, and where_out would break higher-order autograd. Equal
+    // bounds retain self_t at equality, while reversed bounds select max_t
+    // everywhere to match the forward operation.
+    auto result = where(self_p < min_p, min_t, self_t);
+    result = where(self_p > max_p, max_t, result);
+    const auto ordered_bounds = min_p < max_p;
+    result = where(
+        ordered_bounds.logical_and(self_p == min_p),
+        (self_t + min_t) / 2,
+        result);
+    result = where(
+        ordered_bounds.logical_and(self_p == max_p),
+        (self_t + max_t) / 2,
+        result);
+    return where(min_p > max_p, max_t, result);
   } else if (min_p.defined()) {
+    // Both non-tie branches select Tensor tangents, so scalar-only
+    // masked_fill_ cannot replace either where without losing
+    // differentiability.
     return where(
         self_p == min_p,
         (self_t + min_t) / 2,
@@ -3719,12 +3733,7 @@ Tensor slice_backward_wrapper(
   auto end_val = end.has_value() ? end.value() : INT64_MAX;
 
   return slice_backward_symint(
-      grad,
-      input_sizes,
-      dim,
-      std::move(start_val),
-      std::move(end_val),
-      std::move(step));
+      grad, input_sizes, dim, std::move(start_val), std::move(end_val), step);
 }
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
@@ -7468,7 +7477,7 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
           dilation,
           transposed,
           output_padding,
-          std::move(groups),
+          groups,
           {output_mask[0], output_mask[1], false});
   return std::make_tuple(
       std::move(std::get<0>(grad_inputs)), std::move(std::get<1>(grad_inputs)));

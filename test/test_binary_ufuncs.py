@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     precisionOverride,
+    skipCPUIf,
     skipCUDAIfNotRocm,
     skipIf,
     skipMeta,
@@ -1374,6 +1375,7 @@ class TestBinaryUfuncsDevice(TestCase):
         res = nom / denom
         self.assertEqual(res, expected)
 
+    @skipCPUIf(True, "test compares accelerator division implementations")
     @dtypes(torch.float, torch.bfloat16)
     def test_division_by_scalar(self, device, dtype):
         num = torch.rand(1024, device=device, dtype=dtype)
@@ -1385,6 +1387,7 @@ class TestBinaryUfuncsDevice(TestCase):
 
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
+    @skipCPUIf(True, "test requires distinct CPU and accelerator devices")
     def test_cross_device_inplace_error_msg(self, device):
         a = torch.tensor(2.0)
         b = torch.tensor(2.0, device=device)
@@ -2724,6 +2727,25 @@ class TestBinaryUfuncsDevice(TestCase):
                 [20.0] * 3,
             )
 
+        for op in (torch.clamp_min, torch.clamp_max):
+            nan_self = torch.tensor(
+                [float("nan")], device=device, dtype=dtype, requires_grad=True
+            )
+            bound = torch.zeros(1, device=device, dtype=dtype, requires_grad=True)
+            op(nan_self, bound).sum().backward()
+            self.assertEqual(nan_self.grad, [0.0])
+            self.assertEqual(bound.grad, [0.0])
+
+        nan_self = torch.tensor(
+            [float("nan")], device=device, dtype=dtype, requires_grad=True
+        )
+        nan_min = torch.tensor([-1.0], device=device, dtype=dtype, requires_grad=True)
+        nan_max = torch.tensor([1.0], device=device, dtype=dtype, requires_grad=True)
+        torch.clamp(nan_self, min=nan_min, max=nan_max).sum().backward()
+        self.assertEqual(nan_self.grad, [0.0])
+        self.assertEqual(nan_min.grad, [0.0])
+        self.assertEqual(nan_max.grad, [0.0])
+
         x = torch.tensor(
             [[0.0, 1.0, 2.0], [1.0, 1.0, 0.0]],
             device=device,
@@ -2814,31 +2836,27 @@ class TestBinaryUfuncsDevice(TestCase):
                 tangent = fwAD.unpack_dual(op(a_dual, b_dual)).tangent
             self.assertEqual(tangent, [7.0])
 
-        with fwAD.dual_level():
-            inf_tangent = torch.tensor([float("inf")], device=device, dtype=dtype)
-            finite_tangent = torch.ones(1, device=device, dtype=dtype)
-            fmax_tangent = fwAD.unpack_dual(
-                torch.fmax(
-                    fwAD.make_dual(
-                        torch.zeros(1, device=device, dtype=dtype), inf_tangent
-                    ),
-                    fwAD.make_dual(
-                        torch.ones(1, device=device, dtype=dtype), finite_tangent
-                    ),
-                )
-            ).tangent
-            fmin_tangent = fwAD.unpack_dual(
-                torch.fmin(
-                    fwAD.make_dual(
-                        torch.ones(1, device=device, dtype=dtype), inf_tangent
-                    ),
-                    fwAD.make_dual(
-                        torch.zeros(1, device=device, dtype=dtype), finite_tangent
-                    ),
-                )
-            ).tangent
-        self.assertEqual(fmax_tangent, [1.0])
-        self.assertEqual(fmin_tangent, [1.0])
+        for op, a, b in (
+            (torch.maximum, 0.0, 1.0),
+            (torch.fmax, 0.0, 1.0),
+            (torch.minimum, 1.0, 0.0),
+            (torch.fmin, 1.0, 0.0),
+        ):
+            with fwAD.dual_level():
+                inf_tangent = torch.tensor([float("inf")], device=device, dtype=dtype)
+                finite_tangent = torch.ones(1, device=device, dtype=dtype)
+                tangent = fwAD.unpack_dual(
+                    op(
+                        fwAD.make_dual(
+                            torch.tensor([a], device=device, dtype=dtype), inf_tangent
+                        ),
+                        fwAD.make_dual(
+                            torch.tensor([b], device=device, dtype=dtype),
+                            finite_tangent,
+                        ),
+                    )
+                ).tangent
+            self.assertEqual(tangent, [1.0])
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -4149,6 +4167,7 @@ class TestBinaryUfuncsDevice(TestCase):
             lambda: torch.add(m1, m1, out=m2),
         )
 
+    @skipCPUIf(True, "test covers accelerator half precision")
     def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
         for op, y, alpha in (
@@ -5061,27 +5080,10 @@ def generate_not_implemented_tests(cls):
 generate_not_implemented_tests(TestBinaryUfuncsDevice)
 
 
-class TestBinaryUfuncSubgradientsCPU(TestCase):
-    test_min_max_and_clamp_subgradient = (
-        TestBinaryUfuncsDevice.test_min_max_and_clamp_subgradient
-    )
-    test_min_max_and_clamp_forward_ad = (
-        TestBinaryUfuncsDevice.test_min_max_and_clamp_forward_ad
-    )
-    test_scalar_clamp_subgradient = TestBinaryUfuncsDevice.test_scalar_clamp_subgradient
-    test_tensor_clamp_subgradient = TestBinaryUfuncsDevice.test_tensor_clamp_subgradient
-    test_fmin_fmax_nan_subgradient = (
-        TestBinaryUfuncsDevice.test_fmin_fmax_nan_subgradient
-    )
-
-
 instantiate_device_type_tests(
     TestChebyshevNanPropagation, globals(), only_for=("cpu", "cuda")
 )
-instantiate_device_type_tests(TestBinaryUfuncSubgradientsCPU, globals(), only_for="cpu")
-instantiate_device_type_tests(
-    TestBinaryUfuncsDevice, globals(), allow_xpu=True, except_for="cpu"
-)
+instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":

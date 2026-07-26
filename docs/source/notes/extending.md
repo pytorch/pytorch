@@ -1153,11 +1153,17 @@ match ``Tensor`` parameters for the following operator names:
 - ``to``, ``_to_copy``, ``copy``, and ``copy_``; and
 - ``_conj``.
 
-For these names, the Tensor signature is tried first. If it accepts a Python
-number, the binding converts the number with ``scalar_to_tensor`` into a
+For these names, the Tensor signature is tried first and accepts a Python
+number. The binding converts the number with ``scalar_to_tensor`` into a
 zero-dimensional Tensor and marks it as a wrapped number. This is a temporary,
 name-based compatibility allowlist, not the default conversion rule for Tensor
 parameters.
+
+Wrapped numbers are also important when an operation runs on an accelerator.
+Kernels can extract their value and pass it as a kernel argument, just as they
+do for a Scalar, without transferring a Tensor between devices. Naively moving
+a CPU scalar Tensor to the accelerator before using it would introduce a
+blocking CPU-to-accelerator copy for a value that can instead be passed directly.
 
 The distinction matters when schemas have different semantics. A ``Scalar``
 argument is a fixed parameter, whereas a zero-dimensional Tensor is still a
