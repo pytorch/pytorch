@@ -534,7 +534,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.r7i.2xlarge
       build-environment: linux-jammy-py3.10-gcc11-full-debug-build-only
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       python-version: "3.10"
       compiler: gcc11
