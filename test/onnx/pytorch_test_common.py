@@ -408,6 +408,8 @@ class ExportTestCase(common_utils.TestCase):
         super().setUp()
         # TODO(#88264): Flaky test failures after changing seed.
         set_rng_seed(0)
-        device_type = getattr(torch.accelerator.current_accelerator(check_available=True), "type", None)
+        device_type = getattr(
+            torch.accelerator.current_accelerator(check_available=True), "type", None
+        )
         if device_type:
             torch.get_device_module(device_type).manual_seed_all(0)
