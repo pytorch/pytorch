@@ -7,6 +7,7 @@ with test_sym_bool)
 import copy
 import io
 import math
+import pickle
 import tempfile
 import unittest
 import zipfile
@@ -2181,6 +2182,16 @@ class TestSchemaVersioning(TestCase):
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 
 
+class _CustomObject:
+    def __init__(self, x):
+        self.x = x
+
+
+@dataclass
+class _CustomPytreeInput:
+    x: torch.Tensor
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
     def test_save_buffer(self):
@@ -2525,6 +2536,115 @@ class TestSaveLoad(TestCase):
                         self.assertEqual(
                             node_source_orig.to_dict(), node_source_loaded.to_dict()
                         )
+
+    def test_deserialize_torch_artifact_default_loads_tensors(self):
+        # Tensors-only payloads must round-trip with the default (weights_only=None).
+        data = {"x": torch.tensor([1.0, 2.0]), "y": torch.tensor([3, 4])}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        result = deserialize_torch_artifact(buf.getvalue())
+        self.assertIsInstance(result, dict)
+        self.assertTrue(torch.equal(result["x"], data["x"]))
+        self.assertTrue(torch.equal(result["y"], data["y"]))
+
+    def test_deserialize_torch_artifact_explicit_weights_only(self):
+        # Explicit weights_only=True/False both work for plain tensor payloads.
+        data = {"x": torch.tensor([1.0, 2.0])}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        payload = buf.getvalue()
+        for weights_only in (True, False):
+            result = deserialize_torch_artifact(payload, weights_only=weights_only)
+            self.assertTrue(torch.equal(result["x"], data["x"]))
+
+    def test_deserialize_torch_artifact_custom_object_default_fallback(self):
+        # BC: payloads containing arbitrary pickled objects still load with the
+        # default (weights_only=None) via the historical weights_only=False fallback.
+        data = {"obj": _CustomObject(7)}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        with self.assertLogs("torch._export.serde.serialize", level="WARNING"):
+            result = deserialize_torch_artifact(buf.getvalue())
+        self.assertEqual(result["obj"].x, 7)
+
+    def test_deserialize_torch_artifact_custom_object_weights_only_true(self):
+        # weights_only=True rejects non-allowlisted pickled objects.
+        data = {"obj": _CustomObject(7)}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        with self.assertRaises(pickle.UnpicklingError):
+            deserialize_torch_artifact(buf.getvalue(), weights_only=True)
+
+    def test_deserialize_torch_artifact_custom_object_weights_only_false(self):
+        data = {"obj": _CustomObject(7)}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        result = deserialize_torch_artifact(buf.getvalue(), weights_only=False)
+        self.assertEqual(result["obj"].x, 7)
+
+    def test_deserialize_torch_artifact_empty_bytes(self):
+        # Empty bytes should return an empty dict regardless of weights_only.
+        self.assertEqual(deserialize_torch_artifact(b""), {})
+        self.assertEqual(deserialize_torch_artifact(b"", weights_only=False), {})
+
+    def test_deserialize_torch_artifact_passthrough(self):
+        # dict/tuple inputs are passed through without touching torch.load.
+        d = {"a": torch.tensor(1)}
+        self.assertIs(deserialize_torch_artifact(d), d)
+        t = (torch.tensor(1),)
+        self.assertIs(deserialize_torch_artifact(t), t)
+
+    def test_load_weights_only_default_and_explicit(self):
+        # Plain-tensor models load with the default (None) as well as explicit
+        # weights_only=True/False.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M()
+        inp = (torch.randn(2, 4),)
+        ep = export(m, inp, strict=True)
+
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        expected = ep.module()(*inp)
+        for weights_only in (None, True, False):
+            buffer.seek(0)
+            loaded_ep = load(buffer, weights_only=weights_only)
+            self.assertTrue(torch.allclose(expected, loaded_ep.module()(*inp)))
+
+    def test_load_weights_only_true_rejects_custom_example_inputs(self):
+        # Archives whose example inputs contain non-allowlisted pickled objects
+        # cannot be loaded with weights_only=True; the error points to the
+        # weights_only=False escape hatch. The default (None) keeps the
+        # historical fallback and still loads them.
+        torch.export.register_dataclass(
+            _CustomPytreeInput,
+            serialized_type_name="test_serialize._CustomPytreeInput",
+        )
+
+        class M(torch.nn.Module):
+            def forward(self, inp: _CustomPytreeInput) -> torch.Tensor:
+                return inp.x * 2
+
+        x = torch.randn(4)
+        ep = export(M(), (_CustomPytreeInput(x),), strict=True)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+
+        buffer.seek(0)
+        with self.assertRaisesRegex(pickle.UnpicklingError, "weights_only=False"):
+            load(buffer, weights_only=True)
+
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        expected = ep.module()(_CustomPytreeInput(x))
+        actual = loaded_ep.module()(_CustomPytreeInput(x))
+        self.assertTrue(torch.allclose(expected, actual))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
