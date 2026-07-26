@@ -25,7 +25,7 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, get_device_type, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -182,6 +182,12 @@ def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
 
 
 def check_supported_striding(mat_a, mat_b) -> None:
+    # These layout requirements come from the cuBLAS-style scaled GEMM backends.
+    # The CPU kernel makes both operands contiguous internally and accepts any
+    # layout, and the meta kernel skips these checks on CPU for the same reason.
+    if get_device_type(mat_a) == "cpu":
+        return
+
     def is_row_major(stride) -> bool:
         return V.graph.sizevars.statically_known_equals(stride[1], 1)
 
