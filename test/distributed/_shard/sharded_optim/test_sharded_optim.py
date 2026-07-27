@@ -117,8 +117,10 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         sharded_optim.zero_grad()
 
         before_update = deepcopy(sharded_optim.named_params)
-        
-        inp = torch.rand([5, 10]).to(torch.device(device_type, self.rank)).requires_grad_()
+
+        inp = torch.rand(
+            [5, 10], device=torch.device(device_type, self.rank), requires_grad=True
+        )
 
         # run forward
         local_output = local_model(inp)
