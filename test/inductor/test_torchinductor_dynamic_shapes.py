@@ -72,10 +72,11 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    # inf/nan cast to int can't be constant-folded under dynamic shapes, so the
-    # cast is emitted by codegen and evaluates to INT_MIN instead of 0 on CPU.
-    # Mirrors the xfail added in test_torchinductor_codegen_dynamic_shapes.py (#190427).
-    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(("cpu",)),
+    # This fails on periodic CPU shards but passes on other CPU configurations,
+    # so skip it instead of producing unexpected successes.
+    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
