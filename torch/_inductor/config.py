@@ -1304,6 +1304,14 @@ compile_worker_watchdog_interval_seconds: int = int(
     os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL", 60)
 )
 
+# After a limit breach, how long the sidecar waits for non-offending siblings to
+# finish before tearing down the worker pool. Independent of the watchdog
+# reporting interval -- drain_ready is only checked on subsequent ticks, so a
+# budget of one interval expires before siblings can be waited on.
+compile_worker_drain_timeout_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_DRAIN_TIMEOUT", 30)
+)
+
 # Log per-operation runtime estimates for TLParse analysis.
 log_tlparse: bool = Config(
     env_name_force="LOG_TLPARSE",
@@ -1869,6 +1877,33 @@ file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "
 # long compiles are not affected.
 compile_worker_wait_timeout: int = int(
     os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT", "0")
+)
+
+# Memory enforcement mode for compile workers.
+# Options: "auto" (default), "cgroup" (not yet supported), "poll", "off"
+# Env-only: the sidecar is a separate process and reads this from the
+# environment, so setting it via config.patch() has no effect on
+# enforcement.  Use TORCHINDUCTOR_COMPILE_WORKER_MEMORY_ENFORCEMENT.
+compile_worker_memory_enforcement: Literal["auto", "cgroup", "poll", "off"] = cast(
+    "Literal['auto', 'cgroup', 'poll', 'off']",
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_MEMORY_ENFORCEMENT", "auto"),
+)
+
+# Memory limit (kB) for a single compile worker's process subtree.
+# 0 (the default) means unlimited. Linux-only. Enforcement is poll-based.
+compile_worker_memory_limit_kb: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_MEMORY_LIMIT_KB", "0")
+)
+
+# Per-kernel compilation timeout (seconds) inside a compile worker.
+# 0 (the default) means no per-kernel limit.
+# Enforcement is poll-based: the sidecar watchdog checks on every tick
+# (compile_worker_watchdog_interval_seconds, default 60s), so the actual
+# kill lands at timeout + up to one interval + compile_worker_drain_timeout_seconds.
+# Distinct from compile_worker_wait_timeout, which only bounds how long the
+# parent waits on futures and does not stop the worker itself.
+compile_worker_per_kernel_timeout: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_PER_KERNEL_TIMEOUT", "0")
 )
 
 enable_autograd_for_aot: bool = False
@@ -3272,6 +3307,7 @@ _cache_config_ignore_prefix: list[str] = [
     # config hash and needlessly invalidate every cache entry
     "compile_worker_watchdog_interval_seconds",
     "compile_worker_mode",
+    "compile_worker_drain_timeout_seconds",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
