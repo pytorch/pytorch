@@ -37,9 +37,8 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         if accelerator is not None:
             device_type = accelerator.type
             # Keep the existing HPU/HCCL behavior unchanged.
-            if (
-                device_type != "hpu"
-                and backend == dist.get_default_backend_for_device(device_type)
+            if device_type != "hpu" and backend == dist.get_default_backend_for_device(
+                device_type
             ):
                 torch.accelerator.set_device_index(self.rank)
 
