@@ -62,12 +62,15 @@ def _torch_probe(expr: str) -> bool:
     import (e.g. an ASan build aborting because the sanitizer runtime
     is not LD_PRELOADed into plain python) must degrade to a skip, not
     kill the build script -- an in-process ImportError-only check
-    misses those, and any crash would also poison the later checks."""
+    misses those, and any crash would also poison the later checks.
+
+    cwd=HERE: `python -c` puts the cwd on sys.path (unlike `python
+    script.py`, which uses the script's dir), so probing from the repo
+    root would import the SOURCE torch/ tree instead of the installed
+    wheel and always fail."""
     code = f"import sys, torch; sys.exit(0 if ({expr}) else 1)"
-    return (
-        subprocess.run([sys.executable, "-c", code], capture_output=True).returncode
-        == 0
-    )
+    probe = subprocess.run([sys.executable, "-c", code], capture_output=True, cwd=HERE)
+    return probe.returncode == 0
 
 
 def should_run() -> bool:
