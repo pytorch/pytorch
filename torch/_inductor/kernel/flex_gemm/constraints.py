@@ -67,7 +67,7 @@ LOCAL_REDUCE_C_ALPHA_BETA_ERROR = (
     "FlexGEMM local reductions cannot be combined with C/alpha/beta yet"
 )
 LOCAL_REDUCE_SWAP_AB_ERROR = (
-    "FlexGEMM local reductions do not support swap_ab configs yet"
+    "FlexGEMM swap_ab local reductions require physical callbacks"
 )
 LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
     "FlexGEMM local-reduce aux output must be produced by a grouped TensorSSA reduction"
@@ -115,6 +115,9 @@ LOCAL_REDUCE_MIXED_MATCH_ERROR = (
 LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
     "FlexGEMM local-reduce broadcast values must share one grouped layout"
 )
+FLEX_GEMM_OUTPUT_LAYOUT_USAGE_ERROR = (
+    "FlexGEMM output layout transforms must be returned directly as a validated output"
+)
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
@@ -124,8 +127,23 @@ LOCAL_REDUCE_RUNTIME_DENSE_MM_ERROR = (
     "FlexGEMM local reductions currently support only 2-D aten.mm"
 )
 LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {actual}"
+LOCAL_REDUCE_BLOCKED_AXIS_ERROR = (
+    "FlexGEMM blocked local-reduce outputs currently support only axis 1"
+)
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
+)
+FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
+    "FlexGEMM grouped main outputs do not compose with full-shape aux outputs, "
+    "captured tensors, C, alpha/beta, or batched GEMMs yet"
+)
+FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR = (
+    "FlexGEMM concat-layout grouped main outputs do not compose with grouped "
+    "reductions because concat layout permutes accumulator columns"
+)
+FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: grouped main output shape must equal the "
+    "physical GEMM output shape with N divided by the transform group"
 )
 
 
@@ -309,13 +327,23 @@ def validate_local_reduce_no_c_alpha_beta(
         raise NotImplementedError(LOCAL_REDUCE_C_ALPHA_BETA_ERROR)
 
 
-def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
+def validate_flex_gemm_local_reduce_config(
+    config: Any, group: int, axis: int, *, allow_swap_ab: bool = False
+) -> bool:
     """Return whether a QuACK config has a validated grouped-reduction layout.
+
+    Swap-ab transposes the physical accumulator, so the logical reduction axis
+    is reversed before checking tile ownership. The generated epilogue emits
+    physical callbacks for the transposed reduction geometry, including groups
+    that fit within one fragment before reorientation.
 
     This matches ``GemmConfig`` fields against layout families covered by forced
     kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
     one 32-value epilogue fragment need no cross-fragment combine. Some SM100
     two-CTA layouts expose only 16 contiguous N values, reducing that local limit.
+
+    Non-SM100 devices retain the conservative single-CTA families because the
+    expanded fragment and clustered layouts have only been validated on SM100.
 
     Axis-0 groups and larger axis-1 groups use ``GroupedLocalReduce``'s physical
     callback path, which combines epilogue fragments inside one CTA and directly
@@ -329,15 +357,36 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     temporal fragment combine supports a full-tile group without cross-CTA state.
     Axis-0 full groups still exceed the per-CTA M tile and remain unsupported.
     """
-    match axis:
-        case 0:
-            tile = config.tile_m
-        case 1:
-            tile = config.tile_n
-        case _:
-            return False
-    if group <= 0 or config.swap_ab:
+    if axis not in (0, 1) or group <= 0:
         return False
+    swapped = config.swap_ab
+    if swapped:
+        if not allow_swap_ab or (group <= LOCAL_REDUCE_FRAGMENT_WIDTH and axis != 1):
+            return False
+        axis = 1 - axis
+    tile = config.tile_m if axis == 0 else config.tile_n
+    if config.device_capacity != 10:
+        if swapped or config.tile_n < 128 or config.tile_n % 64 != 0:
+            return False
+        if tile % group != 0:
+            return False
+        fragment_width = LOCAL_REDUCE_FRAGMENT_WIDTH
+        if (
+            axis == 1
+            and config.tile_m == 128
+            and config.tile_n == 128
+            and config.cluster_m > 1
+        ):
+            fragment_width //= 2
+        if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            return fragment_width % group == 0 and group < tile
+        return (
+            group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
+            and group <= tile
+            and config.tile_m == 128
+            and config.cluster_m == 1
+            and config.cluster_n == 1
+        )
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
 
@@ -410,8 +459,63 @@ def flex_gemm_local_reduce_config_error(
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmGroupedMainOutputTransform:
+    """Contract groups on the innermost GEMM output dimension."""
+
+    group: int
+    chunked: bool = False
+
+    def __post_init__(self) -> None:
+        if self.group <= 0:
+            raise ValueError("grouped main-output group must be positive")
+
+    @property
+    def concat_layout(self) -> tuple[str, ...]:
+        return ("B",) if self.chunked else ()
+
+    def validate_quack(self, device_capacity: int) -> None:
+        if device_capacity == 12:
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs are not yet supported on SM120"
+            )
+        if device_capacity not in (10, 11):
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs are currently validated only on "
+                "SM100 and SM110"
+            )
+        if self.group == 2 or (self.group == 4 and not self.chunked):
+            return
+        raise NotImplementedError(
+            "FlexGEMM grouped main-output stores support group 2, plus "
+            "interleaved group 4 on SM100 and SM110"
+        )
+
+
+def grouped_main_output_config_supported(config: Any, n: Any) -> bool:
+    """Return whether a config has validated grouped-N store ownership.
+
+    Keep one CTA per cluster along N, require the physical N tile not to exceed
+    the problem, and admit only M-cluster families whose row ownership has been
+    validated: a single M CTA or the wide-M two-CTA layout. Multiple N tiles and
+    partial final tiles are supported by the ordinary tile scheduler and store
+    predicates.
+    """
+    supported_m_cluster = config.cluster_m == 1 or (
+        config.tile_m == 256 and config.cluster_m == 2
+    )
+    return (
+        supported_m_cluster
+        and config.cluster_n == 1
+        and statically_known(config.tile_n <= n)
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmLocalReduceGeometry:
-    """Describe the grouped output axis shared by local-reduce consumers.
+    """Describe the canonical grouped M/N layout used by FlexGEMM epilogues.
+
+    This type also owns the TensorSSA shape contract used by grouped main
+    outputs.
 
     Attributes:
         group: Number of contiguous M or N elements in each local group.
@@ -420,14 +524,58 @@ class FlexGemmLocalReduceGeometry:
 
     group: int
     axis: int
+    swapped: bool = False
 
     def __post_init__(self) -> None:
         """Reject geometry outside the GEMM tile's M/N grouping model."""
         validate_local_reduce_group_axis(self.group, self.axis)
 
     @property
+    def tensorssa_axis(self) -> int:
+        return 1 - self.axis if self.swapped else self.axis
+
+    @property
+    def reduce_dims(self) -> tuple[int, ...]:
+        return (-1, 2) if self.axis == 1 else (-2, 1)
+
+    def matches_reduction_dim(self, dim: Any) -> bool:
+        """Return whether an FX reduction selects this layout's grouped dimension."""
+        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
+        return len(dims) == 1 and dims[0] in self.reduce_dims
+
+    def fragment_group_size_expr(self, source: Any) -> str:
+        """Return the local group size available in this epilogue fragment."""
+        return (
+            f"cutlass.const_expr(min({self.group}, "
+            f"cute.size({source}.shape, mode=[0])))"
+        )
+
+    def fragment_repeat_expr(self, source: Any) -> str:
+        """Return the repeat count needed to cover the current epilogue fragment."""
+        return (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({self.group}, cute.size({source}.shape, mode=[0])))"
+        )
+
+    def tensorssa_shape(self, source: Any) -> str:
+        fragment_group_size = self.fragment_group_size_expr(source)
+        repeats = self.fragment_repeat_expr(source)
+        if self.tensorssa_axis == 1:
+            return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
+        return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
+
+    def keepdim_shape(self, source: Any) -> str:
+        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
+
+    @property
+    def reduction_profile(self) -> str:
+        if self.tensorssa_axis == 1:
+            return "((None, 1, None), 1, 1)"
+        return "((1, None, None), 1, 1)"
+
+    @property
     def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.axis, self.group)
+        return local_reduce_needs_physical_callbacks(self.tensorssa_axis, self.group)
 
 
 @dataclasses.dataclass(frozen=True)
