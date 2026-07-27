@@ -933,13 +933,12 @@ unsigned TensorBase::register_hook(T&& hook) const {
   using R = std::invoke_result_t<T, TensorBase>;
   if constexpr (std::is_same_v<R, TensorBase>) {
     return _register_hook(std::forward<T>(hook));
-  } else if constexpr (std::is_void_v<R>) {
+  } else {
+    static_assert(std::is_void_v<R>);
     return _register_hook([fn = std::forward<T>(hook)](const TensorBase& grad) {
       fn(grad);
       return TensorBase();
     });
-  } else {
-    static_assert(false, "hook must return TensorBase or void");
   }
 }
 
