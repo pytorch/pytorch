@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 @contextmanager
@@ -62,6 +63,32 @@ class EnvironTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
         self._check_recompiles_on_change(fn, "TEST_DYNAMO_ENV_C")
+
+    def _guard_log(self, fn, key, value):
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with env_var(key, value), ctx():
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            opt_fn(torch.ones(4))
+        return log_stream.getvalue()
+
+    def test_environ_read_guards_are_ambient(self):
+        # Pin the guard, not the recompile: the old environ._data path also
+        # recompiles, so a frame-count test cannot tell the two apart. Each of
+        # the three read paths needs its own hook (subscript in particular
+        # dispatches through mp_subscript, which never reaches call_method).
+        def getitem_fn(x):
+            return x + int(os.environ["TEST_DYNAMO_ENV_J"])
+
+        def getenv_fn(x):
+            return x + int(os.getenv("TEST_DYNAMO_ENV_J", "0"))
+
+        def get_fn(x):
+            return x + int(os.environ.get("TEST_DYNAMO_ENV_J", "0"))
+
+        for fn in (getitem_fn, getenv_fn, get_fn):
+            guard_log = self._guard_log(fn, "TEST_DYNAMO_ENV_J", "1")
+            self.assertIn("environ.get('TEST_DYNAMO_ENV_J')", guard_log)
+            self.assertNotIn("environ._data", guard_log)
 
     def test_environ_contains(self):
         def fn(x):
