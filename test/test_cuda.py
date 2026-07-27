@@ -10225,16 +10225,24 @@ class TestGDS(TestCase):
             file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             # The constructor already registered the handle.
             self.assertIsNotNone(file.handle)
-            with self.assertRaisesRegex(AssertionError, "Cannot register a handle that is already registered"):
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot register a handle that is already registered"
+            ):
                 file.register_handle()
             file.deregister_handle()
             self.assertIsNone(file.handle)
             # Operations without a registered handle are rejected.
-            with self.assertRaisesRegex(AssertionError, "Cannot deregister a handle that is not registered"):
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot deregister a handle that is not registered"
+            ):
                 file.deregister_handle()
-            with self.assertRaisesRegex(AssertionError, "Cannot save data to a file that is not registered"):
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot save data to a file that is not registered"
+            ):
                 file.save_storage(storage)
-            with self.assertRaisesRegex(AssertionError, "Cannot load data from a file that is not registered"):
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot load data from a file that is not registered"
+            ):
                 file.load_storage(storage)
             # Re-registering restores usability.
             file.register_handle()

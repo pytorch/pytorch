@@ -1121,7 +1121,6 @@ if(USE_ROCM)
     if(USE_CUFILE AND NOT hipfile_FOUND)
       caffe2_update_option(USE_CUFILE OFF)
     endif()
-    set(CAFFE2_USE_CUFILE ${USE_CUFILE})
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
