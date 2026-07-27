@@ -11,6 +11,7 @@
 #include <ATen/ops/logspace_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/range_native.h>
+#include <c10/util/safe_conv.h>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -67,7 +68,7 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
         [encoder setComputePipelineState:pso];
         bind_start_step(encoder);
         if (use32) {
-          mtl_setArgs<2>(encoder, std::array<int32_t, 2>{safe_downcast<int32_t>(stride), 0});
+          mtl_setArgs<2>(encoder, std::array<int32_t, 2>{c10::safe_conv<int32_t>(stride), 0});
           mtl_dispatch1DJob(encoder, pso, steps);
         } else {
           dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
@@ -236,7 +237,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
           mtl_setArgs(encoder, result, vals);
         }
         if (use32) {
-          const c10::metal::vec3<int32_t> p{safe_downcast<int32_t>(steps), safe_downcast<int32_t>(stride), 0};
+          const c10::metal::vec3<int32_t> p{c10::safe_conv<int32_t>(steps), c10::safe_conv<int32_t>(stride), 0};
           mtl_setArgs<2>(encoder, p);
           mtl_dispatch1DJob(encoder, pso, steps);
         } else {
@@ -317,7 +318,7 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, result, vals);
         if (use32) {
-          const c10::metal::vec3<int32_t> p{safe_downcast<int32_t>(steps), safe_downcast<int32_t>(stride), 0};
+          const c10::metal::vec3<int32_t> p{c10::safe_conv<int32_t>(steps), c10::safe_conv<int32_t>(stride), 0};
           mtl_setArgs<2>(encoder, p);
           mtl_dispatch1DJob(encoder, pso, steps);
         } else {

@@ -13,6 +13,7 @@
 #include <ATen/ops/sum.h>
 #endif
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 
 namespace at::native {
 namespace mps {
@@ -93,7 +94,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
     allTensorsList.push_back(weight.value());
   }
 
-  const auto numThreads = c10::checked_convert<uint32_t>(N, "uint32_t");
+  const auto numThreads = c10::safe_conv<uint32_t>(N);
   const auto hist_sizes = hist_output.sizes();
 
   Tensor counts, thread_histograms;
@@ -169,7 +170,7 @@ static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_
   TORCH_INTERNAL_ASSERT(hist_output.numel() + 1 == bin_edges[0].numel());
 
   const int64_t num_bins = hist_output.numel();
-  const auto num_elements = c10::checked_convert<uint32_t>(input.numel(), "uint32_t");
+  const auto num_elements = c10::safe_conv<uint32_t>(input.numel());
   Tensor counts = at::zeros({num_bins}, input.options().dtype(kUInt32));
   if (num_elements == 0) {
     hist_output.copy_(counts);
@@ -185,8 +186,7 @@ static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_
 
       const NSUInteger max_threadgroup_memory_length =
           std::min<NSUInteger>(kHistcMaxThreadgroupMemoryLength, [device maxThreadgroupMemoryLength]);
-      const bool use_threadgroup =
-          num_bins <= c10::checked_convert<int64_t>(max_threadgroup_memory_length / sizeof(uint), "int64_t");
+      const bool use_threadgroup = num_bins <= c10::safe_conv<int64_t>(max_threadgroup_memory_length / sizeof(uint));
       const std::string kernel =
           fmt::format("histc_atomic_{}_{}", use_threadgroup ? "threadgroup" : "global", scalarToMetalTypeString(input));
       auto histogramPSO = lib.getPipelineStateForFunc(kernel);
@@ -195,8 +195,8 @@ static void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_
       mtl_setArgs(computeEncoder, input, counts, input.stride(0), num_elements, num_bins, bin_edges[0]);
 
       if (use_threadgroup) {
-        const NSUInteger threadgroup_memory_length = at::round_up(
-            c10::checked_convert<NSUInteger>(num_bins, "NSUInteger") * sizeof(uint), kMetalThreadgroupMemoryAlignment);
+        const NSUInteger threadgroup_memory_length =
+            at::round_up(c10::safe_conv<NSUInteger>(num_bins) * sizeof(uint), kMetalThreadgroupMemoryAlignment);
         const NSUInteger threadgroup_size =
             std::min<NSUInteger>(kHistcThreadsPerThreadgroup, [histogramPSO maxTotalThreadsPerThreadgroup]);
         const NSUInteger threadgroups =
