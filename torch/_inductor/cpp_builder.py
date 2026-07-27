@@ -2498,7 +2498,7 @@ class CppBuilder:
             if _IS_WINDOWS:
                 self._libraries_dirs_args += f'/LIBPATH:"{lib_dir}" '
             else:
-                self._libraries_dirs_args += f"-L{lib_dir} "
+                self._libraries_dirs_args += f"-L{shlex.quote(lib_dir)} "
 
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:
