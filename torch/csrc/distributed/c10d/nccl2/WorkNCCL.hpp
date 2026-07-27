@@ -120,6 +120,11 @@ class WorkNCCL : public c10d::Work {
   std::optional<std::chrono::steady_clock::time_point> start_completed_time_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
+
+  // Set by the backend for a synchronous barrier: synchronizeInternal() then
+  // host-blocks the CPU thread (in addition to the stream-ordered wait) to
+  // mirror stock ProcessGroupNCCL, whose barrier host-blocks. See barrierImpl.
+  bool hostBlocking_{false};
 };
 
 class WorkNCCLQueue {
@@ -136,6 +141,7 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollectLocked();
   std::unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<WorkNCCL>>>
       stream_work_queues_;
+  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue_;
   std::mutex work_queues_mutex_;
 };
 
