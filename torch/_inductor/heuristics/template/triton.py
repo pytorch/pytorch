@@ -26,6 +26,7 @@ from ...kernel.mm import (
     get_tile_size,
     mm_template,
     persistent_mm_template,
+    persistent_tdm_mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
@@ -34,11 +35,13 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
+    _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    tdm_descriptor_row_major,
     triton_type,
     using_b200,
     using_rocm_rdna3,
@@ -74,6 +77,49 @@ def _use_template_autows() -> bool:
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
+
+
+def _tdm_block_aligned(block: int, dtype_size: int) -> bool:
+    if dtype_size <= 0:
+        return True
+    return (int(block) * dtype_size) % _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES == 0
+
+
+def _tdm_descriptor_blocks_aligned(
+    block_m: int,
+    block_n: int,
+    block_k: int,
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> bool:
+    a_contiguous_block = block_k if a_row_major else block_m
+    b_contiguous_block = block_n if b_row_major else block_k
+    return _tdm_block_aligned(a_contiguous_block, dtype_size) and _tdm_block_aligned(
+        b_contiguous_block, dtype_size
+    )
+
+
+def _filter_tdm_descriptor_block_configs(
+    configs: list[BaseConfig],
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> list[BaseConfig]:
+    return [
+        config
+        for config in configs
+        if _tdm_descriptor_blocks_aligned(
+            config.block_m,
+            config.block_n,
+            config.block_k,
+            dtype_size,
+            a_row_major=a_row_major,
+            b_row_major=b_row_major,
+        )
+    ]
 
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
@@ -1573,6 +1619,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         super().__init__()
 
         self.default_num_stages = get_backend_num_stages()
+        self.uses_tdm_configs = False
 
         self.mm_configs: list[BaseConfig] = [
             ROCmGemmConfig(
@@ -1629,6 +1676,17 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 128, 32, self.default_num_stages, 8, group_m=16),
             ROCmGemmConfig(256, 128, 64, self.default_num_stages, 8, group_m=4),
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
+        ]
+
+        self.tdm_persistent_mm_configs: list[BaseConfig] = [
+            ROCmGemmConfig(128, 64, 64, 1, 4, group_m=8, waves_per_eu=2),
+            ROCmGemmConfig(64, 128, 64, 1, 4, group_m=8, waves_per_eu=2),
+            ROCmGemmConfig(128, 64, 128, 1, 4, group_m=8),
+            ROCmGemmConfig(64, 128, 128, 1, 4, group_m=8),
+            ROCmGemmConfig(128, 128, 64, 1, 4, group_m=8),
+            ROCmGemmConfig(128, 128, 128, 1, 4, group_m=8),
+            ROCmGemmConfig(256, 128, 64, 1, 8, group_m=16),
+            ROCmGemmConfig(128, 256, 64, 1, 8, group_m=16),
         ]
 
         # Exhaustive search for mm configs
@@ -1781,6 +1839,61 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for kpack in [1, 2]
         ]
 
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        if self.uses_tdm_configs:
+            a_row_major = kwargs.get("tdm_a_row_major", True)
+            b_row_major = kwargs.get("tdm_b_row_major", True)
+            configs = _filter_tdm_descriptor_block_configs(
+                configs,
+                dtype_size,
+                a_row_major=a_row_major,
+                b_row_major=b_row_major,
+            )
+            caller_exclude = exclude
+
+            def tdm_exclude(
+                block_m: sympy.Integer,
+                block_n: sympy.Integer,
+                block_k: sympy.Integer,
+            ) -> bool:
+                return not _tdm_descriptor_blocks_aligned(
+                    block_m,
+                    block_n,
+                    block_k,
+                    dtype_size,
+                    a_row_major=a_row_major,
+                    b_row_major=b_row_major,
+                ) or caller_exclude(block_m, block_n, block_k)
+
+            exclude = tdm_exclude
+
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs,
+            has_int8_tensor,
+            scale,
+            exclude,
+            dtype_size,
+            op_name,
+            **kwargs,
+        )
+
     def _prune_exhaustive_configs(
         self,
         configs: list[BaseConfig],
@@ -1804,8 +1917,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         """
         ROCm specific filtering
         """
-        for c in configs:
-            c.num_stages = self.default_num_stages
+        if not self.uses_tdm_configs:
+            for c in configs:
+                c.num_stages = self.default_num_stages
         return super()._filter_configs(configs)
 
     def _finalize_mm_configs(
@@ -3131,6 +3245,67 @@ class PersistentMMTemplateConfigHeuristic(
             kernel_inputs, op_name, **kwargs
         ):
             yield {**template_kwargs, "NUM_SMS": get_num_sms()}
+
+
+@register_template_heuristic(
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentTDMTemplateConfigHeuristic(
+    MMTemplateConfigMixin,
+    ROCmConfigHeuristic,  # type: ignore[misc]
+):
+    """Persistent descriptor MM heuristic for gfx1250 TDM."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = self.tdm_persistent_mm_configs
+        self.uses_tdm_configs = True
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(
+                "ROCmPersistentTDMTemplateConfigHeuristic requires MMKernelInputs"
+            )
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        a_row_major = tdm_descriptor_row_major(mat1)
+        b_row_major = tdm_descriptor_row_major(mat2)
+        if a_row_major is None or b_row_major is None:
+            raise AssertionError("TDM operand orientation must be unambiguous")
+
+        kwargs = {
+            **kwargs,
+            "tdm_a_row_major": a_row_major,
+            "tdm_b_row_major": b_row_major,
+        }
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {
+                **template_kwargs,
+                "A_ROW_MAJOR": a_row_major,
+                "B_ROW_MAJOR": b_row_major,
+                "NUM_SMS": get_num_sms(),
+                "TMA_EXPERIMENTAL_API": False,
+            }
+
+
+@register_template_heuristic(
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
+    AddMMConfigMixin, ROCmPersistentTDMTemplateConfigHeuristic
+):
+    """Addmm extension for the gfx1250 TDM persistent template."""
 
 
 @register_template_heuristic(

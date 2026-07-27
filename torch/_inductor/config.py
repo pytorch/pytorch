@@ -881,6 +881,10 @@ layout_optimization = (
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
+# Enable AMD Tensor Data Mover descriptor paths on supported ROCm targets.
+# Device, compiler, dtype, layout, and template-specific checks still apply.
+enable_tdm = os.environ.get("TORCHINDUCTOR_ENABLE_TDM", "0") == "1"
+
 # Cache SDPA constraint results keyed by (tensor identity, stride_order) to avoid
 # creating duplicate buffers when the same tensor feeds multiple SDPA positions
 # (e.g., key=value in simplified PMA attention).

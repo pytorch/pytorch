@@ -55,6 +55,7 @@ from ..utils import (
     use_triton_blackwell_tma_template,
     use_triton_scaling_template,
     use_triton_template,
+    use_triton_tdm_template,
     use_triton_tma_template,
 )
 from .mm_common import (
@@ -99,6 +100,14 @@ mm_template = TritonTemplate(
 
 persistent_tma_mm_template = TritonTemplate(
     name="mm_persistent_tma",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
+)
+
+# AMD TDM uses Triton's stable tensor descriptor branch from the same maintained
+# persistent template source, with ROCm-specific options supplied by its heuristic.
+persistent_tdm_mm_template = TritonTemplate(
+    name="mm_persistent_tdm",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_persistent_tma_mm"),
 )
@@ -451,6 +460,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            elif use_triton_tdm_template(
+                mat1, mat2, output_layout=layout, add_guards=True
+            ):
+                templates_to_use.append(persistent_tdm_mm_template)
             elif use_triton_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
@@ -730,6 +743,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             mat1, mat2, output_layout=layout, add_guards=True
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+        elif use_triton_tdm_template(mat1, mat2, output_layout=layout, add_guards=True):
+            templates_to_use.append(persistent_tdm_mm_template)
         elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
             if torch.version.hip is None:
                 templates_to_use.append(persistent_tma_mm_template)

@@ -84,6 +84,25 @@ HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
+
+def running_on_tdm_device() -> bool:
+    """Return whether the active ROCm device and Triton support gfx1250 TDM."""
+    if not torch.version.hip or not HAS_GPU:
+        return False
+    try:
+        from torch._inductor.utils import is_gfx1250_arch
+        from torch.utils._triton import has_triton_amd_tdm_device
+
+        match = re.match(r"(\d+)\.(\d+)", torch.version.hip)
+        if match is None or (int(match.group(1)), int(match.group(2))) < (7, 14):
+            return False
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        arch = getattr(props, "gcnArchName", "")
+        return is_gfx1250_arch(arch) and has_triton_amd_tdm_device(arch)
+    except Exception:
+        return False
+
+
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
     for gpu in GPU_TYPES

@@ -155,6 +155,25 @@ def has_triton_tma_device() -> bool:
 
 
 @functools.cache
+def has_triton_amd_tdm_device(arch: str) -> bool:
+    """Return whether Triton exposes AMD TDM lowering for the given GCN arch."""
+    if not has_triton_package():
+        return False
+
+    try:
+        from triton.language import make_tensor_descriptor  # noqa: F401
+    except ImportError:
+        return False
+
+    try:
+        from triton._C.libtriton import amd
+
+        return bool(amd.supports_tdm(arch.split(":", 1)[0]))
+    except Exception:
+        return False
+
+
+@functools.cache
 def has_datacenter_blackwell_tma_device() -> bool:
     import torch
 
