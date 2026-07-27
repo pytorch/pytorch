@@ -2743,6 +2743,7 @@ class TestReductions(TestCase):
         ((0, 2), 1),
     ])
     @parametrize("keepdim", [False, True])
+    @onlyOn(["cpu", "cuda", "mps"])
     @dtypes(torch.float)
     def test_median_empty_dim(self, device, dtype, op_name, shape, dim, keepdim):
         op = getattr(torch, op_name)
@@ -2770,6 +2771,36 @@ class TestReductions(TestCase):
             primal, tangent = torch.autograd.forward_ad.unpack_dual(dual_values)
             self.assertEqual(primal, expected_values)
             self.assertEqual(tangent, torch.zeros_like(expected_values))
+
+    @parametrize("op_name", ["median", "nanmedian"])
+    @parametrize("shape,dim", [
+        ((0,), 0),
+        ((2, 0), 1),
+        ((1, 2, 0), -1),
+        ((0, 2), 0),
+        ((0, 2), 1),
+    ])
+    @parametrize("keepdim", [False, True])
+    @dtypes(torch.int32, torch.int64)
+    def test_median_empty_dim_integral(self, device, dtype, op_name, shape, dim, keepdim):
+        op = getattr(torch, op_name)
+        x = torch.empty(shape, dtype=dtype, device=device)
+        wrapped_dim = dim % len(shape)
+
+        if shape[wrapped_dim] == 0:
+            with self.assertRaisesRegex(IndexError, "Expected reduction dim"):
+                op(x, dim=dim, keepdim=keepdim)
+            return
+
+        values, indices = op(x, dim=dim, keepdim=keepdim)
+        expected_shape = list(shape)
+        if keepdim:
+            expected_shape[wrapped_dim] = 1
+        else:
+            del expected_shape[wrapped_dim]
+
+        self.assertEqual(values, torch.empty(expected_shape, dtype=dtype, device=device))
+        self.assertEqual(indices, torch.empty(expected_shape, dtype=torch.long, device=device))
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
@@ -3855,7 +3886,6 @@ as the input tensor excluding its innermost dimension'):
             ('amin', torch.amin, np.amin),
             ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, np.max),
             ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, np.min),
-            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, np.median),
         ]
 
         for name, fn, np_function in test_functions:
