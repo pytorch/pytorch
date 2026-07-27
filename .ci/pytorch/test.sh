@@ -865,6 +865,17 @@ test_perf_for_dashboard() {
   if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
     modes+=(inference)
   fi
+
+  # Global inductor config toggles applied across every benchmark config below.
+  # Driven by the inductor-perf-test-nightly-h100 workflow_dispatch inputs so the
+  # perf dashboard can A/B combo kernels and combo-kernel uniform dispatch.
+  if [[ "$DASHBOARD_TAG" == *combo_kernels-true* ]]; then
+    export TORCHINDUCTOR_COMBO_KERNELS=1
+  fi
+  if [[ "$DASHBOARD_TAG" == *combo_kernel_uniform_dispatch-true* ]]; then
+    export TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH=1
+  fi
+
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
   local targets=(accuracy performance)
 

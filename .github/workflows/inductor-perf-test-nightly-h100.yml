@@ -62,6 +62,16 @@ on:
         required: false
         type: boolean
         default: false
+      combo_kernels:
+        description: Run with combo kernels enabled?
+        required: false
+        type: boolean
+        default: false
+      combo_kernel_uniform_dispatch:
+        description: Run with combo kernel uniform dispatch enabled?
+        required: false
+        type: boolean
+        default: false
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -199,7 +209,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}-batch_invariant_accuracy-${{ inputs.batch_invariant_accuracy || 'false' }}
+      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}-batch_invariant_accuracy-${{ inputs.batch_invariant_accuracy || 'false' }}-combo_kernels-${{ inputs.combo_kernels || 'false' }}-combo_kernel_uniform_dispatch-${{ inputs.combo_kernel_uniform_dispatch || 'false' }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720

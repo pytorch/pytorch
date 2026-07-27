@@ -1081,7 +1081,9 @@ compute_all_bounds = False
 
 # enable the combo kernel that combines data-independent kernels (additional
 # to foreach kernels) into a single one (Experimental)
-combo_kernels = False
+# Can be forced on via the TORCHINDUCTOR_COMBO_KERNELS=1 env var, which the
+# inductor perf dashboard CI uses to A/B combo kernels.
+combo_kernels: bool = os.environ.get("TORCHINDUCTOR_COMBO_KERNELS", "0") == "1"
 # benchmark combo kernels and only allow ones with perf gains
 benchmark_combo_kernel = False
 # combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
@@ -1130,7 +1132,11 @@ combo_kernel_max_distance: int = -1
 # When True, detect identical sub-kernels in combo groups and generate a single
 # code body with pointer-array indexing instead of if/elif branching.
 # This eliminates register pressure and branching overhead for uniform sub-kernels.
-combo_kernel_uniform_dispatch = False
+# Can be forced on via the TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH=1 env var,
+# which the inductor perf dashboard CI uses to A/B uniform dispatch.
+combo_kernel_uniform_dispatch: bool = (
+    os.environ.get("TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH", "0") == "1"
+)
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
