@@ -467,15 +467,17 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       C_VISIBILITY_PRESET "default"
     )
   endif()
-  # Install at the install prefix root, which maps to torch/ in the wheel
-  # via wheel.install-dir = "torch". The import library (Windows _C.lib) goes
-  # alongside the other import libs in torch/lib/, matching the layout that
-  # setup.py used before _C moved to CMake.
-  install(TARGETS _C
-    RUNTIME DESTINATION "."
-    LIBRARY DESTINATION "."
-    ARCHIVE DESTINATION "lib"
-  )
+  # The extension module belongs to the Python package; the import library
+  # (Windows _C.lib) is a C++ artifact and stays in the prefix's lib/,
+  # alongside the other import libs, matching the layout that setup.py used
+  # before _C moved to CMake.
+  if(SKBUILD)
+    install(TARGETS _C
+      RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+      LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+      ARCHIVE DESTINATION "lib"
+    )
+  endif()
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
@@ -515,7 +517,11 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()
-    install(TARGETS _nccl_ep RUNTIME DESTINATION "." LIBRARY DESTINATION ".")
+    if(SKBUILD)
+      install(TARGETS _nccl_ep
+        RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+        LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+    endif()
   endif()
 endif()
 
@@ -546,7 +552,10 @@ add_custom_target(
 add_dependencies(torch_python gen_torch_version)
 # version.py is gitignored (generated), so scikit-build-core won't include it
 # via Python package collection. Install it explicitly via cmake instead.
-install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
+if(SKBUILD)
+  install(FILES "${TORCH_SRC_DIR}/version.py"
+          DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+endif()
 
 # _rocm_init.py is gitignored (injected by ROCm build scripts to bootstrap
 # torch/__init__.py). See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
