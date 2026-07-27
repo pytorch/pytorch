@@ -10,7 +10,10 @@ from unittest import mock
 import torch
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
-from torch._inductor.codegen.flydsl.flydsl_scheduling import FlyDSLScheduling
+from torch._inductor.codegen.flydsl.flydsl_scheduling import (
+    _get_flydsl_device_arch,
+    FlyDSLScheduling,
+)
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.select_algorithm import PartialRender
@@ -28,7 +31,7 @@ class _CacheParam:
 class TestFlyDSLTemplate(TestCase):
     def setUp(self):
         super().setUp()
-        FlyDSLScheduling._build_flydsl_gpu_arch_cached.cache_clear()
+        _get_flydsl_device_arch.cache_clear()
 
     def test_gen_imports(self):
         kernel = FlyDSLTemplateKernel(
