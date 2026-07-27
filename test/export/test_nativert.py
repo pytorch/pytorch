@@ -5,8 +5,6 @@ import copy
 import tempfile
 import unittest
 
-from parameterized import parameterized
-
 import torch
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
@@ -17,8 +15,9 @@ from torch.nativert.backends._lower_utils import (
     lower_exported_program,
     package_nativert_with_aoti_delegate,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, parametrize
+from torch.utils._triton import has_triton, has_triton_package
 from torch.utils import _pytree as pytree
 
 
@@ -261,39 +260,35 @@ class TestNativeRT(TestCase):
 
         return M()
 
-    parameters = []
-    for device in ["cpu", "cuda"]:
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            continue
-        for module, sample_inputs in [
-            (get_module.__func__().to(device), (torch.randn(4, 4).to(device),)),
-            (
-                get_module_multi_output.__func__().to(device),
-                (torch.randn(4, 4).to(device),),
-            ),
-            (
-                get_model_pytree.__func__().to(device),
+    def _aoti_case(self, device, case):
+        if case == "basic":
+            return self.get_module().to(device), (torch.randn(4, 4, device=device),)
+        if case == "multi_output":
+            return (
+                self.get_module_multi_output().to(device),
+                (torch.randn(4, 4, device=device),),
+            )
+        if case == "pytree":
+            return (
+                self.get_model_pytree().to(device),
                 (
                     (
-                        torch.randn(4, 4).to(device),
+                        torch.randn(4, 4, device=device),
                         (
-                            torch.randn(4, 4).to(device),
-                            torch.randn(4, 4).to(device),
+                            torch.randn(4, 4, device=device),
+                            torch.randn(4, 4, device=device),
                         ),
                     ),
                 ),
-            ),
-        ]:
-            parameters.append(
-                (
-                    device,
-                    module,
-                    sample_inputs,
-                )
             )
+        raise AssertionError(f"unknown aoti case: {case}")
 
-    @parameterized.expand(parameters)
-    def test_aoti(self, device, m, sample_inputs):
+    @parametrize("case", ["basic", "multi_output", "pytree"])
+    def test_aoti(self, device, case):
+        if torch.device(device).type != "cpu":
+            if not has_triton_package() or not has_triton():
+                self.skipTest("requires triton")
+        m, sample_inputs = self._aoti_case(device, case)
         MODEL_NAME = "model"
         BACKEND_ID = "aoti"
 
@@ -374,6 +369,9 @@ class TestNativeRT(TestCase):
                     pass
                 else:
                     raise e
+
+
+instantiate_device_type_tests(TestNativeRT, globals())
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
