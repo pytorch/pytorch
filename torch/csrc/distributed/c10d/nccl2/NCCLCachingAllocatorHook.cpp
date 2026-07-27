@@ -2,7 +2,7 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLCCA.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 
 #include <ATen/Context.h>
 #include <c10/core/AllocatorConfig.h>
@@ -14,18 +14,18 @@ namespace c10d::nccl2 {
 namespace {
 void ncclCachingAllocatorHookFn(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
-  NcclCachingAllocatorHook::getInstance().regDeregMem(te);
+  NCCLCachingAllocatorHook::getInstance().regDeregMem(te);
 }
 } // namespace
 
-NcclCachingAllocatorHook& NcclCachingAllocatorHook::getInstance() {
+NCCLCachingAllocatorHook& NCCLCachingAllocatorHook::getInstance() {
   // Leaked singleton: allocator trace trackers cannot be detached, so the
   // hook must outlive every allocator event.
-  static auto* instance = new NcclCachingAllocatorHook();
+  static auto* instance = new NCCLCachingAllocatorHook();
   return *instance;
 }
 
-NcclCachingAllocatorHook::NcclCachingAllocatorHook()
+NCCLCachingAllocatorHook::NCCLCachingAllocatorHook()
     : register_default_pool_segments_(
           !c10::CachingAllocator::AcceleratorAllocatorConfig::
               use_expandable_segments()) {
@@ -40,13 +40,13 @@ NcclCachingAllocatorHook::NcclCachingAllocatorHook()
       &ncclCachingAllocatorHookFn);
 }
 
-bool NcclCachingAllocatorHook::shouldTrackSegment(
+bool NCCLCachingAllocatorHook::shouldTrackSegment(
     const c10::MempoolId_t& mempool_id) const {
   return register_default_pool_segments_ ||
       mempool_id != c10::MempoolId_t{0, 0};
 }
 
-void NcclCachingAllocatorHook::registerMemPreHook() {
+void NCCLCachingAllocatorHook::registerMemPreHook() {
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
   for (const auto& segmentInfo : snapshot.segments) {
     if (!shouldTrackSegment(segmentInfo.owner_private_pool_id)) {
@@ -59,7 +59,7 @@ void NcclCachingAllocatorHook::registerMemPreHook() {
   }
 }
 
-void NcclCachingAllocatorHook::regDeregMem(
+void NCCLCachingAllocatorHook::regDeregMem(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   if (!shouldTrackSegment(te.mempool_)) {
     return;
@@ -94,7 +94,7 @@ void NcclCachingAllocatorHook::regDeregMem(
   }
 }
 
-void NcclCachingAllocatorHook::registerComm(ProcessGroupNCCL* comm) {
+void NCCLCachingAllocatorHook::registerComm(ProcessGroupNCCL* comm) {
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_CHECK(!registeredComms_.count(comm), "Communicator already registered");
   for (const auto& [addr, mem_info] : registeredMemMap_) {
@@ -105,7 +105,7 @@ void NcclCachingAllocatorHook::registerComm(ProcessGroupNCCL* comm) {
   registeredComms_.insert(comm);
 }
 
-void NcclCachingAllocatorHook::deregisterComm(ProcessGroupNCCL* comm) {
+void NCCLCachingAllocatorHook::deregisterComm(ProcessGroupNCCL* comm) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!registeredComms_.count(comm)) {
     return;
