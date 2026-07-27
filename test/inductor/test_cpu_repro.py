@@ -6,6 +6,7 @@ import functools
 import itertools
 import math
 import os
+import pickle
 import platform
 import sys
 import unittest
@@ -81,6 +82,17 @@ requires_vectorization = unittest.skipUnless(
     "Does not support vectorization",
 )
 
+_FX_WRAPPER_FALLBACK_CONFIG = {
+    "implicit_fallbacks": True,
+    "cpp_wrapper": False,
+    "fx_wrapper": True,
+    "compile_threads": 1,
+    "alignment_asserts": False,
+    "size_asserts": False,
+    "scalar_asserts": False,
+    "nan_asserts": False,
+}
+
 
 def _can_check_vec_metrics():
     return (
@@ -144,7 +156,9 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
-    def _check_fallback_dispatch_runs_below_autograd(self, namespace):
+    def _check_fallback_dispatch_runs_below_autograd(
+        self, namespace, *, with_pointwise=True, aot_fx_wrapper=False
+    ):
         with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
             calls = {"autograd": 0, "cpu": 0}
@@ -166,11 +180,27 @@ class CPUReproTests(TestCase):
             lib.impl("foo", foo_autograd, "Autograd", with_keyset=True)
 
             def fn(x):
-                return op(x).cos()
+                result = op(x)
+                return result.cos() if with_pointwise else result
 
             x = torch.randn(4)
             expected = fn(x)
-            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            if aot_fx_wrapper:
+
+                class Model(torch.nn.Module):
+                    def forward(self, x):
+                        return fn(x)
+
+                exported = torch.export.export(Model(), (x,))
+                compiled = torch._inductor.aot_compile(
+                    exported.module(),
+                    (x,),
+                    options=_FX_WRAPPER_FALLBACK_CONFIG,
+                )
+                self.assertIsInstance(compiled, torch.fx.GraphModule)
+                compiled = pickle.loads(pickle.dumps(compiled))
+            else:
+                compiled = torch.compile(fn, backend="inductor", fullgraph=True)
             torch.testing.assert_close(compiled(x), expected)
 
             calls["autograd"] = 0
@@ -216,7 +246,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(calls["cpu"], 1)
 
     def _check_out_variant_fallback_dispatch_runs_below_autograd(
-        self, namespace, *, expect_out_variant
+        self, namespace, *, expect_out_variant, with_pointwise=True
     ):
         with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
@@ -266,7 +296,8 @@ class CPUReproTests(TestCase):
             lib.impl("foo.out", foo_out_autograd, "Autograd", with_keyset=True)
 
             def fn(x):
-                return op(x).cos()
+                result = op(x)
+                return result.cos() if with_pointwise else result
 
             x = torch.randn(4)
             expected = fn(x)
@@ -291,6 +322,19 @@ class CPUReproTests(TestCase):
     def test_fallback_dispatch_runs_below_autograd_cpp_wrapper(self):
         self._check_fallback_dispatch_runs_below_autograd("issue139629_cpp")
 
+    @config.patch(_FX_WRAPPER_FALLBACK_CONFIG)
+    def test_fallback_dispatch_runs_below_autograd_fx_wrapper(self):
+        self._check_fallback_dispatch_runs_below_autograd(
+            "issue139629_fx", with_pointwise=False
+        )
+
+    def test_fallback_dispatch_runs_below_autograd_aot_fx_wrapper(self):
+        self._check_fallback_dispatch_runs_below_autograd(
+            "issue139629_aot_fx",
+            with_pointwise=False,
+            aot_fx_wrapper=True,
+        )
+
     @config.patch(implicit_fallbacks=True, cpp_wrapper=True)
     def test_boxed_fallback_dispatch_runs_below_autograd_cpp_wrapper(self):
         self._check_boxed_fallback_dispatch_runs_below_autograd("issue139629_boxed_cpp")
@@ -305,6 +349,12 @@ class CPUReproTests(TestCase):
     def test_out_variant_fallback_dispatch_runs_below_autograd_cpp_wrapper(self):
         self._check_out_variant_fallback_dispatch_runs_below_autograd(
             "issue139629_out_cpp", expect_out_variant=False
+        )
+
+    @config.patch(_FX_WRAPPER_FALLBACK_CONFIG)
+    def test_out_variant_fallback_dispatch_runs_below_autograd_fx_wrapper(self):
+        self._check_out_variant_fallback_dispatch_runs_below_autograd(
+            "issue139629_out_fx", expect_out_variant=True, with_pointwise=False
         )
 
     @config.patch(cpp_wrapper=False)

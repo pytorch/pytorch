@@ -143,7 +143,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     const char* call,
     const char* file,
     int64_t line) {
-  std::stringstream ss;
+  std::stringstream ss{};
   const auto& error_msg_without = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
       torch_exception_get_what_without_backtrace, torch_shim_bc_const_char_ptr);
   if (error_msg_without) {
