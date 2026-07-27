@@ -17,6 +17,7 @@
 #include <thrust/inner_product.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <cuda/std/functional>
 
 namespace at::native {
 
@@ -50,8 +51,8 @@ struct ModeImpl {
                     iter_end - 1,
                     iter_begin + 1,
                     0,
-                    thrust::plus<int>(),
-                    thrust::not_equal_to<scalar_t>());
+                    cuda::std::plus<int>(),
+                    cuda::std::not_equal_to<scalar_t>());
 
     // Count frequency of each element
     auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
