@@ -196,6 +196,11 @@ CPU_TEST_FAILURES = {
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_cond_share_predicate": fail_stack_allocation(is_skip=True),
     "test_cond_predicate_on_cpu": fail_stack_allocation(is_skip=True),
+    # ArrayRefTensor outputs do not expose AtenTensorHandle, so this wrapper
+    # variant intentionally skips fallback output metadata assertions.
+    "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_stack_allocation(
+        is_skip=True
+    ),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
     "test_aot_inductor_consts_cpp_build": fail_stack_allocation(is_skip=True),
