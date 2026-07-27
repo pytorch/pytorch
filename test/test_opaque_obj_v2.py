@@ -3418,9 +3418,9 @@ class GraphModule(torch.nn.Module):
             ep.graph_module.code.strip(),
             """\
 def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
-    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    return (linear,)""",
+    noisy_inject_default = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject_default = None
+    linear_default = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear_default,)""",
         )
 
     def test_hoist_no_recompile_on_different_string(self):
@@ -3521,8 +3521,8 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[4, 4]", d):
-        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
-        return (add,)
+        add_tensor: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
+        return (add_tensor,)
 """,
         )
 
