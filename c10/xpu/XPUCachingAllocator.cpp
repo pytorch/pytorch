@@ -147,10 +147,34 @@ struct ExpandableSegment {
     // The extra 1/8 allows flexibility for remapping or moving pages within the
     // segment when unmapping earlier regions.
     constexpr float kVirtualMemOversubscriptFactor = 1.125f; // 1 + 1/8
+    auto min_granularity = sycl::ext::oneapi::experimental::get_mem_granularity(
+        c10::xpu::get_raw_device(device),
+        c10::xpu::get_device_context(),
+        sycl::ext::oneapi::experimental::granularity_mode::minimum);
+    TORCH_CHECK(
+        segment_size_ % min_granularity == 0,
+        "segment_size (",
+        segment_size_,
+        ") must be a multiple of the device memory granularity (",
+        min_granularity,
+        ")");
     max_handles_ = numSegments(static_cast<size_t>(
         static_cast<float>(device_total) * kVirtualMemOversubscriptFactor));
     ptr_ = sycl::ext::oneapi::experimental::reserve_virtual_mem(
         segment_size_ * max_handles_, xpu::get_device_context());
+    TORCH_CHECK(
+        ptr_ != 0,
+        "Failed to reserve virtual memory of size ",
+        format_size(segment_size_ * max_handles_));
+    TORCH_CHECK(
+        ptr_ % min_granularity == 0,
+        "Reserved virtual address (0x",
+        std::hex,
+        ptr_,
+        std::dec,
+        ") is not aligned to device memory granularity (",
+        min_granularity,
+        ")");
   }
 
   C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);

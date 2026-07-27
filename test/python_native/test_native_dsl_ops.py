@@ -67,6 +67,14 @@ class TestNativeDSLOps(TestCase):
                     "check_native_version_skip",
                 ],
             ),
+            (
+                "torch._native.helion_utils",
+                [
+                    "_version_is_sufficient",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
         ]
         self._clear_function_caches()
 
@@ -90,7 +98,7 @@ class TestNativeDSLOps(TestCase):
         dsl_names = get_all_dsls()
         if not dsl_names:
             # Fallback to hardcoded list if registry not available
-            dsl_names = ["triton", "cutedsl"]
+            dsl_names = ["triton", "cutedsl", "helion"]
 
         modules_info = [
             (f"{dsl}_utils.py", f"torch._native.{dsl}_utils") for dsl in dsl_names
@@ -117,7 +125,7 @@ class TestNativeDSLOps(TestCase):
 
                 self.assertTrue(
                     required_methods <= public,
-                    f"{module_name} missing: {required_methods - public}",
+                    lambda msg: f"{msg}\n{module_name} missing: {required_methods - public}",
                 )
 
                 for method_name in required_methods:
@@ -131,7 +139,7 @@ class TestNativeDSLOps(TestCase):
                 self.assertEqual(
                     api_sets[0],
                     api_set,
-                    f"Module {i} should have identical public API to module 0",
+                    lambda msg: f"{msg}\nModule {i} should have identical public API to module 0",
                 )
 
         # Test runtime functions return expected types
@@ -157,12 +165,16 @@ class TestNativeDSLOps(TestCase):
         script = textwrap.dedent("""\
             import sys
             import torch
-            dsl_modules = ["triton", "cutlass", "tvm_ffi"]
+            dsl_modules = ["triton", "cutlass", "tvm_ffi", "helion"]
             leaked = [m for m in dsl_modules if m in sys.modules]
             print(repr(leaked))
         """)
         result = _subprocess_lastline(script)
-        self.assertEqual(result, "[]", f"DSL modules leaked on import torch: {result}")
+        self.assertEqual(
+            result,
+            "[]",
+            lambda msg: f"{msg}\nDSL modules leaked on import torch: {result}",
+        )
 
     def test_no_external_packaging_dependency(self):
         """torch._native must not import the external `packaging` package.
@@ -250,7 +262,7 @@ class TestNativeDSLOps(TestCase):
                     self.assertEqual(
                         result,
                         expected_result,
-                        f"_available_version({version_str!r}) = {result}",
+                        lambda msg: f"{msg}\n_available_version({version_str!r}) = {result}",
                     )
 
     def test_registry_mechanics(self):
@@ -303,6 +315,7 @@ class TestNativeDSLOps(TestCase):
         modules_to_test = [
             ("triton_utils.py", "torch._native.triton_utils"),
             ("cutedsl_utils.py", "torch._native.cutedsl_utils"),
+            ("helion_utils.py", "torch._native.helion_utils"),
         ]
 
         # Use the preserve_filter_state context manager pattern
@@ -341,7 +354,7 @@ class TestNativeDSLOps(TestCase):
 
     def test_register_op_skips_when_jit_disabled(self):
         """register_op_override does not call through when TORCH_DISABLE_NATIVE_JIT=1."""
-        from torch._native import cutedsl_utils, triton_utils
+        from torch._native import cutedsl_utils, helion_utils, triton_utils
 
         # Test the actual environment variable behavior to ensure it works
         # Set TORCH_DISABLE_NATIVE_JIT=1 and clear caches
@@ -354,12 +367,18 @@ class TestNativeDSLOps(TestCase):
             # Import functions from each module and clear their caches too
             triton_utils.check_native_jit_disabled.cache_clear()
             cutedsl_utils.check_native_jit_disabled.cache_clear()
+            helion_utils.check_native_jit_disabled.cache_clear()
 
             # Verify the function returns True
             self.assertTrue(check_native_jit_disabled())
 
-            # Mock the registry calls to count how many times they would be called
-            with patch("torch._native.registry.register_op_override") as registry_mock:
+            with (
+                patch.object(triton_utils, "_register_op_override_impl") as triton_mock,
+                patch.object(
+                    cutedsl_utils, "_register_op_override_impl"
+                ) as cutedsl_mock,
+                patch.object(helion_utils, "_register_op_override_impl") as helion_mock,
+            ):
                 # Use a unique operation name
                 unique_op = f"test_jit_disabled_{uuid.uuid4().hex[:8]}.Tensor"
                 triton_utils.register_op_override(
@@ -368,62 +387,83 @@ class TestNativeDSLOps(TestCase):
                 cutedsl_utils.register_op_override(
                     "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
-                # Should not call the registry function at all since JIT is disabled
-                self.assertEqual(registry_mock.call_count, 0)
+                helion_utils.register_op_override(
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
+                )
+                self.assertEqual(triton_mock.call_count, 0)
+                self.assertEqual(cutedsl_mock.call_count, 0)
+                self.assertEqual(helion_mock.call_count, 0)
+
+    def test_helion_availability_requires_supported_backend_and_version(self):
+        from torch._native import helion_utils
+        from torch._vendor.packaging.version import Version
+
+        with patch.dict(os.environ, {"HELION_BACKEND": "metal"}):
+            helion_utils._check_runtime_available.cache_clear()
+            helion_utils._version_is_sufficient.cache_clear()
+            self.assertFalse(helion_utils.runtime_available())
+
+        helion_utils._check_runtime_available.cache_clear()
+        helion_utils._version_is_sufficient.cache_clear()
+        with patch.object(
+            helion_utils,
+            "_check_runtime_available",
+            return_value=(True, Version("1.2.0")),
+        ):
+            self.assertTrue(helion_utils.runtime_available())
+            self.assertTrue(helion_utils._version_is_sufficient())
+
+        helion_utils._check_runtime_available.cache_clear()
+        helion_utils._version_is_sufficient.cache_clear()
+        with patch.object(
+            helion_utils,
+            "_check_runtime_available",
+            return_value=(True, Version("1.0.0")),
+        ):
+            self.assertTrue(helion_utils.runtime_available())
+            self.assertFalse(helion_utils._version_is_sufficient())
 
     def test_version_skip_env_var_overrides(self):
         """TORCH_NATIVE_SKIP_VERSION_CHECK=1 allows non-blessed versions."""
         from torch._vendor.packaging.version import Version
 
-        fake_version = Version("99.99.99")
+        fake_version = Version("1.0.0")
 
         # Set the environment variable and clear caches
         with patch.dict(os.environ, {"TORCH_NATIVE_SKIP_VERSION_CHECK": "1"}):
             # Import fresh modules to avoid cached state
-            from torch._native import cutedsl_utils, triton_utils
+            from torch._native import cutedsl_utils, helion_utils, triton_utils
             from torch._native.common_utils import check_native_version_skip
 
             # Clear all relevant caches to ensure clean state
             check_native_version_skip.cache_clear()
 
-            # Clear module-specific caches for the imported modules
-            for module in [triton_utils, cutedsl_utils]:
+            utils = (triton_utils, cutedsl_utils, helion_utils)
+            op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
+
+            for module in utils:
+                # Clear cached lookups so the patched runtime takes effect.
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if hasattr(attr, "cache_clear"):
                         attr.cache_clear()
 
-            with (
-                patch.object(
-                    triton_utils,
-                    "_check_runtime_available",
-                    return_value=(True, fake_version),
-                ),
-                patch.object(
-                    cutedsl_utils,
-                    "_check_runtime_available",
-                    return_value=(True, fake_version),
-                ),
-                patch.object(triton_utils, "_register_op_override_impl") as triton_mock,
-                patch.object(cutedsl_utils, "_register_op_override_impl") as cute_mock,
-            ):
-                # Use unique operation names to avoid conflicts
-                op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
-
-                # Call the register functions
-                triton_utils.register_op_override(
-                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
-                )
-                cutedsl_utils.register_op_override(
-                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
-                )
-
-                # Verify both implementation functions were called
-                self.assertEqual(
-                    triton_mock.call_count + cute_mock.call_count,
-                    2,
-                    f"Expected 2 calls but got triton: {triton_mock.call_count}, cutedsl: {cute_mock.call_count}",
-                )
+                with (
+                    patch.object(
+                        module,
+                        "_check_runtime_available",
+                        return_value=(True, fake_version),
+                    ),
+                    patch.object(module, "_register_op_override_impl") as mock,
+                ):
+                    module.register_op_override(
+                        "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                    )
+                    self.assertEqual(
+                        mock.call_count,
+                        1,
+                        f"{module.__name__}: impl not called under skip flag",
+                    )
 
     @parametrize("env_value, expected", [(None, False), ("1", True)])
     def test_check_native_version_skip_environment_variable(self, env_value, expected):
@@ -456,6 +496,7 @@ class TestNativeDSLOps(TestCase):
         self.assertIsInstance(all_dsls, list)
         self.assertIn("triton", all_dsls)
         self.assertIn("cutedsl", all_dsls)
+        self.assertIn("helion", all_dsls)
 
         # Test available DSLs are subset of all DSLs
         available_dsls = get_available_dsls()
@@ -475,6 +516,7 @@ class TestNativeDSLOps(TestCase):
         """Test that DSL test helper decorators work"""
         from torch.testing._internal.common_utils import (
             skipIfDSLUnavailable,
+            skipIfNoHelionDSL,
             skipIfNoTritonDSL,
             skipUnlessDSLAvailable,
         )
@@ -482,6 +524,7 @@ class TestNativeDSLOps(TestCase):
         # Test that decorators are callable
         self.assertTrue(callable(skipIfNoTritonDSL))
         self.assertTrue(callable(skipIfNoCuteDSL))
+        self.assertTrue(callable(skipIfNoHelionDSL))
         self.assertTrue(callable(skipIfDSLUnavailable))
         self.assertTrue(callable(skipUnlessDSLAvailable))
 

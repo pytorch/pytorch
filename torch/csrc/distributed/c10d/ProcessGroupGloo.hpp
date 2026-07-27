@@ -319,6 +319,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
+  ErrorType getError() override {
+    return ErrorType::SUCCESS;
+  }
+
   c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
@@ -444,10 +448,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
   void monitoredBarrier(
       const BarrierOptions& opts = BarrierOptions(),
       bool waitAllRanks = false) override;
-
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store.
-  void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
