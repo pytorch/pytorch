@@ -882,6 +882,43 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         finally:
             d.clear()
 
+    def test_dict_view_mapping_blocks_backing_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            mapping = proxy.keys().mapping
+            d["foo"] = 1
+            return t + (1 if "foo" in mapping else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dictionary mutation when a dict view is live",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_dict_view_mapping_resume_sees_later_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            mapping = proxy.keys().mapping
+            torch._dynamo.graph_break()
+            d["foo"] = 1
+            return t + (1 if "foo" in mapping else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
     def test_consumed_local_dict_keys_view_does_not_block_dict_mutation(self):
         d = {}
 
@@ -2030,6 +2067,16 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
         it = iter([])
         result = next(it, "default")
         self.assertEqual(result, "default")
+
+    @make_dynamo_test
+    def test_next_non_iterator_raises_type_error(self):
+        with self.assertRaisesRegex(TypeError, "'list' object is not an iterator"):
+            next([1, 2])
+
+    @make_dynamo_test
+    def test_next_non_iterator_with_default_raises_type_error(self):
+        with self.assertRaisesRegex(TypeError, "'list' object is not an iterator"):
+            next([1, 2], "default")
 
     @make_dynamo_test
     def test_error_on_dict_keys_mutation_during_iteration(self):

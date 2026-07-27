@@ -54,9 +54,11 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
@@ -95,7 +97,6 @@ jobs:
           { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.dgx.b200" }
         ]}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "12.8"
@@ -113,7 +114,6 @@ jobs:
       build-environment: ${{ needs.build-b200.outputs.build-environment }}
       docker-image: ${{ needs.build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.build-b200.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "12.8"
@@ -124,9 +124,12 @@ jobs:
     if: github.repository_owner == 'pytorch' && inputs.gpu == 'MI300X'
     name: build-rocm
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3_10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
@@ -155,7 +158,7 @@ jobs:
         needs.test-rocm.result == 'success'
       )
     needs: [test-cuda, test-b200, test-rocm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPERATOR: ${{ inputs.operator }}

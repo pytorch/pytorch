@@ -653,6 +653,10 @@ if rank == 0:
 ```
 
 ```{eval-rst}
+.. autofunction:: gather_into_tensor
+```
+
+```{eval-rst}
 .. autofunction:: gather_object
 ```
 
@@ -1739,10 +1743,4 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
-```
-
-```{toctree}
-:hidden:
-
-distributed._dist2
 ```
