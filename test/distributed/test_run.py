@@ -123,6 +123,43 @@ class RunTest(TestCase):
         self.assertEqual(args.rdzv_backend, "c10d")
         self.assertEqual(args.rdzv_endpoint, "localhost:0")
 
+    def _log_line_prefix_template(self, args):
+        """config_from_args' template, with the prefix env vars under our control."""
+        with patch.dict(os.environ):
+            os.environ.pop("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE", None)
+            os.environ.pop("PET_LOG_LINE_PREFIX_TEMPLATE", None)
+            config, _, _ = run.config_from_args(self._parse_args(args))
+        return config.log_line_prefix_template
+
+    def test_log_line_prefix_template_from_args(self):
+        """--log-line-prefix-template is passed through to LaunchConfig."""
+        template = "${hostname}:${rank}: "
+        self.assertEqual(
+            template,
+            self._log_line_prefix_template(
+                [f"--log-line-prefix-template={template}", "dummy_script.py"]
+            ),
+        )
+
+    def test_log_line_prefix_template_unset(self):
+        """Unset, the template stays None so the default [role_name][local_rank] prefix is kept."""
+        self.assertIsNone(self._log_line_prefix_template(["dummy_script.py"]))
+
+    def test_log_line_prefix_template_env_var(self):
+        """TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE still works, and the flag overrides it."""
+        with patch.dict(
+            os.environ, {"TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE": "[${rank}]:"}
+        ):
+            config, _, _ = run.config_from_args(self._parse_args(["dummy_script.py"]))
+            self.assertEqual("[${rank}]:", config.log_line_prefix_template)
+
+            config, _, _ = run.config_from_args(
+                self._parse_args(
+                    ["--log-line-prefix-template=${hostname}: ", "dummy_script.py"]
+                )
+            )
+            self.assertEqual("${hostname}: ", config.log_line_prefix_template)
+
 
 if __name__ == "__main__":
     run_tests()

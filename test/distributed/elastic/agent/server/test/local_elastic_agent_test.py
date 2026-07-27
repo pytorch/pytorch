@@ -29,6 +29,7 @@ import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 import torch.distributed.rpc as rpc
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
+    WorkerGroup,
     WorkerSpec,
     WorkerState,
 )
@@ -813,7 +814,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         )
 
     def test_run_with_custom_log_lines(self):
-        log_line_prefix_template = "[${role_name}-${local_rank}:${rank}]:"
+        log_line_prefix_template = "[${hostname}-${role_name}-${local_rank}:${rank}]:"
         self.run_test_with_backend(
             backend="c10d",
             test_to_run=lambda: self.run_distributed_sum_homogeneous(
@@ -1752,6 +1753,74 @@ class LocalElasticAgentTest(unittest.TestCase):
                     del os.environ[healthcheck_port_env_name]
             else:
                 os.environ[healthcheck_port_env_name] = original_healthcheck
+
+
+class LocalElasticAgentLogPrefixTest(unittest.TestCase):
+    """Unit tests for ``log_line_prefix_template`` macro substitution.
+
+    These tests do not require etcd or a real rendezvous; they mock out
+    ``start_processes`` and inspect the prefixes the agent hands to it.
+    """
+
+    def _make_agent(self, log_line_prefix_template: str) -> LocalElasticAgent:
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role="default",
+            local_world_size=2,
+            entrypoint=_happy_function,
+            args=(),
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        log_dir = tempfile.mkdtemp(prefix="LocalElasticAgentLogPrefixTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        return LocalElasticAgent(
+            spec,
+            start_method="spawn",
+            exit_barrier_timeout=5,
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+            log_line_prefix_template=log_line_prefix_template,
+        )
+
+    @staticmethod
+    def _captured_prefixes(agent: LocalElasticAgent) -> dict[int, str]:
+        """Run ``_start_workers`` with the spawn mocked out, return the prefixes."""
+        spec = agent._worker_group.spec
+        worker_group = WorkerGroup(spec)
+        worker_group.store = Mock()
+        worker_group.group_rank = 0
+        worker_group.group_world_size = 1
+        worker_group.master_addr = "localhost"
+        worker_group.master_port = 0
+        for global_rank, worker in enumerate(worker_group.workers):
+            worker.global_rank = global_rank
+            worker.role_rank = global_rank
+            worker.world_size = spec.local_world_size
+            worker.role_world_size = spec.local_world_size
+
+        with patch(
+            "torch.distributed.elastic.agent.server.local_elastic_agent.start_processes"
+        ) as mock_start_processes:
+            agent._start_workers(worker_group)
+        return mock_start_processes.call_args.kwargs["log_line_prefixes"]
+
+    def test_hostname_macro(self):
+        """``${hostname}`` expands to the name of the node the agent runs on."""
+        agent = self._make_agent("${hostname}:${rank}: ")
+        hostname = socket.gethostname()
+        self.assertEqual(
+            {0: f"{hostname}:0: ", 1: f"{hostname}:1: "},
+            self._captured_prefixes(agent),
+        )
+
+    def test_preexisting_macros_unchanged(self):
+        """Adding ${hostname} must not alter how existing templates render."""
+        agent = self._make_agent("[${role_name}${local_rank}]:")
+        self.assertEqual(
+            {0: "[default0]:", 1: "[default1]:"}, self._captured_prefixes(agent)
+        )
 
 
 class LocalElasticAgentUninterruptibleStateTest(unittest.TestCase):
