@@ -41,6 +41,12 @@ def main():
     with torch.inference_mode():
         bench_overhead("inference_mode()", False)
 
+    # torch._dynamo.disable's wrapper just toggles the eval-frame handler.
+    print("torch._dynamo.disable")
+    eager_us = bench("eager   ", add1, False)
+    disabled_us = bench("disabled", torch._dynamo.disable(add1), False)
+    print(f"overhead {disabled_us - eager_us:.1f}us")
+
 
 if __name__ == "__main__":
     main()
