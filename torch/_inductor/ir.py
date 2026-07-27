@@ -6510,6 +6510,8 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         return self.outputs
 
 
+# TODO: Factor out a common DSL template buffer base shared with
+# CuteDSLTemplateBuffer.
 class FlyDSLTemplateBuffer(TemplateBuffer):
     """
     Buffer for FlyDSL template kernels.
