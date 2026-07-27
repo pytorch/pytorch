@@ -18,7 +18,8 @@ is missing, so the standard build NEVER hard-depends on the DSL stack:
 
   * NATIVE_AOT=0 in the environment (explicit opt-out)
   * no CUDA build (USE_CUDA off / no nvcc toolchain in the build)
-  * DSL runtime not importable (nvidia_cutlass_dsl not installed)
+  * DSL runtime not importable (nvidia_cutlass_dsl or tvm_ffi, the
+    same pair torch/_native/cutedsl_utils.py gates the JIT layer on)
   * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
     for now -- see export.EXPORT_SMS); on-device export runs when the
     arch list is unset and a supported GPU is present
@@ -55,28 +56,32 @@ def _report(msg: str) -> None:
     print(f"-- native-AOT stage 2: {msg}", flush=True)
 
 
-def _torch_importable() -> bool:
-    try:
-        import torch  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+def _torch_probe(expr: str) -> bool:
+    """Evaluate a torch expression in a SUBPROCESS and return its truth.
+    Never imports torch in this process: a torch that hard-crashes on
+    import (e.g. an ASan build aborting because the sanitizer runtime
+    is not LD_PRELOADed into plain python) must degrade to a skip, not
+    kill the build script -- an in-process ImportError-only check
+    misses those, and any crash would also poison the later checks."""
+    code = f"import sys, torch; sys.exit(0 if ({expr}) else 1)"
+    return (
+        subprocess.run([sys.executable, "-c", code], capture_output=True).returncode
+        == 0
+    )
 
 
 def should_run() -> bool:
     if os.getenv("NATIVE_AOT", "1") == "0":
         _report("disabled (NATIVE_AOT=0)")
         return False
-    if importlib.util.find_spec("nvidia_cutlass_dsl") is None:
-        _report("skipped (nvidia_cutlass_dsl not installed)")
-        return False
-    if not _torch_importable():
+    for dist in ("nvidia_cutlass_dsl", "tvm_ffi"):
+        if importlib.util.find_spec(dist) is None:
+            _report(f"skipped ({dist} not installed)")
+            return False
+    if not _torch_probe("True"):
         _report("skipped (built torch not importable)")
         return False
-    import torch
-
-    if not torch.backends.cuda.is_built():
+    if not _torch_probe("torch.backends.cuda.is_built()"):
         _report("skipped (torch built without CUDA)")
         return False
     arch_list = os.getenv("TORCH_CUDA_ARCH_LIST")
@@ -88,7 +93,7 @@ def should_run() -> bool:
                 f"exportable arch; supported: {' '.join(export_mod.EXPORT_SMS)})"
             )
             return False
-    elif not torch.cuda.is_available():
+    elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
     return True
