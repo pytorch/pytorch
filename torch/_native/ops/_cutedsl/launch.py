@@ -50,6 +50,25 @@ def cute_tensor(t, read_only=False):
     return ct
 
 
+def cute_tensor_dynMN(t, vec, align=None, read_only=False):
+    # 2D wrap with BOTH extents dynamic: rows (mode 0) fully dynamic, the
+    # contiguous N (mode 1) dynamic with divisibility=vec so the kernel may keep
+    # emitting vec-wide (up to 128-bit) loads. One compiled kernel then serves a
+    # whole (vec-class, tile-ceiling) BUCKET of shapes instead of one exact N --
+    # the K1 recompile-minimization mode. Caller guarantees t is 2D row-major
+    # compact and t.shape[1] % vec == 0 (the bucket's vec class).
+    w = _ro(t, read_only)
+    ct = (
+        cute.runtime.from_dlpack(w, assumed_align=align, enable_tvm_ffi=True)
+        if align is not None
+        else cute.runtime.from_dlpack(w, enable_tvm_ffi=True)
+    )
+    ct.element_type = torch2cute[t.dtype]
+    ct.mark_compact_shape_dynamic(mode=0, stride_order=(0, 1), divisibility=1)
+    ct.mark_compact_shape_dynamic(mode=1, stride_order=(0, 1), divisibility=vec)
+    return ct
+
+
 def cute_tensor_dynM(t, align=None, ndim=None, read_only=False):
     # Like cute_tensor but marks the LEADING dim (mode 0 = the M / output-row axis)
     # DYNAMIC while keeping the others static. For row reductions M is just the grid
