@@ -25,7 +25,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher  # noqa: F401
+from .. import config, ir, pattern_matcher
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -66,7 +66,7 @@ from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
-from .reinplace import reinplace_inplaceable_ops
+from .reinplace import META_ONLY_OPS, reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
 
@@ -139,6 +139,64 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
         additional_deps_map[random_nodes[i]] = OrderedSet([random_nodes[i - 1]])
 
     preserve_node_ordering(graph, additional_deps_map)
+
+
+def _has_accelerator_cse_candidates(gm: torch.fx.GraphModule) -> bool:
+    candidate_counts = Counter(
+        (
+            node.target,
+            value.device,
+            value.dtype,
+            value.ndim,
+        )
+        for node in gm.graph.nodes
+        if node.op == "call_function"
+        and isinstance((value := node.meta.get("val")), torch.Tensor)
+        and is_gpu(value.device.type)
+        and value.device.type != "mps"
+    )
+    return any(count > 1 for count in candidate_counts.values())
+
+
+def _annotate_data_independent_cse_tokens(gm: torch.fx.GraphModule) -> None:
+    """Mark CSE-equivalent graph fragments without deduplicating them.
+
+    See Note [Data-independent CSE signatures].
+    """
+    from torch._functorch.compile_utils import fx_graph_cse_replacements
+
+    mutation_inputs = OrderedSet(
+        input_node
+        for node in gm.graph.nodes
+        if pattern_matcher.is_mutation_op(node)
+        for input_node in node.all_input_nodes
+    )
+    tensor_data_dependent: OrderedSet[torch.fx.Node] = OrderedSet()
+    for node in gm.graph.nodes:
+        if node in mutation_inputs or (
+            node.op in ("placeholder", "get_attr")
+            and isinstance(node.meta.get("val"), torch.Tensor)
+        ):
+            tensor_data_dependent.add(node)
+        elif node.op == "call_function" and node.target in META_ONLY_OPS:
+            continue
+        elif any(arg in tensor_data_dependent for arg in node.all_input_nodes):
+            tensor_data_dependent.add(node)
+
+    for node in gm.graph.nodes:
+        if node not in tensor_data_dependent:
+            node.meta[ir.DATA_INDEPENDENT_CSE_TOKEN] = node.name
+
+    replacements = fx_graph_cse_replacements(
+        gm.graph,
+        node_filter=lambda node: node not in tensor_data_dependent,
+    )
+    if replacements:
+        gm.meta[ir.HAS_DATA_INDEPENDENT_CSE] = True
+    for node, canonical in replacements.items():
+        node.meta[ir.DATA_INDEPENDENT_CSE_TOKEN] = canonical.meta[
+            ir.DATA_INDEPENDENT_CSE_TOKEN
+        ]
 
 
 def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
@@ -469,6 +527,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
         decompose_map_to_while_loop
     )
+
+    if config.combo_kernels and _has_accelerator_cse_candidates(gm):
+        _annotate_data_independent_cse_tokens(gm)
 
     gm.recompile()
     gm.graph.lint()
