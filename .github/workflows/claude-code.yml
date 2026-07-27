@@ -19,6 +19,8 @@ jobs:
     with:
       model: global.anthropic.claude-opus-5
       additional_claude_args: '--allowedTools Skill'
+      # Surface stalled Bedrock requests before the one-hour job timeout.
+      settings: '{"alwaysThinkingEnabled":true,"env":{"API_TIMEOUT_MS":"180000","CLAUDE_CODE_MAX_RETRIES":"2","CLAUDE_ENABLE_STREAM_WATCHDOG":"1"}}'
       append_system_prompt: |
         When asked to review a PR, always use the /pr-review skill first.
         It contains PyTorch-specific review guidelines, output format, and critical checks.
