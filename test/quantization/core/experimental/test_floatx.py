@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
-    skipIfXpu,
     subtest,
     TemporaryFileName,
     TestCase,
@@ -409,7 +408,6 @@ class TestFloat8Dtype(TestCase):
 
 class TestFloat4Dtype(TestCase):
     # TODO(#146647): make the testing generic for shell dtypes
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4445")
     def test_float4_e2m1fn_x2(self, device):
         # can create a tensor of dtype float4
         x1 = torch.empty(4096, 4096, device=device, dtype=torch.float4_e2m1fn_x2)
