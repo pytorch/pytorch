@@ -175,11 +175,15 @@ class SymPyOps:
     @staticmethod
     def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
+        if result_type == torch.bool:
+            return NotImplemented
         return TypedExpr(Min(x.expr, y.expr), result_type)
 
     @staticmethod
     def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
+        if result_type == torch.bool:
+            return NotImplemented
         return TypedExpr(Max(x.expr, y.expr), result_type)
 
 
@@ -293,7 +297,11 @@ class IndexPropagation(DefaultHandler):
 
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
-        new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        try:
+            new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        except (OverflowError, ValueError):
+            # e.g. int(inf) raises OverflowError, int(nan) raises ValueError
+            return self.fallback(name, args, kwargs)
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated

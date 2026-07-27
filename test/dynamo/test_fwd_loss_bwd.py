@@ -190,8 +190,8 @@ class <lambda>(torch.nn.Module):
         eager_loss, eager_grads = fn(x)
         compiled_loss, compiled_grads = compiled_fn(x)
 
-        # Exercises the `result_cls = OrderedDict` branch in
-        # `torch._dynamo.variables.torch` — the compiled grads must be an
+        # Exercises the `OrderedItemsDictVariable` branch in
+        # `torch._dynamo.variables.torch` -- the compiled grads must be an
         # OrderedDict, not a plain dict.
         self.assertIs(type(eager_grads), OrderedDict)
         self.assertIs(type(compiled_grads), OrderedDict)
