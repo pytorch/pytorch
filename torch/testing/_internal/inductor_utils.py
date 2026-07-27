@@ -5,6 +5,7 @@ import functools
 import logging
 import os
 import re
+import subprocess
 import sys
 import unittest
 from subprocess import CalledProcessError
@@ -32,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     LazyVal,
+    TemporaryFileName,
     TestCase,
 )
 
@@ -101,6 +103,22 @@ def running_on_tdm_device() -> bool:
         return is_gfx1250_arch(arch) and has_triton_amd_tdm_device(arch)
     except Exception:
         return False
+
+
+def run_triton_code_in_subprocess(
+    source: str, timeout: int = 600
+) -> subprocess.CompletedProcess[str]:
+    """Run file-backed Triton source so `@triton.jit` can inspect its definition."""
+    from pathlib import Path
+
+    with TemporaryFileName(mode="w", suffix=".py") as filename:
+        Path(filename).write_text(source, encoding="utf-8")
+        return subprocess.run(
+            [sys.executable, filename],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
 
 
 HAS_MULTIGPU = any(
