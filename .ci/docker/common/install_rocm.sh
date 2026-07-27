@@ -2,11 +2,6 @@
 
 set -ex
 
-# for pip_install function
-source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
-
-ROCM_COMPOSABLE_KERNEL_VERSION="$(cat $(dirname $0)/../ci_commit_pins/rocm-composable-kernel.txt)"
-
 ver() {
     printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
 }
@@ -267,11 +262,54 @@ ROCM_ENV
     fi
 }
 
+install_almalinux() {
+    # ROCm from the multi-arch TheRock wheel index (used by the manywheel builder
+    # image). Distro-agnostic pip install; no OS packages. The ROCm SDK unpacks
+    # under <site-packages>/_rocm_sdk_* and its real install root is discovered via
+    # `rocm-sdk path` and exported through /etc/rocm_env.sh (no /opt/rocm symlink);
+    # build_env_setup.py / repair_wheel.py discover ROCM_HOME from there. Mirrors #188429.
+    local THEROCK_INDEX_URL="${THEROCK_INDEX_URL:-https://repo.amd.com/rocm/whl-multi-arch/}"
+    # ROCM_VERSION is the ROCm minor line (e.g. "7.14"); resolve to newest 7.14.x.
+    local ROCM_VERSION="${ROCM_VERSION:-7.14}"
+    local ROCM_PIP_SPEC="rocm[libraries,devel,device-all]==${ROCM_VERSION}.*"
+
+    echo "=============================================="
+    echo "ROCm Multi-Arch Wheel Installation (TheRock)"
+    echo "Index URL:  ${THEROCK_INDEX_URL}"
+    echo "ROCm spec:  ${ROCM_PIP_SPEC}"
+    echo "=============================================="
+
+    # device-all pulls kernels for every supported gfx target (multi-arch wheel);
+    # libraries+devel provide the runtime libs + headers/hipcc to compile against ROCm.
+    python3 -m pip install --index-url "${THEROCK_INDEX_URL}" "${ROCM_PIP_SPEC}"
+
+    # Discover the real install root/bin via the rocm-sdk CLI (rocm-sdk-core wheel).
+    local ROCM_HOME ROCM_BIN
+    ROCM_HOME="$(rocm-sdk path --root)"
+    ROCM_BIN="$(rocm-sdk path --bin)"
+
+    # Build-time environment file (sourced by CI scripts): ROCM_PATH/PATH let the
+    # build find ROCm + hipcc. No LD_LIBRARY_PATH: the produced wheel resolves ROCm
+    # at runtime via RPATH (see repair_wheel.py), and TheRock's own binaries carry
+    # their RPATHs, so the build does not need it either.
+    cat > /etc/rocm_env.sh << ROCM_ENV
+export ROCM_PATH="${ROCM_HOME}"
+export ROCM_HOME="${ROCM_HOME}"
+export PATH="${ROCM_BIN}:\${PATH}"
+ROCM_ENV
+    echo "source /etc/rocm_env.sh" >> /etc/bashrc || true
+
+    echo "TheRock ROCm wheel install complete: ROCM_HOME=${ROCM_HOME}"
+}
+
 # Install Python packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
   ubuntu)
     install_ubuntu
+    ;;
+  almalinux)
+    install_almalinux
     ;;
   *)
     echo "Unable to determine OS..."
