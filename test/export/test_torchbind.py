@@ -1272,10 +1272,15 @@ class TestCompileTorchbind(TestCase):
         self.assertEqual(cnt.frame_count, 4)
 
         tq6 = _empty_tensor_queue()
-        tq6.push(torch.randn(2, 3, requires_grad=True, dtype=torch.float64))
-        torch.compile(mod, backend=cnt)(tq6, x)
+        tq6_ref = _empty_tensor_queue()
+        queued_tensor = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        tq6.push(queued_tensor)
+        tq6_ref.push(queued_tensor.detach().clone().requires_grad_(True))
+        compiled_out, _ = torch.compile(mod, backend=cnt)(tq6, x)
+        eager_out, _ = mod(tq6_ref, x)
         # Tensor in queue changes dtype causes re-compile
         self.assertEqual(cnt.frame_count, 5)
+        self.assertEqual(compiled_out, eager_out)
 
     def test_compile_script_object_input_automatic_dynamic_shape(self):
         class Model(torch.nn.Module):
