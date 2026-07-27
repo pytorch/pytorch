@@ -596,7 +596,7 @@ def _load_model_state_dict(
             if torch.is_tensor(value) and value.dim() > 0:
                 devices.add(value.device)
         # In lora state_dict, there could be multiple devices, with meta device inside.
-        # Take the other device in the broadcast/distribtue, and set assign to True
+        # Take the other device in the broadcast/distribute, and set assign to True
         if torch.device("meta") in devices:
             devices.remove(torch.device("meta"))
             assign = True

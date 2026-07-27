@@ -46,7 +46,11 @@ class TestForwardLossBackward(TestCase):
 
         self.assertEqual(eager_result, compiled_result)
         for name, p in mod.named_parameters():
-            self.assertEqual(eager_grads[name], p.grad, f"Grad mismatch for {name}")
+            self.assertEqual(
+                eager_grads[name],
+                p.grad,
+                lambda msg: f"{msg}\nGrad mismatch for {name}",
+            )
         self.assertEqual(len(backend.graphs), 1)
 
         gm = backend.graphs[0]

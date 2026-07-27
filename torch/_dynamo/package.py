@@ -147,6 +147,7 @@ def load_guard_manager(
         OutputGraphCommon(guards_state.output_graph),
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
+        guard_build_local_state=getattr(guards_state, "local_state", None),
     ).guard_manager
 
 
@@ -878,6 +879,7 @@ class CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
+        from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
         self.uninstall()
@@ -927,6 +929,7 @@ class CompilePackage:
                     # or guarded codes.
                     continue
 
+                input_codes.add(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(

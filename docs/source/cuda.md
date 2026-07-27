@@ -115,6 +115,97 @@
     export_graph_data
 ```
 
+## Graph Kernel Annotations (prototype)
+
+`torch.cuda.graph_annotations` annotates the kernels captured in a CUDA
+graph with user metadata, keyed so the annotations can be joined against
+the ``graph node id`` field on kernel events in profiler traces. Enable
+recording per capture with the ``enable_annotations`` argument of
+{class}`torch.cuda.graph`, then wrap regions of the captured workload in
+{func}`~torch.cuda.graph_annotations.mark_kernels` scopes.
+
+These APIs require the `cuda-bindings` package and a CUDA driver that
+supports ``cudaGraphNodeGetToolsId`` (CUDA 13.1 or newer, or an equivalent
+cuda-compat package); recording silently degrades to a no-op otherwise, and
+is not supported on ROCm. Use
+{func}`~torch.cuda.graph_annotations.is_available` to check support.
+
+The end-to-end workflow: annotate during capture, profile the replay,
+then merge the annotations into the exported trace and view it in
+[Perfetto](https://ui.perfetto.dev). During capture:
+
+```python
+import torch
+from torch.cuda.graph_annotations import mark_kernels, get_kernel_annotations
+
+x = torch.randn(1024, 1024, device="cuda")
+
+# Warmup: run the workload once outside capture so lazy initialization
+# (e.g. cuBLAS handles) does not end up in -- or invalidate -- the capture.
+y = x @ x.t()
+z = torch.relu(y) @ x
+torch.cuda.synchronize()
+
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g, enable_annotations=True):
+    with mark_kernels("attention"):
+        y = x @ x.t()
+    with mark_kernels({"name": "mlp", "layer": 3}):
+        z = torch.relu(y) @ x
+
+with torch.profiler.profile() as prof:
+    g.replay()
+    torch.cuda.synchronize()
+prof.export_chrome_trace("trace.json")
+```
+
+Each kernel event in the exported trace carries a ``graph node id`` in its
+``args``; the recorded annotations are keyed by the same ids, so merging
+them into the trace is a dictionary lookup:
+
+```python
+import json
+
+annotations = get_kernel_annotations()
+with open("trace.json") as f:
+    trace = json.load(f)
+for event in trace["traceEvents"]:
+    node_id = event.get("args", {}).get("graph node id")
+    for ann in annotations.get(node_id, []):
+        event["args"].update(ann)
+with open("trace_annotated.json", "w") as f:
+    json.dump(trace, f)
+```
+
+Opening ``trace_annotated.json`` in [Perfetto](https://ui.perfetto.dev)
+(or ``chrome://tracing``) and clicking a kernel from the graph replay now
+shows the annotation fields -- ``name: attention`` or ``name: mlp``,
+``layer: 3`` -- alongside the kernel's grid and block sizes, identifying
+which region of the captured workload each kernel came from.
+
+Because annotations live in a process-global registry keyed by ids that
+match the profiler's, the pickle of ``dict(get_kernel_annotations())``
+can equally be saved next to a trace and joined offline.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.graph_annotations
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_available
+    mark_kernels
+    get_kernel_annotations
+    clear_kernel_annotations
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
 (cuda-memory-management-api)=
 
 ```{eval-rst}
@@ -300,7 +391,23 @@ CUDA 13.1 or newer.
 Install instructions for `cuda.bindings` can be found here:
 https://nvidia.github.io/cuda-python/
 
-See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example of how to use these.
+Create streams from the green context and use them like other custom CUDA
+streams:
+
+```python
+ctx = GreenContext(...)
+stream = ctx.Stream()
+with torch.cuda.stream(stream):
+    # torch operations here are using resources from `ctx`
+    pass
+```
+
+Synchronization between green-context streams and other streams is the user's
+responsibility. Use CUDA events to order work, just as you would for any other
+custom stream.
+
+The `GreenContext.set_context()` and `GreenContext.pop_context()` methods are
+deprecated compatibility APIs.
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
@@ -325,6 +432,10 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 
 ```{eval-rst}
 .. py:module:: torch.cuda.gds
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.graph_annotations
 ```
 
 ```{eval-rst}

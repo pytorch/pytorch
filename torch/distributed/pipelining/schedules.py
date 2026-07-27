@@ -448,33 +448,39 @@ class _PipelineSchedule(ABC):
                 "All stages must have the same device type for RNG forking. "
                 f"Found device types: {device_types}"
             )
-        with torch.random.fork_rng(devices=devices, device_type=device_type):
-            if needs_fwd:
-                next_stage_args: Any = None
-                for stage in stages:
-                    stage_args = args if stage.is_first else next_stage_args
-                    next_stage_args = stage._prepare_forward_infra(
-                        self._n_microbatches,
-                        stage_args,
-                        kwargs,
-                        has_backward=self._has_backward,
-                    )
-                fwd_initialized = True
+        pipeline_stages = [
+            stage for stage in stages if isinstance(stage, PipelineStage)
+        ]
+        for stage in pipeline_stages:
+            stage._pre_metadata_inference_backup()
 
-            if needs_bwd:
-                prev_stage_grad_meta: Any = None
-                for stage in reversed(stages):
-                    prev_stage_grad_meta = stage._prepare_backward_infra(
-                        self._n_microbatches,
-                        loss_fn=self._loss_fn,
-                        target=target,
-                        received_grad_meta=prev_stage_grad_meta,
-                        loss_kwargs=loss_kwargs,
-                    )
-                bwd_initialized = True
+        try:
+            with torch.random.fork_rng(devices=devices, device_type=device_type):
+                if needs_fwd:
+                    next_stage_args: Any = None
+                    for stage in stages:
+                        stage_args = args if stage.is_first else next_stage_args
+                        next_stage_args = stage._prepare_forward_infra(
+                            self._n_microbatches,
+                            stage_args,
+                            kwargs,
+                            has_backward=self._has_backward,
+                        )
+                    fwd_initialized = True
 
-        for stage in stages:
-            if isinstance(stage, PipelineStage):
+                if needs_bwd:
+                    prev_stage_grad_meta: Any = None
+                    for stage in reversed(stages):
+                        prev_stage_grad_meta = stage._prepare_backward_infra(
+                            self._n_microbatches,
+                            loss_fn=self._loss_fn,
+                            target=target,
+                            received_grad_meta=prev_stage_grad_meta,
+                            loss_kwargs=loss_kwargs,
+                        )
+                    bwd_initialized = True
+        finally:
+            for stage in pipeline_stages:
                 stage._post_metadata_inference_cleanup()
 
         return fwd_initialized, bwd_initialized
@@ -654,15 +660,17 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
 
     op_types = {p.op for p in p2p_ops}
     if op_types == {dist.isend}:
-        return [
+        send_works = [
             p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
             for p in p2p_ops
         ]
+        return [work for work in send_works if work is not None]
     if op_types == {dist.irecv}:
-        return [
+        recv_works = [
             p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
             for p in p2p_ops
         ]
+        return [work for work in recv_works if work is not None]
 
     return dist.batch_isend_irecv(p2p_ops)
 

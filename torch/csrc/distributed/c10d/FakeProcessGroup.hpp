@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <iterator>
+
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -43,14 +46,52 @@ class FakeProcessGroup : public Backend {
     return "fake";
   }
 
+  // Nullable accessor exposed as the Python `.options` property, mirroring the
+  // getOptions()/getBackendOptions() split on ProcessGroupNCCL and
+  // ProcessGroupGloo. Returns null when the user constructed the group without
+  // options, which callers (and test_device_mesh) rely on to tell whether an
+  // options override was supplied.
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
+
+  // options_ may be null when the user passed no options. splitGroup and
+  // mergeRemoteGroup unconditionally dereference the result, so coalesce to a
+  // fresh default Options rather than returning null. The child of a
+  // no-options parent thus carries a real Options, matching NCCL/Gloo.
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
-    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+    auto opts = options_ ? options_ : c10::make_intrusive<Options>();
+    return c10::static_intrusive_pointer_cast<Backend::Options>(opts);
   }
 
   void setTimeout(std::chrono::milliseconds /* timeout */) override {
     // FakeProcessGroup does no real communication, so there is no timeout to
     // configure. Override as a no-op so callers don't hit the warning the
     // Backend base class emits for unsupported backends.
+  }
+
+  bool supportsSplitting() const override {
+    return true;
+  }
+
+  // Create a sub-group from a subset of the parent's ranks. The fake backend
+  // performs no real communication, so there is no split collective to join:
+  // ranks outside the subgroup simply return nullptr (signalling
+  // non-membership), and members return a fresh FakeProcessGroup whose rank is
+  // their position within the sorted subgroup.
+  c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& /* store */,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options>& opts) override {
+    auto it = std::find(ranks.begin(), ranks.end(), rank_);
+    if (it == ranks.end()) {
+      return nullptr;
+    }
+    auto groupRank = static_cast<int>(std::distance(ranks.begin(), it));
+    auto fakeOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+    TORCH_CHECK(fakeOpts != nullptr, "opts not a FakeProcessGroup::Options.");
+    return c10::make_intrusive<FakeProcessGroup>(
+        groupRank, static_cast<int>(ranks.size()), std::move(fakeOpts));
   }
 
   c10::intrusive_ptr<Work> broadcast(

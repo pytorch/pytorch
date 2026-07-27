@@ -114,6 +114,14 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.12
@@ -145,29 +153,29 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang18)
+  pytorch-linux-jammy-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.11-clang18)
+  pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.12-clang18)
+  pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.13-clang18)
+  pytorch-linux-jammy-py3.13-clang21)
     ANACONDA_PYTHON_VERSION=3.13
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.14-clang18)
+  pytorch-linux-jammy-py3.14-clang21)
     ANACONDA_PYTHON_VERSION=3.14
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -190,7 +198,8 @@ case "$tag" in
     ROCM_VERSION=nightly
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx942"
+    # rocm-nightly only runs on MI350 (gfx950) runners.
+    PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -226,9 +235,9 @@ case "$tag" in
     CLANG_VERSION=18
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang18-executorch)
+  pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
@@ -266,15 +275,15 @@ case "$tag" in
     CUDA_VERSION=13.0.2
     CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc15)
+  pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=15
+    GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc15-inductor-benchmarks)
+  pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=15
+    GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
     INDUCTOR_BENCHMARKS=yes

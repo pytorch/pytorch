@@ -580,12 +580,19 @@ class AddcmulOperator(TernaryElementwiseOperatorBase):
 # ---------------------------------------------------------------------------
 
 
+def _clamp_bound(output_spec: Spec) -> float | int:
+    assert isinstance(output_spec, TensorSpec)  # noqa: S101
+    bound = round(random.uniform(-10.0, 10.0), 4)
+    if output_spec.dtype not in FLOAT_DTYPES:
+        bound = int(bound)
+    return bound
+
+
 class ClampMaxOperator(Operator):
     """``torch.clamp_max(input, max)`` — random scalar bound."""
 
     def __init__(self) -> None:
         super().__init__("torch.clamp_max")
-        self._max: float | int | None = None
 
     @property
     def torch_op_name(self) -> str:
@@ -598,10 +605,6 @@ class ClampMaxOperator(Operator):
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         assert isinstance(output_spec, TensorSpec)  # noqa: S101
-        bound = round(random.uniform(-10.0, 10.0), 4)
-        if output_spec.dtype not in FLOAT_DTYPES:
-            bound = int(bound)
-        self._max = bound
         return [
             TensorSpec(
                 size=output_spec.size,
@@ -613,9 +616,11 @@ class ClampMaxOperator(Operator):
     def codegen(
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
-        max_val = self._max
-        self._max = None
-        return f"{output_name} = torch.clamp_max({input_names[0]}, max={max_val!r})"
+        # Generate the bound here (not as instance state): the same operator
+        # instance serves multiple clamp nodes, so stashing the bound in
+        # fuzz_inputs_specs and reading it back here yielded max=None.
+        bound = _clamp_bound(output_spec)
+        return f"{output_name} = torch.clamp_max({input_names[0]}, max={bound!r})"
 
 
 class ClampMinOperator(Operator):
@@ -623,7 +628,6 @@ class ClampMinOperator(Operator):
 
     def __init__(self) -> None:
         super().__init__("torch.clamp_min")
-        self._min: float | int | None = None
 
     @property
     def torch_op_name(self) -> str:
@@ -636,10 +640,6 @@ class ClampMinOperator(Operator):
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         assert isinstance(output_spec, TensorSpec)  # noqa: S101
-        bound = round(random.uniform(-10.0, 10.0), 4)
-        if output_spec.dtype not in FLOAT_DTYPES:
-            bound = int(bound)
-        self._min = bound
         return [
             TensorSpec(
                 size=output_spec.size,
@@ -651,9 +651,8 @@ class ClampMinOperator(Operator):
     def codegen(
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
-        min_val = self._min
-        self._min = None
-        return f"{output_name} = torch.clamp_min({input_names[0]}, min={min_val!r})"
+        bound = _clamp_bound(output_spec)
+        return f"{output_name} = torch.clamp_min({input_names[0]}, min={bound!r})"
 
 
 class HeavisideOperator(Operator):

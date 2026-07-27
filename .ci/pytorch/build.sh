@@ -36,6 +36,15 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
   echo "NVCC version:"
   nvcc --version
+
+  # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
+  # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header is
+  # actually resolvable (find_cupti_header applies the CUPTI_API_VERSION floor) -- so non-13.x
+  # / CPU builds, which have no such header, don't pull it in. Skip it too when LIBCLANG_PATH
+  # already points the codegen at a libclang.so (that env supplies the clang bindings itself).
+  if [ -z "${LIBCLANG_PATH:-}" ] && python -c "import sys; from tools.setup_helpers.cupti import find_cupti_header as f; sys.exit(0 if f() else 1)"; then
+    python -mpip install libclang
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
@@ -171,19 +180,12 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
-# memory to build and will OOM
-
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  J=2  # default to 2 jobs
-  case "$RUNNER" in
-    linux.12xlarge.memory|linux.24xlarge.memory)
-      J=24
-      ;;
-  esac
-  echo "Building FlashAttention with job limit $J"
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
-fi
+# FlashAttention CUDA kernels (built for CUDA 8.0+) need large amounts of memory
+# to compile and can OOM at full build parallelism. The previous mitigation set
+# BUILD_CUSTOM_STEP to pre-build the flash_attention target at a reduced job
+# count; it was consumed by the setuptools build path removed in this stack, so
+# it is dropped here. Re-homing the throttle as a CMake JOB_POOLS constraint is
+# tracked in https://github.com/pytorch/pytorch/issues/190663.
 
 # TODO: Removeme once all the wrappers are gone
 if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -240,12 +242,6 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUI
   git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
-# check that setup.py would fail with bad arguments
-echo "The next three invocations are expected to fail with invalid command error messages."
-( ! get_exit_code python setup.py bad_argument )
-( ! get_exit_code python setup.py clean] )
-( ! get_exit_code python setup.py clean bad_argument )
-
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
@@ -261,11 +257,8 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       python -mpip install numpy==2.0.2
     fi
 
-    WERROR=1 python setup.py clean
-
     WERROR=1 python -m build --wheel --no-isolation
   else
-    python setup.py clean
     if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
       source .ci/pytorch/install_cache_xla.sh
     fi

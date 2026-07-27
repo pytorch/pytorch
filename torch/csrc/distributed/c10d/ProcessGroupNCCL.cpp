@@ -1244,9 +1244,6 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
   }
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {
-} // NCCL just starts sequence numbers at 0.
-
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seqCollective_;
 }
@@ -1296,10 +1293,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //      same order and hence no deadlocks.
   while (true) {
     {
-      std::lock(workMetaListMutex_, completedWorkListMutex_);
-      std::lock_guard<std::mutex> lockWork(workMetaListMutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> lockHook(
-          completedWorkListMutex_, std::adopt_lock);
+      std::scoped_lock lock(workMetaListMutex_, completedWorkListMutex_);
 
       if (workMetaList_.empty() && completedWorkList_.empty()) {
         return;
@@ -2354,7 +2348,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // In that window, timeout checks can report false positives for
       // otherwise-complete work, so we defer timeout enforcement.
       // TODO: Remove once all supported HIP runtimes include:
-      // https://github.com/ROCm/clr/pull/3176
+      // https://github.com/ROCm/rocm-systems/pull/3176
       if (!at::cuda::is_graph_capture_active()) {
         timedout = !work.exception() && work.checkTimeout();
       }
@@ -5724,6 +5718,96 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       OpType::GATHER,
       opts.asyncOp,
       "nccl:gather");
+}
+
+c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const GatherOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_into_tensor: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  check_gpu_single_tensor(inputTensor);
+
+  const bool isRoot = getRank() == opts.rootRank;
+  if (isRoot) {
+    check_gpu_single_tensor(outputTensor);
+    if (inputTensor.dtype() != outputTensor.dtype()) {
+      invalidArgument("output tensor must have the same type as input tensor");
+    }
+    if (inputTensor.numel() * size_ != outputTensor.numel()) {
+      invalidArgument(
+          "output tensor size must be equal to world_size times input tensor size");
+    }
+  }
+
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      inputTensor, // inputTensors
+      outputTensor, // outputTensors
+      opts.rootRank, // root rank
+      "gather_into_tensor", // collective name
+      inputTensor.numel(), // inNelems
+      inputTensor.numel() * this->getSize(), // outNelems
+      inputTensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSize
+      globalRankStart_, // globalRankStart_
+      globalRankStride_, // globalRankStride_
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
+
+  return collective(
+      inputTensor,
+      outputTensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = static_cast<int>(opts.rootRank);
+        const auto count = input.numel();
+#if defined(NCCL_VERSION_CODE) && (NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3))
+        // ncclGather (added in NCCL 2.28.3) writes each rank's contribution
+        // directly into the flat output buffer on the root, so no per-rank
+        // copy is needed.
+        void* recvbuff = isRoot ? output.data_ptr() : nullptr;
+        return ncclGather(
+            input.data_ptr(),
+            recvbuff,
+            count,
+            getNcclDataType(input.scalar_type()),
+            root,
+            comm,
+            stream.stream());
+#else
+        // Fallback for NCCL < 2.28.3 (e.g. RCCL, which lacks ncclGather):
+        // reuse the shared send/recv gather helper, pointing its per-rank
+        // outputs at contiguous slices of the flat output buffer so there is
+        // still no extra copy. The helper's group-end check is
+        // non-blocking-communicator aware. Flatten the input so the helper's
+        // root self-copy (outputs[root].copy_(input)) is a flat-to-flat copy
+        // and does not try to broadcast a multi-dim input onto a 1-D slice.
+        auto flatInput = input.view(-1);
+        std::vector<at::Tensor> outputViews;
+        if (isRoot) {
+          auto flat = output.view(-1);
+          outputViews.reserve(size_);
+          for (const auto r : c10::irange(size_)) {
+            outputViews.push_back(flat.narrow(0, r * count, count));
+          }
+        }
+        torch::cuda::nccl::gather(flatInput, outputViews, comm, stream, root);
+        return ncclSuccess;
+#endif
+      },
+      OpType::GATHER,
+      opts.asyncOp,
+      "nccl:gather_into_tensor");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(

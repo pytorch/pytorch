@@ -23,12 +23,27 @@ import logging
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
-from enum import Enum
-from typing import Any, NoReturn, TYPE_CHECKING
+from enum import Enum, IntFlag
+from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+
+from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
+    PyMappingSlots,
+    PyNumberSlots,
+    PySequenceSlots,
+    PyTypeSlots,
+)
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import (
+    ObservedAttributeError,
+    raise_observed_exception,
+    raise_type_error,
+    unimplemented,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import format_source_range, istype, raise_args_mismatch
@@ -81,7 +96,7 @@ class SourceLocation:
 # calls (e.g., as_python_constant on a list that contains itself). Maps
 # (id(instance), id(original_method)) tuples to track which calls are in progress.
 # We use id(original_method) rather than the method name string so that super()
-# delegation within a class hierarchy (e.g. TorchScriptObjectVariable.as_python_constant
+# delegation within a class hierarchy (e.g. CustomClassObjectVariable.as_python_constant
 # calling UserDefinedObjectVariable.as_python_constant) is not a false positive.
 _vt_active_calls: ContextVar[set[tuple[int, int]] | None] = ContextVar(
     "_vt_active_calls", default=None
@@ -264,8 +279,114 @@ def is_side_effect_safe(m: MutationType) -> bool:
     return m.scope == scope_id
 
 
+def maybe_get_python_type(obj: VariableTracker) -> type:
+    try:
+        return obj.python_type()
+    except NotImplementedError:
+        unimplemented(
+            gb_type="Unsupported python_type() call",
+            context=f"{obj} does not implement python_type()",
+            explanation="This VariableTracker does not implement python_type(), "
+            "which is required for object protocol operations.",
+            hints=[
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
+
+
 class NO_SUCH_SUBOBJ:
     """Sentinel indicating no concrete Python object is available."""
+
+
+class MethodFlags(IntFlag):
+    """Calling convention for a `Method` handler, mirroring CPython's
+    PyMethodDef ml_flags. `call_method` enforces arity from these before
+    invoking the handler, centralizing the raise_args_mismatch boilerplate."""
+
+    VARARGS = 1  # any positional args; kwargs rejected unless KEYWORDS is set
+    KEYWORDS = 2  # kwargs allowed (combine with VARARGS)
+    NOARGS = 4  # exactly zero args and zero kwargs
+    O = 8  # exactly one positional arg, no kwargs
+
+
+def _check_method_arity(
+    vt: VariableTracker,
+    tx: InstructionTranslatorBase,
+    name: str,
+    flags: MethodFlags,
+    args: Any,
+    kwargs: Any,
+) -> None:
+    # Centralized arity check for a tp_methods handler, driven by MethodFlags,
+    # raising the same TypeErrors CPython raises for builtin methods. Shared by
+    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
+    n = len(args)
+    qualname = f"{vt.python_type_name()}.{name}"
+    if kwargs and not (flags & MethodFlags.KEYWORDS):
+        raise_type_error(tx, f"{qualname}() takes no keyword arguments")
+    if flags & (MethodFlags.NOARGS | MethodFlags.O):
+        if flags & MethodFlags.NOARGS and args:
+            raise_type_error(tx, f"{qualname}() takes no arguments ({n} given)")
+        if flags & MethodFlags.O and n != 1:
+            raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
+
+
+@dataclasses.dataclass(slots=True)
+class Method:
+    """Declarative entry in a VariableTracker's `tp_methods` table, analogous
+    to CPython's PyMethodDef. `flags` drives centralized arity checking.
+
+    Handlers have signature `(self, tx, args, kwargs)` and return the result
+    VariableTracker, or None to decline the call (the equivalent of the old
+    `super().call_method` fall-through) so `call_method` continues to the
+    object-protocol dispatch below."""
+
+    handler: Callable[..., VariableTracker | None]
+    flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
+
+    def invoke(
+        self,
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        name: str,
+        args: Any,
+        kwargs: Any,
+    ) -> VariableTracker | None:
+        _check_method_arity(vt, tx, name, self.flags, args, kwargs)
+        return self.handler(vt, tx, args, kwargs)
+
+
+@dataclasses.dataclass(slots=True)
+class GetSet:
+    """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
+    `(self, tx) -> VT | None` (None declines); `setter`
+    `(self, tx, value) -> VT | None`, None for read-only."""
+
+    getter: Callable[..., VariableTracker | None]
+    setter: Callable[..., VariableTracker | None] | None = None
+
+
+@dataclasses.dataclass(slots=True)
+class Member:
+    """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
+    GetSet; a distinct type so members and getsets never share a class."""
+
+    getter: Callable[..., VariableTracker | None]
+    setter: Callable[..., VariableTracker | None] | None = None
+
+
+def getset_read(
+    accessor: Callable[[Any], VariableTracker],
+) -> Callable[..., VariableTracker]:
+    """Getter for a GetSet/Member whose value is an already-built VT."""
+    return lambda self, tx: accessor(self)
+
+
+def getset_build(
+    accessor: Callable[[Any], Any],
+) -> Callable[..., VariableTracker]:
+    """Getter that builds a VT from the raw value returned by `accessor`."""
+    return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -278,6 +399,195 @@ class AsPythonConstantNotImplementedError(NotImplementedError):
         msg = f"{vt} is not a constant" if msg is None else msg
         super().__init__(msg)
         self.vt = vt
+
+
+class SlotGroup(Enum):
+    """A CPython slot group.  The value is the group's index into
+    get_type_slots()'s 4-tuple."""
+
+    SEQUENCE = 0
+    MAPPING = 1
+    NUMBER = 2
+    TYPE = 3
+
+
+@dataclasses.dataclass(frozen=True)
+class Slot:
+    """A CPython type slot: the name of the VariableTracker method implementing
+    the slot function.  Distinct from SlotDef (a slotdefs[] dunder entry) -- e.g.
+    the mp_length slot fn is the raw ``mp_length`` getter, not ``__len__``'s
+    ``tp_len_impl`` wrapper.  Mirrors the function pointer in a type's Py*Methods
+    struct: unbound, so the receiving ``vt`` is passed at call time as CPython
+    passes ``self`` to ``Py_TYPE(vt)->...->slot(vt, ...)``."""
+
+    impl: str
+
+    def __call__(
+        self,
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        *args: Any,
+        **kwargs: Any,
+    ) -> VariableTracker:
+        return getattr(type(vt), self.impl)(vt, tx, *args, **kwargs)
+
+
+class PyNumberMethods(NamedTuple):
+    nb_bool: Slot | None
+    nb_index: Slot | None
+    nb_int: Slot | None
+    nb_float: Slot | None
+    nb_negative: Slot | None
+    nb_positive: Slot | None
+    nb_absolute: Slot | None
+    nb_invert: Slot | None
+    nb_add: Slot | None
+    nb_inplace_add: Slot | None
+    nb_subtract: Slot | None
+    nb_inplace_subtract: Slot | None
+    nb_multiply: Slot | None
+    nb_inplace_multiply: Slot | None
+    nb_remainder: Slot | None
+    nb_inplace_remainder: Slot | None
+    nb_power: Slot | None
+    nb_inplace_power: Slot | None
+    nb_lshift: Slot | None
+    nb_inplace_lshift: Slot | None
+    nb_rshift: Slot | None
+    nb_inplace_rshift: Slot | None
+    nb_and: Slot | None
+    nb_inplace_and: Slot | None
+    nb_xor: Slot | None
+    nb_inplace_xor: Slot | None
+    nb_or: Slot | None
+    nb_inplace_or: Slot | None
+    nb_floor_divide: Slot | None
+    nb_inplace_floor_divide: Slot | None
+    nb_true_divide: Slot | None
+    nb_inplace_true_divide: Slot | None
+    nb_divmod: Slot | None
+    nb_matrix_multiply: Slot | None
+    nb_inplace_matrix_multiply: Slot | None
+
+
+class PySequenceMethods(NamedTuple):
+    sq_length: Slot | None
+    sq_concat: Slot | None
+    sq_repeat: Slot | None
+    sq_item: Slot | None
+    sq_ass_item: Slot | None
+    sq_contains: Slot | None
+    sq_inplace_concat: Slot | None
+    sq_inplace_repeat: Slot | None
+
+
+class PyMappingMethods(NamedTuple):
+    mp_length: Slot | None
+    mp_subscript: Slot | None
+    mp_ass_subscript: Slot | None
+
+
+class PyTypeObject(NamedTuple):
+    tp_repr: Slot | None
+    tp_hash: Slot | None
+    tp_call: Slot | None
+    tp_str: Slot | None
+    tp_getattro: Slot | None
+    tp_setattro: Slot | None
+    tp_richcompare: Slot | None
+    tp_iter: Slot | None
+    tp_iternext: Slot | None
+    tp_descr_get: Slot | None
+    tp_descr_set: Slot | None
+    tp_init: Slot | None
+    tp_as_number: PyNumberMethods
+    tp_as_sequence: PySequenceMethods
+    tp_as_mapping: PyMappingMethods
+
+
+# The tp_ slot fields of PyTypeObject (everything but the sub-struct pointers).
+_TYPE_FIELDS = tuple(f for f in PyTypeObject._fields if not f.startswith("tp_as_"))
+
+# Per group: C slot bit -> struct field name, keyed via the enum's UPPERCASE name.
+_BIT_FIELD: dict[SlotGroup, dict[int, str]] = {
+    SlotGroup.NUMBER: {
+        getattr(PyNumberSlots, f.upper()): f for f in PyNumberMethods._fields
+    },
+    SlotGroup.SEQUENCE: {
+        getattr(PySequenceSlots, f.upper()): f for f in PySequenceMethods._fields
+    },
+    SlotGroup.MAPPING: {
+        getattr(PyMappingSlots, f.upper()): f for f in PyMappingMethods._fields
+    },
+    SlotGroup.TYPE: {getattr(PyTypeSlots, f.upper()): f for f in _TYPE_FIELDS},
+}
+
+
+# The actual slot function (a VariableTracker method) each struct field dispatches to
+_SLOT_FN: dict[SlotGroup, dict[str, str]] = {
+    SlotGroup.NUMBER: {
+        **{f: f"{f}_impl" for f in PyNumberMethods._fields},
+        "nb_bool": "bool_impl",
+    },
+    SlotGroup.SEQUENCE: {
+        "sq_length": "sq_length",
+        "sq_concat": "sq_concat_impl",
+        "sq_repeat": "sq_repeat_impl",
+        "sq_item": "sq_item_impl",
+        "sq_ass_item": "sq_ass_item_impl",
+        "sq_contains": "sq_contains",
+        "sq_inplace_concat": "sq_inplace_concat_impl",
+        "sq_inplace_repeat": "sq_inplace_repeat_impl",
+    },
+    SlotGroup.MAPPING: {
+        "mp_length": "mp_length",
+        "mp_subscript": "mp_subscript_impl",
+        "mp_ass_subscript": "mp_ass_subscript_impl",
+    },
+    SlotGroup.TYPE: {
+        "tp_repr": "repr_impl",
+        "tp_hash": "tp_hash_impl",
+        "tp_call": "call_function",
+        "tp_str": "str_impl",
+        "tp_getattro": "getattro_impl",
+        "tp_setattro": "setattro_impl",
+        "tp_richcompare": "richcompare_impl",
+        "tp_iter": "tp_iter_impl",
+        "tp_iternext": "tp_iternext_impl",
+        "tp_descr_get": "tp_descr_get_impl",
+        "tp_descr_set": "tp_descr_set_impl",
+        "tp_init": "tp_init_impl",
+    },
+}
+
+# _SLOT_FN must name a slot fn for exactly each struct field.
+for _group, _fns in _SLOT_FN.items():
+    if set(_fns) != set(_BIT_FIELD[_group].values()):
+        raise AssertionError(f"{_group.name}: _SLOT_FN fields != struct fields")
+
+
+def _fill(group: SlotGroup, masks: tuple[int, int, int, int]) -> dict[str, Any]:
+    # {field -> Slot(slot fn) if the type fills the slot, else None}
+    mask = masks[group.value]
+    fn_map = _SLOT_FN[group]
+    return {
+        field: Slot(fn_map[field]) if has_slot(mask, bit) else None
+        for bit, field in _BIT_FIELD[group].items()
+    }
+
+
+@functools.cache
+def _tp_type(obj_type: type) -> PyTypeObject:
+    # obj_type's whole slot table (PyTypeObject-like).  Independent of _tp_dict's
+    # cross-group collapse, so a type with both sq_length and mp_length shows up in
+    # both the sequence and mapping views (as CPython's separate sub-structs do).
+    masks = get_type_slots(obj_type)
+    return PyTypeObject(
+        tp_as_number=PyNumberMethods(**_fill(SlotGroup.NUMBER, masks)),
+        tp_as_sequence=PySequenceMethods(**_fill(SlotGroup.SEQUENCE, masks)),
+        tp_as_mapping=PyMappingMethods(**_fill(SlotGroup.MAPPING, masks)),
+        **_fill(SlotGroup.TYPE, masks),
+    )
 
 
 class VariableTrackerMeta(type):
@@ -332,6 +642,41 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
     _cpython_type: type | tuple[type, ...] | None = None
 
+    # Declarative named-method table (analogous to CPython's tp_methods): maps a
+    # method name to a Method describing its handler and calling convention.
+    # `call_method` consults this before the object-protocol (tp_slot) dispatch.
+    # Lookup walks the class MRO (see `_lookup_tp_table`), so a subclass table
+    # adds to (rather than replaces) the entries it inherits, with the
+    # most-derived class winning on name collisions.
+    tp_methods: dict[str, Method] = {}
+    # Declarative attribute tables, split to match CPython: tp_getset holds the
+    # PyGetSetDef attributes, tp_members the PyMemberDef ones.
+    tp_getset: dict[str, GetSet] = {}
+    tp_members: dict[str, Member] = {}
+
+    def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
+        """Resolve *name* in the given declarative tables across the class MRO.
+
+        Mirrors CPython method/getset/member inheritance: each class contributes
+        its own table entries into its own tp_dict, and lookup walks the MRO with
+        the most-derived class winning. A subclass table therefore *adds* to
+        (rather than replaces) the entries it inherits. Within a class the tables
+        are consulted in the order given.
+        """
+        for klass in type(self).__mro__:
+            d = klass.__dict__
+            for attr in table_attrs:
+                table = d.get(attr)
+                if table is not None and name in table:
+                    return table[name]
+        return None
+
+    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
+        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+
+    def lookup_tp_method(self, name: str) -> Method | None:
+        return self._lookup_tp_table(name, "tp_methods")
+
     # fields to leave unmodified in apply()
     _nonvar_fields = {
         "value",
@@ -341,7 +686,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "mutation_type",
         "parents_tracker",
         "user_code_variable_name",
+        "dict_vt",
     }
+
+    # Lazily-created view of the instance __dict__, backed by the side effects table
+    dict_vt: variables.DunderDictVariable | None = None
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         """Shallow copy with some (optional) changes"""
@@ -363,33 +712,50 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         When side_effects is provided, also walks attributes stored in
         store_attr_mutations (e.g. dataclass fields set during tracing
         that aren't in the VT's __dict__).
+
+        Implemented with an explicit worklist rather than recursion so that
+        deeply chained structures (e.g. the ~N-node buffer built by
+        itertools.tee over a long iterable) do not overflow the Python stack.
+        Children are pushed in reverse so they are popped in their original
+        order, matching the pre-order DFS the previous recursive version
+        produced (callers rely on the visitation order, e.g. for graph output
+        ordering).
         """
         if cache is None:
             cache = {}
 
-        idx = id(value)
-        if idx in cache:
-            return
-        # save `value` to keep it alive and ensure id() isn't reused
-        cache[idx] = value
+        worklist = [value]
+        while worklist:
+            cur = worklist.pop()
+            idx = id(cur)
+            if idx in cache:
+                continue
+            # save `cur` to keep it alive and ensure id() isn't reused
+            cache[idx] = cur
 
-        if isinstance(value, VariableTracker):
-            value = value.unwrap()
-            fn(value)
-            value = value.unwrap()  # calling fn() might have realized it
-            nonvars = value._nonvar_fields
-            for key, subvalue in value.__dict__.items():
-                if key not in nonvars:
-                    cls.visit(fn, subvalue, cache, side_effects)
-            if side_effects is not None and value in side_effects.store_attr_mutations:
-                for attr_vt in side_effects.store_attr_mutations[value].values():
-                    cls.visit(fn, attr_vt, cache, side_effects)
-        elif istype(value, (list, tuple)):
-            for subvalue in value:
-                cls.visit(fn, subvalue, cache, side_effects)
-        elif istype(value, (dict, collections.OrderedDict)):
-            for subvalue in value.values():
-                cls.visit(fn, subvalue, cache, side_effects)
+            children: list[Any]
+            if isinstance(cur, VariableTracker):
+                cur = cur.unwrap()
+                fn(cur)
+                cur = cur.unwrap()  # calling fn() might have realized it
+                nonvars = cur._nonvar_fields
+                children = [
+                    subvalue
+                    for key, subvalue in cur.__dict__.items()
+                    if key not in nonvars
+                ]
+                if (
+                    side_effects is not None
+                    and cur in side_effects.store_attr_mutations
+                ):
+                    children.extend(side_effects.store_attr_mutations[cur].values())
+            elif istype(cur, (list, tuple)):
+                children = list(cur)
+            elif istype(cur, (dict, collections.OrderedDict)):
+                children = list(cur.values())
+            else:
+                continue
+            worklist.extend(reversed(children))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -431,6 +797,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             raise NotImplementedError(f"{self} has no type") from None
 
     def python_type_name(self) -> str:
+        """
+        Return the type name for the Python type this VariableTracker represents.
+
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
+        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+
+        Note: There are no external callers outside torch._dynamo that rely on this.
+        Internal uses should prefer this over hardcoded type name strings.
+        """
         try:
             return self.python_type().__name__
         except NotImplementedError:
@@ -588,17 +963,84 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
-    def var_getattr(self, tx: InstructionTranslatorBase, name: str) -> VariableTracker:
-        """getattr(self, name) returning a new variable"""
+    def lookup_instance_dict(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Look up *name* in the instance __dict__ (tp_dictoffset equivalent).
+
+        Returns a VT if the attribute exists in the instance dict, None if
+        the attribute is absent or the VT has no instance dict at all.
+        UDOV overrides to check self.value.__dict__ + side effects.
+        """
+        return None
+
+    def call_getattr_fallback(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Call __getattr__ fallback (step 6 of GenericGetAttr).
+
+        Returns a VT if the type defines __getattr__ and it succeeds,
+        None otherwise.  The base returns None (most types have no
+        __getattr__).  UDOV overrides to walk the MRO for __getattr__.
+        """
+        return None
+
+    def getattro_impl(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """Default attribute access via object_generic_getattr.
+
+        Tries the MRO-based descriptor protocol first (PyObject_GenericGetAttr),
+        falls back to const_getattr for VTs without a known python_type or
+        when the descriptor protocol hits an unhandled type.
+        """
+        # tp_getset/tp_members are data descriptors: resolve ahead of the
+        # object-protocol walk. A getter returning None declines.
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None:
+            result = getset.getter(self, tx)
+            if result is not None:
+                return result
+
+        # object.__class__: one shared getset on `object` rather than per-VT.
+        if name == "__class__":
+            return VariableTracker.build(tx, self.python_type())
+
+        try:
+            py_type = self.python_type()
+        except NotImplementedError:
+            py_type = None
+
+        if py_type is not None:
+            from .object_protocol import (
+                _UnhandledDescriptorError,
+                object_generic_getattr,
+            )
+
+            try:
+                return object_generic_getattr(tx, self, name)
+            except _UnhandledDescriptorError:
+                pass
+
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
         source = self.source and AttrSource(self.source, name)
         if source and not self.is_python_constant():
-            # The second condition is to avoid guards on const getattr objects
-            # like __code__.co_argcount
+            # Skip guards on const getattr objects like __code__.co_argcount
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
+
+    def get_dict_vt(
+        self, tx: InstructionTranslatorBase
+    ) -> variables.DunderDictVariable:
+        # Callers gate this on the object actually having an instance __dict__
+        # (e.g. the per-VT `__dict__` attribute branches). If a VT without a
+        # real instance dict reaches here, DunderDictVariable's example-value
+        # lookup graph-breaks rather than fabricating a bogus dict.
+        if self.dict_vt is None:
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+        return self.dict_vt
 
     def is_proxy(self) -> bool:
         try:
@@ -643,12 +1085,30 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct_pycode(self, codegen: PyCodegen) -> str:
         raise NotImplementedError(f"reconstruct_pycode not implemented for {self}")
 
-    def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: InstructionTranslatorBase
+    ) -> list[VariableTracker]:
         raise NotImplementedError
 
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
+        """Dynamo's hasattr(): try getattro_impl, catch AttributeError.
+
+        Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
+        call tp_getattro, suppress AttributeError via PyErr_Clear, return
+        True/False.
+        https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
+        """
+        try:
+            self.getattro_impl(tx, name)
+            return variables.ConstantVariable.create(True)
+        except ObservedAttributeError:
+            tx.exn_vt_stack.clear_current_exception()
+            return variables.ConstantVariable.create(False)
+        except (NotImplementedError, Unsupported):
+            pass
+
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
@@ -674,9 +1134,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def tp_init_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """tp_init slot (__init__). VTs override to initialize instances."""
+        unimplemented(
+            gb_type="missing tp_init",
+            context=f"tp_init_impl not implemented for {self.python_type_name()}",
+            explanation=f"Dynamo does not know how to trace __init__ on `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
     def call_function(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -702,7 +1176,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def sq_length(self, tx: Any) -> VariableTracker:
+    def sq_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -710,7 +1184,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
-    def mp_length(self, tx: Any) -> VariableTracker:
+    def mp_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when mp_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -749,7 +1223,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[],
         )
 
-    def sq_contains(self, tx: Any, item: VariableTracker) -> VariableTracker:
+    def sq_contains(
+        self, tx: InstructionTranslatorBase, item: VariableTracker
+    ) -> VariableTracker:
         """Called when sq_contains is not implemented."""
         unimplemented(
             gb_type="missing sq_contains",
@@ -812,11 +1288,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_method(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Declarative named-method dispatch (tp_methods). A handler returning
+        # None declines the call and falls through to the object-protocol
+        # (tp_slot) dispatch below, mirroring the old super().call_method path.
+        method = self.lookup_tp_method(name)
+        if method is not None:
+            result = method.invoke(self, tx, name, args, kwargs)
+            if result is not None:
+                return result
+
         if name == "__getitem__":
             if len(args) == 1 and not kwargs:
                 from .object_protocol import vt_getitem
@@ -864,6 +1349,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.tp_iter_impl(tx)
         elif name == "__next__" and not args and not kwargs:
             return self.tp_iternext_impl(tx)
+        elif name == "__init__":
+            return self.tp_init_impl(tx, args, kwargs)
         elif name == "__call__":
             return self.call_function(tx, args, kwargs)
         elif name == "__contains__" and not kwargs:
@@ -878,7 +1365,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and args[0].is_python_constant()
             and not kwargs
         ):
-            return self.var_getattr(tx, args[0].as_python_constant())
+            # TODO(tp_getattro): In CPython, obj.__getattr__("foo") calls only
+            # the type's __getattr__ method, not the full attribute resolution.
+            # Currently we dispatch through getattro_impl which does the full
+            # GenericGetAttr + __getattr__ fallback. Fix in a follow-up to
+            # call __getattr__ directly for UDOV types.
+            return self.getattro_impl(tx, args[0].as_python_constant())
+        elif (
+            name == "__getattribute__"
+            and len(args) == 1
+            and args[0].is_python_constant()
+            and not kwargs
+        ):
+            # TODO(tp_getattro): In CPython, obj.__getattribute__("foo")
+            # calls GenericGetAttr WITHOUT the __getattr__ fallback.
+            # Currently we route through getattro_impl which, for UDOV,
+            # includes __getattr__. Fix in a follow-up to have UDOV
+            # override this to call generic_getattr (the inner helper)
+            # directly, skipping __getattr__.
+            return self.getattro_impl(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
         elif name == "__int__" and not args and not kwargs:
@@ -891,7 +1396,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
             if hasattr(self, "tp_descr_get_impl"):
                 obj = args[0]
-                owner = args[1] if len(args) > 1 else obj.var_getattr(tx, "__class__")
+                owner = args[1] if len(args) > 1 else obj.getattro_impl(tx, "__class__")
                 return self.tp_descr_get_impl(tx, obj, owner)
         elif name == "__or__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
@@ -916,6 +1421,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             if name == "__rmul__":
                 return slot_wrapper_mul(tx, self, args[0], reverse=True)
             return slot_wrapper_imul(tx, self, args[0])
+        elif name in ("__matmul__", "__rmatmul__", "__imatmul__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+
+            if name == "__matmul__":
+                return self.nb_matrix_multiply_impl(tx, args[0])
+            if name == "__rmatmul__":
+                return self.nb_matrix_multiply_impl(tx, args[0], reverse=True)
+            return self.nb_inplace_matrix_multiply_impl(tx, args[0])
         elif name == "__lshift__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -983,15 +1501,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
-        elif name == "__add__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_add_impl(tx, args[0])
-        elif name == "__radd__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_add_impl(tx, args[0], reverse=True)
-        elif name == "__iadd__":
-            return self.nb_inplace_add_impl(tx, args[0])
+        elif name in ("__add__", "__radd__", "__iadd__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+            from .object_protocol import slot_wrapper_add, slot_wrapper_iadd
+
+            if name == "__add__":
+                return slot_wrapper_add(tx, self, args[0])
+            if name == "__radd__":
+                return slot_wrapper_add(tx, self, args[0], reverse=True)
+            return slot_wrapper_iadd(tx, self, args[0])
         elif name == "__sub__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -1073,7 +1596,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_tree_map(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: list[VariableTracker],
@@ -1106,7 +1629,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_tree_map_branch(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: list[VariableTracker],
@@ -1123,7 +1646,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def _tree_map_fallback(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: list[VariableTracker],
@@ -1145,7 +1668,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_tree_map_with_path(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: list[VariableTracker],
@@ -1184,7 +1707,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def call_tree_map_with_path_branch(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: list[VariableTracker],
@@ -1199,7 +1722,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def _tree_map_with_path_fallback(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: list[VariableTracker],
@@ -1239,7 +1762,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def tp_iternext_impl(self, tx: Any) -> VariableTracker:
+    def tp_iternext_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
         Implements tp_iternext slot semantics.
         Subclasses override this to support next(). Reaching this base is a
@@ -1255,10 +1778,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
-    def next_variable(self, tx: Any) -> VariableTracker:
+    def next_variable(self, tx: InstructionTranslatorBase) -> VariableTracker:
         return self.tp_iternext_impl(tx)
 
-    def is_strict_mode(self, tx: Any) -> bool:
+    def is_strict_mode(self, tx: InstructionTranslatorBase) -> bool:
         return bool(tx.strict_checks_fn and tx.strict_checks_fn(self))
 
     def is_mutable(self) -> bool:
@@ -1271,7 +1794,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     @staticmethod
     def build(
-        tx: Any,
+        tx: InstructionTranslatorBase,
         value: Any,
         source: Source | None = None,
         realize: bool = False,
@@ -1321,7 +1844,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_index_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's PyNumber_Index / nb_index slot.
 
@@ -1340,7 +1863,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def repr_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's tp_repr slot.
 
@@ -1359,7 +1882,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def str_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Dynamo hook for VariableTrackers with dedicated str behavior.
         Subclasses override this for the per-type str result; generic_str()
@@ -1375,7 +1898,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_int_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's tp_as_number->nb_int slot.
 
@@ -1392,7 +1915,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_float_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's tp_as_number->nb_float slot.
 
@@ -1422,7 +1945,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_lshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1435,7 +1958,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_lshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_lshift slot. Default: returns NotImplemented."""
@@ -1443,7 +1966,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_rshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1456,7 +1979,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_rshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
@@ -1464,7 +1987,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_and_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1477,7 +2000,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_and_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_and slot. Default: returns NotImplemented."""
@@ -1485,7 +2008,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_xor_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1498,7 +2021,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_xor_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
@@ -1506,7 +2029,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_floor_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1519,7 +2042,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_floor_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_floor_divide slot. Default: returns NotImplemented."""
@@ -1527,7 +2050,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_true_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1540,7 +2063,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_true_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_true_divide slot. Default: returns NotImplemented."""
@@ -1548,7 +2071,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_remainder_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1561,7 +2084,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_remainder_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_remainder slot. Default: returns NotImplemented."""
@@ -1569,7 +2092,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_divmod_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1633,6 +2156,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
         return self._nb_slot_not_implemented("nb_inplace_multiply_impl", other)
 
+    def nb_matrix_multiply_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_matrix_multiply slot. Default: graph-breaks.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmatmul__`` instead of ``__matmul__``).
+        """
+        return self._nb_slot_not_implemented(
+            "nb_matrix_multiply_impl", other, reverse=reverse
+        )
+
+    def nb_inplace_matrix_multiply_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_matrix_multiply slot. Default: graph-breaks."""
+        return self._nb_slot_not_implemented("nb_inplace_matrix_multiply_impl", other)
+
     def sq_repeat_impl(
         self,
         tx: InstructionTranslatorBase,
@@ -1667,7 +2213,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_or_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1680,7 +2226,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_or_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
@@ -1688,7 +2234,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_negative_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's tp_as_number->nb_negative slot.
 
@@ -1705,7 +2251,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_positive_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's tp_as_number->nb_positive slot.
 
@@ -1722,7 +2268,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_add_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1736,7 +2282,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_add_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_add slot. Default: graph break."""
@@ -1745,7 +2291,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_subtract_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1758,7 +2304,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_subtract_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
@@ -1766,7 +2312,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_absolute_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's tp_as_number->nb_absolute slot.
 
@@ -1783,7 +2329,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_invert_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         """Mirrors CPython's tp_as_number->nb_invert slot.
 
@@ -1804,11 +2350,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Source | None = None,
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
+        dict_vt: variables.DunderDictVariable | None = None,
     ) -> None:
         super().__init__()
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
+        # Carried so clone() round-trips the cached __dict__ view.
+        self.dict_vt = dict_vt
 
         # NOTE sometimes mutation_type is set afterwards for implementation
         # convenience, we don't validate those cases at the moment.
@@ -1836,6 +2385,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     raise AssertionError(
                         "source must not be None for ValueMutationExisting/AttributeMutationExisting"
                     )
+
+    @property
+    def tp_type(self) -> PyTypeObject:
+        return _tp_type(maybe_get_python_type(self))
+
+    @property
+    def tp_as_number(self) -> PyNumberMethods:
+        return _tp_type(maybe_get_python_type(self)).tp_as_number
+
+    @property
+    def tp_as_sequence(self) -> PySequenceMethods:
+        return _tp_type(maybe_get_python_type(self)).tp_as_sequence
+
+    @property
+    def tp_as_mapping(self) -> PyMappingMethods:
+        return _tp_type(maybe_get_python_type(self)).tp_as_mapping
+
+    @property
+    def tp_iter(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_iter
+
+    @property
+    def tp_iternext(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_iternext
+
+    @property
+    def tp_str(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_str
+
+    @property
+    def tp_repr(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_repr
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
