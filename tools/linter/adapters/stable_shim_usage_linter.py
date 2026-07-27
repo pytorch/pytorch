@@ -52,6 +52,9 @@ def get_shim_functions(
         shim_files_to_check = [
             repo_root / "torch/csrc/stable/c/shim.h",
             repo_root / "torch/csrc/inductor/aoti_torch/c/shim.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/c/shim_cpu.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/c/shim_mps.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/c/shim_xpu.h",
             repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h",
             repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h",
             repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h",
