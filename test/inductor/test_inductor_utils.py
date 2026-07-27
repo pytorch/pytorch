@@ -83,7 +83,9 @@ class TestBench(TestCase):
         super().setUpClass()
         x = torch.rand(1024, 10).to(device_type).half()
         w = torch.rand(512, 10).to(device_type).half()
-        cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
+        cls._bench_fn = staticmethod(
+            functools.partial(torch.nn.functional.linear, x, w)
+        )
 
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
