@@ -5121,6 +5121,10 @@ class AlgorithmSelectorCache(PersistentCache):
     def _is_extern(choice: ChoiceCaller) -> bool:
         return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
 
+    # FlyDSL inputs can be views with nonzero offsets and non-contiguous strides.
+    # Reuse layout-preserving benchmark tensors without classifying FlyDSL as
+    # extern, since extern also changes process selection and enables
+    # ATen-specific handling.
     @staticmethod
     def _uses_layout_preserving_inputs(choice: ChoiceCaller) -> bool:
         from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
