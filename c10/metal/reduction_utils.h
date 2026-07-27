@@ -1,0 +1,499 @@
+#pragma once
+
+#include <c10/metal/utils.h>
+#include <metal_compute>
+
+namespace c10 {
+namespace metal {
+namespace detail {
+template <typename T>
+struct simd_type {
+  using t = T;
+};
+
+// Helper that allows one to run simd ops over bfl16 by upcasting them to fp32
+template <typename T>
+using simd_type_t = typename simd_type<T>::t;
+
+template <>
+struct simd_type<bfloat> {
+  using t = float;
+};
+} // namespace detail
+
+template <typename T>
+inline ::metal::
+    enable_if_t<!::metal::is_same_v<T, long> && !c10::metal::is_complex_v<T>, T>
+    simd_sum(T val) {
+  return T(::metal::simd_sum(detail::simd_type_t<T>(val)));
+}
+
+inline float2 simd_sum(float2 val) {
+  return float2(::metal::simd_sum(val.x), ::metal::simd_sum(val.y));
+}
+
+template <typename T>
+inline ::metal::
+    enable_if_t<!::metal::is_same_v<T, long> && !c10::metal::is_complex_v<T>, T>
+    simd_prod(T val) {
+  return T(::metal::simd_product(detail::simd_type_t<T>(val)));
+}
+
+// Complex product reduction via shuffle, using c10::metal::mul for (a+bi)(c+di)
+// Uses simd_shuffle_and_fill_down with identity (1+0i) for inactive lanes.
+inline float2 simd_prod(float2 val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = c10::metal::mul(
+        val, ::metal::simd_shuffle_and_fill_down(val, float2(1, 0), i));
+  }
+  return val;
+}
+
+// Extend simd_broadcast to 64-bit integral types using int2 trick
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) == 8, bool> =
+        true>
+inline T simd_broadcast(T val, ushort lane_id) {
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), lane_id));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<!::metal::is_integral_v<T> || sizeof(T) != 8, bool> =
+        true>
+inline T simd_broadcast(T val, ushort lane_id) {
+  return ::metal::simd_broadcast(val, lane_id);
+}
+
+// Floating simd_min/max with nan propagation
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_max(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return T(::metal::simd_max(detail::simd_type_t<T>(val)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_min(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return T(::metal::simd_min(detail::simd_type_t<T>(val)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_max(T val) {
+  return ::metal::simd_max(val);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_min(T val) {
+  return ::metal::simd_min(val);
+}
+
+// Metal does not support SIMD reductions over 64-bit types, but it could be
+// implement using simd_shuffle_down, that yields result in log2(simdgroup_size)
+// iterations Use fill variant, as shuffle down returns garbage if inactive
+// thread is referenced (on M1/M2, works fine on M4) and broadcast result to all
+// threads in the end. Implementation heavily borrows from
+// https://github.com/ml-explore/mlx/blob/86389bf9707f46101af45d90510e8e97c8a90b93/mlx/backend/metal/kernels/reduction/ops.h#L16
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val += as_type<T>(
+        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
+  }
+  return simd_broadcast(val, 0);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val *= as_type<T>(
+        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
+  }
+  return simd_broadcast(val, 0);
+}
+
+// Fill value for shuffle_and_fill_down must be the op's identity (the fill
+// is contributed by lanes whose shuffle target is past simdgroup_size).
+//
+// NOTE: callers with fewer than simdgroup_size active lanes still risk
+// corruption -- an active lane reading from an in-range but inactive lane
+// gets undefined data (0 in practice on Apple Silicon), not the fill.
+// Round up the dispatched thread count to a multiple of simdgroup_size
+// and have padding threads load the op identity before calling this.
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_max(T val) {
+  const auto fill = as_type<int2>(::metal::numeric_limits<long>::lowest());
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::max(
+        val,
+        as_type<T>(
+            ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i)));
+  }
+  return simd_broadcast(val, 0);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_min(T val) {
+  const auto fill = as_type<int2>(::metal::numeric_limits<long>::max());
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::min(
+        val,
+        as_type<T>(
+            ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i)));
+  }
+  return simd_broadcast(val, 0);
+}
+
+// argmin/argmax helpers using simd_ballot
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
+  const auto rc = simd_min(val);
+  const auto vote = ::metal::simd_ballot(val == rc);
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
+  const auto rc = simd_min(val);
+  const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
+  const auto rc = simd_max(val);
+  const auto vote = ::metal::simd_ballot(val == rc);
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
+  const auto rc = simd_max(val);
+  const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
+}
+
+template <typename ARG_T, typename IDX_T>
+inline c10::metal::pair<ARG_T, IDX_T> simd_argmin(ARG_T val, IDX_T idx_val) {
+  auto rc = simd_argmin(val);
+  return {rc.first, simd_broadcast(idx_val, rc.second)};
+}
+
+template <typename ARG_T, typename IDX_T>
+inline c10::metal::pair<ARG_T, IDX_T> simd_argmax(ARG_T val, IDX_T idx_val) {
+  auto rc = simd_argmax(val);
+  return {rc.first, simd_broadcast(idx_val, rc.second)};
+}
+
+// Below algorithms are  written with hardcoded assumption that simdgroup is 32
+// and threadgroup_max is 1024, i.e. reduction can be done in two stages max
+template <typename T>
+opmath_t<T> threadgroup_sum(
+    threadgroup opmath_t<T>* data,
+    T val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_sum(static_cast<opmath_t<T>>(val));
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_sum(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename T>
+::metal::array<opmath_t<T>, 2> threadgroup_sum2(
+    threadgroup opmath_t<T>* data_a,
+    threadgroup opmath_t<T>* data_b,
+    T val_a,
+    T val_b,
+    unsigned idx,
+    unsigned size) {
+  auto rc_a = simd_sum(static_cast<opmath_t<T>>(val_a));
+  auto rc_b = simd_sum(static_cast<opmath_t<T>>(val_b));
+  if (idx % simdgroup_size == 0) {
+    data_a[idx / simdgroup_size] = rc_a;
+    data_b[idx / simdgroup_size] = rc_b;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1_a = simd_sum(data_a[idx]);
+      auto rc1_b = simd_sum(data_b[idx]);
+      if (idx == 0) {
+        data_a[0] = rc1_a;
+        data_b[0] = rc1_b;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return ::metal::array<opmath_t<T>, 2>{data_a[0], data_b[0]};
+}
+
+template <typename T>
+opmath_t<T> threadgroup_prod(
+    threadgroup opmath_t<T>* data,
+    T val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_prod(static_cast<opmath_t<T>>(val));
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_prod(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename T>
+T threadgroup_max(threadgroup T* data, T val, unsigned idx, unsigned size) {
+  auto rc = simd_max(val);
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_max(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename T>
+T threadgroup_min(threadgroup T* data, T val, unsigned idx, unsigned size) {
+  auto rc = simd_min(val);
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_min(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+// Each vec3type is tuple of mean, m2 and weight
+template <typename T>
+float3 welford_combine(T a, T b) {
+  float delta = b.x - a.x;
+  float new_weight = a.z + b.z;
+  auto w2_over_w = new_weight != 0 ? b.z / new_weight : 0.0;
+  return float3(
+      a.x + delta * w2_over_w,
+      a.y + b.y + delta * delta * a.z * w2_over_w,
+      new_weight);
+}
+
+template <typename T>
+float3 threadgroup_welford_combine(
+    threadgroup T* data,
+    unsigned idx,
+    unsigned size) {
+  unsigned stride = 1;
+  while (stride < size) {
+    stride <<= 1;
+  }
+  for (stride >>= 1; stride > 0; stride >>= 1) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < stride && idx + stride < size) {
+      data[idx] = welford_combine(data[idx], data[idx + stride]);
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename ARG_T, typename IDX_T>
+IDX_T threadgroup_argmax(
+    threadgroup ARG_T* arg_data,
+    threadgroup IDX_T* idx_data,
+    ARG_T val,
+    IDX_T idx_val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_argmax(val, idx_val);
+  if (size <= simdgroup_size) {
+    return rc.second;
+  }
+  if (idx % simdgroup_size == 0) {
+    arg_data[idx / simdgroup_size] = rc.first;
+    idx_data[idx / simdgroup_size] = rc.second;
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+    auto rc1 = simd_argmax(arg_data[idx], idx_data[idx]);
+    if (idx == 0) {
+      idx_data[0] = rc1.second;
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return idx_data[0];
+}
+
+template <typename ARG_T, typename IDX_T>
+IDX_T threadgroup_argmin(
+    threadgroup ARG_T* arg_data,
+    threadgroup IDX_T* idx_data,
+    ARG_T val,
+    IDX_T idx_val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_argmin(val, idx_val);
+  if (size <= simdgroup_size) {
+    return rc.second;
+  }
+  if (idx % simdgroup_size == 0) {
+    arg_data[idx / simdgroup_size] = rc.first;
+    idx_data[idx / simdgroup_size] = rc.second;
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+    auto rc1 = simd_argmin(arg_data[idx], idx_data[idx]);
+    if (idx == 0) {
+      idx_data[0] = rc1.second;
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return idx_data[0];
+}
+
+// Reduction op functors bundling identity, replace predicate, and the value
+// reduction helpers (combine / simd_reduce / threadgroup_reduce) used by both
+// value and arg reductions. NaN handling: for floats, isnan-propagating
+// max/min and a strict "replace" predicate that lets NaN beat any finite
+// value and lets any finite value beat -INF/+INF identity.
+//
+// Float identity is +/-INFINITY (not numeric_limits::lowest/max, i.e.
+// -/+FLT_MAX): max(-INF, x) = x for any finite x including -FLT_MAX, but
+// max(-FLT_MAX, -INFINITY) would incorrectly return -FLT_MAX.
+//
+// The isnan() calls below route through static_cast<float>() so the float
+// branch type-checks even when T is integral (Metal 3 lowers `if IF_CONSTEXPR`
+// to a runtime `if` and parses both arms). Both branches' bodies still get
+// dropped on Metal 4 where IF_CONSTEXPR is real `if constexpr`.
+template <typename T>
+struct MaxOp {
+  static inline constexpr T identity() {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      return T(-INFINITY);
+    } else {
+      return ::metal::numeric_limits<T>::lowest();
+    }
+  }
+
+  // Strict "should-replace" predicate: returns true iff cand strictly beats
+  // cur. NaN-propagating: NaN cand beats finite cur; finite cand never beats
+  // NaN cur.
+  static inline bool replace(T cand, T cur) {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      if (::metal::isnan(static_cast<float>(cur))) {
+        return false;
+      }
+      return ::metal::isnan(static_cast<float>(cand)) || cand > cur;
+    }
+    return cand > cur;
+  }
+
+  static inline T combine(T a, T b) {
+    return c10::metal::max(a, b);
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_max(val);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_max(shared, val, tid, tptg);
+  }
+};
+
+template <typename T>
+struct MinOp {
+  static inline constexpr T identity() {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      return T(INFINITY);
+    } else {
+      return ::metal::numeric_limits<T>::max();
+    }
+  }
+
+  static inline bool replace(T cand, T cur) {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      if (::metal::isnan(static_cast<float>(cur))) {
+        return false;
+      }
+      return ::metal::isnan(static_cast<float>(cand)) || cand < cur;
+    }
+    return cand < cur;
+  }
+
+  static inline T combine(T a, T b) {
+    return c10::metal::min(a, b);
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_min(val);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_min(shared, val, tid, tptg);
+  }
+};
+
+} // namespace metal
+} // namespace c10

@@ -1,0 +1,40 @@
+diff --git a/control/get_batched_crossover.cpp b/control/get_batched_crossover.cpp
+index 4ec57306..912f8608 100644
+--- a/control/get_batched_crossover.cpp
++++ b/control/get_batched_crossover.cpp
+@@ -119,7 +119,7 @@ void magma_get_spotrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_
+ void magma_get_zgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_t *recnb)
+ {
+     *nb    = 64;
+-    *recnb = 32;
++    *recnb = 16;
+     return;
+ }
+ 
+@@ -127,7 +127,7 @@ void magma_get_zgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_
+ void magma_get_cgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_t *recnb)
+ {
+     *nb    = 128;
+-    *recnb =  32;
++    *recnb =  16;
+     return;
+ }
+ 
+@@ -135,7 +135,7 @@ void magma_get_cgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_
+ void magma_get_dgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_t *recnb)
+ {
+     *nb    = 128;
+-    *recnb =  32;
++    *recnb =  16;
+     return;
+ }
+ 
+@@ -143,7 +143,7 @@ void magma_get_dgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_
+ void magma_get_sgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_t *recnb)
+ {
+     *nb    = 128;
+-    *recnb =  32;
++    *recnb =  16;
+     return;
+ }
+ 

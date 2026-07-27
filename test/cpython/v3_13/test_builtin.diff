@@ -1,0 +1,144 @@
+diff --git a/test/cpython/v3_13/test_builtin.py b/test/cpython/v3_13/test_builtin.py
+index 12a1c48732f..121a4289617 100644
+--- a/test/cpython/v3_13/test_builtin.py
++++ b/test/cpython/v3_13/test_builtin.py
+@@ -1,3 +1,24 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_builtin.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    skipIfTorchDynamo,
++    run_tests,
++)
++
++# ======= END DYNAMO PATCH =======
++
+ # Python test set -- built-in functions
+ 
+ import ast
+@@ -147,7 +168,7 @@ def filter_char(arg):
+ def map_char(arg):
+     return chr(ord(arg)+1)
+ 
+-class BuiltinTest(unittest.TestCase):
++class BuiltinTest(CPythonTestCase):
+     # Helper to check picklability
+     def check_iter_pickle(self, it, seq, proto):
+         itorg = it
+@@ -1032,6 +1053,7 @@ class BuiltinTest(unittest.TestCase):
+             f2 = filter(filter_char, "abcdeabcde")
+             self.check_iter_pickle(f1, list(f2), proto)
+ 
++    @skipIfTorchDynamo("gc.collect")
+     @support.requires_resource('cpu')
+     def test_filter_dealloc(self):
+         # Tests recursive deallocation of nested filter objects using the
+@@ -1708,8 +1730,6 @@ class BuiltinTest(unittest.TestCase):
+     # float -> integer rounding (floor, ceil, rint, round) for
+     # values in the range [2**52, 2**53).  See:
+     #
+-    #
+     # We skip this test on Linux/alpha if it would fail.
+     linux_alpha = (platform.system().startswith('Linux') and
+                    platform.machine().startswith('alpha'))
+@@ -1948,7 +1968,6 @@ class BuiltinTest(unittest.TestCase):
+         self.assertEqual(next(z), 1)
+ 
+     def test_zip_strict_error_handling(self):
+-
+         class Error(Exception):
+             pass
+ 
+@@ -1981,7 +2000,6 @@ class BuiltinTest(unittest.TestCase):
+         self.assertEqual(l8, [(2, "A"), (1, "B")])
+ 
+     def test_zip_strict_error_handling_stopiteration(self):
+-
+         class Iter:
+             def __init__(self, size):
+                 self.size = size
+@@ -2199,7 +2217,7 @@ class BuiltinTest(unittest.TestCase):
+                     type(singleton).prop
+ 
+ 
+-class TestBreakpoint(unittest.TestCase):
++class TestBreakpoint(CPythonTestCase):
+     def setUp(self):
+         # These tests require a clean slate environment.  For example, if the
+         # test suite is run with $PYTHONBREAKPOINT set to something else, it
+@@ -2207,6 +2225,7 @@ class TestBreakpoint(unittest.TestCase):
+         # Cleaning the slate here means you can't use breakpoint() to debug
+         # these tests, but I think that's okay.  Just use pdb.set_trace() if
+         # you must.
++        super().setUp()
+         self.resources = ExitStack()
+         self.addCleanup(self.resources.close)
+         self.env = self.resources.enter_context(EnvironmentVarGuard())
+@@ -2310,7 +2329,7 @@ class TestBreakpoint(unittest.TestCase):
+ 
+ 
+ @unittest.skipUnless(pty, "the pty and signal modules must be available")
+-class PtyTests(unittest.TestCase):
++class PtyTests(CPythonTestCase):
+     """Tests that use a pseudo terminal to guarantee stdin and stdout are
+     terminals in the test environment"""
+ 
+@@ -2489,7 +2508,7 @@ class PtyTests(unittest.TestCase):
+         )
+         self.assertSequenceEqual(lines, expected)
+ 
+-class TestSorted(unittest.TestCase):
++class TestSorted(CPythonTestCase):
+ 
+     def test_basic(self):
+         data = list(range(100))
+@@ -2532,7 +2551,7 @@ class TestSorted(unittest.TestCase):
+         self.assertRaises(TypeError, sorted, data, None, lambda x,y: 0)
+ 
+ 
+-class ShutdownTest(unittest.TestCase):
++class ShutdownTest(CPythonTestCase):
+ 
+     def test_cleanup(self):
+         # Issue #19255: builtins are still available at shutdown
+@@ -2567,7 +2586,7 @@ class ShutdownTest(unittest.TestCase):
+ 
+ 
+ @cpython_only
+-class ImmortalTests(unittest.TestCase):
++class ImmortalTests(CPythonTestCase):
+ 
+     if sys.maxsize < (1 << 32):
+         IMMORTAL_REFCOUNT = (1 << 30) - 1
+@@ -2595,7 +2614,7 @@ class ImmortalTests(unittest.TestCase):
+             self.assert_immortal(immortal)
+ 
+ 
+-class TestType(unittest.TestCase):
++class TestType(CPythonTestCase):
+     def test_new_type(self):
+         A = type('A', (), {})
+         self.assertEqual(A.__name__, 'A')
+@@ -2772,10 +2791,5 @@ class TestType(unittest.TestCase):
+         self.assertEqual(list(C.__dict__.items())[:2], [('b', 2), ('a', 1)])
+ 
+ 
+-def load_tests(loader, tests, pattern):
+-    from doctest import DocTestSuite
+-    tests.addTest(DocTestSuite(builtins))
+-    return tests
+-
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
