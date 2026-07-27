@@ -69,6 +69,9 @@ class TestCuTeDSLReductionWiring(TestCase):
             self._fired_count(lambda: torch.linalg.vector_norm(x, dim=-1)), 1
         )
         self.assertEqual(self._fired_count(lambda: torch.count_nonzero(x, dim=-1)), 1)
+        # Group D: two float-output reductions.
+        self.assertEqual(self._fired_count(lambda: torch.var_mean(x, dim=-1)), 1)
+        self.assertEqual(self._fired_count(lambda: torch.aminmax(x, dim=-1)), 1)
 
     def test_unsupported_dtype_falls_back(self):
         # Integer input is outside the supported set -> must NOT hit our kernel.
