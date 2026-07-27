@@ -464,28 +464,31 @@ class FlexGemmGroupedMainOutputTransform:
         return ("B",) if self.chunked else ()
 
     def validate_quack(self, device_capacity: int) -> None:
-        device_capacity = 10 if device_capacity == 11 else device_capacity
         if device_capacity == 12:
             raise NotImplementedError(
                 "FlexGEMM grouped main outputs are not yet supported on SM120"
             )
-        if self.group == 2:
-            return
-        if self.group == 4 and not self.chunked and device_capacity == 10:
+        if device_capacity not in (10, 11):
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs are currently validated only on "
+                "SM100 and SM110"
+            )
+        if self.group == 2 or (self.group == 4 and not self.chunked):
             return
         raise NotImplementedError(
             "FlexGEMM grouped main-output stores support group 2, plus "
-            "interleaved group 4 on SM100"
+            "interleaved group 4 on SM100 and SM110"
         )
 
 
 def grouped_main_output_config_supported(config: Any, n: Any) -> bool:
-    """Return whether a config satisfies the grouped-N store ownership contract.
+    """Return whether a config has validated grouped-N store ownership.
 
-    Grouped stores have no fallback for partial N tiles or multiple CTAs owning
-    one contracted output tile. Keep one CTA along N, require its tile to fit in
-    physical N, and admit only the M-cluster families whose row ownership has
-    been validated: a single M CTA or the wide-M two-CTA layout.
+    Keep one CTA per cluster along N, require the physical N tile not to exceed
+    the problem, and admit only M-cluster families whose row ownership has been
+    validated: a single M CTA or the wide-M two-CTA layout. Multiple N tiles and
+    partial final tiles are supported by the ordinary tile scheduler and store
+    predicates.
     """
     supported_m_cluster = config.cluster_m == 1 or (
         config.tile_m == 256 and config.cluster_m == 2
