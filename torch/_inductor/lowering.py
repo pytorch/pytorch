@@ -12,7 +12,7 @@ import sys
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
+from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -1555,6 +1555,38 @@ def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
     return sym_size, sym_storage
 
 
+def _compute_slice_index(index, size, default=None):
+    if index is None:
+        return default
+
+    guard = V.graph.sizevars.guard_or_false
+    index = sympy.expand(index)
+    size = sympy.expand(size)
+    if guard(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
+        return index
+    elif guard(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
+        return index + size
+    elif guard(sympy.Gt(index, size)):
+        return size
+    elif guard(sympy.Lt(index, -size)):
+        return 0
+    elif guard(sympy.Ge(index, 0)):
+        # If index >= 0, the resolved index is at most min(index, size).
+        return Min(index, size)
+    elif guard(sympy.Lt(index, 0)):
+        # If index < 0, wrap and clamp: the resolved index is at least 0.
+        return Max(index + size, 0)
+    return None
+
+
+def _clamp_slice_end_to_start(end, start):
+    if V.graph.sizevars.statically_known_geq(end, start):
+        return end
+    if V.graph.sizevars.statically_known_leq(end, start):
+        return start
+    return Max(end, start)
+
+
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
@@ -1589,30 +1621,6 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     except TypeError:
         pass
 
-    # try to avoid dynamic (unbacked) slice
-    def compute_slice_index(index, size, default=None):
-        if index is None:
-            return default
-
-        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
-        index = sympy.expand(index)
-        size = sympy.expand(size)
-        if fn(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
-            return index
-        elif fn(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
-            return index + size
-        elif fn(sympy.Gt(index, size)):
-            return size
-        elif fn(sympy.Lt(index, -size)):
-            return 0
-        elif fn(sympy.Ge(index, 0)):
-            # If index >= 0, the resolved index is at most min(index, size).
-            return Min(index, size)
-        elif fn(sympy.Lt(index, 0)):
-            # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return Max(index + size, 0)
-        return None
-
     start_index, end_index = None, None
     # ambiguous_slice=False means we know what semantics this slice call follows,
     # and don't need to generate an extern kernel to represent the output size.
@@ -1620,7 +1628,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     # (meant to follow standard indexing semantics: 0 <= index < size)
     ambiguous_slice = clamp
     if ambiguous_slice:
-        start_index = compute_slice_index(start, size, 0)
+        start_index = _compute_slice_index(start, size, 0)
         # Special case: if end is maxsize (unbounded), use size directly
         # This matches the logic in fake_impls.py
         if end is not None and V.graph.sizevars.statically_known_equals(
@@ -1628,7 +1636,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         ):
             end_index = size
         else:
-            end_index = compute_slice_index(end, size, size)
+            end_index = _compute_slice_index(end, size, size)
         if start_index is not None and end_index is not None:
             start, end = start_index, end_index
             ambiguous_slice = False
@@ -1661,18 +1669,25 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     if x.maybe_get_layout() is None:
         # realize tensor before accessing layout
         x.realize()
+    stride = x.maybe_get_stride()
 
     if start_index is not None:
         # we shouldn't have allocated storage offset symbol if start index was determinable
         if sym_storage is not None:
             raise AssertionError("expected: sym_storage is None")
-        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
+        if stride is None:
+            return TensorBox(
+                ir.SliceView.create_with_size(x.data, dim, start_index, sym_size, step)
+            )
+        new_storage_offset = x.get_layout().offset + start_index * stride[dim]
     else:
+        if stride is None:
+            raise AssertionError("expected: stride is not None")
         b_storage = ir.DynamicSelectStorageOffset(
             sym_storage,
             start,
             x.get_layout().offset,
-            x.get_stride()[dim],
+            stride[dim],
             x.get_size()[dim],
             clamp=True,
         )
@@ -1681,7 +1696,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         new_storage_offset = sym_storage
 
     new_sizes = list(x.get_size())
-    new_strides = list(x.get_stride())
+    new_strides = list(stride)
     new_sizes[dim] = sym_size
     new_strides[dim] *= step
     return as_strided(
@@ -2794,7 +2809,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             return False
 
         for meta in pytree.tree_leaves(inp_out_node.meta["val"]):
-            if not isinstance(meta, torch._subclasses.FakeTensor):
+            if not torch._subclasses.fake_tensor.is_fake_tensor(meta):
                 continue
 
             if is_output:
@@ -3633,7 +3648,7 @@ make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
 # 1) Easy
-make_fallback(aten.uniform, warn=False)
+make_fallback(aten.uniform, override_decomp=True)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward, require_contiguous)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
@@ -3782,9 +3797,6 @@ make_fallback(aten.masked_scatter_backward)
 # Complex number support
 make_fallback(aten.view_as_complex, require_contiguous)
 make_fallback(aten.angle)  # needs complex
-
-# Needs efficentzerotensor
-make_fallback(aten._efficientzerotensor)
 
 # Needs Sparse
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -4058,16 +4070,38 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
+    """Lower slice_scatter with exact source shape checks."""
     src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
-    # pyrefly: ignore [bad-argument-type]
-    start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
+    if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+        start_index = _compute_slice_index(start, dim_size, 0)
+        if end is not None and V.graph.sizevars.statically_known_equals(
+            end, sys.maxsize
+        ):
+            end_index = dim_size
+        else:
+            end_index = _compute_slice_index(end, dim_size, dim_size)
+
+        if start_index is None or end_index is None:
+            return fallback_handler(aten.slice_scatter.default)(
+                x, src, dim, start, end, step
+            )
+
+        start = start_index
+        end = _clamp_slice_end_to_start(end_index, start)
+    else:
+        # pyrefly: ignore [bad-argument-type]
+        start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
+    if len(src.get_size()) != len(src_size):
+        raise AssertionError("expected src and slice to have the same rank")
+    for actual, expected in zip(src.get_size(), src_size):
+        V.graph.sizevars.check_equals(actual, expected)
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -4145,12 +4179,20 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     ranges: list[sympy.Expr] = []
 
+    _truncate_fp = dtype in (torch.bfloat16, torch.float16)
+
     if isinstance(data, sympy.Basic):
 
         def inner_fn(index):
-            return ops.index_expr(data, dtype)
+            result = ops.index_expr(data, dtype)
+            if _truncate_fp:
+                result = ops.to_dtype(result, dtype, use_compute_types=False)
+                result = ops.to_dtype(result, dtype)
+            return result
 
     elif isinstance(data, (float, int)):
+        if _truncate_fp and isinstance(data, float):
+            data = torch.tensor(data, dtype=dtype).item()
 
         def inner_fn(index):
             return ops.constant(data, dtype)
@@ -4492,6 +4534,17 @@ def full(size, fill_value, **kwargs):
     if kwargs.get("dtype") is None:
         raise AssertionError("dtype should be handled by decomposition")
     return tensor_constructor(fill_value)(size, **kwargs)
+
+
+@register_lowering(aten._efficientzerotensor, type_promotion_kind=None)
+def _efficientzerotensor(
+    size, *, dtype=None, layout=None, device=None, pin_memory=False
+):
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    dtype = torch.get_default_dtype() if dtype is None else decode_dtype(dtype)
+    with torch.utils._python_dispatch._disable_current_modes():
+        scalar = torch.zeros((), dtype=dtype, device=decode_device(device))
+    return expand(V.graph.add_tensor_constant(scalar), size)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
@@ -5886,6 +5939,11 @@ fallback_max_pool2d_with_indices_backward = fallback_handler(
 def max_pool2d_with_indices_backward(
     grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
 ):
+    if x.get_device().type == "xpu":
+        return fallback_max_pool2d_with_indices_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
+
     if padding == 0:
         padding = [0, 0]
     if dilation == 1:
@@ -7594,6 +7652,40 @@ def _div_rn(a, b):
     return ops.div_rn(a, b)
 
 
+def _floor_div_floating(a, b):
+    # Either operand may be a python scalar (e.g. torch.floor_divide(scalar,
+    # tensor)); constant_like needs a tensor for dtype/device/size, so seed the
+    # constants from whichever operand is a tensor.
+    ref = a if isinstance(a, (TensorBox, IRNode)) else b
+    nan = constant_like(float("nan"))(ref)
+    neg_one = constant_like(-1.0)(ref)
+    zero = constant_like(0.0)(ref)
+
+    def fn(a, b, nan, neg_one, zero):
+        quotient = ops.div_rn(a, b)
+        result = ops.floor(quotient)
+        a_is_inf = ops.isinf(a)
+        a_is_finite = ops.logical_and(
+            ops.logical_not(a_is_inf), ops.logical_not(ops.isnan(a))
+        )
+        # Eager floor division uses a fmod-based implementation. For +/-inf
+        # divided by a nonzero divisor, fmod produces NaN. Keep divisor == 0
+        # unchanged because eager returns a / b directly.
+        a_inf_nonzero_b = ops.logical_and(a_is_inf, ops.ne(b, zero))
+
+        # For finite nonzero a divided by +/-inf, floor(a / b) can produce
+        # signed zero. Eager applies Python-style floor-division sign correction,
+        # so negative zero direction results become -1.
+        finite_nonzero_a_inf_b = ops.logical_and(
+            ops.logical_and(a_is_finite, ops.ne(a, zero)),
+            ops.logical_and(ops.isinf(b), ops.ne(ops.lt(a, zero), ops.lt(b, zero))),
+        )
+        result = ops.where(finite_nonzero_a_inf_b, neg_one, result)
+        return ops.where(a_inf_nonzero_b, nan, result)
+
+    return make_pointwise(fn)(a, b, nan, neg_one, zero)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -7610,7 +7702,7 @@ def div_mode(a, b, rounding_mode=None):
         # Triton's default division uses an approximate reciprocal, which can
         # produce a result slightly below the true quotient and cause floor()
         # to round down by one.
-        return floordiv(a, b) if both_integer else floor(_div_rn(a, b))
+        return floordiv(a, b) if both_integer else _floor_div_floating(a, b)
     if rounding_mode == "trunc":
         if both_boolean:
             raise AssertionError(
@@ -8436,6 +8528,11 @@ maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
+register_op_dtype_propagation_rules(
+    "fmaximum",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    override_return_dtype=None,
+)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
@@ -8674,11 +8771,34 @@ def sym_constrain_range(a, min=None, max=None):
     return None
 
 
+def _record_symbolic_input_source(
+    tensor: Any,
+    dim: int,
+    expr: sympy.Expr,
+    kind: Literal["size", "stride"],
+) -> None:
+    if not isinstance(expr, sympy.Symbol) or not isinstance(tensor, TensorBox):
+        return
+
+    if not isinstance(tensor.data, ir.StorageBox) or not isinstance(
+        tensor.data.data, ir.InputBuffer
+    ):
+        return
+
+    name = tensor.get_name()
+    if name not in V.graph.graph_inputs:
+        return
+
+    V.graph.symbolic_input_sources.setdefault(expr, (name, kind, int(dim)))
+
+
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
     if isinstance(val, torch.SymInt):
-        return val.node.expr
+        expr = val.node.expr
+        _record_symbolic_input_source(a, dim, expr, "size")
+        return expr
     else:
         return int(val)
 
@@ -8687,7 +8807,9 @@ def sym_size(a, dim):
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
     if isinstance(val, torch.SymInt):
-        return val.node.expr
+        expr = val.node.expr
+        _record_symbolic_input_source(a, dim, expr, "stride")
+        return expr
     else:
         return int(val)
 
@@ -8888,7 +9010,22 @@ def cond(
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    # The branches are reordered to [false_fn, true_fn]
+    # because during codegen the pred is converted to an integer with True -> 1 and False -> 0.
+    # When iterating over the branches the false_fn is associated index 0.
+    result = ir.Switch.create(pred, [false_fn, true_fn], operands, is_cond=True)
+    return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
+
+
+@register_lowering(torch.ops.higher_order.switch, type_promotion_kind=None)
+def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
+    # TODO: cudagraph support for torch.switch is not yet implemented; always disable.
+    msg = "control flow operator: torch.switch."
+    if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+        msg = f"{msg} Found from : \n {stack_trace}"
+    V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.Switch.create(index, branches, operands)
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 

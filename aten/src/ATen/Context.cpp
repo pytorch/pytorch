@@ -370,6 +370,14 @@ void Context::setAllowTF32CuBLAS(bool b) {
   setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, b ? Float32Precision::TF32 : Float32Precision::IEEE);
 }
 
+bool Context::preferCublasltGroupedGemm() const {
+  return prefer_cublaslt_grouped_gemm;
+}
+
+void Context::setPreferCublasltGroupedGemm(bool b) {
+  prefer_cublaslt_grouped_gemm = b;
+}
+
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
   bool invalid = float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32 &&
       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST;
