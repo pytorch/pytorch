@@ -48,6 +48,17 @@ def normalize_shape(shape: Any) -> Any:
     return tuple(shape) if isinstance(shape, (list, tuple, torch.Size)) else shape
 
 
+def specialize_backed_structural_int(value: Any) -> int | None:
+    """Return a guarded integer for a backed kernel-structural value."""
+    if isinstance(value, torch.fx.Node):
+        value = value.meta.get("val")
+    if isinstance(value, torch.SymInt):
+        if not has_guarding_hint(value):
+            return None
+        value = guard_int(value)
+    return value if isinstance(value, int) else None
+
+
 def _specialize_grouped_reshape_group(
     shape: tuple[Any, ...], source_shape: tuple[Any, ...]
 ) -> tuple[Any, ...]:
@@ -487,7 +498,6 @@ def lower_grouped_n_select(
         or len(node.args) < 3
         or not isinstance(node.args[0], torch.fx.Node)
         or not isinstance(node.args[1], int)
-        or not isinstance(node.args[2], int)
     ):
         return None
     source_node = node.args[0]
@@ -495,15 +505,19 @@ def lower_grouped_n_select(
     shape = tensor_meta_shape(source_node)
     if layout is None or layout.axis != 1 or shape is None:
         return None
-    if not -len(shape) <= node.args[1] < len(shape):
+    dim = node.args[1]
+    index = specialize_backed_structural_int(node.args[2])
+    if index is None:
         return None
-    dim = node.args[1] % len(shape)
+    if not -len(shape) <= dim < len(shape):
+        return None
+    dim %= len(shape)
     is_group_dim = dim == len(shape) - 1 or (
         len(shape) == 3 and shape[1] == layout.group and dim == 1
     )
-    if not is_group_dim or not -layout.group <= node.args[2] < layout.group:
+    if not is_group_dim or not -layout.group <= index < layout.group:
         return None
-    index = node.args[2] % layout.group
+    index %= layout.group
     source = _cute_arg(source_node, env)
     return _generate_like(
         kernel,

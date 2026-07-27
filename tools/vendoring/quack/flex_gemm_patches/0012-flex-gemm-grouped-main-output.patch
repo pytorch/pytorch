@@ -11,10 +11,10 @@ index f6bbf7f..0fc8cc0 100644
 +        return
 +    if device_capacity[0] == 12:
 +        raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
-+    if group > 2 and device_capacity[0] not in (10, 11):
++    if device_capacity[0] not in (10, 11):
 +        raise NotImplementedError(
-+            "grouped_n_contract groups larger than 2 are currently validated "
-+            "only on SM100 and SM110"
++            "grouped_n_contract is currently validated only on "
++            "SM100 and SM110"
 +        )
 +
 +
@@ -50,7 +50,7 @@ index f6bbf7f..0fc8cc0 100644
 +                    result_dtype = main_result.element_type
 +                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
 +                tRS_rAuxOut.store(main_result)
-@@ -491,0 +508,85 @@ class GemmActSm120(GemmActMixin, GemmSm120):
+@@ -491,0 +508,51 @@ class GemmActSm120(GemmActMixin, GemmSm120):
 +def _grouped_n_contract_epi_tile(epi_tile, group):
 +    if isinstance(epi_tile[1], cute.Layout):
 +        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
@@ -86,41 +86,7 @@ index f6bbf7f..0fc8cc0 100644
 +        )
 +        return params
 +
-+    @cute.jit
-+    def epi_convert_aux_out(
-+        self, tRS_rAuxOut, sr_seed, tidx, tile_coord_mnkl, num_prev_subtiles, epi_idx
-+    ):
-+        result = GemmActMixin.epi_convert_aux_out(
-+            self,
-+            tRS_rAuxOut,
-+            sr_seed,
-+            tidx,
-+            tile_coord_mnkl,
-+            num_prev_subtiles,
-+            epi_idx,
-+        )
-+        if const_expr(
-+            self.grouped_n_contract_group == 2
-+            and self.arch in (90, 120)
-+            and self.aux_out_dtype.width == 16
-+        ):
-+            permute_gated_Cregs_b16(result)
-+        return result
-+
-+
-+class GemmGroupedNContractSm80(GemmGroupedNContractMixin, GemmSm80):
-+    pass
-+
-+
-+class GemmGroupedNContractSm90(GemmGroupedNContractMixin, GemmSm90):
-+    pass
-+
-+
 +class GemmGroupedNContractSm100(GemmGroupedNContractMixin, GemmSm100):
-+    pass
-+
-+
-+class GemmGroupedNContractSm120(GemmGroupedNContractMixin, GemmSm120):
 +    pass
 +
 +
@@ -138,13 +104,10 @@ index f6bbf7f..0fc8cc0 100644
 +
 @@ -664,0 +766 @@ def _compile_gemm_act(
 +    main_output_transform_group,
-@@ -688,0 +791,7 @@ def _compile_gemm_act(
+@@ -688,0 +791,4 @@ def _compile_gemm_act(
 +        "grouped_n_contract": {
-+            8: GemmGroupedNContractSm80,
-+            9: GemmGroupedNContractSm90,
 +            10: GemmGroupedNContractSm100,
 +            11: GemmGroupedNContractSm100,
-+            12: GemmGroupedNContractSm120,
 +        },
 @@ -690,0 +800,2 @@ def _compile_gemm_act(
 +    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group == 4:
