@@ -554,7 +554,7 @@ __host__ __device__
     abort();                     \
   }
 #else
-#if defined(USE_ROCM) && (defined(__HIP__) || defined(__CUDACC__))
+#if defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
 template <unsigned N, unsigned F, unsigned M>
 __device__ __attribute__((flatten)) void c10_rocm_assert_literal(
     const char (&prefix)[N],
