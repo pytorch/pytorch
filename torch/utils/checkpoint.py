@@ -1702,6 +1702,14 @@ def _checkpoint_without_reentrant_generator(
         yield
         return
 
+    if (
+        isinstance(forward_context, _CachingTorchDispatchMode)
+        and torch._C._autograd._top_saved_tensors_default_hooks(False) is not None
+    ):
+        torch._C._log_api_usage_once(
+            "torch.utils.checkpoint.sac_with_saved_tensors_hooks"
+        )
+
     new_frame.save_inputs(*args)
 
     forward_context_suppressed_exc = False
