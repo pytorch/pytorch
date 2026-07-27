@@ -16,9 +16,10 @@ from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.dependencies import MemoryDep, ReadWrites
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import _LoopMutationTracker, SchedulerNode
+from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -281,6 +282,23 @@ class ImplDetailTest(MockSchedulerTest):
 
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
+
+    def test_can_fuse_exception_rolls_back_loop_state(self):
+        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        original_body = node2._body
+        scheduler = object.__new__(Scheduler)
+
+        def fail_after_mutation(*args, **kwargs):
+            node2.apply_indexing_exprs({})
+            raise RuntimeError("fusion analysis failed")
+
+        scheduler._can_fuse_impl = fail_after_mutation
+        with self.assertRaisesRegex(RuntimeError, "fusion analysis failed"):
+            scheduler.can_fuse(node1, node2)
+
+        self.assertIs(node2._body, original_body)
+        self.assertIsNone(node2._loop_mutation_listener)
 
     def test_reorder_modular_indexing(self):
         """
@@ -813,7 +831,13 @@ class LoopOrderingTest(TestCase):
             return y.view(2, 16, 4, 8).transpose(1, 2).contiguous()
 
         x = torch.randn(2, 16, 32, device=self.device)
-        self.do_acc_test(f, x)
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            wraps=generate_inverse_formula,
+        ) as inverse:
+            self.do_acc_test(f, x)
+
+        self.assertEqual(inverse.call_count, 1)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     def test_reindex_block_scale_swizzle_with_epilogue(self):
@@ -2266,6 +2290,125 @@ class TestIndexInversion(TestCase):
         )
         self.assertIsNone(generate_inverse_formula(blockwise_expr, p, 15))
         self.assertIsNotNone(generate_inverse_formula(blockwise_expr, p, 100))
+
+    def test_flattened_read_inverse_is_cached(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler._flattened_read_inverse_cache = {}
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        args = (
+            2 * i1 + i0,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+            sympy.Integer(8),
+        )
+
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            wraps=generate_inverse_formula,
+        ) as inverse:
+            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+
+        self.assertEqual(inverse.call_count, 1)
+
+    def test_failed_flattened_read_inverse_is_not_cached(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler._flattened_read_inverse_cache = {}
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        args = (
+            2 * i1 + i0,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+            sympy.Integer(8),
+        )
+
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            side_effect=(None, sympy.S.Zero),
+        ) as inverse:
+            self.assertIsNone(scheduler._get_flattened_read_inverse(*args))
+            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+
+        self.assertEqual(inverse.call_count, 2)
+
+    def test_zero_numel_flattened_read_is_rejected(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler._flattened_read_inverse_cache = {}
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+
+        self.assertIsNone(
+            scheduler._get_flattened_read_inverse(
+                i0 + i1,
+                (i0, i1),
+                (sympy.Integer(2), sympy.S.Zero),
+                sympy.S.Zero,
+            )
+        )
+
+    def test_reindex_exception_restores_local_snapshot(self):
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        producer_write = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
+        consumer_read = MemoryDep(
+            "source",
+            2 * i1 + i0,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+        )
+        consumer_write = MemoryDep(
+            "output",
+            4 * i0 + i1,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+        )
+        node1 = mock.Mock()
+        node1.is_cpu.return_value = False
+        node1.read_writes = ReadWrites(
+            OrderedSet(), OrderedSet((producer_write,)), OrderedSet()
+        )
+
+        body = mock.Mock()
+        body.indexing_exprs = {
+            "index0": consumer_read.index,
+            "index1": consumer_write.index,
+        }
+        body.subblocks = {}
+        body.get_read_exprs.return_value = [consumer_read.index]
+        node2 = object.__new__(SchedulerNode)
+        node2.node = object.__new__(ir.ComputedBuffer)
+        node2._body = body
+        node2.is_cpu = mock.Mock(return_value=False)
+        node2.read_writes = ReadWrites(
+            OrderedSet((consumer_read,)), OrderedSet((consumer_write,)), OrderedSet()
+        )
+        node2.unmet_dependencies = OrderedSet((consumer_read,))
+        state = mock.sentinel.loop_state
+        node2.snapshot_loop_state = mock.Mock(return_value=state)
+
+        def restore_loop_state(snapshot):
+            self.assertIs(snapshot, state)
+            node2._body = body
+
+        def fail_after_reindex(*args, **kwargs):
+            node2._body = mock.sentinel.reindexed_body
+            raise RuntimeError("reindex failed")
+
+        node2.restore_loop_state = mock.Mock(side_effect=restore_loop_state)
+        node2.apply_loop_reindexing = mock.Mock(side_effect=fail_after_reindex)
+        scheduler = object.__new__(Scheduler)
+        flat_var = sympy.Dummy("flat", integer=True, nonnegative=True)
+
+        with (
+            mock.patch.object(
+                scheduler,
+                "_get_consumer_reindex_inverse",
+                return_value=(flat_var, flat_var),
+            ),
+            self.assertRaisesRegex(RuntimeError, "reindex failed"),
+        ):
+            scheduler.shared_data_after_inverting_indexing(node1, node2)
+
+        self.assertIs(node2._body, body)
+        node2.restore_loop_state.assert_called_once_with(state)
 
 
 if __name__ == "__main__":
