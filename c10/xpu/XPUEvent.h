@@ -82,7 +82,15 @@ struct XPUEvent {
   void record(const XPUStream& stream) {
     if (!isCreated()) {
       device_index_ = stream.device_index();
+#if SYCL_COMPILER_VERSION >= 20260200
+      event_ = std::make_unique<sycl::event>(
+          sycl::ext::oneapi::experimental::make_event(
+              c10::xpu::get_device_context(),
+              sycl::ext::oneapi::experimental::enable_profiling{
+                  enable_timing_}));
+#else
       assignEvent(stream.queue());
+#endif
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_creation(
@@ -96,8 +104,13 @@ struct XPUEvent {
           " does not match recording stream's device ",
           stream.device_index(),
           ".");
+#if SYCL_COMPILER_VERSION < 20260200
       reassignEvent(stream.queue());
+#endif
     }
+#if SYCL_COMPILER_VERSION >= 20260200
+    sycl::ext::oneapi::experimental::enqueue_signal_event(queue, *event_);
+#endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
@@ -109,9 +122,14 @@ struct XPUEvent {
 
   void block(const XPUStream& stream) {
     if (isCreated()) {
+#if SYCL_COMPILER_VERSION >= 20260200
+      sycl::ext::oneapi::experimental::enqueue_wait_event(
+          stream.queue(), *event_);
+#else
       std::vector<sycl::event> event_list{event()};
       // Make this stream wait until event_ is completed.
       stream.queue().ext_oneapi_submit_barrier(event_list);
+#endif
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_wait(
