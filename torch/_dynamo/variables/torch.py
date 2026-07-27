@@ -2412,7 +2412,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             def materialize_data_ptr(x: VariableTracker) -> VariableTracker:
                 x = realize(x)
                 if isinstance(x, DataPtrVariable) and x.method_name == "data_ptr":
-                    return x.as_sym_node(tx)
+                    return x.as_tensor_constructor_arg(tx)
                 elif isinstance(x, (ListVariable, TupleVariable)):
                     return x.modified([materialize_data_ptr(y) for y in x.items])
                 else:
@@ -2459,7 +2459,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 return None
 
-            sym_node = data_arg.as_sym_node(tx)
+            sym_node = data_arg.as_tensor_constructor_arg(tx)
             if args:
                 args = (sym_node, *args[1:])
             else:

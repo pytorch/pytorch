@@ -52,6 +52,8 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
     ObservedAttributeError,
     raise_observed_exception,
+    raise_type_error,
+    raise_value_error,
     TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
@@ -1876,6 +1878,16 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "copy_", [result], {})
         return None
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if value is None:
+            raise_type_error(tx, "Tensor does not support deleting items")
+        return self.method___setitem__(tx, key, value)
+
     def method___setitem__(
         self,
         tx: "InstructionTranslatorBase",
@@ -3246,6 +3258,16 @@ class NumpyNdarrayVariable(TensorVariable):
         else:
             return NoneType
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if value is None:
+            raise_value_error(tx, "cannot delete array elements")
+        return self.call_method(tx, "__setitem__", [key, value], {})
+
 
 class UnspecializedPythonVariable(TensorVariable):
     """
@@ -3466,6 +3488,21 @@ class DataPtrVariable(VariableTracker):
             raise AssertionError(self.method_name)
         if self._sym_node is not None:
             return self._sym_node
+
+        from ..data_ptr_op import _data_ptr
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            _data_ptr,
+            (self.from_tensor.as_proxy(),),
+            {},
+        )
+        self._sym_node = SymNodeVariable.create(tx, proxy)
+        return self._sym_node
+
+    def as_tensor_constructor_arg(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
         if tx.output.export:
             unimplemented(
                 gb_type="data_ptr() in export",
@@ -3492,17 +3529,14 @@ class DataPtrVariable(VariableTracker):
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
-        from ..data_ptr_op import _data_ptr
 
-        tx.output.data_ptr_sources.add(self.from_tensor)
-        proxy = tx.output.create_proxy(
-            "call_function",
-            _data_ptr,
-            (self.from_tensor.as_proxy(),),
-            {},
-        )
-        self._sym_node = SymNodeVariable.create(tx, proxy)
-        return self._sym_node
+        # Graph inputs are owned by the caller for the duration of the compiled
+        # call. Computed sources need a hidden output so their storage stays live
+        # while an opaque consumer can dereference the materialized pointer.
+        tx.output.data_ptr_materialized = True
+        if self.from_tensor.as_proxy().node.op not in ("placeholder", "get_attr"):
+            tx.output.data_ptr_sources.add(self.from_tensor)
+        return self.as_sym_node(tx)
 
     @classmethod
     def _strip_data_ptr_preserving_aliases(cls, node: torch.fx.Node) -> torch.fx.Node:

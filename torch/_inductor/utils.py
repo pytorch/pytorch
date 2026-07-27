@@ -2776,12 +2776,12 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
         class DummyModule:
             """This is empty to replace the generated triton module"""
 
-            def __init__(self) -> None:
-                pass
+            def __init__(self, num_outputs: int) -> None:
+                self.num_outputs = num_outputs
 
-            def call(self, *args: Any, **kwargs: Any) -> None:
-                # Don't do anything when called
-                pass
+            def call(self, *args: Any, **kwargs: Any) -> tuple[None, ...]:
+                # Match the generated module's output arity without running it.
+                return (None,) * self.num_outputs
 
         wrapper_code, kernel_code = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
@@ -2791,7 +2791,7 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
         if kernel_code:
             save_output_code(kernel_code.value)
 
-        return DummyModule()
+        return DummyModule(len(self.graph_outputs))
 
     with (
         mock.patch.object(
@@ -4215,13 +4215,13 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
     - Ops with the cudagraph_unsafe tag
     - index_put_ with boolean indices (triggers .nonzero() during capture)
-    - Control flow nodes (Conditional, WhileLoop)
+    - Control flow nodes (Switch, WhileLoop)
     - Ops with sparse tensor outputs
     """
     from . import ir
 
     # Control flow nodes are cudagraph-unsafe
-    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+    if isinstance(node, (ir.Switch, ir.WhileLoop)):
         return True
 
     if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
@@ -4520,12 +4520,16 @@ def python_subprocess_env() -> dict[str, str]:
     Get a base environment for running Python subprocesses.
     """
 
+    torch_package_root = os.path.dirname(
+        os.path.dirname(os.path.abspath(torch.__file__))
+    )
     env = {
         # Inherit the environment of the current process.
         **os.environ,
         # Set the PYTHONPATH so the subprocess can find torch.
         "PYTHONPATH": os.environ.get(
-            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+            "TORCH_CUSTOM_PYTHONPATH",
+            os.pathsep.join((torch_package_root, *sys.path)),
         ),
     }
 

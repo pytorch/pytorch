@@ -321,7 +321,8 @@ class TestCodegenTriton(InductorTestCase):
     @inductor_config.patch(cpp_wrapper=True)
     def test_cpp_wrapper_data_ptr_symint_output_uses_stable_dispatch(self):
         def fn(x, y):
-            return torch.tensor([x.data_ptr(), y.data_ptr()], dtype=torch.long)
+            tmp = x + y
+            return torch.tensor([x.data_ptr(), tmp.data_ptr()], dtype=torch.long)
 
         x = torch.randn(4)
         y = torch.randn(4)

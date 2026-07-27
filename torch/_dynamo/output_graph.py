@@ -958,6 +958,7 @@ class OutputGraph(OutputGraphCommon):
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
         # Hidden graph outputs keep raw pointer sources live through graph execution.
         self.data_ptr_sources: OrderedSet[VariableTracker] = OrderedSet()
+        self.data_ptr_materialized = False
         self.data_ptr_storage_versions: dict[tuple[bool, int], int] = {}
 
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
@@ -2074,7 +2075,7 @@ class OutputGraph(OutputGraphCommon):
         Returns stack indices and locals keys where we dropped NULLs, and where we found inactive context manager objects.
         """
 
-        if reason.graph_break and self.data_ptr_sources:
+        if reason.graph_break and self.data_ptr_materialized:
             raise SkipFrame(
                 "Dynamo cannot preserve traced data_ptr() lifetimes across a graph break"
             )
@@ -2148,6 +2149,22 @@ class OutputGraph(OutputGraphCommon):
                 block.exit(cur_tx, is_graph_break=reason.graph_break)
 
             cur_tx = cur_tx.parent
+
+        if reason.graph_break:
+            live_data_ptr = False
+
+            def find_data_ptr(var: VariableTracker) -> None:
+                nonlocal live_data_ptr
+                if isinstance(var, variables.DataPtrVariable):
+                    live_data_ptr = True
+
+            VariableTracker.visit(
+                find_data_ptr, all_stack_values, side_effects=self.side_effects
+            )
+            if live_data_ptr:
+                raise SkipFrame(
+                    "Dynamo cannot preserve a data_ptr() value across a graph break"
+                )
 
         # "Garbage collect the heap".
         self.side_effects.prune_dead_object_new(tx)
