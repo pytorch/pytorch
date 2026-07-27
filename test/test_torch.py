@@ -6686,9 +6686,9 @@ class TestTorchDeviceType(TestCase):
         neg_0 = torch.tensor((1, 2, 3), dtype=torch.float, device=device)
         neg_1 = neg_0._neg_view()
 
-        # Inductor lowers _neg_view to neg, creating a new tensor
-        # instead of a view. So is_neg(), data_ptr(), and _neg_view() equality
-        # checks are skipped under inductor.
+        # Inductor lowers `_neg_view` to `neg`, creating a new tensor
+        # instead of a view. So is_neg(), data_ptr() and storage_offset()
+        # equality checks are skipped under inductor.
         if not TEST_WITH_TORCHINDUCTOR:
             self.assertTrue(neg_1.is_neg())
             self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
