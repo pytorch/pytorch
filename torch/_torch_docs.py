@@ -14435,15 +14435,19 @@ should reinterpret the bits back to uint64 (e.g. load as int64 and bitcast);
 for host-side inspection use ``.item() & (2**64 - 1)``. The offset wraps
 modulo ``2**64`` on advancement.
 
-**Graph capture.** The values are returned as tensors rather than integers so
-the same code is safe under graph capture (:class:`torch.accelerator.Graph`,
-:class:`torch.cuda.CUDAGraph`). Outside capture, ``seed`` and ``offset`` are
-device tensors holding the current values and ``intragraph_offset`` is a CPU
-tensor holding 0. During capture, ``seed`` and ``offset`` alias generator
-state that each replay refills with the values current at replay time, and
-``intragraph_offset`` holds this reservation's position within the graph; a
-kernel that loads ``seed`` and ``offset`` from the tensors at run time
-therefore replays correctly with no capture-specific code.
+**Graph capture.** The two return modes mirror the C++ ``PhiloxCudaState``
+protocol. Outside capture (``HostState``), ``seed`` and ``offset`` are CPU
+tensors holding the current values; ``.item()`` is cheap and does not
+synchronize, so callers pass the values as scalar kernel arguments. During
+capture (``DevState``, under :class:`torch.accelerator.Graph` or
+:class:`torch.cuda.CUDAGraph`), ``seed`` and ``offset`` are CUDA tensors
+aliasing generator state that each replay refills with the values current at
+replay time, so kernels must load them from device memory at run time.
+``intragraph_offset`` is always a CPU tensor: 0 outside capture, and this
+reservation's position within the graph during capture. Callers branch on
+capture state (e.g. :func:`torch.cuda.is_current_stream_capturing`, or the
+device of the returned tensors), exactly like the built-in kernels branch on
+``PhiloxCudaState`` via ``at::cuda::philox::unpack``.
 
 .. warning::
     Tensors returned during capture alias the capture's state: their contents

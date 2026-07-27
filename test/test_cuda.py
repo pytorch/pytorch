@@ -2964,12 +2964,12 @@ torch.cuda.synchronize()
         self.assertEqual(seed_t.item(), g.initial_seed())
         self.assertEqual(off_t.item(), 0)
         self.assertEqual(intra_t.item(), 0)
+        # Outside capture all three are CPU tensors (PhiloxCudaState's
+        # HostState); during capture seed/offset are CUDA (DevState).
         for t in (seed_t, off_t, intra_t):
             self.assertEqual(t.dtype, torch.int64)
             self.assertEqual(t.shape, (1,))
-        self.assertEqual(seed_t.device.type, "cuda")
-        self.assertEqual(off_t.device.type, "cuda")
-        self.assertEqual(intra_t.device.type, "cpu")
+            self.assertEqual(t.device.type, "cpu")
         self.assertEqual(g.get_offset(), 8)
         _, off_t, _ = g.philox_state(8)
         self.assertEqual(off_t.item(), 8)
