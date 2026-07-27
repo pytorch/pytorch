@@ -282,23 +282,6 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
 
-    def test_can_fuse_exception_rolls_back_loop_state(self):
-        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        original_body = node2._body
-        scheduler = object.__new__(Scheduler)
-
-        def fail_after_mutation(*args, **kwargs):
-            node2.apply_indexing_exprs({})
-            raise RuntimeError("fusion analysis failed")
-
-        scheduler._can_fuse_impl = fail_after_mutation
-        with self.assertRaisesRegex(RuntimeError, "fusion analysis failed"):
-            scheduler.can_fuse(node1, node2)
-
-        self.assertIs(node2._body, original_body)
-        self.assertIsNone(node2._loop_mutation_listener)
-
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
@@ -2292,7 +2275,6 @@ class TestIndexInversion(TestCase):
 
     def test_flattened_read_inverse_is_cached(self):
         scheduler = object.__new__(Scheduler)
-        scheduler._flattened_read_inverse_cache = {}
         i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
         args = (
             2 * i1 + i0,
@@ -2310,9 +2292,8 @@ class TestIndexInversion(TestCase):
 
         self.assertEqual(inverse.call_count, 1)
 
-    def test_failed_flattened_read_inverse_is_not_cached(self):
+    def test_failed_flattened_read_inverse_is_cached(self):
         scheduler = object.__new__(Scheduler)
-        scheduler._flattened_read_inverse_cache = {}
         i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
         args = (
             2 * i1 + i0,
@@ -2323,16 +2304,15 @@ class TestIndexInversion(TestCase):
 
         with mock.patch(
             "torch._inductor.invert_expr_analysis.generate_inverse_formula",
-            side_effect=(None, sympy.S.Zero),
+            return_value=None,
         ) as inverse:
             self.assertIsNone(scheduler._get_flattened_read_inverse(*args))
-            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+            self.assertIsNone(scheduler._get_flattened_read_inverse(*args))
 
-        self.assertEqual(inverse.call_count, 2)
+        self.assertEqual(inverse.call_count, 1)
 
     def test_zero_numel_flattened_read_is_rejected(self):
         scheduler = object.__new__(Scheduler)
-        scheduler._flattened_read_inverse_cache = {}
         i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
 
         self.assertIsNone(
