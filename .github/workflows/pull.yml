@@ -79,7 +79,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -182,16 +182,16 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-py3.14t-clang18 (build + test)                           ║
+  # ║ linux-jammy-py3.14t-clang21 (build + test)                           ║
   # ╠══════════════════════════════════════════════════════════════════════╣
-  linux-jammy-py3_14t-clang18-build:
-    name: linux-jammy-py3.14t-clang18
+  linux-jammy-py3_14t-clang21-build:
+    name: linux-jammy-py3.14t-clang21
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.14t-clang18
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang18
+      build-environment: linux-jammy-py3.14t-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -226,23 +226,23 @@ jobs:
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
       python-version: "3.14t"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
-  linux-jammy-py3_14t-clang18-test:
-    name: linux-jammy-py3.14t-clang18
+  linux-jammy-py3_14t-clang21-test:
+    name: linux-jammy-py3.14t-clang21
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_14t-clang18-build
+      - linux-jammy-py3_14t-clang21-build
       - target-determination
       - get-label-type
     with:
-      build-environment: linux-jammy-py3.14t-clang18
-      docker-image: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.14t-clang21
+      docker-image: ${{ needs.linux-jammy-py3_14t-clang21-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_14t-clang21-build.outputs.test-matrix }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.14t"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
   # Docs are built and the preview is published by docs-build.yml so the
@@ -263,7 +263,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11-no-ops
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -274,12 +274,12 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-py3.10-clang18-asan (build + test)                       ║
+  # ║ linux-jammy-py3.10-clang21-asan (build + test)                       ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  linux-jammy-py3_10-clang18-asan-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ') }}
-    name: linux-jammy-py3.10-clang18-asan
+  linux-jammy-py3_10-clang21-asan-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang21-asan ') }}
+    name: linux-jammy-py3.10-clang21-asan
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
@@ -287,8 +287,8 @@ jobs:
     with:
       runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang18-asan
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      build-environment: linux-jammy-py3.10-clang21-asan
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -313,47 +313,47 @@ jobs:
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       python-version: "3.10"
-      compiler: clang18
+      compiler: clang21
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: asan-build
     secrets: inherit
 
-  linux-jammy-py3_10-clang18-asan-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ') }}
-    name: linux-jammy-py3.10-clang18-asan
+  linux-jammy-py3_10-clang21-asan-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang21-asan ') }}
+    name: linux-jammy-py3.10-clang21-asan
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_10-clang18-asan-build
+      - linux-jammy-py3_10-clang21-asan-build
       - target-determination
       - job-filter
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-py3_10-clang21-asan-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-clang21-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang21-asan-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.10"
-      compiler: clang18
+      compiler: clang21
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: asan-test
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-py3.10-clang18 (build + test)                            ║
+  # ║ linux-jammy-py3.10-clang21 (build + test)                            ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  linux-jammy-py3_10-clang18-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18 ') }}
-    name: linux-jammy-py3.10-clang18
+  linux-jammy-py3_10-clang21-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang21 ') }}
+    name: linux-jammy-py3.10-clang21
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang18
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      build-environment: linux-jammy-py3.10-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -383,43 +383,43 @@ jobs:
           { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       python-version: "3.10"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
-  linux-jammy-py3_10-clang18-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18 ') }}
-    name: linux-jammy-py3.10-clang18
+  linux-jammy-py3_10-clang21-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang21 ') }}
+    name: linux-jammy-py3.10-clang21
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_10-clang18-build
+      - linux-jammy-py3_10-clang21-build
       - target-determination
       - job-filter
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.10"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-py3.14-clang18 (build + test)                            ║
+  # ║ linux-jammy-py3.14-clang21 (build + test)                            ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  linux-jammy-py3_14-clang18-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang18 ') }}
-    name: linux-jammy-py3.14-clang18
+  linux-jammy-py3_14-clang21-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang21 ') }}
+    name: linux-jammy-py3.14-clang21
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.14-clang18
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.14-clang18
+      build-environment: linux-jammy-py3.14-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.14-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -449,25 +449,25 @@ jobs:
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
       python-version: "3.14"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
-  linux-jammy-py3_14-clang18-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang18 ') }}
-    name: linux-jammy-py3.14-clang18
+  linux-jammy-py3_14-clang21-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14-clang21 ') }}
+    name: linux-jammy-py3.14-clang21
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_14-clang18-build
+      - linux-jammy-py3_14-clang21-build
       - job-filter
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.14"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
@@ -534,7 +534,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-generates-artifacts: false
       test-matrix: |
@@ -604,15 +604,15 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.13-clang18
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang18
+      build-environment: linux-jammy-py3.13-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
       python-version: "3.13"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
   dynamo-cpython-test:
@@ -620,9 +620,9 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: [get-label-type, dynamo-cpython-build]
     with:
-      build-environment: linux-jammy-py3.13-clang18
+      build-environment: linux-jammy-py3.13-clang21
       docker-image: ${{ needs.dynamo-cpython-build.outputs.docker-image }}
       test-matrix: ${{ needs.dynamo-cpython-build.outputs.test-matrix }}
       python-version: "3.13"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
