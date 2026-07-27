@@ -12,9 +12,10 @@ TEST(XPUEventTest, IPCSupport) {
     return;
   }
 
+#if SYCL_COMPILER_VERSION >= 20260200
   c10::xpu::XPUEvent event1(false, true);
 
-  event1.record(c10::xpu::getCurrentXPUStream());
+  event1.record();
   EXPECT_EQ(event1.event().ext_oneapi_ipc_enabled(), true);
   auto handle = event1.ipc_handle();
 
@@ -22,8 +23,13 @@ TEST(XPUEventTest, IPCSupport) {
   c10::xpu::XPUEvent event2(current_device, handle);
   EXPECT_EQ(event2.event().ext_oneapi_ipc_enabled(), true);
 
-  // TODO: Confirm with SYCL compiler team whether a paired pull() call is required to release each handle returned by ipc::event::get().
+  // TODO: Confirm with SYCL compiler team whether a paired pull() call is
+  // required to release each handle returned by ipc::event::get().
 
   event1.synchronize();
   event2.synchronize();
+#else
+  c10::xpu::XPUEvent event1(false, true);
+  EXPECT_THROW(event1.record(), c10::Error);
+#endif
 }
