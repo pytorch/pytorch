@@ -4957,7 +4957,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def addmm_unique_example_inputs_extern():
             additional_example_inputs = {}
-            for input_node, extern_node in zip(input_nodes, extern_input_nodes):
+            for input_node, extern_node in zip(input_nodes, layout_input_nodes):
                 extern_name = extern_node.get_name()
                 if extern_name in unique_example_inputs:
                     continue
@@ -4974,27 +4974,31 @@ class AlgorithmSelectorCache(PersistentCache):
                 **additional_example_inputs,
             }
 
-        extern_choice = next(
-            (choice for choice in choices if cls._is_extern(choice)),
+        layout_choice = next(
+            (
+                choice
+                for choice in choices
+                if cls._uses_layout_preserving_inputs(choice)
+            ),
             None,
         )
-        extern_input_nodes = input_nodes
+        layout_input_nodes = input_nodes
         unique_example_inputs_extern = unique_example_inputs
 
-        if extern_choice is not None:
-            if len(extern_choice.input_nodes) != len(input_nodes):
+        if layout_choice is not None:
+            if len(layout_choice.input_nodes) != len(input_nodes):
                 raise AssertionError(
-                    "extern_choice.input_nodes length must match input_nodes: "
-                    f"{len(extern_choice.input_nodes)} != {len(input_nodes)}"
+                    "layout_choice.input_nodes length must match input_nodes: "
+                    f"{len(layout_choice.input_nodes)} != {len(input_nodes)}"
                 )
-            extern_input_nodes = extern_choice.input_nodes
+            layout_input_nodes = layout_choice.input_nodes
 
-            if extern_choice.name == "addmm":
+            if cls._is_extern(layout_choice) and layout_choice.name == "addmm":
                 unique_example_inputs_extern = addmm_unique_example_inputs_extern()
 
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
-        for i, input_node in enumerate(extern_input_nodes):
+        for i, input_node in enumerate(layout_input_nodes):
             input_tensor = unique_example_inputs_extern[input_node.get_name()]
             if input_tensor.is_mkldnn:
                 example_inputs_extern.append(input_tensor)
@@ -5102,19 +5106,23 @@ class AlgorithmSelectorCache(PersistentCache):
 
     @staticmethod
     def _is_extern(choice: ChoiceCaller) -> bool:
+        return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
+
+    @staticmethod
+    def _uses_layout_preserving_inputs(choice: ChoiceCaller) -> bool:
         from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
 
-        # FlyDSL templates run through Python wrappers that preserve view semantics
-        # such as transposed RHS tensors; benchmark them with extern-style tensors.
-        return isinstance(
-            choice, (ExternKernelCaller, SubgraphChoiceCaller, FlyDSLTemplateCaller)
+        return AlgorithmSelectorCache._is_extern(choice) or isinstance(
+            choice, FlyDSLTemplateCaller
         )
 
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        benchmark_tensors = autotune_args.get_benchmark_tensors(
+            cls._uses_layout_preserving_inputs(choice)
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         try:
@@ -5208,7 +5216,7 @@ class AlgorithmSelectorCache(PersistentCache):
         rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
-            cls._is_extern(choice)
+            cls._uses_layout_preserving_inputs(choice)
         )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()

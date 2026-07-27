@@ -125,7 +125,7 @@ def is_gemm_config_valid_for_shape(
 
 def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
-    Returns the exhaustive configuration set for the gfx950 FlyDSL HGEMM kernel.
+    Returns the exhaustive configuration set for the gfx950 FlyDSL GEMM kernel.
     """
     selections = {
         "TILE_M": [16, 32, 48, 64, 80, 96, 128, 256],
@@ -163,7 +163,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
 
 def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
-    Returns the default configuration set for the gfx950 FlyDSL HGEMM kernel.
+    Returns the default configuration set for the gfx950 FlyDSL GEMM kernel.
     """
     config_tuples = [
         (128, 128, 64, 2, 1, 4, 4, 1, 0, True),
@@ -232,8 +232,8 @@ def get_gemm_configs() -> list[dict[str, int | bool]]:
         configs = get_default_gemm_configs()
     else:
         configs = get_default_gemm_configs()
-        if not configs:
-            log.warning("No valid default FlyDSL GEMM configuration is available")
-            return []
         configs = configs[:1]
+    if not configs:
+        log.warning("No valid FlyDSL GEMM configuration is available")
+        return []
     return [asdict(gemm_config) for gemm_config in configs]

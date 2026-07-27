@@ -54,7 +54,7 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
-    use_flydsl_template,
+    use_flydsl_gemm_template,
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
     use_triton_scaling_template,
@@ -225,7 +225,7 @@ def get_flydsl_mm_template_kwargs(
         is_gemm_config_valid_for_shape,
     )
 
-    if not (static_shape and is_nonzero and use_flydsl_template(layout)):
+    if not (static_shape and is_nonzero and use_flydsl_gemm_template(layout)):
         return []
 
     if len(mat1.get_size()) != 2 or len(mat2.get_size()) != 2:
@@ -237,6 +237,9 @@ def get_flydsl_mm_template_kwargs(
     out_stride = layout.stride
 
     if not sizevars.statically_known_equals(mat1_stride[1], 1):
+        return []
+    # FlyDSL consumes the RHS as an [N, K] view of this stride-1 K dimension.
+    if not sizevars.statically_known_equals(mat2_stride[0], 1):
         return []
     if not sizevars.statically_known_equals(out_stride[1], 1):
         return []
@@ -269,11 +272,6 @@ def get_flydsl_mm_template_kwargs(
             for expr in aligned_byte_expressions
         )
     ):
-        return []
-
-    # FlyDSL GEMM consumes B as [N, K]. In aten.mm(A, B.T), Inductor sees
-    # the RHS as a [K, N] transpose view with stride[0] == 1.
-    if not sizevars.statically_known_equals(mat2_stride[0], 1):
         return []
 
     m = mat1.get_size()[0]

@@ -354,6 +354,7 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm_backends="FLYDSL",
         max_autotune_gemm_search_space="EXHAUSTIVE",
         flydsl_enable_autotuning=True,
+        autotune_in_subproc=True,
     )
     def test_flydsl_autotune_transposed_rhs_uses_view_tensor(self):
         from torch._inductor.template_heuristics import flydsl as flydsl_heuristics
