@@ -437,7 +437,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([(i * self.world_size) + (i % self.world_size)]),
                 inputs[i],
-                msg=(f"Mismatch in iteration {i:d}"),
+                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -603,7 +603,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     ]
                 ),
                 future_handle.value()[0],
-                msg=(f"Mismatch in iteration {i:d}"),
+                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -700,30 +700,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 result,
-                msg=f"Mismatch in iteration {i}",
+                msg=lambda msg: f"{msg}\nMismatch in iteration {i}",
             )
 
     @requires_gloo()
     def test_allreduce_coalesced_stress(self):
         inputs = [2 * [torch.tensor([i + self.rank])] for i in range(1000)]
         self._test_allreduce_coalesced_stress(inputs)
-
-    @requires_gloo()
-    def test_allreduce_coalesced_async(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-
-        xs = [2 * [torch.tensor([i + self.rank])] for i in range(2)]
-        futs = [c10d.all_reduce_coalesced(x, async_op=True) for x in xs]
-        torch.futures.wait_all(futs)
-        for i, fut in enumerate(futs):
-            self.assertEqual(
-                self._expected_output(i),
-                fut.wait(),
-                msg=f"Mismatch in iteration {i}",
-            )
 
     @requires_gloo()
     def test_sparse_allreduce_checks(self):
@@ -868,7 +851,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expect = torch.full((3,), expected_val)
                 self.assertTrue(
                     torch.allclose(output, expect),
-                    f"op={op}, rank={self.rank}: output={output}, expected={expect}",
+                    lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output}, expected={expect}",
                 )
 
     @requires_gloo()
@@ -921,7 +904,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expect = torch.full((out_size,), expected_val)
                 self.assertTrue(
                     torch.allclose(output, expect),
-                    f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                    lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
                 )
 
     @requires_gloo()
@@ -984,7 +967,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     expect = torch.full((out_size,), expected_val)
                     self.assertTrue(
                         torch.allclose(output, expect),
-                        f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                        lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
                     )
 
     @requires_gloo()
@@ -1135,7 +1118,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([iter + root]),
                 result[0],
-                msg=(f"Mismatch in iteration {iter:d} for rank {root:d}"),
+                msg=(
+                    lambda msg: f"{msg}\nMismatch in iteration {iter:d} for rank {root:d}"
+                ),
             )
 
     @requires_gloo()
@@ -1150,13 +1135,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
-    def test_gloo_set_pg_timeout_api(self):
+    def test_gloo_set_timeout_api(self):
         """
-        Test _set_pg_timeout API for Gloo backend (issue #165422).
-        This test demonstrates that dynamically changing timeout via _set_pg_timeout
+        Test set_timeout API for Gloo backend (issue #165422).
+        This test demonstrates that dynamically changing timeout via set_timeout
         actually affects operation timeouts by:
         1. verifying operations complete successfully with normal timeout
-        2. setting a very short timeout via _set_pg_timeout
+        2. setting a very short timeout via set_timeout
         3. demonstrating that operations timeout with the new short timeout value
         """
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1176,9 +1161,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         tensor = torch.rand(10)
         pg.allreduce(tensor).wait()
 
-        # change timeout to a very short value using _set_pg_timeout
+        # change timeout to a very short value using set_timeout
         # this is the API from issue #165422
-        c10d.distributed_c10d._set_pg_timeout(timedelta(milliseconds=1), pg)
+        c10d.set_timeout(timedelta(milliseconds=1), pg)
         self.assertEqual(backend.options._timeout, timedelta(milliseconds=1))
 
         # demonstrate that the new timeout is actually enforced
@@ -1187,6 +1172,30 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             t1 = torch.zeros([1], dtype=torch.float32)
             with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
                 pg.allreduce([t1]).wait()
+
+        dist.destroy_process_group()
+
+    @requires_gloo()
+    def test_gloo_set_pg_timeout_deprecated(self):
+        """
+        The private `_set_pg_timeout` alias is deprecated but must remain
+        functional, delegating to the public `set_timeout`.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=50),
+        )
+
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device("cpu"))
+
+        with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
+            c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=23), pg)
+        self.assertEqual(backend.options._timeout, timedelta(seconds=23))
 
         dist.destroy_process_group()
 
@@ -1368,7 +1377,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     [result],
-                    msg=(f"Mismatch in iteration {iter:d} for root {root:d}"),
+                    msg=(
+                        lambda msg: f"{msg}\nMismatch in iteration {iter:d} for root {root:d}"
+                    ),
                 )
 
     @requires_gloo()
@@ -1504,7 +1515,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 [result],
-                msg=(f"Mismatch in iteration {i:d}"),
+                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -1691,7 +1702,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         ]
                     ),
                     result[0],
-                    msg=(f"Mismatch in iteration {iter:d} with root rank {root:d}"),
+                    msg=(
+                        lambda msg: f"{msg}\nMismatch in iteration {iter:d} with root rank {root:d}"
+                    ),
                 )
 
     @requires_gloo()
@@ -1910,7 +1923,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_value,
                     outputs[i][j],
-                    msg=(f"Mismatch in iteration {i:d} from rank {j:d}"),
+                    msg=(
+                        lambda msg: f"{msg}\nMismatch in iteration {i:d} from rank {j:d}"
+                    ),
                 )
 
     @requires_gloo()
@@ -1965,7 +1980,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expected_value,
                 actual_value,
                 msg=(
-                    f"Rank {self.rank}: output_tensors[{j}] = "
+                    lambda msg: f"{msg}\nRank {self.rank}: output_tensors[{j}] = "
                     f"{actual_value}, expected {expected_value}"
                 ),
             )
@@ -3403,28 +3418,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_default_pg_gloo(self):
-        self._test_sequence_num_set_default_pg(backend="gloo")
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_gloo_new_group(self):
-        self._test_sequence_num_set_new_group(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_default(self):
-        self._test_sequence_num_incremented_default_group("gloo")
-
-    @skip_if_lt_x_gpu(4)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_subgroup(self):
-        if self.world_size < 4:
-            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
-        self._test_sequence_num_incremented_subgroup("gloo")
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()

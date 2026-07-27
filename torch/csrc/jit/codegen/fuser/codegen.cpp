@@ -51,7 +51,7 @@ static std::string scalarValue(const double v) {
   } else {
     out << std::setprecision(16) << v;
   }
-  return out.str();
+  return std::move(out).str();
 }
 
 // Note: Half is special-cased to avoid returning at::Half

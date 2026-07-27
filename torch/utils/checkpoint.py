@@ -873,7 +873,7 @@ class _CheckpointFrame:
         if not len(self.weak_holders) == self.recomp_counter[gid]:
             # 2. During recompute, fewer tensors were saved
             #
-            # We know that every time we save something do original forward
+            # We know that every time we save something during original forward
             # we append to weak_holder, and every time we save a tensor
             # during recompute we increment recompute_counter.
             raise CheckpointError(
@@ -1643,11 +1643,15 @@ def _checkpoint_without_reentrant_generator(
     from torch.overrides import _get_current_function_mode_stack
     from torch.utils._device import DeviceContext
 
-    # recompute_fn should respect the device context of the original forward
+    # recompute_fn should respect the device context of the original forward.
+    # Capture the device, not the mode instance: re-entering the captured
+    # DeviceContext during recompute (possibly on the backward thread) corrupts
+    # its exit state and leaks it. A fresh context avoids that.
     device_ctx = next(
-        filter(
-            lambda mode: isinstance(mode, DeviceContext),
-            reversed(_get_current_function_mode_stack()),
+        (
+            DeviceContext(mode.device)
+            for mode in reversed(_get_current_function_mode_stack())
+            if isinstance(mode, DeviceContext)
         ),
         contextlib.nullcontext(),
     )
