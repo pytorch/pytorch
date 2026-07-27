@@ -1,4 +1,6 @@
 //  Copyright © 2022 Apple Inc.
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch_v2.h>
@@ -43,6 +45,12 @@
 #include <ATen/ops/nonzero_static_native.h>
 #include <ATen/ops/ones_like.h>
 #endif
+
+namespace at::mps {
+// DIAGNOSTIC hooks (defined in MPSStream.mm): name the faulting op under env MPS_FAULT_NAME_DIAG.
+void mpsSetCurrentOp(const char* name);
+bool mpsFaultNameDiag();
+} // namespace at::mps
 
 namespace at::native {
 namespace mps {
@@ -110,6 +118,76 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
     return;
   }
   const auto mpsStream = getCurrentMPSStream();
+  // DIAGNOSTIC (env IDX_SYNC): force all prior GPU work (incl. the index buffer's producer) to fully
+  // complete before this index kernel runs. If this makes the fault vanish, the bug is a read-before-write
+  // RACE on the bindless index buffer (missing hazard barrier), not a wrong/uninitialized buffer identity.
+  if (std::getenv("IDX_SYNC")) {
+    mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
+  }
+  if (at::mps::mpsFaultNameDiag()) {
+    // Dump ALL CPU-side metadata that feeds the kernel's offset math (no GPU sync): a garbage stride
+    // or size here produces a garbage input_offs even with valid index VALUES -> OOB read/write.
+    auto fmt = [](IntArrayRef a) {
+      std::string s = "[";
+      for (auto d : a) {
+        s += std::to_string(d) + ",";
+      }
+      return s + "]";
+    };
+    std::string meta = kernel_name + " ndim=" + std::to_string(iter.ndim()) + " numel=" + std::to_string(iter.numel()) +
+        " out.shape=" + fmt(iter.shape()) + " out.str=" + fmt(iter.strides(0)) + " in.str=" + fmt(iter.strides(1)) +
+        " idxtns.str=" + fmt(iter.strides(2)) + " index_size=" + fmt(index_size) +
+        " index_stride=" + fmt(index_stride) + " in.numel=" + std::to_string(iter.tensor_base(1).numel());
+    // Storage bytes of the indexed tensors + max byte offset the kernel can reach: if the max reach
+    // exceeds storage, the "valid" (idx < index_size) index still reads/writes OUT OF BOUNDS.
+    const int64_t out_bytes = static_cast<int64_t>(iter.tensor_base(0).storage().nbytes());
+    const int64_t in_bytes = static_cast<int64_t>(iter.tensor_base(1).storage().nbytes());
+    int64_t max_indexed = 0;
+    for (size_t k = 0; k < index_size.size(); k++) {
+      max_indexed += (index_size[k] - 1) * index_stride[k];
+    }
+    meta += " out.store_bytes=" + std::to_string(out_bytes) + " in.store_bytes=" + std::to_string(in_bytes) +
+        " max_indexed_byte=" + std::to_string(max_indexed);
+    // Account for storage_offset: the kernel indexes from data_ptr = storage_base + offset*elemsize,
+    // so the bytes actually available past data_ptr = store_bytes - offset*elemsize. A tight-fit access
+    // + a non-zero offset overruns the buffer.
+    const int64_t out_off_b = iter.tensor_base(0).storage_offset() * iter.tensor_base(0).element_size();
+    const int64_t in_off_b = iter.tensor_base(1).storage_offset() * iter.tensor_base(1).element_size();
+    meta += " out.off_bytes=" + std::to_string(out_off_b) + " in.off_bytes=" + std::to_string(in_off_b) +
+        " in.avail=" + std::to_string(in_bytes - in_off_b) + " out.avail=" + std::to_string(out_bytes - out_off_b);
+    fprintf(stderr, "IDXMETA: %s\n", meta.c_str());
+    fflush(stderr);
+    // Value check (copies index tensors to CPU; may sync): confirm index VALUES are in-bounds.
+    for (uint32_t k = 0; k < index_size.size(); k++) {
+      const auto& it = iter.tensor_base(k + 2);
+      try {
+        auto host = it.to(at::kCPU).contiguous();
+        const int64_t n = host.numel();
+        const int64_t* p = host.data_ptr<int64_t>();
+        int64_t mn = n ? p[0] : 0, mx = n ? p[0] : 0;
+        for (int64_t i = 1; i < n; i++) {
+          mn = p[i] < mn ? p[i] : mn;
+          mx = p[i] > mx ? p[i] : mx;
+        }
+        const int64_t dim = index_size[k];
+        const bool bad = (mx >= dim || mn < 0 || mn < -1000000 || mx > 1000000000);
+        fprintf(stderr,
+                "IDXVAL%s: %s idx#%u numel=%lld min=%lld max=%lld indexed_dim=%lld\n",
+                bad ? "_BAD" : "",
+                kernel_name.c_str(),
+                k,
+                static_cast<long long>(n),
+                static_cast<long long>(mn),
+                static_cast<long long>(mx),
+                static_cast<long long>(dim));
+        fflush(stderr);
+      } catch (const std::exception& e) {
+        fprintf(stderr, "IDXVAL_COPYFAIL: %s idx#%u : %s\n", kernel_name.c_str(), k, e.what());
+        fflush(stderr);
+      }
+    }
+    at::mps::mpsSetCurrentOp(kernel_name.c_str());
+  }
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     const int64_t num_indices = index_size.size();
     auto indexSelectPSO = lib.getPipelineStateForFunc(kernel_name);
@@ -390,6 +468,18 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
     // Dynamic path: sync to learn output size. total_nonzero is int64, so the
     // count reads back directly even when it exceeds INT_MAX.
     const int64_t total_nonzero = total_nonzero_buf.item<int64_t>();
+    // DIAGNOSTIC (env NZ_DIAG): a real nonzero count can never exceed the input numel, so a count
+    // outside [0, numel] proves total_nonzero_buf was read garbage/uninitialized (the phase-3 hypothesis).
+    if (std::getenv("NZ_DIAG")) {
+      const int64_t nel = self.numel();
+      fprintf(stderr,
+              "NZ_COUNT: total_nonzero=%lld self.numel=%lld nDim=%lld%s\n",
+              static_cast<long long>(total_nonzero),
+              static_cast<long long>(nel),
+              static_cast<long long>(nDim),
+              (total_nonzero < 0 || total_nonzero > nel) ? "  <-- GARBAGE COUNT (> numel)" : "");
+      fflush(stderr);
+    }
     at::native::resize_output(out_, {total_nonzero, nDim});
     max_elements = total_nonzero;
   }
