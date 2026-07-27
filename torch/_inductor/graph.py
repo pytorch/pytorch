@@ -431,6 +431,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_inference = is_inference
         self.is_backward = is_backward
         self.is_const_graph = is_const_graph
+        self.has_data_independent_cse = bool(gm.meta.get(ir.HAS_DATA_INDEPENDENT_CSE))
         self.const_wrapper_code = const_wrapper_code
         self.const_kernel_code = const_kernel_code
         self.const_module = const_module
