@@ -7,6 +7,7 @@ from functorch.experimental.control_flow import map
 from torch._higher_order_ops.flex_attention import (
     flex_attention as flex_attention_hop,
 )
+from torch._higher_order_ops.flex_gemm import flex_gemm
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     create_block_mask,
@@ -168,6 +169,26 @@ def simple_cond(x):
     return torch.cond(x.sum() > 2, lambda x: (x.cos(),), lambda x: (x.sin(),), [x])
 
 
+def sample_inputs_switch(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
+
+
+def simple_switch(x):
+    # Tensor index so the HOP is actually captured (Python-constant indices
+    # would specialize away in dynamo).
+    from torch._higher_order_ops.switch import switch
+
+    idx = (x.sum() > 2).long()
+    return switch(
+        idx,
+        (lambda x: (x.cos(),), lambda x: (x.sin(),), lambda x: (x.abs(),)),
+        [x],
+    )
+
+
 def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -301,6 +322,20 @@ def simple_flex_attention_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+
+
+def sample_inputs_flex_gemm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    yield SampleInput(make_arg(2, 3, low=0.1, high=2), make_arg(3, 4, low=0.1, high=2))
+
+
+def simple_flex_gemm(a, b):
+    def epilogue_fn(acc):
+        return (acc + 1).relu()
+
+    return flex_gemm(torch.mm, (a, b), epilogue_fn)
 
 
 def sample_inputs_while_loop(opinfo, device, dtype, requires_grad, **kwargs):
@@ -518,6 +553,22 @@ hop_db = [
         supports_gradgrad=False,
     ),
     OpInfo(
+        name="switch",
+        variant_test_name="simple",
+        op=simple_switch,
+        sample_inputs_func=sample_inputs_switch,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        # The full SwitchAutogradOp lands in PR 3. PR 1 ships only a
+        # passthrough autograd stub (CompositeExplicitAutograd-style) that
+        # is not sufficient for HOP-level backward tests.
+        supports_autograd=False,
+    ),
+    OpInfo(
         name="invoke_quant",
         variant_test_name="simple",
         op=simple_invoke_quant,
@@ -618,6 +669,20 @@ hop_db = [
         op=simple_flex_attention_backward,
         sample_inputs_func=sample_inputs_flex_attention_backward_explicit_buffers,
         **cuda_only_dtypes(torch.float16, torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+        supports_gradgrad=False,
+    ),
+    OpInfo(
+        name="flex_gemm",
+        variant_test_name="simple",
+        op=simple_flex_gemm,
+        sample_inputs_func=sample_inputs_flex_gemm,
+        dtypes=custom_types(torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,

@@ -421,7 +421,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
       input_sorted[i] = input_flat[indices[i]];
     }
   } else {
-    input_sorted = input_flat;
+    input_sorted = std::move(input_flat);
   }
 
   Tensor inverse_indices = at::empty(indices.size(), self.options().dtype(kLong));
