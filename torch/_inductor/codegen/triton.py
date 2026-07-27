@@ -7959,14 +7959,15 @@ class TritonScheduling(SIMDScheduling):
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
+        backend_features = cls.backend_features.copy()
+        if device.type != "cpu":
+            backend_features.add(BackendFeature.DEVICE_ASSERT_ASYNC)
         if (
             config.triton.cooperative_reductions
             or config.triton.force_cooperative_reductions
         ):
-            return OrderedSet(
-                [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
-            )
-        return cls.backend_features
+            backend_features.add(BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
+        return backend_features
 
     def codegen_comment(self, node_schedule, kernel_name=None):
         wrapper = V.graph.wrapper_code

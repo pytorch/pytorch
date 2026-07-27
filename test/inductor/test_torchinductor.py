@@ -19131,6 +19131,35 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out.stride(), (1,))
         self.assertTrue(out._is_zerotensor())
 
+    @parametrize("invalid_p", (-0.1, 2.0))
+    def test_bernoulli_invalid_probabilities_raise(self, invalid_p):
+        if torch.device(self.device).type != "cpu":
+            raise unittest.SkipTest("CPU validation contract")
+
+        def fn(p):
+            return torch.bernoulli(p)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        p = torch.full((4,), invalid_p, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "Expected p_in"):
+            opt_fn(p)
+
+    def test_normal_negative_std_tensor_raises(self):
+        if torch.device(self.device).type != "cpu":
+            raise unittest.SkipTest("CPU validation contract")
+
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        mean = torch.zeros((4,), device=self.device)
+        std = torch.full((4,), -1.0, device=self.device)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "normal expects all elements of std >= 0.0"
+        ):
+            opt_fn(mean, std)
+
     # end of class CommonTemplate - add new tests here
 
 

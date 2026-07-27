@@ -1916,6 +1916,10 @@ def _assert_async(cond, msg):
 
 @register_lowering(aten._assert_async.msg)
 def lower_assert_async(cond, msg):
+    if not V.graph.has_feature(cond, BackendFeature.DEVICE_ASSERT_ASYNC):
+        return fallback_handler(aten._assert_async.msg, add_to_fallback_set=False)(
+            cond, msg
+        )
     return _assert_async(cond, msg)
 
 
