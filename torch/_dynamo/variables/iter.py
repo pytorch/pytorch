@@ -37,7 +37,7 @@ from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
-from .object_protocol import generic_getiter, generic_iternext
+from .object_protocol import generic_getiter, pyiter_next
 
 
 # chain.from_iterable is a method descriptor that creates a new object on each
@@ -70,7 +70,7 @@ def is_iterator_exhausted(
     tx: "InstructionTranslatorBase", iterator: VariableTracker
 ) -> bool:
     try:
-        generic_iternext(tx, iterator)
+        pyiter_next(tx, iterator)
         return False
     except ObservedUserStopIteration:
         handle_observed_exception(tx)
@@ -361,7 +361,7 @@ class ChainVariable(IteratorVariable):
             if self.current is None:
                 # Pull next sub-iterable from source (source is always an iterator)
                 try:
-                    next_raw = generic_iternext(tx, self.source_iterator)
+                    next_raw = pyiter_next(tx, self.source_iterator)
                 except ObservedUserStopIteration:
                     handle_observed_exception(tx)
                     raise_observed_exception(StopIteration, tx)
@@ -370,7 +370,7 @@ class ChainVariable(IteratorVariable):
                 tx.output.side_effects.mutation(self)
                 self.current = it
             try:
-                return generic_iternext(tx, self.current)
+                return pyiter_next(tx, self.current)
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 tx.output.side_effects.mutation(self)
@@ -586,7 +586,7 @@ class ZipVariable(IteratorVariable):
         for i in range(tuplesize):
             it = self.iterable.items[i]
             try:
-                items.append(generic_iternext(tx, it))
+                items.append(pyiter_next(tx, it))
             except ObservedUserStopIteration:
                 if not self.strict:
                     raise
@@ -672,7 +672,7 @@ class ZipLongestVariable(IteratorVariable):
                 values.append(self.fillvalue)
             else:
                 try:
-                    values.append(generic_iternext(tx, it))
+                    values.append(pyiter_next(tx, it))
                     any_active = True
                 except ObservedUserStopIteration:
                     handle_observed_exception(tx)
@@ -764,7 +764,7 @@ class MapVariable(IteratorVariable):
         for i in range(tuplesize):
             it = self.iterable.items[i]
             try:
-                items.append(generic_iternext(tx, it))
+                items.append(pyiter_next(tx, it))
             except ObservedUserStopIteration:
                 if not self.strict:
                     raise
@@ -837,7 +837,7 @@ class FilterVariable(IteratorVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L573-L606
         # A do-while loop to find elements that make fn return true
         while True:
-            item = generic_iternext(tx, self.iterable)
+            item = pyiter_next(tx, self.iterable)
             if self.fn.is_constant_none():
                 res = item
             else:

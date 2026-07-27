@@ -2068,6 +2068,52 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         # Sorts stay fused in the combo: tuned normally, no carve-out fallbacks.
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
+    @requires_gpu_and_triton
+    @parametrize("benchmark_combo_kernel", [False, True])
+    def test_benchmarking_excludes_indirect_indexing(self, benchmark_combo_kernel):
+        def fn(a, b, c, idx):
+            return a[idx + 1024], b * 2.0, c + 1.0
+
+        inps = [
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            # Real indices map to zero; synthetic zero-filled indices map out of bounds.
+            torch.full((256,), -1024, device=GPU_TYPE, dtype=torch.int64),
+        ]
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "benchmark_combo_kernel": benchmark_combo_kernel,
+                    "combo_kernel_compile_time_autotune": not benchmark_combo_kernel,
+                }
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        src = code[0]
+        # The gather is its own kernel; the combo stitches only the 2 pointwise subkernels.
+        FileCheck().check("triton_poi_fused_add_index").check("'num_kernels': 2").run(
+            src
+        )
+
+    @requires_gpu_and_triton
+    def test_disabled_autotune_keeps_indirect_indexing(self):
+        def fn(a, b, c, idx):
+            return a[idx + 1024], b * 2.0, c + 1.0
+
+        inps = [
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.full((256,), -1024, device=GPU_TYPE, dtype=torch.int64),
+        ]
+        with fresh_cache(), torch._inductor.config.patch({"combo_kernels_autotune": 0}):
+            out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        FileCheck().check("'num_kernels': 3").run(code[0])
+
 
 @instantiate_parametrized_tests
 class ComboKernelPDLTests(TestCase):

@@ -58,7 +58,6 @@ class TestBwdGradients(TestGradients):
         | {
             xfail("cov"),
             xfail("istft"),
-            xfail("native_group_norm"),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
             xfail("as_strided_scatter"),

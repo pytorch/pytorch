@@ -115,6 +115,9 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
     fi
   done
 
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
 fi
 
 # Use special scripts for Android builds
@@ -246,6 +249,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
   # Release xpu build stress with WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
@@ -272,7 +276,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
   # on a from-source build that test jobs don't have. --dry-run reads the tree
   # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
-  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && [[ "${USE_NINJA}" != "0" ]] && grep -q "csrc/Module.cpp" build/compile_commands.json; then
     debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
     echo "${debinfo_plan}"
     grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
