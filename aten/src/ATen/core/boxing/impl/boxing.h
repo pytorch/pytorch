@@ -11,6 +11,7 @@
 
 #include <c10/util/Metaprogramming.h>
 #include <cstddef>
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -98,22 +99,18 @@ consteval size_t boxed_size() {
   return (size_t{0} + ... + boxed_size_one<Args>());
 }
 
-// dest is only incremented after an IValue is fully constructed, so that
-// cleanup code (e.g. detail::BoxedBufferGuard) never destroys an
+// dest is only advanced past a slot once its IValue is fully constructed,
+// so cleanup code (e.g. detail::BoxedBuffer) never destroys an
 // unconstructed slot if a constructor throws.
 template <typename T>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValue*& dest, T&& arg) {
   if constexpr (std::is_same_v<std::decay_t<T>, c10::TensorOptions>) {
-    new (dest) IValue(c10::typeMetaToScalarType(arg.dtype()));
-    ++dest;
-    new (dest) IValue(arg.layout());
-    ++dest;
-    new (dest) IValue(arg.device());
-    ++dest;
-    new (dest) IValue(arg.pinned_memory());
-    ++dest;
+    boxToStack(dest, c10::typeMetaToScalarType(arg.dtype()));
+    boxToStack(dest, arg.layout());
+    boxToStack(dest, arg.device());
+    boxToStack(dest, arg.pinned_memory());
   } else {
-    new (dest) IValue(std::forward<T>(arg));
+    std::construct_at(dest, std::forward<T>(arg));
     ++dest;
   }
 }
@@ -135,19 +132,30 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
 // of them in libtorch).
 //
 
-// Moves [begin, end) into a freshly allocated Stack and destroys the moved
-// IValues. On exception (allocation failure) the buffer is left untouched.
-TORCH_API torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end);
+// Moves [begin, end) into a freshly allocated Stack, destroying the drained
+// IValues and resetting end to begin. On exception (Stack allocation
+// failure) the buffer is left untouched.
+TORCH_API torch::jit::Stack boxedBufferToStack(IValue* begin, IValue*& end);
 
 namespace detail {
-// Destroys [begin, cur) on unwind if boxing an argument throws.
-struct BoxedBufferGuard final {
+// Uninitialized storage for N boxed IValues. Destroys the constructed
+// prefix [begin, end) on destruction; a successful boxedBufferToStack
+// empties the range, so the destructor only does work when boxing or the
+// Stack allocation threw.
+template <size_t N>
+struct BoxedBuffer final {
+  // See Dispatcher::callWithDispatchKeySlowPath for why this is not an
+  // std::array<IValue, N>.
+  // NOLINTNEXTLINE(*array*)
+  alignas(IValue) std::byte storage[N * sizeof(IValue)];
   IValue* begin;
-  IValue* cur;
-  ~BoxedBufferGuard() {
-    while (cur != begin) {
-      (--cur)->~IValue();
-    }
+  IValue* end;
+
+  BoxedBuffer() : begin(reinterpret_cast<IValue*>(storage)), end(begin) {}
+  BoxedBuffer(const BoxedBuffer&) = delete;
+  BoxedBuffer& operator=(const BoxedBuffer&) = delete;
+  ~BoxedBuffer() {
+    std::destroy(begin, end);
   }
 };
 } // namespace detail
@@ -158,16 +166,9 @@ torch::jit::Stack boxArgs(Args&&... args) {
   if constexpr (num_boxed == 0) {
     return torch::jit::Stack();
   } else {
-    // See Dispatcher::callWithDispatchKeySlowPath for why this is not an
-    // std::array<IValue, num_boxed>.
-    // NOLINTNEXTLINE(*array*)
-    alignas(IValue) std::byte buffer[num_boxed * sizeof(IValue)];
-    IValue* const buffer_begin = reinterpret_cast<IValue*>(buffer);
-    detail::BoxedBufferGuard guard{buffer_begin, buffer_begin};
-    boxArgsToStack(guard.cur, std::forward<Args>(args)...);
-    torch::jit::Stack stack = boxedBufferToStack(guard.begin, guard.cur);
-    guard.cur = guard.begin;
-    return stack;
+    detail::BoxedBuffer<num_boxed> buffer;
+    boxArgsToStack(buffer.end, std::forward<Args>(args)...);
+    return boxedBufferToStack(buffer.begin, buffer.end);
   }
 }
 
