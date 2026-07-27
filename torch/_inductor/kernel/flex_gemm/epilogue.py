@@ -912,10 +912,47 @@ def grouped_main_output_transform(
         selected_indices.add(index % group)
         return True
 
+    def bind_all_lanes(
+        source: torch.fx.Node,
+        shape: tuple[Any, ...],
+        group: int,
+        chunked: bool,
+    ) -> bool:
+        """Bind a transform that consumes every lane without explicit selects."""
+        return all(
+            bind_lane(source, shape, group, chunked, index) for index in range(group)
+        )
+
     def visit(node: Any) -> bool:
         if not isinstance(node, torch.fx.Node) or node in seen:
             return True
         seen.add(node)
+        if (
+            node.op == "call_function"
+            and node.target is torch.ops.flex_gemm.nvfp4_pack.default
+            and len(node.args) == 1
+            and isinstance(node.args[0], torch.fx.Node)
+        ):
+            grouped = node.args[0]
+            grouped_args = view_or_reshape_args(grouped)
+            grouped_shape = tensor_meta_shape(grouped)
+            layout = FlexGemmLocalReduceGeometry(group=2, axis=1)
+            if (
+                grouped_args is not None
+                and isinstance(grouped_args[0], torch.fx.Node)
+                and grouped_shape is not None
+                and gemm_shape is not None
+                and len(grouped_shape) == 3
+                and grouped_shape[-1] == layout.group
+                and statically_known_shape_equal(
+                    (grouped_shape[0], grouped_shape[1] * layout.group),
+                    gemm_shape,
+                )
+                and local_reduce.graph.depends_on(grouped_args[0], gemm)
+                and bind_all_lanes(grouped_args[0], grouped_shape, layout.group, False)
+            ):
+                pending_grouped[grouped] = layout
+                return True
         if (
             node.op == "call_function"
             and node.target is operator.getitem
@@ -1502,6 +1539,7 @@ class FlexGemmEpilogueEmitter:
             "from cutlass._mlir_helpers import math as cutlass_math\n"
             "from torch._inductor.kernel.flex_gemm.quant_intrinsics import (\n"
             "    mx_e8m0_scale_intrinsic,\n"
+            "    nvfp4_pack_intrinsic,\n"
             ")\n\n"
             f"{local_reduce_source}"
             f"@cute.jit\ndef {name}({epilogue_params}):\n"
