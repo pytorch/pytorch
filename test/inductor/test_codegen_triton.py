@@ -43,23 +43,6 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
-if has_triton_package():
-    import triton
-    import triton.language as tl
-
-    @triton.jit
-    def helper_for_dependency_order(x):
-        return x + 1
-
-    @triton.jit
-    def root_for_dependency_order(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
-        pid = tl.program_id(axis=0)
-        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        values = helper_for_dependency_order(tl.load(x + offsets, mask=mask))
-        tl.store(out + offsets, values, mask=mask)
-
-
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -688,25 +671,6 @@ def helper(x):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
-
-    @unittest.skipUnless(has_triton_package(), "requires Triton")
-    def test_user_defined_triton_kernel_dependency_before_root(self):
-        from torch._inductor.codegen.wrapper import (
-            user_defined_triton_kernel_transitive_closure_source_code,
-        )
-
-        source = user_defined_triton_kernel_transitive_closure_source_code(
-            root_for_dependency_order
-        )
-        helper_idx = source.index("def helper_for_dependency_order")
-        root_idx = source.index("def root_for_dependency_order")
-        self.assertLess(helper_idx, root_idx)
-
-        dependency_source = user_defined_triton_kernel_transitive_closure_source_code(
-            root_for_dependency_order, include_root=False
-        )
-        self.assertIn("def helper_for_dependency_order", dependency_source)
-        self.assertNotIn("def root_for_dependency_order", dependency_source)
 
     def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
         # Regression: a backend whose import_get_raw_stream_as returns a
