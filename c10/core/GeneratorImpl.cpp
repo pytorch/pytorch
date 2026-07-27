@@ -43,11 +43,11 @@ c10::intrusive_ptr<c10::GeneratorImpl> GeneratorImpl::graphsafe_get_state()
       false, "graphsafe_get_state is not supported in this Generator");
 }
 
-std::tuple<
-    c10::intrusive_ptr<c10::TensorImpl>,
-    c10::intrusive_ptr<c10::TensorImpl>,
-    c10::intrusive_ptr<c10::TensorImpl>>
-GeneratorImpl::philox_state(uint64_t /*increment*/) {
+void GeneratorImpl::philox_state(
+    uint64_t /*increment*/,
+    at::Tensor& /*seed*/,
+    at::Tensor& /*offset*/,
+    at::Tensor& /*intragraph_offset*/) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "philox_state is not supported in this Generator");
 }

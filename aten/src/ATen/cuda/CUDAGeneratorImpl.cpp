@@ -501,7 +501,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
 
 /**
  * Tensor-based variant of philox_cuda_state for consumers that cannot
- * take a PhiloxCudaState (e.g. Python). Returns 1-element int64 tensors
+ * take a PhiloxCudaState (e.g. Python). Writes 1-element int64 tensors
  * (seed, offset, intragraph_offset); the kernel-visible values are
  * (seed, offset + intragraph_offset), with the uint64 seed and offset
  * reinterpreted as int64. During capture, seed and offset are aliases of
@@ -512,41 +512,33 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
  *
  * See Note [Acquire lock when using random generators]
  */
-std::tuple<
-    c10::intrusive_ptr<c10::TensorImpl>,
-    c10::intrusive_ptr<c10::TensorImpl>,
-    c10::intrusive_ptr<c10::TensorImpl>>
-CUDAGeneratorImpl::philox_state(uint64_t increment) {
+void CUDAGeneratorImpl::philox_state(
+    uint64_t increment,
+    at::Tensor& seed,
+    at::Tensor& offset,
+    at::Tensor& intragraph_offset) {
   const auto cpu_opts = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
   const auto dev_opts = at::TensorOptions().dtype(at::kLong).device(device());
   auto capture_id = at::cuda::currentStreamCaptureId();
   if (capture_id.has_value()) {
     auto* capture_state = state_->get_capture_state(capture_id.value(), true);
-    uint64_t offset = capture_state->offset_intragraph_;
+    uint64_t intragraph = capture_state->offset_intragraph_;
     state_->increase(increment);
     // Aliases (not the tensors themselves) so callers cannot mutate the
     // capture state's metadata; the storage itself is non-resizable (see
-    // CUDAGeneratorCaptureState::initialize). wrap_tensor_impl converts the
-    // at::TensorBase members to the at::Tensor that at::alias expects.
-    auto seed_t = at::alias(at::Tensor::wrap_tensor_impl(
-        capture_state->rng_state_seed_extragraph_.getIntrusivePtr()));
-    auto off_t = at::alias(at::Tensor::wrap_tensor_impl(
-        capture_state->rng_state_offset_extragraph_.getIntrusivePtr()));
-    auto intra_t = at::full({1}, static_cast<int64_t>(offset), cpu_opts);
-    return {
-        seed_t.getIntrusivePtr(),
-        off_t.getIntrusivePtr(),
-        intra_t.getIntrusivePtr()};
+    // CUDAGeneratorCaptureState::initialize). The Tensor(TensorBase) ctor
+    // bridges the at::TensorBase members to at::Tensor, which has alias().
+    seed = at::Tensor(capture_state->rng_state_seed_extragraph_).alias();
+    offset = at::Tensor(capture_state->rng_state_offset_extragraph_).alias();
+    intragraph_offset =
+        at::full({1}, static_cast<int64_t>(intragraph), cpu_opts);
+    return;
   }
-  uint64_t offset = state_->philox_offset_per_thread_;
+  uint64_t current_offset = state_->philox_offset_per_thread_;
   state_->increase(increment);
-  auto seed_t = at::full({1}, static_cast<int64_t>(state_->seed_), dev_opts);
-  auto off_t = at::full({1}, static_cast<int64_t>(offset), dev_opts);
-  auto intra_t = at::zeros({1}, cpu_opts);
-  return {
-      seed_t.getIntrusivePtr(),
-      off_t.getIntrusivePtr(),
-      intra_t.getIntrusivePtr()};
+  seed = at::full({1}, static_cast<int64_t>(state_->seed_), dev_opts);
+  offset = at::full({1}, static_cast<int64_t>(current_offset), dev_opts);
+  intragraph_offset = at::zeros({1}, cpu_opts);
 }
 
 /**
