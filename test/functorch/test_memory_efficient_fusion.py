@@ -406,6 +406,24 @@ class ReduceTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 1)
 
+    def test_nan_full_deduplication(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_neg_nan_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, -float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
 
 class RandomOpTestCase(TestCase):
     def test_random(self):

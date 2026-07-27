@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import operator
 from typing import Any, TYPE_CHECKING
 
@@ -20,6 +21,18 @@ if TYPE_CHECKING:
     from torch.utils._pytree import TreeSpec
 
 aten = torch.ops.aten
+
+
+def _normalize_cse_arg(val: Any) -> Any:
+    """Replace NaN float values with a sign-preserving sentinel that compares equal to itself.
+
+    IEEE 754 NaN values do not compare equal (nan != nan), which prevents CSE from
+    deduplicating identical NaN-filled tensors. Replace NaN floats with a sign-preserving
+    sentinel so the token equality check passes.
+    """
+    if isinstance(val, float) and math.isnan(val):
+        return ("__CSE_NAN__", math.copysign(1.0, val))
+    return val
 
 
 def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
@@ -207,9 +220,9 @@ def fx_graph_cse(
             token = {
                 "target": n.target,
                 "extra_key": extra_key,
-                "args": args,
+                "args": tuple(_normalize_cse_arg(a) for a in args),
                 "args_spec": args_spec,
-                "kwargs": kwargs,
+                "kwargs": tuple(_normalize_cse_arg(a) for a in kwargs),
                 "kwargs_spec": kwargs_spec,
                 "custom_context": custom_context_key(n),
             }
@@ -217,8 +230,13 @@ def fx_graph_cse(
             # hash substituted args to a number, do not hash specs because specs are not hashable
             # We need to add type into hash to avoid situations like:
             # hash((primals_2, 1.0)) == hash((primals_2, 1))
+            # Normalize args with _normalize_cse_arg to ensure NaN values hash consistently --
+            # different float('nan') instances have different hashes in CPython.
             hash_arg = hash(
-                (tuple((a, type(a)) for a in args), tuple((a, type(a)) for a in kwargs))
+                (
+                    tuple((_normalize_cse_arg(a), type(a)) for a in args),
+                    tuple((_normalize_cse_arg(a), type(a)) for a in kwargs),
+                )
             )
             hash_val = (n.target, extra_key, hash_arg)
 
