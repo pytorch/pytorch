@@ -42,7 +42,8 @@ Tensor cov(
   // View input tensor as 2D (variables, observations)
   auto in = self.ndimension() < 2 ? self.view({1, -1}) : self;
   const auto num_observations = in.sym_size(OBSERVATIONS_DIM);
-  // Fake tensors only need shape propagation; real tensors still run value checks.
+  // Fake or symbolic tensors only need shape propagation; real tensors still
+  // run value checks.
   const auto can_check_values = [](const Tensor& tensor) {
     return !tensor.is_fake() &&
         !tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
@@ -73,7 +74,7 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        num_observations == 0 || !can_check_values(w) ||
+        !can_check_values(w) || num_observations == 0 ||
             at::is_scalar_tensor_true(w.min().ge(0)),
         "cov(): fweights cannot be negative");
   }
@@ -97,7 +98,7 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        num_observations == 0 || !can_check_values(aw) ||
+        !can_check_values(aw) || num_observations == 0 ||
             at::is_scalar_tensor_true(aw.min().ge(0)),
         "cov(): aweights cannot be negative");
     w = w.defined() ? w * aw : aw;
@@ -136,7 +137,9 @@ Tensor cov(
     }
   }
 
-  if ((!w.defined() || can_check_values(w)) &&
+  const auto can_check_norm_factor =
+      w.defined() ? can_check_values(w) : can_check_values(in);
+  if (can_check_norm_factor &&
       at::is_scalar_tensor_true(norm_factor.le(0))) {
     TORCH_WARN("cov(): degrees of freedom is <= 0. Correction should be strictly less than the number of observations.");
     norm_factor.zero_();

@@ -200,8 +200,10 @@ from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
     generic_bool,
     generic_contains,
+    generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_setitem,
     pyiter_send,
 )
 from .variables.sets import SetVariable
@@ -4055,7 +4057,7 @@ class InstructionTranslatorBase(
             and source.local_name == self._boxed_resume_arg_name()
         ):
             return
-        obj.call_method(self, "__setitem__", [key, val], {})
+        generic_setitem(self, obj, key, val)
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
@@ -4071,7 +4073,7 @@ class InstructionTranslatorBase(
         # user code and add unwanted graph nodes.
         if not self.is_tracing_resume_prologue:
             self._maybe_sync_dealloc_subscr(obj, key)
-        obj.call_method(self, "__delitem__", [key], {})
+        generic_delitem(self, obj, key)
 
     def _maybe_sync_dealloc_subscr(
         self, obj: VariableTracker, key: VariableTracker
@@ -4211,7 +4213,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected isinstance(obj, ConstDictVariable) to be true"
             )
-        obj.call_method(self, "__setitem__", (k, v), {})  # type: ignore[arg-type]
+        generic_setitem(self, obj, k, v)
 
     def SET_ADD(self, inst: Instruction) -> None:
         v = self.pop()

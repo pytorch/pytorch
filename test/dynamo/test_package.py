@@ -412,7 +412,11 @@ def add(x, y):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    def test_reset_clears_installed_package(self):
+    @parametrize("backend", ("eager", "inductor"))
+    def test_reset_clears_installed_package(self, backend):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190664.
+        # package.install() must register target_code in input_codes so that
+        # torch._dynamo.reset() clears precompile entries on the installed code.
         from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
         ctx = DiskDynamoStore()
@@ -421,10 +425,11 @@ def add(x, y):
             return x.sin() + x.cos()
 
         package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
         compiled_fn(torch.randn(3, 2))
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
+        if backend == "eager":
+            for backend_id, bknd in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, bknd)
         ctx.save_package(package, self.path())
 
         torch._dynamo.reset()

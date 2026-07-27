@@ -2491,13 +2491,6 @@ class OutputGraph(OutputGraphCommon):
                     resume_arg_indexes_to_clear,
                     use_boxed_graph_call,
                 )
-                if (
-                    resume_args_varname is not None
-                    and resume_args_varname in graph_input_names_to_delete
-                ):
-                    tx._mark_resume_args_cleanup_emitted()
-                    if self.root_tx is not tx:
-                        self.root_tx._mark_resume_args_cleanup_emitted()
                 output.extend(instructions)
 
                 if len(pass2.graph_outputs) != 0:

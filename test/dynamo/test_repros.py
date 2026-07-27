@@ -44,6 +44,7 @@ import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
+from torch._dynamo.output_graph import _as_boxed_call, _uses_boxed_call
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -56,6 +57,7 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._inductor.utils import fresh_cache
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import (
     AuxRequest,
@@ -8670,6 +8672,48 @@ SavedForBackwardsAOTOutput(idx=5)""",
                         (torch.randn(5), torch.randn(6)),
                     ):
                         self.assertEqual(fn(*args), opt_fn(*args))
+
+    def test_as_boxed_call_lazy_graph_module(self):
+        def fn(x, y):
+            return x + y
+
+        gm = torch.fx.symbolic_trace(fn)
+        lazy_gm = _LazyGraphModule.from_graphmodule(gm)
+        boxed = _as_boxed_call(lazy_gm.forward)
+        self.assertIsNotNone(boxed)
+
+        x = torch.randn(2)
+        y = torch.randn(2)
+        args = [x, y]
+        self.assertEqual(boxed(args), fn(x, y))
+        self.assertEqual(args, [])
+        self.assertTrue(_uses_boxed_call(lazy_gm.forward))
+
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    def test_cov_dynamic(self):
+        compiled_unweighted = torch.compile(
+            torch.cov, backend="eager", dynamic=True, fullgraph=True
+        )
+
+        def weighted_cov(x, fweights, aweights):
+            return torch.cov(x, fweights=fweights, aweights=aweights)
+
+        compiled_weighted = torch.compile(
+            weighted_cov, backend="eager", dynamic=True, fullgraph=True
+        )
+        for observations in (3, 5):
+            x = torch.randn(2, observations)
+            fweights = torch.randint(1, 4, (observations,))
+            aweights = torch.rand(observations)
+            self.assertEqual(compiled_unweighted(x), torch.cov(x))
+            self.assertEqual(
+                compiled_weighted(x, fweights, aweights),
+                weighted_cov(x, fweights, aweights),
+            )
+
+        with self.assertWarnsRegex(UserWarning, "degrees of freedom is <= 0"):
+            result = torch.cov(torch.randn(2, 1))
+        self.assertTrue(result.isnan().all())
 
     def test_resume_args_name_collision(self):
         def user_arg_name(__resume_args):  # noqa: PYI063
