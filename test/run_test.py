@@ -115,7 +115,6 @@ RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1
 NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
 IS_S390X = platform.machine() == "s390x"
 
 
@@ -371,10 +370,6 @@ CORE_TEST_LIST = [
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
-
-DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE: dict[str, int] = {
-    "test_nn": 6,
-}
 
 DISTRIBUTED_TESTS_CONFIG = {}
 
@@ -656,24 +651,7 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
-    timeout_multiplier = (
-        DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE.get(test_file, 3)
-        if options.dynamo
-        else 3
-    )
-    timeout = (
-        None
-        if not options.enable_timeout
-        else THRESHOLD * 6
-        if IS_SLOW
-        else THRESHOLD * timeout_multiplier
-        if should_retry
-        and isinstance(test_module, ShardedTest)
-        and test_module.time is not None
-        else THRESHOLD * 3
-        if is_cpp_test
-        else None
-    )
+    timeout = THRESHOLD if options.enable_timeout else None
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
     with ExitStack() as stack:
@@ -763,6 +741,39 @@ def extend_python_path(install_directories):
         os.environ["PYTHONPATH"] = python_path
 
 
+def _td_tracer_pytest_args(options) -> list[str]:
+    tracer_args = []
+    args = iter(options.additional_args)
+    for arg in args:
+        if arg == "--td-tracer":
+            tracer_args.extend((arg, next(args, "")))
+        elif arg.startswith("--td-tracer="):
+            tracer_args.append(arg)
+    return tracer_args
+
+
+def _run_custom_pytest(command, test_directory, options, env) -> int:
+    output_path = env.get("PYTORCH_TD_TRACER_OUTPUT")
+    run_id = env.get("PYTORCH_TD_TRACER_RUN_ID")
+    fragment_dir = None
+    before = set()
+    if output_path and run_id:
+        fragment_dir = Path(f"{Path(output_path).resolve()}.td-tracer.d") / run_id
+        before = set(fragment_dir.glob("*.json"))
+
+    return_code = shell(
+        [*command, *_td_tracer_pytest_args(options)],
+        cwd=test_directory,
+        env=env,
+    )
+    if return_code == 0 and fragment_dir is not None:
+        after = set(fragment_dir.glob("*.json"))
+        if after == before:
+            print_to_stderr("TD tracer subprocess produced no fragment")
+            return 1
+    return return_code
+
+
 def try_set_cpp_stack_traces(env, command, set=True):
     # Print full c++ stack traces during retries
     env = env or {}
@@ -788,14 +799,14 @@ def run_test_retries(
     # If continue through error is not set, then we fail fast.
     #
     # If continue through error is set, then we skip that test, and keep going.
-    # Basically if the same test fails 3 times in a row, skip the test on the
-    # next run, but still fail in the end. I take advantage of the value saved
-    # in stepcurrent to keep track of the most recently run test (which is the
-    # one that failed if there was a failure).
+    # If a test fails, skip it on the next run, but still fail in the end. I take
+    # advantage of the value saved in stepcurrent to keep track of the most
+    # recently run test (which is the one that failed if there was a failure).
 
     def print_to_file(s):
         print(s, file=output, flush=True)
 
+    failure_threshold = 1
     num_failures = defaultdict(int)
 
     def read_pytest_cache(key: str) -> Any:
@@ -851,7 +862,7 @@ def run_test_retries(
             print_to_file(
                 "Test succeeded in new process, continuing with the rest of the tests"
             )
-        elif num_failures[current_failure] >= 3:
+        elif num_failures[current_failure] >= failure_threshold:
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
@@ -876,8 +887,12 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
+    consistent_failures = [
+        x[1:-1] for x in num_failures if num_failures[x] >= failure_threshold
+    ]
+    flaky_failures = [
+        x[1:-1] for x in num_failures if 0 < num_failures[x] < failure_threshold
+    ]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -992,14 +1007,14 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
 
 
 def test_autoload_enable(test_module, test_directory, options):
-    return _test_autoload(test_directory, options, enable=True)
+    return _test_autoload(test_module, test_directory, options, enable=True)
 
 
 def test_autoload_disable(test_module, test_directory, options):
-    return _test_autoload(test_directory, options, enable=False)
+    return _test_autoload(test_module, test_directory, options, enable=False)
 
 
-def _test_autoload(test_directory, options, enable=True):
+def _test_autoload(test_module, test_directory, options, enable=True):
     cpp_extensions_test_dir = os.path.join(test_directory, "cpp_extensions")
     install_directory, return_code = install_cpp_extensions(cpp_extensions_test_dir)
     if return_code != 0:
@@ -1008,6 +1023,17 @@ def _test_autoload(test_directory, options, enable=True):
     try:
         os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
         with extend_python_path([install_directory]):
+            if getattr(options, "td_tracer_enabled", False):
+                from td_tracer import TD_TRACER_CURRENT_TEST_ENV
+
+                env = os.environ.copy()
+                env[TD_TRACER_CURRENT_TEST_ENV] = test_module.name
+                return _run_custom_pytest(
+                    [sys.executable, "-m", "pytest", "-q", "test_autoload.py"],
+                    test_directory,
+                    options,
+                    env,
+                )
             cmd = [sys.executable, "test_autoload.py"]
             return_code = shell(cmd, cwd=test_directory, env=os.environ)
             return return_code
@@ -1037,14 +1063,26 @@ def test_openreg(test_module, test_directory, options):
         if return_code != 0:
             return return_code
 
+    tests_dir = os.path.join(openreg_dir, "tests")
     with extend_python_path([install_dir]):
+        if getattr(options, "td_tracer_enabled", False):
+            from td_tracer import TD_TRACER_CURRENT_TEST_ENV
+
+            env = os.environ.copy()
+            env[TD_TRACER_CURRENT_TEST_ENV] = test_module.name
+            return _run_custom_pytest(
+                [sys.executable, "-m", "pytest", "-q", tests_dir],
+                test_directory,
+                options,
+                env,
+            )
         cmd = [
             sys.executable,
             "-m",
             "unittest",
             "discover",
             "-s",
-            os.path.join(openreg_dir, "tests"),
+            tests_dir,
             "-v",
         ]
         return shell(cmd, cwd=test_directory, env=os.environ)
@@ -1134,6 +1172,15 @@ def run_doctests(test_module, test_directory, options):
     xdoctest runner on the torch library itself.
     """
     import xdoctest
+
+    if (
+        getattr(options, "td_tracer_enabled", False)
+        and options.xdoctest_command != "all"
+    ):
+        print_to_stderr(
+            "--xdoctest-command only supports 'all' when TD tracing is enabled"
+        )
+        return 1
 
     pkgpath = Path(torch.__file__).parent
 
@@ -1247,6 +1294,32 @@ def run_doctests(test_module, test_directory, options):
         "options": "+IGNORE_WHITESPACE",
     }
     xdoctest_verbose = max(1, options.verbose)
+    if getattr(options, "td_tracer_enabled", False):
+        from td_tracer import TD_TRACER_CURRENT_TEST_ENV
+
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "conftest",
+            "--noconftest",
+            pkgpath,
+            "--xdoctest-modules",
+            "--xdoctest-analysis=static",
+            "--xdoctest-style=google",
+            "--xdoctest-options=+IGNORE_WHITESPACE",
+            f"--xdoctest-verbose={xdoctest_verbose}",
+            "--xdoctest-global-exec",
+            xdoctest_config["global_exec"],
+        ]
+        for excluded_module in exclude_module_list:
+            relative_path = excluded_module.removeprefix("torch.").removesuffix(".*")
+            command.extend(("--ignore", os.path.join(pkgpath, relative_path)))
+        env = os.environ.copy()
+        env[TD_TRACER_CURRENT_TEST_ENV] = "doctests"
+        return _run_custom_pytest(command, test_directory, options, env)
+
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath),
         config=xdoctest_config,
@@ -2125,6 +2198,7 @@ def run_tests(
     conftest_files = [
         "conftest.py",
         "pytest_shard_custom.py",
+        "td_tracer.py",
     ]
     for conftest_file in conftest_files:
         cpp_file = os.path.join(CPP_TESTS_DIR, conftest_file)
@@ -2243,6 +2317,23 @@ def main():
     check_pip_packages()
 
     options = parse_args()
+    td_tracer_output = os.environ.get("PYTORCH_TD_TRACER_OUTPUT")
+    td_tracer_requested = any(
+        arg == "--td-tracer" or arg.startswith("--td-tracer=")
+        for arg in options.additional_args
+    )
+    if td_tracer_output and not td_tracer_requested:
+        output_path = Path(td_tracer_output)
+        if not output_path.is_absolute():
+            output_path = REPO_ROOT / output_path
+        options.additional_args.append(f"--td-tracer={output_path}")
+    if td_tracer_output or td_tracer_requested:
+        from td_tracer import ensure_td_tracer_run_id
+
+        ensure_td_tracer_run_id()
+    options.td_tracer_enabled = bool(td_tracer_output or td_tracer_requested)
+    if options.td_tracer_enabled:
+        options.exclude.append("test_ci_sanity_check_fail")
     tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
     if tests_to_include_env:
         # Parse env var tests to module names (strips .py suffix and ::method)
