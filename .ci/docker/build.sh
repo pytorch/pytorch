@@ -153,29 +153,29 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang18)
+  pytorch-linux-jammy-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.11-clang18)
+  pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.12-clang18)
+  pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.13-clang18)
+  pytorch-linux-jammy-py3.13-clang21)
     ANACONDA_PYTHON_VERSION=3.13
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-py3.14-clang18)
+  pytorch-linux-jammy-py3.14-clang21)
     ANACONDA_PYTHON_VERSION=3.14
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -204,14 +204,14 @@ case "$tag" in
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    XPU_VERSION=2025.3
+    XPU_VERSION=2026.0
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    XPU_VERSION=2026.0
+    XPU_VERSION=2026.1
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -235,9 +235,9 @@ case "$tag" in
     CLANG_VERSION=18
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang18-executorch)
+  pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
