@@ -3348,18 +3348,17 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         thresholds,
         graph_outputs=None,
         mem_ctx=None,
+        scheduler=None,
     ):
-        from torch._inductor.scheduler import ComboKernelMemoryContext, Scheduler
+        from torch._inductor.scheduler import Scheduler
 
-        scheduler = _PeakMemFakeScheduler(nodes)
+        scheduler = scheduler or _PeakMemFakeScheduler(nodes)
         if mem_ctx is None:
-            mem_ctx = ComboKernelMemoryContext(
-                graph_outputs=set() if graph_outputs is None else graph_outputs,
-                node_to_idx={node: idx for idx, node in enumerate(nodes)},
-                baseline_peak=baseline_peak,
-                running_peak=baseline_peak,
-                baseline_live_before=baseline_live_before,
-                accepted_live_delta=[0] * (len(nodes) + 1),
+            mem_ctx = ComboKernelPeakMemoryTests._memory_context(
+                nodes,
+                baseline_peak,
+                baseline_live_before,
+                graph_outputs=graph_outputs,
             )
 
         def _fake_combo(scheduler_arg, snodes, **kwargs):
@@ -3384,6 +3383,26 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 mem_ctx,
                 enable_autotune=False,
             )
+
+    @staticmethod
+    def _memory_context(nodes, baseline_peak, live_before, graph_outputs=None):
+        from torch._inductor.scheduler import ComboKernelMemoryContext
+
+        node_to_idx = {node: idx for idx, node in enumerate(nodes)}
+        return ComboKernelMemoryContext(
+            graph_outputs=set() if graph_outputs is None else graph_outputs,
+            node_to_idx=node_to_idx,
+            baseline_peak=baseline_peak,
+            running_peak=baseline_peak,
+            current_nodes=list(nodes),
+            current_node_to_idx=node_to_idx.copy(),
+            current_live_before=live_before,
+            current_step_peak=[
+                live_before[idx]
+                + sum(buf.mpi_buffer.size_alloc for buf in node.get_outputs())
+                for idx, node in enumerate(nodes)
+            ],
+        )
 
     def test_threshold_gating(self):
         """abs_thr/pct_thr set to 0 or a too-small bound reject."""
@@ -3451,9 +3470,8 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
 
     def test_accepts_charge_later_windows(self):
-        """A buffer lifetime-extended by an accepted combo must be visible to
-        later candidate windows (accepted_live_delta), so overlapping
-        extensions cannot each pass the threshold as if independent.
+        """Later candidates must see the schedule produced by earlier accepts,
+        so overlapping extensions cannot each pass as if independent.
 
         Schedule (10 steps): two interleaved just-in-time producer/consumer
         pairs per "layer", global peak elsewhere (BIG at step 8).
@@ -3465,16 +3483,12 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
           step 8: BIG (250) step 9: uBIG      <- baseline peak 250
 
         Window A = combo{z1, z2}: hoists z2's alloc from step 4 to step 0.
-        Its own walk sees the stack (z1+z2 = 160 < 250) -> accepted, and it
-        records +80 live at steps 1..6 in accepted_live_delta.
+        Its own walk sees the stack (z1+z2 = 160 < 250) -> accepted.
         Window B = combo{y1, y2}: hoists y2 to step 1. Combined reality at
         step 1: z1+z2+y1+y2 = 320 = +28% over the 250 baseline peak.
         With a 5% threshold B must be rejected -- but only if B's carry-in
-        includes A's extension. Reading baseline_live_before alone reports
-        +0% and wrongly accepts.
+        includes A's extension.
         """
-        from torch._inductor.scheduler import ComboKernelMemoryContext
-
         z1, y1, uz1, uy1 = (_PeakMemFakeNode(n) for n in ("z1", "y1", "uz1", "uy1"))
         z2, y2, uz2, uy2 = (_PeakMemFakeNode(n) for n in ("z2", "y2", "uz2", "uy2"))
         big, ubig = _PeakMemFakeNode("big"), _PeakMemFakeNode("ubig")
@@ -3494,13 +3508,10 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         # live bytes before each step in the baseline schedule above
         baseline_live_before = [0, 80, 160, 80, 0, 80, 160, 80, 0, 250, 0]
         baseline_peak = 250
-        mem_ctx = ComboKernelMemoryContext(
-            graph_outputs=set(),
-            node_to_idx={node: idx for idx, node in enumerate(nodes)},
-            baseline_peak=baseline_peak,
-            running_peak=baseline_peak,
-            baseline_live_before=baseline_live_before,
-            accepted_live_delta=[0] * (len(nodes) + 1),
+        mem_ctx = self._memory_context(
+            nodes,
+            baseline_peak,
+            baseline_live_before,
         )
         thresholds = self._thresholds(pct_thr=0.05)
 
@@ -3513,9 +3524,8 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             mem_ctx=mem_ctx,
         )
         self.assertIsNotNone(combo_a, "window A fits under the baseline peak")
-        # A's accept must be recorded: z2 now live at steps 1..4 (+80 each)
-        self.assertEqual(mem_ctx.accepted_live_delta[1], 80)
-        self.assertEqual(mem_ctx.accepted_live_delta[4], 80)
+        y1_step = mem_ctx.current_node_to_idx[y1]
+        self.assertEqual(mem_ctx.current_live_before[y1_step], 160)
 
         combo_b, _ = self._try_combo_with_fake_scheduler(
             nodes,
@@ -3528,6 +3538,139 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertIsNone(
             combo_b,
             "window B stacks on A's extension (320 = +28% > 5%); must reject",
+        )
+
+    def test_later_combo_recomputes_input_lifetime(self):
+        a0, idle, consume_i, dependency, producer, q, consume_o = (
+            _PeakMemFakeNode(name)
+            for name in (
+                "a0",
+                "idle",
+                "consume_i",
+                "dependency",
+                "producer",
+                "q",
+                "consume_o",
+            )
+        )
+        nodes = [a0, idle, consume_i, dependency, producer, q, consume_o]
+
+        input_i = _PeakMemFakeBuffer("input_i", {consume_i, producer}, 100, 100)
+        a0_out = _PeakMemFakeBuffer("a0_out", {consume_i}, 0, 0)
+        dep_out = _PeakMemFakeBuffer("dep_out", {q}, 0, 0)
+        producer_out = _PeakMemFakeBuffer("producer_out", {consume_o}, 100, 100)
+        q_temp = _PeakMemFakeBuffer("q_temp", set(), 50, 50)
+        a0._outputs = [a0_out]
+        dependency._outputs = [dep_out]
+        producer._outputs = [producer_out]
+        q._outputs = [q_temp]
+        consume_i.mpi_node.pred_buffers = {input_i, a0_out}
+        producer.mpi_node.pred_buffers = {input_i}
+        q.mpi_node.pred_buffers = {dep_out}
+        consume_o.mpi_node.pred_buffers = {producer_out}
+
+        live_before = [100, 100, 100, 100, 100, 100, 100, 0]
+        mem_ctx = self._memory_context(nodes, 200, live_before)
+
+        class DelayedScheduler(_PeakMemFakeScheduler):
+            def topological_sort_schedule(self, scheduled):
+                result = list(scheduled)
+                combo = next(
+                    (
+                        node
+                        for node in result
+                        if node.snodes is not None
+                        and set(node.snodes) == {consume_i, q}
+                    ),
+                    None,
+                )
+                if combo is not None:
+                    result.remove(combo)
+                    result.insert(result.index(dependency) + 1, combo)
+                return result
+
+        scheduler = DelayedScheduler(nodes)
+        thresholds = self._thresholds(pct_thr=0.0)
+        combo_a, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [a0, producer],
+            baseline_peak=200,
+            baseline_live_before=live_before,
+            thresholds=thresholds,
+            mem_ctx=mem_ctx,
+            scheduler=scheduler,
+        )
+        self.assertIsNotNone(combo_a)
+
+        combo_b, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [consume_i, q],
+            baseline_peak=200,
+            baseline_live_before=live_before,
+            thresholds=thresholds,
+            mem_ctx=mem_ctx,
+            scheduler=scheduler,
+        )
+        self.assertIsNone(
+            combo_b,
+            "the composed schedule peaks at 250 bytes, above the 200-byte cap",
+        )
+
+    def test_prior_hoist_is_not_counted_at_original_allocation(self):
+        z1, y1, uz1, idle, z2, y2, uz2, uy1, uy2, big, ubig = (
+            _PeakMemFakeNode(name)
+            for name in (
+                "z1",
+                "y1",
+                "uz1",
+                "idle",
+                "z2",
+                "y2",
+                "uz2",
+                "uy1",
+                "uy2",
+                "big",
+                "ubig",
+            )
+        )
+        nodes = [z1, y1, uz1, idle, z2, y2, uz2, uy1, uy2, big, ubig]
+
+        def wire(prod, cons, size):
+            buf = _PeakMemFakeBuffer("b" + prod.get_name(), {cons}, size, size)
+            prod._outputs = [buf]
+            cons.mpi_node.pred_buffers = {buf}
+
+        wire(z1, uz1, 20)
+        wire(z2, uz2, 100)
+        wire(y1, uy1, 40)
+        wire(y2, uy2, 40)
+        wire(big, ubig, 250)
+
+        live_before = [0, 20, 60, 40, 40, 140, 180, 80, 40, 0, 250, 0]
+        mem_ctx = self._memory_context(nodes, 250, live_before)
+        thresholds = self._thresholds(pct_thr=0.0)
+
+        combo_a, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [z1, z2],
+            baseline_peak=250,
+            baseline_live_before=live_before,
+            thresholds=thresholds,
+            mem_ctx=mem_ctx,
+        )
+        self.assertIsNotNone(combo_a)
+
+        combo_b, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [y1, y2],
+            baseline_peak=250,
+            baseline_live_before=live_before,
+            thresholds=thresholds,
+            mem_ctx=mem_ctx,
+        )
+        self.assertIsNotNone(
+            combo_b,
+            "the composed schedule stays at the 250-byte baseline peak",
         )
 
     def test_region_carry_in_uses_post_free_boundary(self):
