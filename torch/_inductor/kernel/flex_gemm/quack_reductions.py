@@ -323,6 +323,13 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
     if op_name in ("mx_e8m0_scale", "nvfp4_e4m3_scale"):
         return _cute_scale_call(op_name, args, kwargs)
+    if op_name == "nvfp4_pack":
+        source = args[0]
+        return V.kernel.cse.generate(
+            V.kernel.body,
+            f"nvfp4_pack_intrinsic({source})",
+            dtype=torch.uint8,
+        )
     try:
         op = getattr(V.get_ops_handler(), op_name)
     except AttributeError:
