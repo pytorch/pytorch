@@ -45,7 +45,7 @@ else:
     kg = LazyModule("torch._native.ops.reductions.kernel_general")
 
 
-_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 
 
 def _acc_policy():
@@ -60,6 +60,7 @@ def _acc_policy():
         torch.float16: (cutlass.Float32, torch.float32),
         torch.bfloat16: (cutlass.Float32, torch.float32),
         torch.float32: (cutlass.Float32, torch.float32),
+        torch.float64: (cutlass.Float64, torch.float64),
     }
 
 
