@@ -567,45 +567,36 @@ __device__ __attribute__((flatten)) void c10_rocm_assert_literal(
   __builtin_trap();
 }
 
-template <unsigned P, unsigned S>
-__host__ inline void c10_rocm_kernel_assert(
-    const char* cond,
-    const char* file,
-    unsigned int line,
-    const char* func,
-    const char (&prefix)[P],
-    const char (&suffix)[S]) {
-  (void)prefix;
-  (void)suffix;
-  __assert_fail(cond, file, line, func);
-}
-
 template <unsigned P, unsigned F, unsigned S>
-__device__ inline void c10_rocm_kernel_assert(
+__host__ __device__ inline void c10_rocm_kernel_assert(
     const char* cond,
     const char* file,
     unsigned int line,
     const char (&func)[F],
     const char (&prefix)[P],
     const char (&suffix)[S]) {
+#if defined(__HIP_DEVICE_COMPILE__)
   (void)cond;
   (void)file;
   (void)line;
   c10_rocm_assert_literal(prefix, func, suffix);
+#else
+  (void)prefix;
+  (void)suffix;
+  __assert_fail(cond, file, line, func);
+#endif
 }
 
-#define CUDA_KERNEL_ASSERT(cond)                          \
-  do {                                                    \
-    if C10_UNLIKELY (!(cond)) {                           \
-      c10_rocm_kernel_assert(                             \
-          #cond,                                          \
-          __FILE__,                                       \
-          static_cast<unsigned int>(__LINE__),            \
-          __func__,                                       \
-          __FILE__ ":" C10_STRINGIZE(__LINE__) ":",       \
-          ": Device-side assertion " #cond " failed.\n"); \
-    }                                                     \
-  } while (0)
+#define CUDA_KERNEL_ASSERT(cond)                        \
+  if C10_UNLIKELY (!(cond)) {                           \
+    c10_rocm_kernel_assert(                             \
+        #cond,                                          \
+        __FILE__,                                       \
+        static_cast<unsigned int>(__LINE__),            \
+        __func__,                                       \
+        __FILE__ ":" C10_STRINGIZE(__LINE__) ":",       \
+        ": Device-side assertion " #cond " failed.\n"); \
+  }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
