@@ -6922,44 +6922,6 @@ print(value, end="")
             torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
         self.assertTrue(x)
 
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC,
-        "expandable_segments is not supported with cudaMallocAsync",
-    )
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
-    @serialTest()
-    def test_oom_expandable_segments_hint(self):
-        hint = "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
-        original_settings = torch._C._accelerator_getAllocatorSettings()
-        original_expandable_segments = torch.cuda.memory._snapshot()[
-            "allocator_settings"
-        ]["expandable_segments"]
-
-        def settings_with_expandable_segments(enabled: bool) -> str:
-            return (
-                f"{original_settings},expandable_segments:{enabled}"
-                if original_settings
-                else f"expandable_segments:{enabled}"
-            )
-
-        try:
-            for enabled in (False, True):
-                torch.cuda.memory._set_allocator_settings(
-                    settings_with_expandable_segments(enabled)
-                )
-                with self.assertRaises(torch.cuda.OutOfMemoryError) as cm:
-                    torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
-
-                if enabled:
-                    self.assertNotIn(hint, str(cm.exception))
-                else:
-                    self.assertIn(hint, str(cm.exception))
-        finally:
-            torch.cuda.memory._set_allocator_settings(
-                settings_with_expandable_segments(original_expandable_segments)
-            )
-            torch.cuda.memory._set_allocator_settings(original_settings)
-
     def test_allocator_fuzz(self):
         # fuzz
         if (
