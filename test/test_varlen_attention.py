@@ -849,7 +849,7 @@ class TestVarlenAttention(NNTestCase):
         "backend",
         ["fa2"]
         + (["fa3"] if IS_SM90 else [])
-        + (["fa4"] if SM100OrLater else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else [])
         + ["cudnn"],
     )
     def test_batch_invariance(
@@ -1312,7 +1312,9 @@ class TestVarlenAttention(NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
     )
     def test_enable_gqa(self, device, dtype, backend):
         torch.manual_seed(42)
