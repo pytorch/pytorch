@@ -5889,7 +5889,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         self.assertIn("make_tensor_descriptor", source)
         self.assertIn("load_tensor_descriptor", source)
 
-    def test_tdm_config_policy_keeps_curated_stage1_and_exhaustive_stage2(self):
+    def test_tdm_config_policy_keeps_curated_and_exhaustive_stage_policy(self):
         from torch._inductor.heuristics.template.triton import (
             BaseHeuristicSingleton,
             ROCmPersistentTDMTemplateConfigHeuristic,
@@ -5915,7 +5915,9 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             )
             stages = {config.num_stages for config in configs}
             self.assertIn(1, stages)
-            self.assertIn(2, stages)
+            self.assertIn(heuristic.default_num_stages, stages)
+            if torch.version.hip is not None:
+                self.assertEqual(heuristic.default_num_stages, 2)
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
 
