@@ -485,7 +485,8 @@ class TestCuptiRecords(TestCase):
                 "stream_id": i64(7, 7),  # both replayed on the capture stream
                 "correlation_id": i64(11, 12),
                 "graph_id": i64(1, 1),
-                "graph_node_id": i64(101, 102),
+                # graph id packed into the upper 32 bits; only the lower node id is kept
+                "graph_node_id": i64((1 << 32) | 101, (1 << 32) | 102),
                 "name": np.array(["graphKernelA", "graphKernelB"], dtype=object),
                 "annotation": np.array(
                     [{"ann_id": "a"}, {"ann_id": "b"}], dtype=object
