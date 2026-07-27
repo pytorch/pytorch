@@ -239,10 +239,15 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+    def __init__(self, name: str, suggestions: list[str] | None = None) -> None:
+        msg = f"Invalid backend: {name!r}"
+        msg += (
+            f", did you mean: {', '.join(map(repr, suggestions))}?"
+            if suggestions
+            else "."
         )
+        msg += " See `torch._dynamo.list_backends()` for available backends."
+        super().__init__(msg)
 
 
 class ResetRequired(TorchDynamoException):
@@ -503,6 +508,16 @@ observed_exception_map = {
 }
 
 
+class UnhandledDescriptorError(NotImplementedError):
+    """Raised by object_generic_getattr when a descriptor type is not
+    recognized by _resolve_descriptor_get.  Subclasses NotImplementedError
+    so callers that catch NotImplementedError (e.g., generic_getattr's
+    graph-break fallback) still work, but callers that want to
+    distinguish unhandled descriptors from other NotImplementedErrors can
+    catch this specifically.
+    """
+
+
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
     if exc_type not in observed_exception_map:
         name = getattr(exc_type, "__name__", str(exc_type))
@@ -520,7 +535,6 @@ def raise_observed_exception(
     args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
-    from .symbolic_convert import ExceptionVals
     from .variables.builder import SourcelessBuilder
 
     if args:
@@ -536,15 +550,7 @@ def raise_observed_exception(
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx, args_, kwargs or {}
     )
-    if not isinstance(exception_vt, ExceptionVals):
-        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
-    tx._attach_traceback_to_exception(exception_vt)
-    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
-    raised_exc = get_dynamo_observed_exception(exc_type)
-    # Store the original exception arguments for better error messages
-    if args:
-        raise raised_exc(*args_)
-    raise raised_exc
+    tx.do_raise(exception_vt, None)
 
 
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
