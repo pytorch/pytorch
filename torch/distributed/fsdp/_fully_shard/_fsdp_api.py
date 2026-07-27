@@ -63,7 +63,7 @@ class Comm(ABC):
        Depending on the goal, an implementation can choose to:
        a. associate each call to a temporary buffer
           (best for flexibility and simplicity)
-       b. reuse an persistent buffer for efficiency reasons
+       b. reuse a persistent buffer for efficiency reasons
 
     2. Where to allocate memory
        (e.g. NCCL mem pool or regular cuda caching allocator)
