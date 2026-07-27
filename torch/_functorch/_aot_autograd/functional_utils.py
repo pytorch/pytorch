@@ -231,7 +231,7 @@ def was_shallow_copy_data(t: object) -> bool:
 # Assumption: arg promises to be the "original" tensor wrapped by f_arg
 # Note: "storage mutations" coming from set_() are a type of metadata mutation. So:
 # - check_only_storage_mutation=True: only return true if there was a storage mutation
-# - check_only_storage_mutation=Flse: return true if there was any metadata mutation (including a storage mutation)
+# - check_only_storage_mutation=False: return true if there was any metadata mutation (including a storage mutation)
 def has_metadata_mutation(
     f_arg: object, arg: object, *, check_only_storage_mutation: bool
 ) -> bool:
