@@ -3,6 +3,10 @@ name: triaging-issues
 description: Triages GitHub issues by routing to oncall teams, applying labels, and closing questions. Use when processing new PyTorch issues or when asked to triage an issue.
 hooks:
   PreToolUse:
+    - matcher: "mcp__github__issue_write|mcp__github__update_issue|mcp__github__add_issue_comment|mcp__github__transfer_issue"
+      hooks:
+        - type: command
+          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/validate_issue_target.py"
     - matcher: "mcp__github__issue_write|mcp__github__update_issue"
       hooks:
         - type: command
