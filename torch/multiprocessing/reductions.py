@@ -628,17 +628,6 @@ def reduce_storage(storage):
         raise RuntimeError(
             "Cannot pickle meta storage; try pickling a meta tensor instead"
         )
-    elif get_sharing_strategy() == "file_system":
-        metadata = storage._share_filename_cpu_()
-        cache_key = metadata[1]
-        rebuild = rebuild_storage_filename
-        if isinstance(storage, torch.TypedStorage):
-            metadata += (storage.dtype,)
-        storage._shared_incref()
-    elif storage.size() == 0:
-        # This is special cased because Empty tensors
-        # (with size 0) cannot be mmapped.
-        return (rebuild_storage_empty, (type(storage),))
     elif storage.device.type == "xpu":
         (
             device,
@@ -660,6 +649,17 @@ def reduce_storage(storage):
             offset_bytes,
         )
         rebuild = rebuild_storage_xpu  # type: ignore[assignment]
+    elif get_sharing_strategy() == "file_system":
+        metadata = storage._share_filename_cpu_()
+        cache_key = metadata[1]
+        rebuild = rebuild_storage_filename
+        if isinstance(storage, torch.TypedStorage):
+            metadata += (storage.dtype,)
+        storage._shared_incref()
+    elif storage.size() == 0:
+        # This is special cased because Empty tensors
+        # (with size 0) cannot be mmapped.
+        return (rebuild_storage_empty, (type(storage),))
     else:
         fd, size = storage._share_fd_cpu_()
         df = multiprocessing.reduction.DupFd(fd)
