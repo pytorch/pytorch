@@ -176,12 +176,11 @@ ROCM_SO_FILES: list[str] = [
     "librocroller.so",
 ]
 
-# ROCm libs bundled only when present. Unlike ROCM_SO_FILES, a missing entry is
-# skipped rather than fatal. This is for libs not shipped by every supported ROCm
-# version. Otherwise handled identically to ROCM_SO_FILES.
-ROCM_OPTIONAL_SO_FILES: list[str] = [
-    "libhipfile.so",
-]
+# hipFile only ships with ROCm 7.14 and later, where it is required.
+_version_file = Path(os.environ.get("ROCM_HOME", "/opt/rocm")) / ".info" / "version"
+_rocm_version = _version_file.read_text().strip() if _version_file.is_file() else ""
+if tuple(int(x) for x in _rocm_version.split(".")[:2] if x.isdigit()) >= (7, 14):
+    ROCM_SO_FILES.append("libhipfile.so")
 
 
 def rocm_os_deps() -> list[Path]:
@@ -266,10 +265,6 @@ def rocm_bundle(
         # Strip the SO version: libfoo.so.6.1 -> libfoo.so. The ROCm-built
         # binaries in the wheel link against the bare .so SONAME.
         libs.append(BundledLib(src=path, dest_name=stem, needed_alias=stem))
-    for stem in ROCM_OPTIONAL_SO_FILES:
-        path = find_rocm_lib(rocm_home, stem)
-        if path is not None:
-            libs.append(BundledLib(src=path, dest_name=stem, needed_alias=stem))
     for os_lib in rocm_os_deps():
         if os_lib.is_file():
             libs.append(BundledLib(src=os_lib, dest_name=os_lib.name))
