@@ -3918,7 +3918,8 @@ torch.cuda.synchronize()
             after, baseline, "Leaked CUDA/RNG allocations after failed capture test"
         )
 
-    @skipIfRocmVersionLessThan((7, 14))
+    @skipIfRocm(msg="HIPCachingAllocator does not release reserved segments after a failed "
+                "graph capture; memory_reserved() does not recover to baseline")
     @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

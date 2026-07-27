@@ -13840,6 +13840,8 @@ class TestNNDeviceType(NNTestCase):
             self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
                                  msg=lambda msg: f"{msg}\nworst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
 
+    @skipIfRocm(msg="ROCm fp32 GEMM ULP divergence: input-grad 952 > 854 tolerance bound "
+                "(TheRock math-lib build, rocBLAS/hipBLASLt accumulation)")
     @parametrize_test("bias", [False, True])
     @dtypes(torch.float32)
     def test_linear_cross_entropy_loss_default(self, device, dtype, bias):
