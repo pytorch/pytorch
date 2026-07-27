@@ -22,7 +22,8 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_precondition,
 )
 from torch._inductor.runtime.caching import encoders, memoizers
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.utils._mode_utils import no_dispatch
 
 from ...utils._triton import has_triton
@@ -199,8 +200,26 @@ def addmm_pattern(
     return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
 
+def _is_statically_expandable_to(shape: torch.Size, desired: Sequence[Any]) -> bool:
+    if len(shape) > len(desired):
+        return False
+    return all(
+        statically_known_true(dim == desired_dim) or statically_known_true(dim == 1)
+        for dim, desired_dim in zip(reversed(shape), reversed(desired))
+    )
+
+
 def should_pad_addmm(match: Match) -> bool:
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
+    beta = match.kwargs["beta"]
+    if (
+        beta == 0
+        and input.is_cuda
+        and not _is_statically_expandable_to(
+            input.shape, (mat1.shape[0], mat2.shape[1])
+        )
+    ):
+        return False
     return should_pad(match, mat1, mat2, torch.ops.aten.addmm, input=input)
 
 
@@ -535,7 +554,7 @@ def _should_pad(
             return cached_pad
 
         def realize_tensor(t):
-            if isinstance(t, FakeTensor):
+            if is_fake_tensor(t):
                 size_hints = hint_symbols(t.size())
                 # pyrefly: ignore [bad-argument-type]
                 stride_hint = hint_symbols(t.stride())

@@ -38,7 +38,7 @@ else
     exit 1
 fi
 
-# Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
+# Version: uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
 build_version="$PYTORCH_BUILD_VERSION"
 build_number="$PYTORCH_BUILD_NUMBER"
@@ -87,7 +87,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
 fi
 pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
-python setup.py clean
+python -m spin clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
 
