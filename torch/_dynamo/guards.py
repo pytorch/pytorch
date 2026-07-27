@@ -2778,6 +2778,7 @@ class GuardBuilder(GuardBuilderBase):
                 np.int16,
                 np.int32,
                 np.int64,
+                np.longlong,
                 np.uint8,
                 np.uint16,
                 np.uint32,
@@ -2845,6 +2846,24 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_float_is_nan_guard(
+                get_verbose_code_parts(code, guard),
+                guard.user_stack,
+            )
+            return
+
+        if np is not None and isinstance(val, np.floating) and np.isnan(val):
+            val_type = type(val)
+            code = [
+                f"(type({ref}) is {val_type.__module__}.{val_type.__name__} "
+                f"and __numpy_isnan({ref}))"
+            ]
+            self._set_guard_export_info(guard, code)
+
+            def check_fn(x: Any) -> bool:
+                return type(x) is val_type and bool(np.isnan(x))
+
+            self.get_guard_manager(guard).add_lambda_guard(
+                check_fn,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
