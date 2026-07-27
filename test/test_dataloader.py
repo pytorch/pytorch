@@ -3309,6 +3309,26 @@ class TestDataLoaderDeviceType(TestCase):
         )
         self.assertEqual(restored_tensor, tensor)
 
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
+    @onlyXPU
+    def test_xpu_ipc_queue_roundtrip_file_system_strategy(self, device):
+        original_strategy = torch.multiprocessing.get_sharing_strategy()
+        xpu_device = torch.device(device)
+        ctx = torch.multiprocessing.get_context("spawn")
+        queue = ctx.Queue()
+
+        try:
+            torch.multiprocessing.set_sharing_strategy("file_system")
+            tensor = torch.arange(8, device=xpu_device, dtype=torch.int64)
+            queue.put(tensor)
+            received = queue.get(timeout=10)
+            self.assertEqual(received.device.type, "xpu")
+            self.assertEqual(received, tensor)
+        finally:
+            torch.multiprocessing.set_sharing_strategy(original_strategy)
+            queue.close()
+            queue.join_thread()
+
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
