@@ -74,6 +74,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_tensorssa_reduce,
     lower_view_or_reshape,
     reduction_from_node,
+    specialize_backed_structural_int,
     squeeze_source_node,
     tensor_meta_shape,
     unsupported_reduction_from_node,
@@ -875,6 +876,7 @@ def grouped_main_output_transform(
     local_reduce: FlexGemmLocalReduceAnalysis,
 ) -> FlexGemmGroupedMainOutputTransform | None:
     """Recognize one innermost-axis grouping feeding the logical main output."""
+    gemm_shape = tensor_meta_shape(gemm)
     selected_key: tuple[torch.fx.Node, tuple[Any, ...], int, bool] | None = None
     selected_indices: OrderedSet[int] = OrderedSet()
     seen: OrderedSet[torch.fx.Node] = OrderedSet()
@@ -927,31 +929,42 @@ def grouped_main_output_transform(
                 and split.target is torch.ops.aten.split.Tensor
                 and len(split.args) >= 3
                 and isinstance(split.args[0], torch.fx.Node)
-                and isinstance(split.args[1], int)
-                and split.args[2] in (-1, 1)
-                and local_reduce.graph.depends_on(split.args[0], gemm)
             ):
-                source_shape = tensor_meta_shape(split.args[0])
-                physical_n = None if source_shape is None else source_shape[-1]
+                source = split.args[0]
+                source_shape = tensor_meta_shape(source)
                 if (
                     source_shape is not None
-                    and isinstance(physical_n, int)
-                    and physical_n % split.args[1] == 0
+                    and len(source_shape) == 2
+                    and gemm_shape is not None
+                    and statically_known_shape_equal(source_shape, gemm_shape)
+                    and local_reduce.graph.depends_on(source, gemm)
                 ):
-                    group = physical_n // split.args[1]
-                    if group > 1 and bind_lane(
-                        split.args[0], source_shape, group, True, node.args[1]
+                    physical_n = source_shape[-1]
+                    if (
+                        isinstance(physical_n, int)
+                        and isinstance(split.args[2], int)
+                        and split.args[2] in (-1, 1)
                     ):
-                        pending_grouped[split] = FlexGemmLocalReduceGeometry(
-                            group=group, axis=1
-                        )
-                        return True
+                        split_size = specialize_backed_structural_int(split.args[1])
+                        if (
+                            split_size is not None
+                            and split_size > 0
+                            and physical_n % split_size == 0
+                        ):
+                            group = physical_n // split_size
+                            if group > 1 and bind_lane(
+                                source, source_shape, group, True, node.args[1]
+                            ):
+                                pending_grouped[split] = FlexGemmLocalReduceGeometry(
+                                    group=group, axis=1
+                                )
+                                return True
         if (
             node.op == "call_function"
             and node.target is torch.ops.aten.select.int
             and len(node.args) >= 3
             and isinstance(node.args[0], torch.fx.Node)
-            and isinstance(node.args[2], int)
+            and isinstance(node.args[1], int)
         ):
             view = node.args[0]
             view_args = view_or_reshape_args(view)
@@ -961,32 +974,31 @@ def grouped_main_output_transform(
                 and isinstance(view_args[0], torch.fx.Node)
                 and local_reduce.graph.depends_on(view_args[0], gemm)
                 and shape is not None
-                and isinstance(node.args[1], int)
-                and -len(shape) <= node.args[1] < len(shape)
+                and len(shape) == 3
+                and gemm_shape is not None
+                and statically_known_shape_equal(
+                    (shape[0], shape[1] * shape[2]), gemm_shape
+                )
             ):
-                dim = node.args[1] % len(shape)
-                layout = pending_grouped.get(
-                    view, local_reduce.grouped_tensors.get(view)
-                )
-                chunked = (
-                    len(shape) == 3
-                    and dim == 1
-                    and isinstance(shape[1], int)
-                    and shape[1] > 1
-                )
-                if chunked:
-                    layout = FlexGemmLocalReduceGeometry(group=shape[1], axis=1)
-                if (
-                    layout is not None
-                    and layout.axis == 1
-                    and (chunked or dim == len(shape) - 1)
-                    and bind_lane(
-                        view_args[0], shape, layout.group, chunked, node.args[2]
+                dim = node.args[1]
+                index = specialize_backed_structural_int(node.args[2])
+                if index is not None and -len(shape) <= dim < len(shape):
+                    dim %= len(shape)
+                    layout = pending_grouped.get(
+                        view, local_reduce.grouped_tensors.get(view)
                     )
-                ):
+                    chunked = dim == 1 and isinstance(shape[1], int) and shape[1] > 1
                     if chunked:
-                        pending_grouped[view] = layout
-                    return True
+                        layout = FlexGemmLocalReduceGeometry(group=shape[1], axis=1)
+                    if (
+                        layout is not None
+                        and layout.axis == 1
+                        and (chunked or dim == len(shape) - 1)
+                        and bind_lane(view_args[0], shape, layout.group, chunked, index)
+                    ):
+                        if chunked:
+                            pending_grouped[view] = layout
+                        return True
         if node is gemm:
             return False
         if (

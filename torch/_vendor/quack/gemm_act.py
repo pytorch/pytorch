@@ -125,10 +125,10 @@ def validate_grouped_n_contract_device(
         return
     if device_capacity[0] == 12:
         raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
-    if group > 2 and device_capacity[0] not in (10, 11):
+    if device_capacity[0] not in (10, 11):
         raise NotImplementedError(
-            "grouped_n_contract groups larger than 2 are currently validated "
-            "only on SM100 and SM110"
+            "grouped_n_contract is currently validated only on "
+            "SM100 and SM110"
         )
 
 
@@ -540,41 +540,7 @@ class GemmGroupedNContractMixin(GemmActMixin):
         )
         return params
 
-    @cute.jit
-    def epi_convert_aux_out(
-        self, tRS_rAuxOut, sr_seed, tidx, tile_coord_mnkl, num_prev_subtiles, epi_idx
-    ):
-        result = GemmActMixin.epi_convert_aux_out(
-            self,
-            tRS_rAuxOut,
-            sr_seed,
-            tidx,
-            tile_coord_mnkl,
-            num_prev_subtiles,
-            epi_idx,
-        )
-        if const_expr(
-            self.grouped_n_contract_group == 2
-            and self.arch in (90, 120)
-            and self.aux_out_dtype.width == 16
-        ):
-            permute_gated_Cregs_b16(result)
-        return result
-
-
-class GemmGroupedNContractSm80(GemmGroupedNContractMixin, GemmSm80):
-    pass
-
-
-class GemmGroupedNContractSm90(GemmGroupedNContractMixin, GemmSm90):
-    pass
-
-
 class GemmGroupedNContractSm100(GemmGroupedNContractMixin, GemmSm100):
-    pass
-
-
-class GemmGroupedNContractSm120(GemmGroupedNContractMixin, GemmSm120):
     pass
 
 
@@ -789,11 +755,8 @@ def _compile_gemm_act(
             12: GemmGatedSm120,
         },
         "grouped_n_contract": {
-            8: GemmGroupedNContractSm80,
-            9: GemmGroupedNContractSm90,
             10: GemmGroupedNContractSm100,
             11: GemmGroupedNContractSm100,
-            12: GemmGroupedNContractSm120,
         },
     }
     GemmCls = sm_to_cls[gemm_cls_name][device_capacity[0]]
