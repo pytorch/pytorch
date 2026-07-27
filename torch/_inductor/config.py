@@ -1113,14 +1113,6 @@ combo_kernel_compile_time_autotune: bool = Config(
     env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
     default=False,
 )
-# Register-pressure guard for compile-time-autotuned combo kernels. A sub-kernel is
-# excluded from the combo (emitted standalone instead) when its own register-limited
-# occupancy -- computed from its autotuned n_regs and num_warps against the device
-# register file -- falls below this fraction. Fusing register-bound sub-kernels unions
-# their register footprints into one CTA body, driving the combo toward the ISA register
-# cap and degrading ptxas codegen for the whole launch; run such a sub-kernel standalone
-# (its faster non-combo form) instead. Set to 0.0 to disable the guard.
-combo_kernel_register_pressure_ratio: float = 0.2
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
