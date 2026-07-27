@@ -3,7 +3,7 @@
 
 set -ex
 
-OPENBLAS_VERSION=${OPENBLAS_VERSION:-"v0.3.33"}
+OPENBLAS_VERSION=${OPENBLAS_VERSION:-"v0.3.34"}
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 
 if [[ "$(uname -m)" == "aarch64" ]]; then
