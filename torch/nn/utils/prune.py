@@ -165,7 +165,7 @@ class BasePruningMethod(ABC):
             importance_scores = orig
 
         # If this is the first time pruning is applied, take care of moving
-        # the original tensor to a new parameter called name + '_orig' and
+        # the original tensor to a new parameter called name + '_orig'
         # and deleting the original parameter
         if not isinstance(method, PruningContainer):
             # copy `module[name]` to `module[name + '_orig']`
