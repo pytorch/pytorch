@@ -1,6 +1,7 @@
 import logging
 from dataclasses import asdict, dataclass
 from itertools import product
+from typing import cast, TypedDict
 
 import torch._inductor.config as config
 
@@ -23,38 +24,22 @@ class FlyDSLGemmConfig:
     USE_HALF_TILE_INTERLEAVED: bool = False
 
 
-def _config_from_mapping(values: dict[str, int | bool]) -> FlyDSLGemmConfig:
-    return FlyDSLGemmConfig(
-        TILE_M=int(values["TILE_M"]),
-        TILE_N=int(values["TILE_N"]),
-        TILE_K=int(values["TILE_K"]),
-        STAGES=int(values["STAGES"]),
-        SPLIT_K=int(values["SPLIT_K"]),
-        BLOCK_M_WARPS=int(values["BLOCK_M_WARPS"]),
-        BLOCK_N_WARPS=int(values["BLOCK_N_WARPS"]),
-        BLOCK_K_WARPS=int(values["BLOCK_K_WARPS"]),
-        GROUP_M=int(values["GROUP_M"]),
-        B_TO_LDS=bool(values["B_TO_LDS"]),
-        USE_HALF_TILE_INTERLEAVED=bool(values.get("USE_HALF_TILE_INTERLEAVED", False)),
-    )
+class FlyDSLGemmConfigDict(TypedDict):
+    TILE_M: int
+    TILE_N: int
+    TILE_K: int
+    STAGES: int
+    SPLIT_K: int
+    BLOCK_M_WARPS: int
+    BLOCK_N_WARPS: int
+    BLOCK_K_WARPS: int
+    GROUP_M: int
+    B_TO_LDS: bool
+    USE_HALF_TILE_INTERLEAVED: bool
 
 
-def _config_from_tuple(values: tuple[int | bool, ...]) -> FlyDSLGemmConfig:
-    if len(values) not in (10, 11):
-        raise ValueError(f"expected 10 or 11 FlyDSL config values, got {len(values)}")
-    return FlyDSLGemmConfig(
-        TILE_M=int(values[0]),
-        TILE_N=int(values[1]),
-        TILE_K=int(values[2]),
-        STAGES=int(values[3]),
-        SPLIT_K=int(values[4]),
-        BLOCK_M_WARPS=int(values[5]),
-        BLOCK_N_WARPS=int(values[6]),
-        BLOCK_K_WARPS=int(values[7]),
-        GROUP_M=int(values[8]),
-        B_TO_LDS=bool(values[9]),
-        USE_HALF_TILE_INTERLEAVED=bool(values[10]) if len(values) == 11 else False,
-    )
+FlyDSLGemmConfigArgs = tuple[int, int, int, int, int, int, int, int, int, bool]
+FlyDSLHTIGemmConfigArgs = tuple[int, int, int, int, int, int, int, int, int, bool, bool]
 
 
 def _make_gemm_param(gemm_config: dict[str, int | bool]):
@@ -151,7 +136,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
             if mma_m_iters > 4 or mma_n_iters > 4:
                 continue
         try:
-            config = _config_from_mapping(gemm_config)
+            config = FlyDSLGemmConfig(**cast(FlyDSLGemmConfigDict, gemm_config))
             _make_gemm_param(asdict(config))
             valid_configs.append(config)
         except Exception as e:
@@ -165,7 +150,7 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
     Returns the default configuration set for the gfx950 FlyDSL GEMM kernel.
     """
-    config_tuples = [
+    config_tuples: list[FlyDSLGemmConfigArgs] = [
         (128, 128, 64, 2, 1, 4, 4, 1, 0, True),
         (128, 128, 64, 4, 1, 4, 4, 1, 0, True),
         (256, 256, 64, 2, 1, 4, 4, 1, 0, True),
@@ -197,7 +182,8 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         (32, 64, 64, 8, 1, 2, 2, 1, 0, True),
         (16, 64, 128, 3, 1, 1, 4, 1, 4, True),
         (64, 64, 64, 6, 1, 4, 2, 1, 4, True),
-        # Trailing True enables the half-tile interleaved kernel.
+    ]
+    hti_config_tuples: list[FlyDSLHTIGemmConfigArgs] = [
         (128, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
         (128, 128, 64, 2, 1, 2, 2, 1, 4, True, True),
         (128, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
@@ -205,7 +191,9 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         (256, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
         (256, 256, 64, 2, 1, 2, 4, 1, 4, True, True),
     ]
-    configs = [_config_from_tuple(args) for args in config_tuples]
+    # Tuple order must match the FlyDSLGemmConfig field declaration order.
+    configs = [FlyDSLGemmConfig(*args) for args in config_tuples]
+    configs.extend(FlyDSLGemmConfig(*args) for args in hti_config_tuples)
     valid_configs: list[FlyDSLGemmConfig] = []
     for gemm_config in configs:
         try:

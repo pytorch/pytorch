@@ -2220,13 +2220,9 @@ def use_flydsl_gemm_template(layout: Layout) -> bool:
         return False
     if not _use_template_for_gpu(layout, [torch.float16, torch.bfloat16]):
         return False
-    try:
-        from .codegen.flydsl import flydsl_utils
-    except Exception:
-        log.debug(
-            "Could not import flydsl_utils for Inductor FlyDSL gate", exc_info=True
-        )
-        return False
+
+    from .codegen.flydsl import flydsl_utils
+
     if not flydsl_utils.runtime_available():
         return False
 

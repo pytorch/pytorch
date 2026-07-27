@@ -242,6 +242,7 @@ class BlockSwizzle:
         )
 
 
+# TODO: Move common ROCm synchronization and buffer-load helpers to FlyDSL.
 def __barrier(vmcnt=0):
     llvm.InlineAsmOp(
         None,
