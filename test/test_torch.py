@@ -6685,9 +6685,14 @@ class TestTorchDeviceType(TestCase):
         # Fast path test: tensor flags, like neg and conj
         neg_0 = torch.tensor((1, 2, 3), dtype=torch.float, device=device)
         neg_1 = neg_0._neg_view()
-        self.assertTrue(neg_1.is_neg())
-        self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
-        self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
+
+        # Inductor lowers _neg_view to neg, creating a new tensor
+        # instead of a view. So is_neg(), data_ptr(), and _neg_view() equality
+        # checks are skipped under inductor.
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertTrue(neg_1.is_neg())
+            self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
+            self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
         self.assertEqual(neg_0.stride(), neg_1.stride())
         self.assertEqual(neg_0.size(), neg_1.size())
         self.assertFalse(torch.equal(neg_0, neg_1))
@@ -6696,20 +6701,6 @@ class TestTorchDeviceType(TestCase):
         # https://github.com/pytorch/pytorch/issues/98175
         if not TEST_WITH_TORCHINDUCTOR:
             self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
-
-        conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j], device=device)
-        conj_1 = conj_0.conj()
-        self.assertTrue(conj_1.is_conj())
-        self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
-        self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
-        self.assertEqual(conj_0.stride(), conj_1.stride())
-        self.assertEqual(conj_0.size(), conj_1.size())
-        self.assertFalse(torch.equal(conj_0, conj_1))
-        # FIXME: Disable the following check due to the inductor failure
-        # See https://github.com/pytorch/pytorch/issues/100340 and
-        # https://github.com/pytorch/pytorch/issues/98175
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertTrue(torch.equal(conj_0, conj_1.conj()))
 
         # Fast path test: two tensors share the same storage, but different dtype
         s_0 = torch.rand((2, 3), dtype=torch.float, device=device)
@@ -6733,6 +6724,19 @@ class TestTorchDeviceType(TestCase):
         for dtype in floating_and_complex_types():
             t = torch.tensor([1., float('nan')], dtype=dtype)
             self.assertFalse(torch.equal(t, t))
+
+    # inductor unsupported complex types
+    @skipIfTorchInductor
+    def test_equal_conj(self, device):
+        conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j], device=device)
+        conj_1 = conj_0.conj()
+        self.assertTrue(conj_1.is_conj())
+        self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
+        self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
+        self.assertEqual(conj_0.stride(), conj_1.stride())
+        self.assertEqual(conj_0.size(), conj_1.size())
+        self.assertFalse(torch.equal(conj_0, conj_1))
+        self.assertTrue(torch.equal(conj_0, conj_1.conj()))
 
     def test_pickle_generator(self, device):
         generator = torch.Generator(device=device).manual_seed(12345)
