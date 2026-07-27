@@ -88,6 +88,18 @@ size_t computeStorageNbytes(
     size_t itemsize_bytes,
     size_t storage_offset
   ) {
+  return static_cast<size_t>(
+      computeStorageNbytesWithOffset(
+          sizes, strides, itemsize_bytes, storage_offset)
+          .withOffset);
+}
+
+StorageNbytes computeStorageNbytesWithOffset(
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    size_t itemsize_bytes,
+    size_t storage_offset
+  ) {
   TORCH_CHECK(
     sizes.size() == strides.size(),
     "dimensionality of sizes (",
@@ -100,35 +112,40 @@ size_t computeStorageNbytes(
 #ifndef C10_MOBILE
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
-  uint64_t size = storage_offset + 1;
+  uint64_t size = 1;
   bool overflowed = false;
   for (const auto i : c10::irange(sizes.size())) {
     if (sizes[i] == 0) {
-      return 0;
+      return {0, 0};
     }
 
     uint64_t strided_size = 0;
     overflowed |= c10::mul_overflows(strides[i], sizes[i] - 1, &strided_size);
     overflowed |= c10::add_overflows(size, strided_size, &size);
   }
-  overflowed |= c10::mul_overflows(size, itemsize_bytes, &size);
-  overflowed |= size > storage_max();
+  uint64_t without_offset = 0;
+  uint64_t with_offset = 0;
+  overflowed |= c10::mul_overflows(size, itemsize_bytes, &without_offset);
+  overflowed |= c10::add_overflows(size, storage_offset, &with_offset);
+  overflowed |= c10::mul_overflows(with_offset, itemsize_bytes, &with_offset);
+  overflowed |= with_offset > storage_max();
   TORCH_CHECK(!overflowed,
               "Storage size calculation overflowed with sizes=",
               sizes, " and strides=", strides);
-  return static_cast<size_t>(size);
+  return {static_cast<int64_t>(without_offset), static_cast<int64_t>(with_offset)};
 #else
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   uint64_t size = 1;
   for (const auto i : c10::irange(sizes.size())) {
     if (sizes[i] == 0) {
-      return 0;
+      return {0, 0};
     }
 
     size += strides[i] * (sizes[i] - 1);
   }
-  return itemsize_bytes * (storage_offset + size);
+  return {static_cast<int64_t>(itemsize_bytes * size),
+          static_cast<int64_t>(itemsize_bytes * (storage_offset + size))};
 #endif
 }
 
@@ -141,9 +158,20 @@ SymInt computeStorageNbytesContiguous(
   return itemsize_bytes * (storage_offset + numel);
 }
 
+SymInt computeStorageNbytes(
+    SymIntArrayRef sizes,
+    SymIntArrayRef strides,
+    const SymInt& itemsize_bytes,
+    const SymInt& storage_offset
+  ) {
+  return computeStorageNbytesWithOffset(
+             sizes, strides, itemsize_bytes, storage_offset)
+      .withOffset;
+}
+
 // not including mobile-only macros in this function,
 // since mobile shouldn't be using symints.
-SymInt computeStorageNbytes(
+SymStorageNbytes computeStorageNbytesWithOffset(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
     const SymInt& itemsize_bytes,
@@ -162,7 +190,7 @@ SymInt computeStorageNbytes(
   SymInt size = 1;
   for (const auto i : c10::irange(sizes.size())) {
     if (TORCH_GUARD_OR_FALSE(sizes[i].sym_eq(0))) {
-      return 0;
+      return {0, 0};
     }
 
     // NOTE: while this can technically return negative sizes for
@@ -172,7 +200,7 @@ SymInt computeStorageNbytes(
     // once our min/max symbolic reasoning improves.
     size += strides[i] * (sizes[i] - 1);
   }
-  return itemsize_bytes * (storage_offset + size);
+  return {itemsize_bytes * size, itemsize_bytes * (storage_offset + size)};
 }
 
 template <typename T>

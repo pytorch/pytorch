@@ -99,15 +99,16 @@ inline void checkInBoundsForStorage(
     const Storage& new_storage) {
   T storage_size_bytes, storage_size_plus_offset_bytes;
   if (stride.data()) {
-    storage_size_bytes =
-        at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-    storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
+    auto nbytes = at::detail::computeStorageNbytesWithOffset(
         size, stride, data_type.itemsize(), storage_offset);
+    storage_size_bytes = std::move(nbytes.withoutOffset);
+    storage_size_plus_offset_bytes = std::move(nbytes.withOffset);
   } else {
+    const size_t itemsize = data_type.itemsize();
     storage_size_bytes =
-        at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
+        at::detail::computeStorageNbytesContiguous(size, itemsize);
     storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
-        size, data_type.itemsize(), storage_offset);
+        size, itemsize, storage_offset);
   }
   const int64_t element_per_byte = subByteElementPerByte(data_type);
   if (element_per_byte > 1) {

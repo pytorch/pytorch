@@ -1767,8 +1767,8 @@ def forward(self, primals, tangents):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(primals_2);  primals_2 = None
     _opaque_obj0 = self._opaque_obj0
     module_mul = torch.ops._TestOpaqueObject.module_mul.default(_opaque_obj0, primals_1, _local_scalar_dense);  _opaque_obj0 = primals_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
-    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)""",
+    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
+    return pytree.tree_unflatten([module_mul, mul_2, None], self._out_spec)""",
                 )
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 

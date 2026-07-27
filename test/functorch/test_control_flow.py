@@ -10835,10 +10835,10 @@ class GraphModule(torch.nn.Module):
             sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
             view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
-            mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
-            add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
+            mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
+            mul_6: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
+            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_6);  mm = mul_6 = None
+            add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_5);  add_7 = mul_5 = None
             add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
             add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None

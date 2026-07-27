@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyNativeDeviceTypes,
     skipLazy,
     skipMeta,
     skipMPS,
@@ -2123,6 +2124,18 @@ class TestOldViewOps(TestCase):
             RuntimeError, "Storage size calculation overflowed"
         ):
             torch.as_strided(t, [1], [1], 2**61 - 1)
+
+    @onlyNativeDeviceTypes
+    def test_as_strided_storage_offset_bounds(self, device):
+        numel = 10
+        t = torch.arange(numel, device=device)
+        size, stride = [3], [1]
+        max_in_bounds_offset = numel - size[0]
+        view = torch.as_strided(t, size, stride, max_in_bounds_offset)
+        self.assertEqual(view, t[max_in_bounds_offset:])
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage of size"):
+            torch.as_strided(t, size, stride, max_in_bounds_offset + 1)
+        self.assertEqual(torch.as_strided(t, [0], [1], numel * 100).numel(), 0)
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):

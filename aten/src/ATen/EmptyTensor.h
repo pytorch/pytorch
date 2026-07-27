@@ -44,6 +44,25 @@ TORCH_API SymInt computeStorageNbytes(
     const SymInt& itemsize,
     const SymInt& storage_offset = 0);
 
+struct StorageNbytes {
+  int64_t withoutOffset;
+  int64_t withOffset;
+};
+TORCH_API StorageNbytes computeStorageNbytesWithOffset(
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    size_t itemsize,
+    size_t storage_offset);
+struct SymStorageNbytes {
+  SymInt withoutOffset;
+  SymInt withOffset;
+};
+TORCH_API SymStorageNbytes computeStorageNbytesWithOffset(
+    SymIntArrayRef sizes,
+    SymIntArrayRef strides,
+    const SymInt& itemsize,
+    const SymInt& storage_offset);
+
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,
     c10::Allocator* allocator,
