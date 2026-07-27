@@ -10001,6 +10001,30 @@ def forward(self, x):
         ep = export(Simple(), example_inputs)
         self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
+    def test_effectful_while_loop_export_nyi(self):
+        class M(torch.nn.Module):
+            def forward(self, matrix, count):
+                def cond(i, out):
+                    return i < count
+
+                def body(i, out):
+                    return i + 1, out + torch.linalg.inv(matrix)
+
+                carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+                return torch.while_loop(cond, body, carries)[1]
+
+        inputs = (torch.eye(2), torch.tensor(1))
+        expected = M()(*inputs)
+        for strict in (True, False):
+            with self.subTest(strict=strict):
+                ep = export(M(), inputs, strict=strict)
+                self.assertEqual(ep.module()(*inputs), expected)
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "effects in while_loop are unsupported during export",
+                ):
+                    ep.run_decompositions()
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):

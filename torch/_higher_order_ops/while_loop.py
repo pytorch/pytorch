@@ -745,6 +745,10 @@ def while_loop_func(
                 raise NotImplementedError(
                     "while_loop effects with mutation are unsupported"
                 )
+            if body_has_effect and torch.compiler.is_exporting():
+                raise NotImplementedError(
+                    "effects in while_loop are unsupported during export"
+                )
 
         active_mode = mode if body_has_effect else None
         if active_mode is not None:
