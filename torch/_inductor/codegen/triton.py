@@ -5645,7 +5645,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute.splice(
                         f"""
                         {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine_with_sum(
-                            {accumulator_max}, {accumulator_sum}, {value_max}, {value_sum}, {config.use_fast_math}
+                            {accumulator_max}, {accumulator_sum}, {value_max}, {value_sum},
+                            {config.use_fast_math}, {config.strict_signed_zero}
                         )
                         """
                     )
@@ -5653,7 +5654,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute.splice(
                         f"""
                         {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine(
-                            {accumulator_max}, {accumulator_sum}, {value}, {config.use_fast_math}
+                            {accumulator_max}, {accumulator_sum}, {value},
+                            {config.use_fast_math}, {config.strict_signed_zero}
                         )
                         """
                     )
@@ -5856,7 +5858,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(
             f"""
             {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
-                {accumulator_max}, {accumulator_sum}, {dim}, {config.use_fast_math})
+                {accumulator_max}, {accumulator_sum}, {dim},
+                {config.use_fast_math}, {config.strict_signed_zero})
             {result_max} = {self.reduction_resize(f"{result_max}")}
             {result_sum} = {self.reduction_resize(f"{result_sum}")}
             """
@@ -5995,7 +5998,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(
             f"""
             {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
-                {accumulator_max}, {accumulator_sum}, {dim}, {config.use_fast_math})
+                {accumulator_max}, {accumulator_sum}, {dim},
+                {config.use_fast_math}, {config.strict_signed_zero})
             {result_max} = {self.reduction_resize(f"{result_max}")}
             {result_sum} = {self.reduction_resize(f"{result_sum}")}
             """
