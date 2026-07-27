@@ -3,7 +3,6 @@
 
 import collections
 import enum
-import unittest
 
 import torch
 
@@ -242,7 +241,6 @@ class NbBoolTests(TestCase):
 
     # --- Blocked slot: __bool__ = None ---
 
-    @unittest.expectedFailure
     def test_user_defined_bool_none_raises(self):
         class NoBool:
             __bool__ = None
