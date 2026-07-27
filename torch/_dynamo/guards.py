@@ -2591,7 +2591,8 @@ class GuardBuilder(GuardBuilderBase):
     @skip_guard_check_spec
     def ENV_MATCH(self, guard: Guard) -> None:
         source = guard.originating_source
-        assert isinstance(source, EnvVarSource)
+        if not isinstance(source, EnvVarSource):
+            raise AssertionError(f"ENV_MATCH expects EnvVarSource, got {type(source)}")
         key = source.key
         value = source.value
         code = f"{source.name} == {value!r}"
@@ -2602,6 +2603,34 @@ class GuardBuilder(GuardBuilderBase):
 
         def fn(x: Any) -> bool:
             return os.environ.get(key) == value
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts([code], guard), guard.user_stack
+        )
+
+    # Weaker sibling of ENV_MATCH for ``key in os.environ``: guards only on the
+    # variable's presence, not its value, so changing the value of a variable
+    # that is already set does not recompile a graph that only tested
+    # membership. Like ENV_MATCH, the presence is taken from the trace-time
+    # snapshot carried by EnvVarSource (value is None iff unset) - do not
+    # re-read os.environ here.
+    @skip_guard_check_spec
+    def ENV_CONTAINS(self, guard: Guard) -> None:
+        source = guard.originating_source
+        if not isinstance(source, EnvVarSource):
+            raise AssertionError(
+                f"ENV_CONTAINS expects EnvVarSource, got {type(source)}"
+            )
+        key = source.key
+        present = source.value is not None
+        code = f"({source.name} is not None) == {present!r}"
+        if code in self.already_added_code_parts:
+            return
+        self.already_added_code_parts.add(code)
+        self._set_guard_export_info(guard, [code])
+
+        def fn(x: Any) -> bool:
+            return (os.environ.get(key) is not None) == present
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts([code], guard), guard.user_stack

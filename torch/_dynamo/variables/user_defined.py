@@ -5595,10 +5595,13 @@ class EnvironVariable(MutableMappingVariable):
     """Handles the ``os.environ`` singleton.
 
     Reads with constant string keys (``get``, ``__getitem__``,
-    ``__contains__``) are constant-folded at trace time and guarded by the
-    ambient ``GuardBuilder.ENV_MATCH`` guard (via ``EnvVarSource``) so that a
-    runtime change to the variable triggers a recompile. Reads funnel through
-    three hooks: subscript via ``mp_subscript_impl``, ``in`` via
+    ``__contains__``) are constant-folded at trace time and guarded via an
+    ambient ``EnvVarSource`` guard so that a runtime change to the variable
+    triggers a recompile: value reads install ``GuardBuilder.ENV_MATCH``
+    (guards on the value), while ``in`` installs the weaker
+    ``GuardBuilder.ENV_CONTAINS`` (guards only on presence, so changing the
+    value of a set variable does not recompile a membership test). Reads
+    funnel through three hooks: subscript via ``mp_subscript_impl``, ``in`` via
     ``sq_contains``, and ``environ.get``/``environ.__getitem__`` attribute
     calls (including ``os.getenv``, which inlines ``environ.get``) via
     ``getattro_impl``.
@@ -5643,14 +5646,16 @@ class EnvironVariable(MutableMappingVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in ("get", "__getitem__"):
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
-            )
+            return variables.CallMethodVariable(self, name)
         return super().getattro_impl(tx, name)
 
     def mp_subscript_impl(
         self, tx: "InstructionTranslatorBase", key: VariableTracker
     ) -> VariableTracker:
+        # Load-bearing: without this, os.environ["X"] falls back to inlining
+        # os._Environ.__getitem__, whose self._data read takes the sourced-dict
+        # guard path this class exists to avoid. Routing through call_method
+        # guards it via the ambient ENV_MATCH like the other reads.
         return self.call_method(tx, "__getitem__", [key], {})
 
     def sq_contains(
@@ -5661,7 +5666,9 @@ class EnvironVariable(MutableMappingVariable):
         if item.is_python_constant() and isinstance(item.as_python_constant(), str):
             key = item.as_python_constant()
             value = os.environ.get(key)
-            install_guard(EnvVarSource(key, value).make_guard(GuardBuilder.ENV_MATCH))
+            install_guard(
+                EnvVarSource(key, value).make_guard(GuardBuilder.ENV_CONTAINS)
+            )
             return ConstantVariable.create(value is not None)
         return super().sq_contains(tx, item)
 

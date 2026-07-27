@@ -78,6 +78,11 @@ class EnvironTests(torch._dynamo.test_case.TestCase):
         with env_var("TEST_DYNAMO_ENV_D", "anything"):
             self.assertEqual(opt_fn(x), x + 1)
             self.assertEqual(cnt.frame_count, 2)
+        # ENV_CONTAINS guards on presence only: changing the value of a set
+        # variable does not recompile a graph that only tested membership.
+        with env_var("TEST_DYNAMO_ENV_D", "something_else"):
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(cnt.frame_count, 2)
 
     def test_getenv_missing_then_set(self):
         def fn(x):

@@ -1099,7 +1099,8 @@ class EnvVarSource(Source):
     ``os.environ.get``, subscript or ``in`` on ``os.environ``). ``value`` is
     the variable's value observed at trace time (None if unset), which is
     baked into the graph as a constant and guarded by
-    ``GuardBuilder.ENV_MATCH`` so that a change to the variable at runtime
+    ``GuardBuilder.ENV_MATCH`` (value reads) or ``GuardBuilder.ENV_CONTAINS``
+    (presence only, for ``in``) so that a change to the variable at runtime
     triggers a recompile. Carrying the traced value here (instead of
     re-reading os.environ when guards are built) keeps the guard in sync with
     the graph even if the environment mutates during backend compilation, and
@@ -1107,8 +1108,8 @@ class EnvVarSource(Source):
     so it stays eval-able in scopes that don't have ``os`` imported (e.g.
     guard export)."""
 
-    key: str = ""
-    value: str | None = None
+    key: str
+    value: str | None
 
     @functools.cached_property
     def _name_template(self) -> str:
