@@ -104,6 +104,38 @@ class DecoratorTests(PytreeRegisteringTestCase):
             finally:
                 torch.ops.foo.custom = orig_custom
 
+    def test_disable_not_traced_and_correct(self):
+        # disable must keep Dynamo from tracing into the function while still
+        # returning correct results (exercises the non-export hot path).
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        def fn(x):
+            return torch.cos(inner(torch.sin(x)))
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        res = torch.compile(fn, backend=cnts)(x)
+        self.assertEqual(ref, res)
+        # inner is disabled -> graph break around it -> two compiled frames.
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_disable_under_eager_on_recompile_stance(self):
+        # A disabled function honors the stance for its body: under
+        # eager_on_recompile the stance callback is False (run-only), not fully
+        # off. Pin that it still returns correct results.
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        x = torch.randn(4)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            self.assertEqual(inner(x), x + 1)
+            self.assertEqual(inner(x), x + 1)
+
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
             pass
