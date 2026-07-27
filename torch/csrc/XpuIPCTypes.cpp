@@ -488,7 +488,6 @@ void ReleaseXpuIPCRefCounter(const std::string& handle, uint64_t offset) {
     *(static_cast<int64_t*>(sptr.get()) + offset) -= 1;
   } catch (c10::Error&) {
   }
-  XpuIPCCollect();
 }
 
 c10::intrusive_ptr<at::StorageImpl> NewStorageFromXpuShared(
