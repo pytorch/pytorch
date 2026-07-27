@@ -43,6 +43,7 @@ from cutlass.cute.runtime import from_dlpack
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 import torch
+from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
 from torch._vendor.quack.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -442,6 +443,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         local_reduce_type: cutlass.Constexpr = "sum",
         local_reduce_source: cutlass.Constexpr = "identity",
         local_reduce_feeds_main: cutlass.Constexpr = False,
+        local_reduce_op: cutlass.Constexpr = cute.ReductionOp.ADD,
+        local_reduce_init: cutlass.Constexpr = 0.0,
+        local_reduce_combine: cutlass.Constexpr = lambda lhs, rhs: lhs + rhs,
+        local_reduce_source_op: cutlass.Constexpr = lambda value: value,
+        local_reduce_finalize: cutlass.Constexpr = lambda value, group: value,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -493,37 +499,34 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_affine_bias = 0.0
         self.local_reduce_denominator_scale = 1.0
         self.local_reduce_denominator_bias = 0.0
-        if cutlass.const_expr(local_reduce_type.startswith("mean_linear:")):
-            _, input_coefficient, result_coefficient, bias = local_reduce_type.split(
-                ":"
+        reduction_expression = GemmReductionExpression.parse(local_reduce_type)
+        local_reduce_type = reduction_expression.kind
+        if cutlass.const_expr(local_reduce_type == "mean_linear"):
+            input_coefficient, result_coefficient, bias = (
+                reduction_expression.parameters
             )
-            local_reduce_type = "mean_linear"
             self.local_reduce_input_coefficient = float(input_coefficient)
             self.local_reduce_result_coefficient = float(result_coefficient)
             self.local_reduce_bias = float(bias)
-        if cutlass.const_expr(local_reduce_type.startswith("normalize_sum_affine:")):
+        if cutlass.const_expr(local_reduce_type == "normalize_sum_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)
             self.local_reduce_denominator_scale = float(denominator_scale)
             self.local_reduce_denominator_bias = float(denominator_bias)
-        if cutlass.const_expr(
-            local_reduce_type.startswith("normalize_sum_reverse_affine:")
-        ):
+        if cutlass.const_expr(local_reduce_type == "normalize_sum_reverse_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum_reverse"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)
@@ -532,6 +535,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_type = local_reduce_type
         self.local_reduce_source = local_reduce_source
         self.local_reduce_feeds_main = local_reduce_feeds_main
+        self.local_reduce_op = local_reduce_op
+        self.local_reduce_init = local_reduce_init
+        self.local_reduce_combine = local_reduce_combine
+        self.local_reduce_source_op = local_reduce_source_op
+        self.local_reduce_finalize = local_reduce_finalize
         self.has_cross_warp_local_reduce = cutlass.const_expr(
             local_reduce_tensor is not None
             and local_reduce_axis == 0
@@ -1778,22 +1786,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
                             self.acc_dtype
                         )
-                        if cutlass.const_expr(self.local_reduce_source == "square"):
-                            local_reduce_vec = local_reduce_vec * local_reduce_vec
-                        elif cutlass.const_expr(self.local_reduce_source == "abs"):
-                            local_reduce_vec = cute.math.abs(local_reduce_vec)
-                        elif cutlass.const_expr(
-                            self.local_reduce_source == "abs_scale"
-                        ):
-                            local_reduce_vec = (
-                                cute.math.max(
-                                    cute.math.abs(local_reduce_vec),
-                                    cute.full_like(local_reduce_vec, 1e-12),
-                                )
-                                / 448.0
-                            )
-                        else:
-                            assert self.local_reduce_source == "identity"
+                        local_reduce_vec = self.local_reduce_source_op(local_reduce_vec)
                     if cutlass.const_expr(self.local_reduce_feeds_main):
                         group = cutlass.const_expr(self.local_reduce_group)
                         if cutlass.const_expr(
@@ -1991,38 +1984,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             grouped = local_reduce_vec.reshape(
                                 ((1, fragment_group, repeats), 1, 1)
                             )
-                            if cutlass.const_expr(
-                                self.local_reduce_type
-                                in (
-                                    "mean",
-                                    "normalize_sum",
-                                    "normalize_sum_reverse",
-                                    "sum",
-                                )
-                            ):
-                                reduce_op = cute.ReductionOp.ADD
-                                init_val = 0.0
-                            elif cutlass.const_expr(self.local_reduce_type == "prod"):
-                                reduce_op = cute.ReductionOp.MUL
-                                init_val = 1.0
-                            elif cutlass.const_expr(
-                                self.local_reduce_type in ("max", "normalize_absmax")
-                            ):
-                                reduce_op = cute.ReductionOp.MAX
-                                init_val = -cutlass.Float32.inf
-                            else:
-                                assert self.local_reduce_type == "min"
-                                reduce_op = cute.ReductionOp.MIN
-                                init_val = cutlass.Float32.inf
                             reduced = grouped.reduce(
-                                reduce_op,
-                                init_val=init_val,
+                                self.local_reduce_op,
+                                init_val=self.local_reduce_init,
                                 reduction_profile=((None, 1, None), 1, 1),
                             )
-                            if cutlass.const_expr(
-                                self.local_reduce_type == "mean" and group <= fragment_n
-                            ):
-                                reduced = reduced / group
+                            if cutlass.const_expr(group <= fragment_n):
+                                reduced = self.local_reduce_finalize(reduced, group)
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
                             reduced = reduced.broadcast_to(grouped.shape)
                             should_store = cutlass.Boolean(True)
@@ -2034,28 +2002,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 partial = local_reduce_partial.load()
                                 if subtile_idx % fragments_per_group == 0:
                                     partial = reduced
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type
-                                    in (
-                                        "mean",
-                                        "normalize_sum",
-                                        "normalize_sum_reverse",
-                                        "sum",
-                                    )
-                                ):
-                                    partial = partial + reduced
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type == "prod"
-                                ):
-                                    partial = partial * reduced
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type
-                                    in ("max", "normalize_absmax")
-                                ):
-                                    partial = cute.math.max(partial, reduced)
                                 else:
-                                    assert self.local_reduce_type == "min"
-                                    partial = cute.math.min(partial, reduced)
+                                    partial = self.local_reduce_combine(
+                                        partial, reduced
+                                    )
                                 local_reduce_partial.store(partial)
                                 should_store = (
                                     subtile_idx % fragments_per_group
@@ -2063,10 +2013,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 )
                                 if should_store:
                                     reduced = partial
-                                    if cutlass.const_expr(
-                                        self.local_reduce_type == "mean"
-                                    ):
-                                        reduced = reduced / group
+                                    reduced = self.local_reduce_finalize(reduced, group)
                                     store_offset = (
                                         real_subtile_idx * self.epi_tile_n
                                     ) % group
@@ -2130,37 +2077,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         reduced_flt[i],
                                         offset=cute.crd2idx((rows, 0), lane_layout_mn),
                                     )
-                                    if cutlass.const_expr(
-                                        self.local_reduce_type
-                                        in (
-                                            "sum",
-                                            "mean",
-                                            "mean_linear",
-                                            "normalize_sum",
-                                            "normalize_sum_reverse",
-                                        )
-                                    ):
-                                        reduced_flt[i] += other
-                                    elif cutlass.const_expr(
-                                        self.local_reduce_type == "prod"
-                                    ):
-                                        reduced_flt[i] *= other
-                                    elif cutlass.const_expr(
-                                        self.local_reduce_type == "max"
-                                    ):
-                                        reduced_flt[i] = cute.arch.fmax(
-                                            reduced_flt[i], other
-                                        )
-                                    else:
-                                        assert self.local_reduce_type == "min"
-                                        reduced_flt[i] = cute.arch.fmin(
-                                            reduced_flt[i], other
-                                        )
+                                    reduced_flt[i] = self.local_reduce_combine(
+                                        reduced_flt[i], other
+                                    )
                                     rows = rows // 2
-                                if cutlass.const_expr(
-                                    self.local_reduce_type in ("mean", "mean_linear")
-                                ):
-                                    reduced_flt[i] /= group
+                                reduced_flt[i] = self.local_reduce_finalize(
+                                    reduced_flt[i], group
+                                )
                             groups_per_cta = cutlass.const_expr(
                                 self.cta_tile_shape_mnk[0] // group
                             )
@@ -2232,32 +2155,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                                 - group_idx
                                                 - 1,
                                             ]
-                                            if cutlass.const_expr(
-                                                self.local_reduce_type
-                                                in (
-                                                    "sum",
-                                                    "mean",
-                                                    "mean_linear",
-                                                    "normalize_sum",
-                                                    "normalize_sum_reverse",
-                                                )
-                                            ):
-                                                group_value += other
-                                            elif cutlass.const_expr(
-                                                self.local_reduce_type == "prod"
-                                            ):
-                                                group_value *= other
-                                            elif cutlass.const_expr(
-                                                self.local_reduce_type == "max"
-                                            ):
-                                                group_value = cute.arch.fmax(
-                                                    group_value, other
-                                                )
-                                            else:
-                                                assert self.local_reduce_type == "min"
-                                                group_value = cute.arch.fmin(
-                                                    group_value, other
-                                                )
+                                            group_value = self.local_reduce_combine(
+                                                group_value, other
+                                            )
                                         if cutlass.const_expr(
                                             self.local_reduce_feeds_main
                                         ):
