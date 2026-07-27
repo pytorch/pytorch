@@ -2271,6 +2271,62 @@ def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
     )
 
 
+def use_flex_tdm_descriptor(*matrices: IRNode) -> bool:
+    """Return whether flex operands satisfy TDM descriptor and request constraints."""
+    from .virtualized import V
+
+    if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
+        return False
+
+    def operand_compatible(mat: IRNode) -> bool:
+        if mat.get_dtype() not in _TDM_SUPPORTED_DTYPES:
+            return False
+        sizes = mat.get_size()
+        strides = mat.get_stride()
+        if len(sizes) != 4 or len(strides) != 4:
+            return False
+        if not _descriptor_shape_fits_in_int32(sizes):
+            return False
+        if mat.get_name() in V.graph.unaligned_buffers:
+            return False
+
+        sizes_i = [
+            V.graph.sizevars.replace_backed_symbols_with_hints(size) for size in sizes
+        ]
+        strides_i = [
+            V.graph.sizevars.replace_backed_symbols_with_hints(stride)
+            for stride in strides
+        ]
+        offset = V.graph.sizevars.replace_backed_symbols_with_hints(
+            mat.get_layout().offset
+        )
+        itemsize = mat.get_dtype().itemsize
+
+        def aligned(expr: sympy.Expr, alignment: int) -> bool:
+            return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
+
+        if not V.graph.sizevars.statically_known_equals(strides_i[-1], 1):
+            return False
+        if not aligned(offset * itemsize, TMA_ALIGNMENT):
+            return False
+        if not aligned(sizes_i[-1] * itemsize, TMA_ALIGNMENT):
+            return False
+        if not all(
+            aligned(stride * itemsize, TMA_ALIGNMENT) for stride in strides_i[:-1]
+        ):
+            return False
+
+        return aligned(
+            sizes_i[-1] * itemsize,
+            _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
+        ) and all(
+            aligned(stride * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES)
+            for stride in strides_i[:-1]
+        )
+
+    return all(operand_compatible(mat) for mat in matrices)
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:

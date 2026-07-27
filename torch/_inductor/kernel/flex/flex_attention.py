@@ -28,6 +28,7 @@ from ...utils import can_use_tma
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
+    apply_gfx1250_tdm_descriptor,
     build_subgraph_buffer,
     can_skip_boundary_checks,
     create_indices_fake,
@@ -473,6 +474,16 @@ def flex_attention(
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
+
+        if not cur_kernel_options["USE_TMA"]:
+            apply_gfx1250_tdm_descriptor(
+                cur_kernel_options,
+                query,
+                key,
+                value,
+            )
+        else:
+            cur_kernel_options.setdefault("USE_TDM", False)
 
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.

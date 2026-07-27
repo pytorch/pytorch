@@ -24,7 +24,7 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     kv_base_offset = kv_start + kv_offset
-    {%- if USE_TMA %}
+    {%- if USE_TMA or USE_TDM %}
     k = tl.load_tensor_descriptor(
         desc_k,
         [kv_base_offset, 0],
@@ -124,7 +124,7 @@ def forward_block_mn(
     l_i = l_i * alpha + tl.sum(p, 1)
     # # -- scale and update acc --
     acc = acc * alpha[:, None]
-    {%- if USE_TMA %}
+    {%- if USE_TMA or USE_TDM %}
     v = tl.load_tensor_descriptor(
         desc_v,
         [kv_base_offset, 0],
