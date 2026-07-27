@@ -60,6 +60,13 @@ on:
       amd-sandbox-label-type:
         description: Runner prefix for the "amd-sandbox" experiment (empty when not enabled)
         value: ${{ jobs.runner-determinator.outputs.amd-sandbox-label-type }}
+      # Deprecated empty-string alias kept only so the MI350/gfx950 workflows that
+      # still reference amd-do-label-type resolve to a bare (unprefixed) label,
+      # matching the old inactive amd-do experiment. Removed once #191249 drops
+      # those references.
+      amd-do-label-type:
+        description: Deprecated no-op alias; removed by the amd-do cleanup PR.
+        value: ${{ '' }}
       ci-docker-hash:
         description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
         value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
