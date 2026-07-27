@@ -510,7 +510,6 @@ def estimate_region_peak_memory(
     step_of: Callable[[BaseSchedulerNode], int],
     graph_outputs: OrderedSet[str],
     cur_memory: int = 0,
-    extra_live_before: list[int] | None = None,
 ) -> tuple[int, list[int]]:
     """Peak memory inside `[region_start, region_end]` for the
     hypothetical post-reorder schedule.
@@ -521,14 +520,8 @@ def estimate_region_peak_memory(
     consumer is this node. Then accumulates per step starting from
     `cur_memory` (live bytes at the window boundary).
 
-    `extra_live_before` (len == window size) is added per slot when
-    computing the peak: live bytes other rewrites contribute at each
-    step that are not part of this walk.
-
     Returns `(peak, live_before)` where `live_before[slot]` is the
-    walk's live bytes before that slot's allocations (excluding
-    `extra_live_before`), so callers can diff it against the baseline
-    per-step liveness to obtain this rewrite's contribution.
+    walk's live bytes before that slot's allocations.
     """
     R = region_end - region_start + 1
     region = [SNodeMemory(0, 0) for _ in range(R)]
@@ -562,12 +555,11 @@ def estimate_region_peak_memory(
     cur = cur_memory
     peak = cur
     live_before = [0] * R
-    for slot, af in enumerate(region):
+    for slot, alloc_free in enumerate(region):
         live_before[slot] = cur
-        extra = extra_live_before[slot] if extra_live_before is not None else 0
-        if cur + af.size_alloc + extra > peak:
-            peak = cur + af.size_alloc + extra
-        cur += af.size_alloc - af.size_free
+        if cur + alloc_free.size_alloc > peak:
+            peak = cur + alloc_free.size_alloc
+        cur += alloc_free.size_alloc - alloc_free.size_free
     return peak, live_before
 
 
