@@ -649,10 +649,10 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         self.assertTrue(opts["USE_TDM"])
         self.assertEqual(opts["num_stages"], 2)
 
-    def test_flex_tdm_helper_negative_gate_only_defines_flag(self):
+    def test_flex_tdm_helper_negative_gate_overrides_stale_flag(self):
         from torch._inductor.kernel.flex.common import apply_gfx1250_tdm_descriptor
 
-        opts = {"num_stages": 2}
+        opts = {"num_stages": 2, "USE_TDM": True}
         with mock.patch(
             "torch._inductor.utils.use_flex_tdm_descriptor", return_value=False
         ):

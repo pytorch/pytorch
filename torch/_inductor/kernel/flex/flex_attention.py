@@ -483,7 +483,7 @@ def flex_attention(
                 value,
             )
         else:
-            cur_kernel_options.setdefault("USE_TDM", False)
+            cur_kernel_options["USE_TDM"] = False
 
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.

@@ -57,9 +57,7 @@ def apply_gfx1250_tdm_descriptor(
     """Enable the flex descriptor branch when all named operands admit TDM."""
     from ...utils import use_flex_tdm_descriptor
 
-    kernel_options.setdefault("USE_TDM", False)
-    if use_flex_tdm_descriptor(*descriptor_operands):
-        kernel_options["USE_TDM"] = True
+    kernel_options["USE_TDM"] = use_flex_tdm_descriptor(*descriptor_operands)
 
 
 def can_skip_boundary_checks(seq_len, sparse_block_size) -> bool:

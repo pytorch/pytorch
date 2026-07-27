@@ -407,7 +407,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         if not cur_kernel_options["USE_TMA"]:
             apply_gfx1250_tdm_descriptor(cur_kernel_options, key, value)
         else:
-            cur_kernel_options.setdefault("USE_TDM", False)
+            cur_kernel_options["USE_TDM"] = False
 
         # Add ROCm-specific parameters if they exist in the config
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
