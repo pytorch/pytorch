@@ -202,10 +202,8 @@ def has_triton() -> bool:
     if triton_disable_device_detection:
         return False
 
-    from torch._dynamo.device_interface import (
-        get_registered_device_interfaces,
-        TritonUnavailableError,
-    )
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+    from torch._dynamo.exc import TritonUnavailableError
 
     # A device supports Triton if it is available, reports Triton capability, and
     # its Triton backend is actually built. Capability is gated first so that

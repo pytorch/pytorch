@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import torch
+from torch._dynamo.exc import TritonUnavailableError
 from torch.utils._pallas import has_torch_tpu
 
 
@@ -35,18 +36,6 @@ else:
 # Recording the device properties in the main process but used in worker process.
 caching_worker_device_properties: dict[str, Any] = {}
 caching_worker_current_devices: dict[str, int] = {}
-
-
-class TritonUnavailableError(RuntimeError):
-    """
-    Raised by DeviceInterface.raise_if_triton_unavailable to signal that a
-    device cannot run Triton (e.g. no Triton backend was built for it).
-
-    Subclasses RuntimeError so existing callers that catch RuntimeError keep
-    working, while callers that only want to react to Triton unavailability -
-    such as has_triton() - can catch this specific type instead of swallowing
-    every RuntimeError, which would hide unrelated bugs.
-    """
 
 
 class DeviceInterface:
@@ -285,9 +274,13 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
+        # Use the Worker API (device properties cached in the main process
+        # before fork) instead of torch.cuda.get_device_properties directly, so
+        # the capability check stays safe when called from spawn-based compile
+        # workers.
         return (
             torch.version.hip is not None
-            or torch.cuda.get_device_properties(device).major >= 7
+            or CudaInterface.Worker.get_device_properties(device).major >= 7
         )
 
     @staticmethod

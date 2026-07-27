@@ -13,7 +13,8 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
-from torch._dynamo.device_interface import DeviceInterface, TritonUnavailableError
+from torch._dynamo.device_interface import DeviceInterface
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
@@ -1173,10 +1174,6 @@ def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
 
 
 class TestHasTriton(TestCase):
-    def setUp(self):
-        super().setUp()
-        triton_utils.has_triton.cache_clear()
-
     def tearDown(self):
         triton_utils.has_triton.cache_clear()
         super().tearDown()
@@ -1227,7 +1224,7 @@ class TestHasTriton(TestCase):
         # A generic RuntimeError is NOT the "no triton backend" signal, so it
         # must surface instead of being silently treated as "no triton".
         iface = _make_triton_interface(raise_exc=RuntimeError("something else broke"))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "something else broke"):
             self._run([("fake", iface)])
 
     def test_indexed_device_name_skipped(self):
