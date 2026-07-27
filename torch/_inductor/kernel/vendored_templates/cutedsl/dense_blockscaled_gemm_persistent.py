@@ -1539,7 +1539,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # alpha_tensor is None) rather than device control flow.
                     if cutlass.const_expr(alpha_tensor is not None):
                         acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
-                    acc_vec = epilogue_op(acc_vec.to(self.c_dtype))
+                    acc_vec = epilogue_op(acc_vec.to(self.c_dtype)).to(self.c_dtype)
                     tRS_rC.store(acc_vec)
 
                     #
