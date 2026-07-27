@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM quay.io/pypa/manylinux_2_28_aarch64 as base
 
 # Cuda ARM build needs gcc 13
@@ -22,6 +21,8 @@ RUN yum install -y \
   diffutils \
   file \
   git \
+  lld \
+  llvm-devel \
   make \
   patch \
   perl \
@@ -91,19 +92,20 @@ RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
 COPY ./common/install_acl.sh install_acl.sh
 RUN bash ./install_acl.sh && rm install_acl.sh
 
-# Build and install llvm-bolt and lld from source
+# Build and install llvm-bolt from source
 FROM base as llvm
-ARG LLVM_VERSION=21.1.8
-ADD --unpack=true https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz /llvm
-RUN cmake -S /llvm/llvm-project-${LLVM_VERSION}.src/llvm -B /llvm/build \
+RUN LLVM_VERSION="$(rpm -q --qf '%{VERSION}' llvm-devel)" \
+  && git clone --depth 1 --filter=blob:none --sparse --branch "llvmorg-${LLVM_VERSION}" \
+     https://github.com/llvm/llvm-project.git /llvm \
+  && git -C /llvm sparse-checkout set bolt cmake llvm \
+  && cmake -S /llvm/bolt -B /llvm/build \
+    -DCMAKE_INSTALL_PREFIX=/llvm/install \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_TARGETS_TO_BUILD=AArch64 \
-    -DLLVM_ENABLE_PROJECTS="bolt;lld" \
-    -DCMAKE_INSTALL_PREFIX=/llvm/install \
-    -DLLVM_INCLUDE_BENCHMARKS=OFF \
-    -DLLVM_INCLUDE_EXAMPLES=OFF \
-    -DLLVM_INCLUDE_TESTS=OFF \
-    && cmake --build /llvm/build --target install --parallel
+    -DBOLT_TARGETS_TO_BUILD=AArch64 \
+    -DBOLT_INCLUDE_TESTS=OFF \
+  && cmake --build /llvm/build --target install-bolt --parallel \
+  && /llvm/install/bin/llvm-bolt --version
 
 FROM base as final
 
