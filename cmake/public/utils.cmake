@@ -394,7 +394,12 @@ function(torch_compile_options libname)
         # I.e. failures look like torch/headeronly/util/complex.h:334:40: error: identifier '_if' preceded by whitespace in a literal operator declaration is deprecated
         # but if one to look at the source code, there are no space there
         list(APPEND private_compile_options -Wno-deprecated-literal-operator)
-
+        # CUDA 13.2's CCCL deprecates thrust::greater/plus/... in favor of
+        # cuda::std::. Silence it here (unconditionally, since the CUDA build
+        # applies -Werror globally rather than via the WERROR block below, so a
+        # -Wno-error= demote would not be honored); migrating the sources to
+        # cuda::std is a followup (switching outright risks older CUDA toolkits).
+        list(APPEND private_compile_options -Wno-deprecated-declarations)
       endif()
       list(APPEND private_compile_options -Wmove)
     else()
@@ -452,6 +457,22 @@ function(torch_compile_options libname)
         $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
+endfunction()
+
+##############################################################################
+# Suppress a clang host-compiler warning on a standalone CUDA object target's
+# nvcc host pass. torch_compile_options handles the common warnings for the main
+# CUDA targets; targets that don't go through it (flash_attention, torch_nvshmem,
+# ...) call this directly. `warning` is the bare name, e.g.
+# deprecated-literal-operator, which nvcc's cudafe spuriously triggers by
+# reformatting complex.h's operator""_if (see gh-151316).
+# Usage:
+#   torch_cuda_suppress_if_clang(<target> <warning>)
+function(torch_cuda_suppress_if_clang target warning)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(${target} PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler -Wno-${warning}>)
+  endif()
 endfunction()
 
 ##############################################################################

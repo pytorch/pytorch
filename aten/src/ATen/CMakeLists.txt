@@ -353,14 +353,7 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   )
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-  # nvcc's cudafe reformats operator""_if in complex.h into `operator "" _if`,
-  # tripping -Wdeprecated-literal-operator on the clang host compiler.
-  # flash_attention does not go through torch_compile_options (which suppresses
-  # this for other CUDA targets), so mirror that Clang-only guard here (gh-151316).
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(flash_attention PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler -Wno-deprecated-literal-operator>)
-  endif()
+  torch_cuda_suppress_if_clang(flash_attention deprecated-literal-operator)
 endif()
 
 if(USE_FLASH_ATTENTION)
