@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import operator
 import random
 import sys
 import threading
@@ -77,7 +78,9 @@ from ..utils import (
     base_exception_methods,
     check_constant_args,
     cmp_name_to_op_mapping,
+    deque_iterator,
     deque_methods,
+    deque_rev_iterator,
     dict_methods,
     exception_methods,
     frozenset_methods,
@@ -176,7 +179,6 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
-    from .dicts import DunderDictVariable
     from .lists import ListVariable, TupleVariable
 
 
@@ -1217,6 +1219,42 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif self.value in (
+            deque_iterator,
+            deque_rev_iterator,
+        ):
+            # _deque_iterator(deque[, index]) / _deque_reverse_iterator(deque[, index])
+            # ref: dequeiter_new in Modules/_collectionsmodule.c
+            name = self.value.__name__
+
+            def deque_iterator_sig(deque: Any, index: Any = 0, /) -> tuple[Any, Any]:
+                return deque, index
+
+            try:
+                deque_arg, index = deque_iterator_sig(*args, **kwargs)
+            except TypeError:
+                raise_args_mismatch(tx, name)
+            if not isinstance(deque_arg, variables.lists.DequeVariable):
+                raise_type_error(
+                    tx,
+                    f"{name}() argument 1 must be collections.deque, "
+                    f"not {deque_arg.python_type_name()}",
+                )
+            if not isinstance(index, int):
+                index = index.as_python_constant()
+            if self.value is deque_rev_iterator:
+                cls = variables.lists.DequeReverseIteratorVariable
+                snapshot = list(reversed(deque_arg.items))
+            else:
+                cls = variables.lists.DequeIteratorVariable
+                snapshot = list(deque_arg.items)
+            return cls(
+                snapshot,
+                deque_arg,
+                deque_arg.state,
+                index=index,
+                mutation_type=ValueMutationNew(),
+            )
         elif (
             # https://github.com/python/cpython/blob/33efd7178e269cbd04233856261fd0aabbf35447/Lib/contextlib.py#L475-L477
             self.value is types.MethodType
@@ -1684,10 +1722,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
 
-        # This records the attributes that were modified via instance
-        # `__dict__` directly, rather than the normal setattr path.
-        self.dict_vt: DunderDictVariable | None = None
-
         # Cache inspect.getattr_static outputs for the same name. This is fine
         # because if there is a mutation for the name, we use side-effects infra
         # to early return the mutated value.
@@ -1717,11 +1751,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
-
-    def get_dict_vt(self, tx: "InstructionTranslatorBase") -> "DunderDictVariable":
-        if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
-        return self.dict_vt
 
     def is_base_vt_modified(self, side_effects: "SideEffects") -> bool:
         if self._base_vt is not None:
@@ -1962,6 +1991,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 skip_frame=True,
             )
 
+    def _call_method_var_or_const_fold(
+        self,
+        tx: "InstructionTranslatorBase",
+        method_var: VariableTracker,
+        direct_fn: Any,
+    ) -> VariableTracker:
+        if (
+            isinstance(method_var, variables.GetAttrVariable)
+            and self.is_python_constant()
+        ):
+            return variables.ConstantVariable.create(
+                direct_fn(self.as_python_constant())
+            )
+        return method_var.call_function(tx, [], {})
+
     def nb_index_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1971,7 +2015,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_index_impl(tx)
         method_var = self.resolve_type_attr(tx, "__index__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
+        result = self._call_method_var_or_const_fold(tx, method_var, operator.index)
         # CPython validates that __index__ returns an int.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1433-L1438
         if result.is_python_constant() and not isinstance(
@@ -1996,7 +2040,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_int_impl(tx)
         method_var = self.resolve_type_attr(tx, "__int__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
+        result = self._call_method_var_or_const_fold(tx, method_var, int)
         if not issubclass(result.python_type(), int):
             raise_observed_exception(
                 TypeError,
@@ -2017,7 +2061,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_float_impl(tx)
         method_var = self.resolve_type_attr(tx, "__float__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
+        result = self._call_method_var_or_const_fold(tx, method_var, float)
         if not issubclass(result.python_type(), float):
             raise_observed_exception(
                 TypeError,
@@ -2456,6 +2500,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             reverse=reverse,
         )
 
+    def nb_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__matmul__",
+            "__rmatmul__",
+            nb_slot=PyNumberSlots.NB_MATRIX_MULTIPLY,
+            reverse=reverse,
+        )
+
+    def nb_inplace_matrix_multiply_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__imatmul__", [other], {})
+
     def nb_lshift_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2774,19 +2840,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args[0], variables.DeletedVariable()
                 )
 
-            if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
-                self.value, types.GeneratorType
-            ):
+            if isinstance(self.value, types.GeneratorType):
                 unimplemented(
                     gb_type="call_method on generator",
                     context=f"object={self.value}, method={name}, args={args}, kwargs={kwargs}",
                     explanation="Detected a method call to a user-defined generator object. "
                     "This is not fully supported.",
-                    hints=[
-                        "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this "
-                        "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily "
-                        "evaluating them.",
-                    ],
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
 
             # torch.Generator methods like manual_seed(), get_state(), etc.
@@ -3511,6 +3571,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             AttributeError,
             tx,
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
+            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
         )
 
     def getattro_impl(
@@ -4213,6 +4274,19 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # The fast path below replicates CPython's *generated* frozen dataclass
+        # __hash__ (hash(tuple(field_values))).  A frozen dataclass may instead
+        # define a custom __hash__ (e.g. the PyTreeSpec polyfill); dataclasses
+        # synthesizes the generated one via exec (co_filename "<string>"), so a
+        # __hash__ from a real source file is custom -- defer to the general
+        # MRO-walking hash_impl, which traces it.
+        type_hash = type(self.value).__hash__
+        if (
+            isinstance(type_hash, types.FunctionType)
+            and type_hash.__code__.co_filename != "<string>"
+        ):
+            return super().hash_impl(tx)
+
         # CPython's frozen dataclass __hash__ is generated by _hash_add:
         # https://github.com/python/cpython/blob/e76aa128fe/Lib/dataclasses.py#L886-L892
         # It computes hash(tuple(field_values)), i.e. tuplehash applied to
@@ -4670,11 +4744,10 @@ class OrderedDictVariable(UserDefinedDictVariable):
         **kwargs: Any,
     ) -> None:
         if dict_vt is None:
-            from .dicts import ConstDictVariable
+            from .dicts import OrderedItemsDictVariable
 
-            dict_vt = ConstDictVariable(
+            dict_vt = OrderedItemsDictVariable(
                 {},
-                user_cls=collections.OrderedDict,
                 mutation_type=ValueMutationNew(),
             )
         super().__init__(value, dict_vt=dict_vt, **kwargs)
@@ -4916,7 +4989,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             raise AssertionError("_base_vt must not be None for defaultdict repr")
         return VariableTracker.build(
             tx,
-            f"defaultdict({tracked_repr(tx, self.default_factory)}, "
+            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, "
             f"{tracked_repr(tx, self._base_vt)})",
         )
 
@@ -5272,13 +5345,13 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
                 raise AssertionError(
                     "tuple_vt must be constructed by builder.py when source is present"
                 )
-            if not init_args:
-                raise AssertionError("init_args must be provided when tuple_vt is None")
-            # Emulate `tuple.__new__`
+            # Emulate `tuple.__new__`: `tuple.__new__(cls)` with no iterable
+            # arg builds an empty tuple, `tuple.__new__(cls, iterable)` builds
+            # a tuple from the iterable.
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            elems = unpack_iterable(tx, init_args[0])
+            elems = unpack_iterable(tx, init_args[0]) if init_args else []
             self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._base_vt = tuple_vt
