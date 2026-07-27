@@ -40,11 +40,29 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import guard_int, has_guarding_hint
 from torch.utils._ordered_set import OrderedSet
 
 
 def normalize_shape(shape: Any) -> Any:
     return tuple(shape) if isinstance(shape, (list, tuple, torch.Size)) else shape
+
+
+def _specialize_grouped_reshape_group(
+    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
+) -> tuple[Any, ...]:
+    """Guard a backed symbolic group because it determines the kernel layout."""
+    if len(shape) != 3:
+        return shape
+    for group_index, kept_index, source_index in ((-1, 0, 0), (-2, -1, -1)):
+        if not _kept_dim_matches_source(shape[kept_index], source_shape[source_index]):
+            continue
+        group = shape[group_index]
+        if isinstance(group, torch.SymInt) and has_guarding_hint(group):
+            result = list(shape)
+            result[group_index] = guard_int(group)
+            return tuple(result)
+    return shape
 
 
 def _syntactic_grouped_tensor_layout(
@@ -121,6 +139,7 @@ def grouped_tensor_layout(
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:
+            shape = _specialize_grouped_reshape_group(shape, source_shape)
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:

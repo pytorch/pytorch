@@ -479,6 +479,24 @@ class FlexGemmGroupedMainOutputTransform:
         )
 
 
+def grouped_main_output_config_supported(config: Any, n: Any) -> bool:
+    """Return whether a config satisfies the grouped-N store ownership contract.
+
+    Grouped stores have no fallback for partial N tiles or multiple CTAs owning
+    one contracted output tile. Keep one CTA along N, require its tile to fit in
+    physical N, and admit only the M-cluster families whose row ownership has
+    been validated: a single M CTA or the wide-M two-CTA layout.
+    """
+    supported_m_cluster = config.cluster_m == 1 or (
+        config.tile_m == 256 and config.cluster_m == 2
+    )
+    return (
+        supported_m_cluster
+        and config.cluster_n == 1
+        and statically_known(config.tile_n <= n)
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class FlexGemmLocalReduceGeometry:
     """Describe the canonical grouped M/N layout used by FlexGEMM epilogues.
