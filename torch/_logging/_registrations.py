@@ -257,6 +257,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "autotuning_inputs",
+    "Per-kernel input tensor shapes/dtypes/strides logged during autotuning.",
+    off_by_default=True,
+)
+register_artifact(
     "graph_region_expansion",
     "Logs detailed steps of the duplicate graph region tracker expansion algorithm",
     off_by_default=True,

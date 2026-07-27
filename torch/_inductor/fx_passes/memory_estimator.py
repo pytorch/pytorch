@@ -253,7 +253,8 @@ def get_fwd_bwd_interactions(
 
     # Get storages in forward output
     fwd_output_node = next(iter(reversed(fwd_graph.nodes)))[-1]
-    assert fwd_output_node.op == "output"
+    if fwd_output_node.op != "output":
+        raise AssertionError(f"expected output node, got op {fwd_output_node.op}")
     fwd_output_storages = fwd_alias_info.get_storage_uses(fwd_output_node)
 
     # Node names that should not be deleted during memory profile estimation of bwd_graph
@@ -334,7 +335,7 @@ class MemoryTracker:
 
         Args:
             graph: FX graph to track memory for under alternative scheduling
-            is_releaseable: do we consider this input to the graph to release memory
+            is_releasable: do we consider this input to the graph to release memory
             upon final use, or is allocated for the duration of the graph ?
             by default, we assume all nodes but those that start with "primals" to be releasable
             device_filter: Function to determine which devices to track (default: non-CPU)
@@ -374,7 +375,8 @@ class MemoryTracker:
         Args:
             node: The node being scheduled (potentially out of original order)
         """
-        assert node not in self.scheduled, "should not schedule node twice"
+        if node in self.scheduled:
+            raise AssertionError("should not schedule node twice")
         self.scheduled.add(node)
         self._update_memory_for_node(node)
 
@@ -397,9 +399,8 @@ class MemoryTracker:
                 continue
 
             # Invariant: if a node uses a storage, it must be live
-            assert storage_key in self.current_live_storages, (
-                "all input storages should be currently allocated"
-            )
+            if storage_key not in self.current_live_storages:
+                raise AssertionError("all input storages should be currently allocated")
 
             if not self.is_releasable(
                 self.alias_tracker.storage_to_allocator[storage_key]

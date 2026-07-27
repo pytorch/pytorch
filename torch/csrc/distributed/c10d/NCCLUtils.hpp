@@ -217,7 +217,7 @@ TORCH_API std::string getNcclErrorDetailStr(
     std::optional<std::string> processGroupFailureReason = std::nullopt);
 
 // Helper function that gets the data type and issues error if not supported
-ncclDataType_t getNcclDataType(at::ScalarType type);
+TORCH_API ncclDataType_t getNcclDataType(at::ScalarType type);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {

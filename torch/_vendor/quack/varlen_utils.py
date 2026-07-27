@@ -19,33 +19,19 @@ class VarlenArguments(NamedTuple):
     mAIdx: Optional[cute.Tensor] = None
 
 
-@mlir_namedtuple
-class VarlenNArguments(NamedTuple):
-    mCuSeqlensM: Optional[cute.Tensor] = None
-    mCuSeqlensK: Optional[cute.Tensor] = None
-    mAIdx: Optional[cute.Tensor] = None
-    mCuSeqlensN: Optional[cute.Tensor] = None
-
-
-def cu_seqlens_n_arg(args) -> Optional[cute.Tensor]:
-    return args.mCuSeqlensN if isinstance(args, VarlenNArguments) else None
-
-
 class VarlenManager:
     @dataclass
     class Params:
         cu_seqlens_m: Optional[cute.Tensor] = None
         cu_seqlens_k: Optional[cute.Tensor] = None
-        cu_seqlens_n: Optional[cute.Tensor] = None
         mAIdx: Optional[cute.Tensor] = None
 
         @staticmethod
         @cute.jit
-        def create(args, *, loc=None, ip=None) -> "VarlenManager.Params":
+        def create(args: VarlenArguments, *, loc=None, ip=None) -> "VarlenManager.Params":
             return VarlenManager.Params(
                 cu_seqlens_m=args.mCuSeqlensM,
                 cu_seqlens_k=args.mCuSeqlensK,
-                cu_seqlens_n=cu_seqlens_n_arg(args),
                 mAIdx=args.mAIdx,
             )
 
@@ -54,7 +40,6 @@ class VarlenManager:
         params: Params,
         len_m_static: Int32,
         len_k_static: Int32,
-        len_n_static: Int32,
         last_batch_idx: Int32 = Int32(-1),
         is_group_changed: Boolean = Boolean(True),
         *,
@@ -64,21 +49,19 @@ class VarlenManager:
         self.params = params
         self._len_m_static = len_m_static
         self._len_k_static = len_k_static
-        self._len_n_static = len_n_static
         self._last_batch_idx = last_batch_idx
         self._is_group_changed = is_group_changed
         self.varlen_m = const_expr(params.cu_seqlens_m is not None)
         self.varlen_k = const_expr(params.cu_seqlens_k is not None)
-        self.varlen_n = const_expr(params.cu_seqlens_n is not None)
         self.gather_A = const_expr(params.mAIdx is not None)
         self._loc = loc
         self._ip = ip
 
     @staticmethod
-    def to_underlying_arguments(args, *, loc=None, ip=None) -> Params:
-        assert sum(
-            x is not None for x in (args.mCuSeqlensM, args.mCuSeqlensK, cu_seqlens_n_arg(args))
-        ) <= 1, "Only support one of varlen_m, varlen_k, or varlen_n"
+    def to_underlying_arguments(args: VarlenArguments, *, loc=None, ip=None) -> Params:
+        assert not (args.mCuSeqlensM is not None and args.mCuSeqlensK is not None), (
+            "Only support either varlen_m or varlen_k"
+        )
         return VarlenManager.Params.create(args, loc=loc, ip=ip)
 
     @staticmethod
@@ -87,17 +70,11 @@ class VarlenManager:
         params: Params,
         len_m_static: Int32,
         len_k_static: Int32,
-        len_n_static: Int32,
         *,
         loc=None,
         ip=None,
     ) -> "VarlenManager":
-        return VarlenManager(
-            params,
-            len_m_static=len_m_static,
-            len_k_static=len_k_static,
-            len_n_static=len_n_static,
-        )
+        return VarlenManager(params, len_m_static=len_m_static, len_k_static=len_k_static)
 
     def len_m(self, batch_idx: Int32) -> Int32:
         if const_expr(self.varlen_m):
@@ -110,12 +87,6 @@ class VarlenManager:
             return self.params.cu_seqlens_k[batch_idx + 1] - self.params.cu_seqlens_k[batch_idx]
         else:
             return self._len_k_static
-
-    def len_n(self, batch_idx: Int32) -> Int32:
-        if const_expr(self.varlen_n):
-            return self.params.cu_seqlens_n[batch_idx + 1] - self.params.cu_seqlens_n[batch_idx]
-        else:
-            return self._len_n_static
 
     def offset_batch_A(self, mA_mkl: cute.Tensor, batch_idx: Int32) -> cute.Tensor:
         params = self.params
@@ -147,8 +118,6 @@ class VarlenManager:
             mAIdx_mk = cute.domain_offset((params.cu_seqlens_m[batch_idx],), params.mAIdx)
         elif const_expr(self.varlen_k):
             mAIdx_mk = cute.domain_offset((params.cu_seqlens_k[batch_idx],), params.mAIdx)
-        elif const_expr(self.varlen_n):
-            mAIdx_mk = params.mAIdx[None, batch_idx]
         else:
             mAIdx_mk = params.mAIdx[None, batch_idx]
         return mAIdx_mk
@@ -201,25 +170,6 @@ class VarlenManager:
                     ragged_dim=1,
                     ptr_shift=ptr_shift,
                 )
-        elif const_expr(self.varlen_n):
-            offset = params.cu_seqlens_n[batch_idx]
-            length = params.cu_seqlens_n[batch_idx + 1] - offset
-            ragged_rank = const_expr(cute.rank(mB_nkl))
-            if const_expr(ragged_rank == 2):
-                mB_offset = cute.domain_offset((offset, None), mB_nkl)
-                mB_nk = cute.make_tensor(
-                    mB_offset.iterator,
-                    cute.make_layout((length, cute.size(mB_nkl, mode=[1])), stride=mB_nkl.stride),
-                )
-            else:
-                ptr_shift = const_expr(ragged_rank == 3)
-                mB_nk = copy_utils.offset_ragged_tensor(
-                    mB_nkl,
-                    offset,
-                    length,
-                    ragged_dim=0,
-                    ptr_shift=ptr_shift,
-                )
         else:
             mB_nk = mB_nkl[None, None, batch_idx]
         return mB_nk
@@ -241,25 +191,6 @@ class VarlenManager:
                     ragged_dim=0,
                     ptr_shift=ptr_shift,
                 )
-        elif const_expr(self.varlen_n):
-            offset = params.cu_seqlens_n[batch_idx]
-            length = params.cu_seqlens_n[batch_idx + 1] - offset
-            ragged_rank = const_expr(cute.rank(mD_mnl))
-            if const_expr(ragged_rank == 2):
-                mD_offset = cute.domain_offset((None, offset), mD_mnl)
-                mD_mn = cute.make_tensor(
-                    mD_offset.iterator,
-                    cute.make_layout((cute.size(mD_mnl, mode=[0]), length), stride=mD_mnl.stride),
-                )
-            else:
-                ptr_shift = const_expr(ragged_rank == 3)
-                mD_mn = copy_utils.offset_ragged_tensor(
-                    mD_mnl,
-                    offset,
-                    length,
-                    ragged_dim=1,
-                    ptr_shift=ptr_shift,
-                )
         else:
             mD_mn = mD_mnl[None, None, batch_idx]
         return mD_mn
@@ -270,7 +201,6 @@ class VarlenManager:
             self.params,
             self._len_m_static,
             self._len_k_static,
-            self._len_n_static,
             self._last_batch_idx,
             self._is_group_changed,
         ]:
@@ -286,7 +216,6 @@ class VarlenManager:
                 self.params,
                 self._len_m_static,
                 self._len_k_static,
-                self._len_n_static,
                 self._last_batch_idx,
                 self._is_group_changed,
             ],

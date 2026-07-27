@@ -1,0 +1,67 @@
+# Applied by flex_gemm_patches/series after the precompile tensor kwargs patch.
+#
+# This patch adds a precompile_configs toggle so PyTorch's FlexGEMM autotune path
+# can benchmark a small curated config set without warming every QuACK compile
+# cache in worker subprocesses.
+#
+
+diff --git a/autotuner.py b/autotuner.py
+index 24d23f4b817..2196e1499f7 100644
+--- a/autotuner.py
++++ b/autotuner.py
+@@ -288,6 +288,7 @@ class Autotuner:
+         prune_configs_by: Optional[Dict] = None,
+         do_bench=None,
+         cache_results=False,
++        precompile_configs=True,
+     ):
+         """
+         :param prune_configs_by: a dict of functions that are used to prune configs, fields:
+@@ -306,6 +307,7 @@ class Autotuner:
+         self.cache_results = (
+             cache_results or os.getenv(f"{PACKAGE_NAME.upper()}_CACHE_AUTOTUNING", None) == "1"
+         )
++        self.precompile_configs = precompile_configs
+ 
+         self.restore_value = []
+         if restore_value is not None:
+@@ -375,7 +377,7 @@ class Autotuner:
+         """
+         from .cache import CACHE_ENABLED
+ 
+-        if not CACHE_ENABLED:
++        if not self.precompile_configs or not CACHE_ENABLED:
+             return _PrecompileHandle()
+ 
+         max_workers = min(len(configs), int(os.getenv("QUACK_COMPILE_WORKERS", "8")))
+@@ -814,7 +816,13 @@ class AutotuneConfig:
+ 
+ 
+ def autotune(
+-    configs, key=None, prune_configs_by=None, restore_value=None, do_bench=None, cache_results=True
++    configs,
++    key=None,
++    prune_configs_by=None,
++    restore_value=None,
++    do_bench=None,
++    cache_results=True,
++    precompile_configs=True,
+ ):
+     f"""
+     Decorator for auto-tuning a function function.
+@@ -838,6 +846,7 @@ def autotune(
+     :param do_bench: a benchmark function to measure the time of each run.
+     :type do_bench: lambda fn, quantiles
+     :param cache_results: whether to cache autotune timings to disk.  Defaults to False.
++    :param precompile_configs: whether to warm config compile caches in worker subprocesses.
+     "type cache_results: bool
+     """
+ 
+@@ -853,6 +862,7 @@ def autotune(
+             prune_configs_by=prune_configs_by,
+             do_bench=do_bench,
+             cache_results=cache_results,
++            precompile_configs=precompile_configs,
+         )
+ 
+     return decorator
