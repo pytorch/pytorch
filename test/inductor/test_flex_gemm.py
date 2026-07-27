@@ -3132,6 +3132,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 ]
                 self.assertEqual(registered, split_nodes if expected_transform else [])
 
+    @skipIfNoCuteDSL
     def test_grouped_main_output_rejects_column_major_out(self):
         """Reject layouts that the grouped tile-store descriptor cannot represent."""
         from torch._vendor.quack.gemm_act import gemm_act
@@ -5906,6 +5907,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_local_m_reduce_feed_main_rejects_unsupported_group(self, case):
+        # Preserve each case's static geometry instead of inheriting PGO state
+        # from the other parameterization.
+        torch._dynamo.reset()
         _, m, group, error = case
         n = 64
 
@@ -5926,6 +5930,87 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
         with self.assertRaisesRegex(Exception, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feed_main_specializes_group_across_functions(self):
+        torch._dynamo.reset()
+        m = 128
+        n = 64
+
+        def make_fn(group):
+            def epilogue_fn(acc, group=group):
+                x = acc.float().view(-1, group, n)
+                scale = x.sum(1, keepdim=True) + 1.0
+                return (x * scale.reciprocal()).view(m, n)
+
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK"},
+                )
+
+            return fn, epilogue_fn
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        # These closures deliberately share code objects. Do not reset between
+        # them: the second group exercises automatic-dynamic specialization.
+        for group in (8, 16):
+            fn, epilogue_fn = make_fn(group)
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+            self.assertMatchesEpilogue(
+                actual,
+                epilogue_fn(a @ b),
+                epilogue_fn(a.double() @ b.double()),
+                a.shape[1],
+            )
+            self.assertPhysicalFeedMainCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("axis", (0, 1))
+    def test_mm_local_reduce_specializes_explicit_group_across_functions(self, axis):
+        torch._dynamo.reset()
+        m = n = 128
+
+        def make_fn(group):
+            def epilogue_fn(acc, group=group):
+                if axis == 1:
+                    x = acc.float().view(m, n // group, group)
+                    scale = x.sum(-1, keepdim=True) + 1.0
+                else:
+                    x = acc.float().view(m // group, group, n)
+                    scale = x.sum(1, keepdim=True) + 1.0
+                return (x * scale.reciprocal()).view(m, n)
+
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK"},
+                )
+
+            return fn, epilogue_fn
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        for group in (8, 16):
+            fn, epilogue_fn = make_fn(group)
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+            self.assertMatchesEpilogue(
+                actual,
+                epilogue_fn(a @ b),
+                epilogue_fn(a.double() @ b.double()),
+                a.shape[1],
+            )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -6968,6 +7053,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertFlexGemmGeneratedCode(code)
+        self.assertNotIn("output_plan=", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

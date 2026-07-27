@@ -91,8 +91,7 @@ class FlexGemmEpilogueConfig:
         quack_config_key: Lossless key for the selected QuACK GEMM config.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
-        aux_out_indices: Template input indices for same-shape aux outputs.
-        local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
+        outputs: Structural plans for auxiliary, reduced, or transformed outputs.
     """
 
     epilogue_name: str
@@ -303,7 +302,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     def _epilogue_kwargs(
         self, input_args: list[str], config: FlexGemmEpilogueConfig
     ) -> str:
-        """Render captured tensors and structural output plans."""
+        """Render only values that differ from the runtime ABI defaults."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
         kwargs: list[str] = []
         if epilogue_args:
@@ -311,7 +310,13 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 f", epilogue_args=({', '.join(epilogue_args)},), "
                 f"epilogue_arg_kinds={config.epilogue_arg_kinds!r}"
             )
-        kwargs.append(f", output_plan={self._output_plan_expr(input_args, config)}")
+        outputs = config.outputs
+        if (
+            outputs.aux_out_indices
+            or outputs.local_reduce is not None
+            or outputs.main_transform is not None
+        ):
+            kwargs.append(f", output_plan={self._output_plan_expr(input_args, config)}")
         return "".join(kwargs)
 
 

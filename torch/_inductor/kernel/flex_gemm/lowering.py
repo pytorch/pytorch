@@ -29,11 +29,11 @@ from .constraints import (
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     flex_gemm_local_reduce_config_error,
     FlexGemmGroupedMainOutputTransform,
+    grouped_main_output_config_supported,
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
-    statically_known,
     statically_known_equal,
     statically_known_multiple,
     statically_known_shape_equal,
@@ -232,17 +232,6 @@ def flex_gemm_config_keys(
     config fields constrain the candidate set; untuned selection fills omitted
     fields from the normal default, while tuned selection benchmarks the matches.
     """
-
-    def fits_main_output(config) -> bool:
-        supported_cluster = config.cluster_m == 1 or (
-            config.tile_m == 256 and config.cluster_m == 2
-        )
-        return (
-            supported_cluster
-            and config.cluster_n == 1
-            and statically_known(config.tile_n <= n)
-        )
-
     if main_transform is not None:
         main_transform.validate_quack(torch.cuda.get_device_capability(device)[0])
         if isinstance(n, sympy.Expr) and n.free_symbols:
@@ -325,13 +314,20 @@ def flex_gemm_config_keys(
                 allow_swap_ab=allow_local_reduce_swap_ab,
             )
             for geometry in local_reduce_geometries
-        ) and (main_transform is None or fits_main_output(default_config)):
+        ) and (
+            main_transform is None
+            or grouped_main_output_config_supported(default_config, n)
+        ):
             return (default_key,)
 
     configs = (
         candidate_configs
         if main_transform is None
-        else tuple(config for config in candidate_configs if fits_main_output(config))
+        else tuple(
+            config
+            for config in candidate_configs
+            if grouped_main_output_config_supported(config, n)
+        )
     )
     if main_transform is not None and not configs:
         if explicit_config is not None:
@@ -470,12 +466,17 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     explicit_swap_ab = explicit_config_swaps_ab(explicit_config)
     # This is where we figure out what the fx-graph body is doing
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
+    outputs = epilogue_analysis.outputs
     if (
         epilogue_analysis.required_geometries
         and gemm_op is not torch.ops.aten.mm.default
     ):
-        raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
-    outputs = epilogue_analysis.outputs
+        error = (
+            FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR
+            if outputs.main_transform is not None
+            else LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
+        )
+        raise NotImplementedError(error)
     local_reduce_store = (
         None if outputs.local_reduce is None else outputs.local_reduce.store
     )
@@ -502,13 +503,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM concat-layout grouped-N outputs require B's output "
             "dimension to be non-contiguous, as in linear weight.t()"
         )
-    if main_transform is not None and (
-        epilogue_args
-        or op_spec.bias_index is not None
-        or alpha != 1.0
-        or beta != 1.0
-        or gemm_op is not torch.ops.aten.mm.default
-    ):
+    if main_transform is not None and epilogue_args:
         raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, physical_output_size
