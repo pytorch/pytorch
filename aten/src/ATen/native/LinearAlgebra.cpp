@@ -2,7 +2,6 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
@@ -98,6 +97,7 @@
 #include <ATen/ops/linalg_matrix_power_native.h>
 #include <ATen/ops/linalg_matrix_rank.h>
 #include <ATen/ops/linalg_matrix_rank_native.h>
+#include <ATen/ops/linalg_matrix_sqrth_native.h>
 #include <ATen/ops/linalg_multi_dot_native.h>
 #include <ATen/ops/linalg_norm.h>
 #include <ATen/ops/linalg_norm_native.h>
@@ -189,9 +189,7 @@ namespace meta {
   TORCH_CHECK( \
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (", \
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
- \
-  auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options());
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -208,8 +206,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options());
 }
 
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
@@ -314,7 +311,6 @@ static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Te
   TORCH_CHECK(result_sizes == output_size,
               "Expected an output tensor with shape [", output_size, "] but got shape ", result_sizes);
 
-  std::vector<Dimname> outnames = {};
   if (!is_bmm) {
     if (self_baddbmm.has_value()) {
       const auto& self = self_baddbmm.value();
@@ -323,16 +319,10 @@ static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Te
       const auto self_sizes = self.sizes();
       TORCH_CHECK(self_sizes == output_size,
                   "Expected an input tensor shape with shape ", output_size, " but got shape: ", self_sizes);
-      outnames = namedinference::compute_baddbmm_outnames(result, batch1, batch2, self);
     }
   } else {
-    outnames = namedinference::compute_bmm_outnames(result, batch1, batch2);
   }
 
-  namedinference::propagate_names_if_nonempty(
-    result,
-    outnames
-  );
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
@@ -1602,11 +1592,8 @@ static void addbmm_impl_(
 Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   auto b_self = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
   {
-    at::NoNamesGuard guard;
     addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
   }
-  auto names = at::namedinference::propagate_names_for_addmm(batch1, batch2, self);
-  at::namedinference::propagate_names_if_nonempty(result, names);
   return result;
 }
 
@@ -1622,7 +1609,6 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
-    at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
   }
 }
@@ -1630,7 +1616,6 @@ TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Ten
 TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
-    at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
     if (use_gelu) {
       at::gelu_(const_cast<Tensor&>(result));
@@ -1642,7 +1627,6 @@ TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1
 
 TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tensor & result) {
   {
-    at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
   }
 }
@@ -1896,7 +1880,6 @@ TORCH_IMPL_FUNC(baddbmm_out_cpu)
 TORCH_IMPL_FUNC(bmm_out_cpu)
 (const Tensor & batch1, const Tensor & batch2, const Tensor & result) {
     {
-    NoNamesGuard guard;
     bool result_is_conj = result.is_conj();
     conjugate_mutable_input_if_needed(result, result_is_conj);
     bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
@@ -2014,7 +1997,6 @@ static Tensor _matmul_impl(
     Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {
-  NoNamesGuard guard;
   const auto dim_tensor1 = tensor1.dim();
   const auto dim_tensor2 = tensor2.dim();
 
@@ -2214,17 +2196,13 @@ static Tensor _matmul_impl(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::Tensor result, unused;
   result = at::native::_matmul_impl(unused, tensor1, tensor2);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
-  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::native::_matmul_impl(result, tensor1, tensor2);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -2327,11 +2305,12 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
-inline Tensor _move_memory_if_cuda_input(
+inline Tensor _move_memory_if_cuda_or_mps_input(
   const Tensor& mem,
   const Tensor& in
 ) {
-  return (in.device().type() == at::kCUDA)
+  const auto device_type = in.device().type();
+  return (device_type == at::kCUDA || device_type == at::kMPS)
     ? mem.to(at::device_of(in).value())
     : mem;
 }
@@ -2351,7 +2330,7 @@ inline Tensor _blob_to_Tensor(
   // be used in _compute_linear_combination
   auto tensor = at::from_blob((void*)blob.begin(), blob.size(),
     c10::toRealValueType(in.scalar_type())).unsqueeze(0);
-  return _move_memory_if_cuda_input(tensor, in);
+  return _move_memory_if_cuda_or_mps_input(tensor, in);
 }
 
 template <typename scalar_t>
@@ -2500,7 +2479,7 @@ Tensor compute_T12(const Tensor& A) {
     {num_prods, 1},
     c10::toRealValueType(A.scalar_type())
   );
-  bs = _move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_or_mps_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -2572,7 +2551,7 @@ Tensor compute_T18(const Tensor& A) {
     {num_prods, 1},
     c10::toRealValueType(A.scalar_type())
   );
-  bs = _move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_or_mps_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -2686,10 +2665,11 @@ Tensor mexp_impl(
                              at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
-    // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
-    // and better performance overall (benchmarked).
-    const auto norm_cpu = (a.device().type() == at::kCUDA)
+    // It requires moving data back and forth between devices when `a` is on an
+    // accelerator (CUDA/MPS), but at the cost of only one single synchronization
+    // (instead of 6), and better performance overall (benchmarked).
+    const auto device_type = a.device().type();
+    const auto norm_cpu = (device_type == at::kCUDA || device_type == at::kMPS)
       ? norm.to(at::kCPU) : norm;
 
     constexpr std::array<
@@ -2709,7 +2689,7 @@ Tensor mexp_impl(
       ).nonzero().squeeze(-1);
 
       if (idx_curr_norm_interval.numel()) {
-        auto idx_to_device = _move_memory_if_cuda_input(
+        auto idx_to_device = _move_memory_if_cuda_or_mps_input(
           idx_curr_norm_interval, a
         );
         auto sub_a = at::index_select(a, 0, idx_to_device);
@@ -2722,7 +2702,7 @@ Tensor mexp_impl(
       .nonzero().squeeze(-1);
 
     if (idx_large_norm.numel()) {
-      auto idx_to_device = _move_memory_if_cuda_input(
+      auto idx_to_device = _move_memory_if_cuda_or_mps_input(
         idx_large_norm, a
       );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
@@ -2812,6 +2792,13 @@ Tensor linalg_matrix_exp(const Tensor& a) {
   squareCheckInputs(a, "linalg.matrix_exp");
   checkFloatingOrComplex(a, "linalg.matrix_exp");
 
+  // MPSGraph complex matmul is numerically unreliable before macOS 15, which
+  // breaks the scale-and-square recurrence this op relies on.
+  TORCH_CHECK(
+      a.device().type() != at::kMPS ||
+          at::detail::getMPSHooks().isOnMacOSorNewer(15, 0),
+      "linalg.matrix_exp on MPS requires macOS 15.0 or newer");
+
   NoTF32Guard disable_tf32;
 
   // Trivial cases
@@ -2828,6 +2815,33 @@ Tensor linalg_matrix_exp(const Tensor& a) {
 // Alias
 Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
+}
+
+// Principal square root of a symmetric/Hermitian positive-definite matrix.
+// Computed from the eigendecomposition A = Q diag(lambda) Q^H as
+// A^{1/2} = Q diag(sqrt(lambda)) Q^H. Only the lower triangle of `a` is read
+// (via linalg_eigh, UPLO="L"); `a` is assumed Hermitian. The custom backward in
+// FunctionsManual.cpp (linalg_matrix_sqrth_differential) uses the Daleckii-Krein
+// formula, whose denominator sqrt(lambda_i) + sqrt(lambda_j) stays well-defined
+// even at degenerate eigenvalues.
+Tensor linalg_matrix_sqrth(const Tensor& a) {
+  squareCheckInputs(a, "linalg.matrix_sqrth");
+  checkFloatingOrComplex(
+      a, "linalg.matrix_sqrth", /*allow_low_precision_dtypes=*/false);
+
+  NoTF32Guard disable_tf32;
+
+  if (a.sym_size(-1) == 0) {
+    return a.clone();
+  }
+  auto [eigvals, eigvecs] = at::linalg_eigh(a);
+
+  // PSD input may still show small eigenvalues due to roundoff.
+  // The clamp_min zeroes them.
+  auto sqrt_eigvals = eigvals.clamp_min(0).sqrt();
+  auto result = at::matmul(eigvecs * sqrt_eigvals.unsqueeze(-2), eigvecs.mH());
+  // The reconstruction is Hermitian up to roundoff; symmetrize to enforce it.
+  return 0.5 * (result + result.mH());
 }
 
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential
@@ -3302,12 +3316,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
 static void _linalg_cond_check_ord(std::variant<Scalar, std::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = std::get_if<Scalar>(&ord_variant);
+    TORCH_CHECK_VALUE(!at::isComplexType(ord->type()),
+      "linalg.cond: Expected a non-complex scalar as the order of norm.");
     double abs_ord = std::abs(ord->toDouble());
-    TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
+    TORCH_CHECK_VALUE(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
     std::string_view* ord = std::get_if<std::string_view>(&ord_variant);
-    TORCH_CHECK(*ord == "fro" || *ord == "nuc",
+    TORCH_CHECK_VALUE(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
     TORCH_CHECK(false,
@@ -3374,7 +3390,7 @@ Tensor linalg_cond(const Tensor& self, std::string_view ord) {
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     return _linalg_cond_empty_matrix(self, self.scalar_type());
   }
 

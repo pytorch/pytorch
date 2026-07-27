@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/forward_grad.h>
 
+#include <atomic>
+
 namespace torch::autograd {
 
 namespace {
@@ -8,6 +10,9 @@ namespace {
 
 std::mutex all_forward_levels_mutex_;
 std::vector<std::shared_ptr<ForwardADLevel>> all_forward_levels_;
+// Fast path for checking whether any forward AD level exists without grabbing
+// all_forward_levels_mutex_.
+std::atomic<uint64_t> active_forward_levels_{0};
 
 const static at::Tensor singleton_undefined_tensor;
 } // namespace
@@ -18,6 +23,8 @@ uint64_t ForwardADLevel::get_next_idx() {
   TORCH_CHECK(
       next_idx == 0, "Nested forward mode AD is not supported at the moment");
   all_forward_levels_.push_back(std::make_shared<ForwardADLevel>(next_idx));
+  active_forward_levels_.store(
+      all_forward_levels_.size(), std::memory_order_release);
   return next_idx;
 }
 
@@ -32,7 +39,13 @@ void ForwardADLevel::release_idx(uint64_t idx) {
   // Keep the level alive until we have released the lock
   auto lvl = std::move(all_forward_levels_.back());
   all_forward_levels_.pop_back();
+  active_forward_levels_.store(
+      all_forward_levels_.size(), std::memory_order_release);
   lock.unlock();
+}
+
+bool ForwardADLevel::has_any_level() {
+  return active_forward_levels_.load(std::memory_order_acquire) != 0;
 }
 
 std::shared_ptr<ForwardADLevel> ForwardADLevel::get_by_idx(uint64_t idx) {

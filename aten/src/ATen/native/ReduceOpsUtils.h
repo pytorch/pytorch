@@ -200,7 +200,6 @@ inline TensorIterator make_reduction(
   auto mask = make_dim_mask(dim, ndim);
   resize_reduction_result(result, self, mask, keepdim, out_dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
   if (self.scalar_type() == in_dtype) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
@@ -249,15 +248,14 @@ inline TensorIterator make_reduction(
   resize_reduction_result(result2, self, mask, keepdim, dtype2);
   auto viewed_result2 = review_reduce_result(result2, ndim, mask, keepdim);
 
-  namedinference::propagate_names_for_reduction(result1, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(result2, self, dim, keepdim);
 
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
   // We don't generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  if (self.scalar_type() == dtype1 ||
-      (self.is_cuda() && self.scalar_type() == kHalf && dtype1 == kFloat)) {
+  const bool gpu_f16_to_f32 =
+      (self.is_cuda() || self.is_xpu()) && self.scalar_type() == kHalf && dtype1 == kFloat;
+  if (self.scalar_type() == dtype1 || gpu_f16_to_f32) {
     return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
@@ -308,6 +306,7 @@ inline std::vector<int64_t> get_zero_numel_tensor_size(
     sizes[dim] = 1;
   }
   else {
+    sizes.reserve(self.dim() - 1);
     for (const auto d : c10::irange(self.dim())) {
       if (d != dim) {
         sizes.push_back(self.sizes()[d]);
@@ -388,8 +387,6 @@ inline void resize_reduction(
   } else {
     TORCH_CHECK(false, "resize_reduction: support for output with ", self.layout(), " layout is not implemented yet");
   }
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(), self, dims_, keepdim);
 }
 
 inline void resize_reduction_with_indices(
@@ -403,10 +400,6 @@ inline void resize_reduction_with_indices(
   auto shape = get_reduction_shape(self, dims_, keepdim);
   meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
   meta.set_output_raw_strided(1, shape, {}, self.options().dtype(kLong));
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(0), self, dims_, keepdim);
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(1), self, dims_, keepdim);
 }
 
 inline TensorIterator make_reduction(
@@ -440,8 +433,9 @@ inline TensorIterator make_reduction(
   // special case for type promotion in mixed precision, improves computational efficiency.
   // We don't generalize this to common mismatched input/output types to avoid cross product
   // of templated kernel launches.
-  if (self.scalar_type() == dtype1 ||
-      (self.is_cuda() && self.scalar_type() == kHalf && dtype1 == kFloat)) {
+  const bool gpu_f16_to_f32 =
+      (self.is_cuda() || self.is_xpu()) && self.scalar_type() == kHalf && dtype1 == kFloat;
+  if (self.scalar_type() == dtype1 || gpu_f16_to_f32) {
     return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
@@ -458,7 +452,7 @@ inline TensorIterator make_reduction(
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 =
-      (self.is_cuda() &&
+      ((self.is_cuda() || self.is_xpu()) &&
        (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
        out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
