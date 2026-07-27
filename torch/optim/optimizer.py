@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Base optimizer."""
 
 import functools
@@ -87,7 +86,7 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return _use_grad
 
 
-def _get_value(x):
+def _get_value(x: torch.Tensor | float) -> Any:
     # item is significantly faster than a cpu tensor in eager mode
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
@@ -95,9 +94,9 @@ def _get_value(x):
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
-def _stack_if_compiling(x):
+def _stack_if_compiling(x: list[torch.Tensor | float]) -> Any:
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
-        return torch.stack(x)
+        return torch.stack(cast(list[torch.Tensor], x))
     else:
         return x
 
@@ -129,7 +128,7 @@ def _disable_dynamo_if_unsupported(
         # but this only occurs in the rare case that the user explicitly deletes
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs):
+        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
@@ -199,7 +198,9 @@ def _device_dtype_check_for_fused(
         )
 
 
-def _view_as_real(params, *state_and_grads) -> None:
+def _view_as_real(
+    params: list[torch.Tensor], *state_and_grads: list[torch.Tensor]
+) -> None:
     for i, p in enumerate(params):
         if torch.is_complex(p):
             params[i] = torch.view_as_real(params[i])
@@ -207,7 +208,7 @@ def _view_as_real(params, *state_and_grads) -> None:
                 s[i] = torch.view_as_real(s[i])
 
 
-def _get_scalar_dtype(is_fused=None):
+def _get_scalar_dtype(is_fused: bool | None = None) -> torch.dtype:
     if is_fused:
         return torch.float32
     return (
@@ -225,7 +226,7 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x: float | torch.Tensor):
+def _to_scalar(x: float | torch.Tensor) -> Any:
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -402,7 +403,7 @@ class Optimizer:
             param_groups = [{"params": param_groups}]
 
         for param_group in param_groups:
-            self.add_param_group(cast(dict, param_group))
+            self.add_param_group(cast(dict[str, Any], param_group))
 
         # Allows _accelerator_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
         # which I don't think exists
@@ -961,7 +962,13 @@ class Optimizer:
             )
         )
 
-        def _cast(param, value, param_id=None, param_groups=None, key=None):
+        def _cast(
+            param: torch.Tensor,
+            value: Any,
+            param_id: int | None = None,
+            param_groups: list[dict[str, Any]] | None = None,
+            key: Hashable = None,
+        ) -> Any:
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
                 return Optimizer._process_value_according_to_param_policy(
@@ -1124,8 +1131,8 @@ class Optimizer:
         else:
             param_group["params"] = list(params)
 
-        extracted_param_tensors = []
-        extracted_param_names = []
+        extracted_param_tensors: list[torch.Tensor] = []
+        extracted_param_names: list[str] = []
         for param in param_group["params"]:
             if isinstance(param, tuple):
                 param_name = param[0]
