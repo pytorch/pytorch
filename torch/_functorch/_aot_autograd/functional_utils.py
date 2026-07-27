@@ -392,9 +392,12 @@ def gen_alias_from_base(
     # offset: the traced FakeTensor's storage_offset equals the trace-time
     # RELATIVE offset from the input, so add back the runtime input's
     # ``storage_offset`` to keep the alias anchored to the correct slice.
+    # Compare storages via ``_cdata`` (raw c10::Storage handle) rather than
+    # ``.data_ptr()`` so this is safe on fake/meta storages that would raise
+    # from ``.data_ptr()`` during AOT tracing.
     if (
-        aliased_base_tensor.untyped_storage().data_ptr()
-        != target_meta_tensor.untyped_storage().data_ptr()
+        aliased_base_tensor.untyped_storage()._cdata
+        != target_meta_tensor.untyped_storage()._cdata
     ):
         storage_offset = aliased_base_tensor.storage_offset() + storage_offset
     if aliased_base_tensor.is_complex() and not target_meta_tensor.is_complex():
