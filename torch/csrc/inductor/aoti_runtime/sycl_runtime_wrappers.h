@@ -1,4 +1,3 @@
-// NOLINT
 #pragma once
 #ifdef USE_XPU
 #include <c10/xpu/XPUFunctions.h>
@@ -6,21 +5,24 @@
 #include <sycl/sycl.hpp>
 #include <fstream>
 #include <iostream>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
-#define ZE_CHECK(status)                                                  \
-  {                                                                       \
-    if (status != ZE_RESULT_SUCCESS) {                                    \
-      std::stringstream ss;                                               \
-      ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(std::move(ss).str());                      \
-    }                                                                     \
+inline void _zeCheck(ze_result_t status, const char* file, int line) {
+  if (status != ZE_RESULT_SUCCESS) {
+    std::stringstream ss;
+    ss << "L0 runtime error: " << std::hex << std::uppercase << status
+       << std::dec << " at " << file << ":" << line;
+    throw std::runtime_error(std::move(ss).str());
   }
+}
 
-static ze_module_handle_t _createModule(
-    const uint8_t* binaryPtr,
-    size_t binarySize,
-    bool isSpirv = false) {
+#define ZE_CHECK(status) _zeCheck((status), __FILE__, __LINE__)
+
+static std::pair<ze_context_handle_t, ze_device_handle_t>
+_getNativeContextAndDevice() {
   sycl::device& syclDevice =
       c10::xpu::get_raw_device(c10::xpu::current_device());
   auto& syclContext = c10::xpu::get_device_context();
@@ -28,6 +30,14 @@ static ze_module_handle_t _createModule(
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice);
   auto context =
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext);
+  return {context, device};
+}
+
+static ze_module_handle_t _createModule(
+    const uint8_t* binaryPtr,
+    size_t binarySize,
+    bool isSpirv = false) {
+  auto [context, device] = _getNativeContextAndDevice();
 
   const char* buildFlags = "";
   const ze_module_format_t format =
@@ -36,21 +46,26 @@ static ze_module_handle_t _createModule(
   moduleDescription.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDescription.format = format;
   moduleDescription.inputSize = binarySize;
-  moduleDescription.pInputModule = (uint8_t*)binaryPtr;
+  moduleDescription.pInputModule = binaryPtr;
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
   ze_module_handle_t module = nullptr;
-  auto error_no = ZE_RESULT_SUCCESS;
-  error_no =
+  ze_result_t error_no =
       zeModuleCreate(context, device, &moduleDescription, &module, &buildLog);
 
   if (error_no != ZE_RESULT_SUCCESS) {
+    // Retrieve the build log on a best-effort basis; failures here must not
+    // mask the real build error reported via ZE_CHECK(error_no) below, and
+    // must not skip the buildLog cleanup that follows.
     size_t szLog = 0;
-    ZE_CHECK(zeModuleBuildLogGetString(buildLog, &szLog, nullptr));
-    char* strLog = (char*)malloc(szLog);
-    ZE_CHECK(zeModuleBuildLogGetString(buildLog, &szLog, strLog));
-    std::cerr << "L0 build module failed. Log: " << strLog << std::endl;
-    free(strLog);
+    std::string strLog;
+    if (zeModuleBuildLogGetString(buildLog, &szLog, nullptr) ==
+            ZE_RESULT_SUCCESS &&
+        szLog > 0) {
+      strLog.resize(szLog);
+      zeModuleBuildLogGetString(buildLog, &szLog, strLog.data());
+    }
+    std::cerr << "L0 build module failed. Log: " << strLog.c_str() << '\n';
   }
   if (buildLog) {
     ZE_CHECK(zeModuleBuildLogDestroy(buildLog));
@@ -88,7 +103,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
 [[maybe_unused]] static std::unique_ptr<sycl::kernel> loadKernel(
     std::string filePath,
     const std::string& funcName,
-    uint32_t sharedMemBytes,
+    [[maybe_unused]] uint32_t sharedMemBytes,
     const std::optional<std::string>& binDir = std::nullopt) {
   if (binDir) {
     std::filesystem::path p1{*binDir};
@@ -114,7 +129,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     const void* start,
     const void* end,
     const std::string& funcName,
-    uint32_t sharedMemBytes,
+    [[maybe_unused]] uint32_t sharedMemBytes,
     bool isSpirv) {
   size_t size = reinterpret_cast<const uint8_t*>(end) -
       reinterpret_cast<const uint8_t*>(start);
@@ -141,38 +156,36 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   if (threadsPerWarp == 0) {
     threadsPerWarp = 32; // default to 32 if not set
   }
-  std::string kernelName =
-      kernelPtr->get_info<sycl::info::kernel::function_name>();
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
   size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
   size_t globalRangeZ = gridZ;
-  size_t localRangeX = numWarps * threadsPerWarp;
+  size_t localRangeX = static_cast<size_t>(numWarps) * threadsPerWarp;
   size_t localRangeY = 1;
   size_t localRangeZ = 1;
   sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
   sycl::range<3> localRange(localRangeZ, localRangeY, localRangeX);
   sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
-  if (sharedMemory) {
+  if (sharedMemory > 0) {
     // numParams from sycl info  = user provided args + sharedMemoryBuffer
     numParams -= 1;
   }
   // Submit the imported kernel.
   auto cgf = [&](sycl::handler& cgh) {
     for (uint32_t i = 0; i < numParams; ++i) {
-      cgh.set_arg(i, *(static_cast<void**>(params[i])));
+      cgh.set_arg(static_cast<int>(i), *(static_cast<void**>(params[i])));
     }
 
     if (sharedMemory > 0) {
       constexpr int dimensions = 1;
       using share_mem_t = sycl::local_accessor<int8_t, dimensions>;
       share_mem_t localBuffer = share_mem_t(sharedMemory, cgh);
-      cgh.set_arg(numParams, localBuffer);
+      cgh.set_arg(static_cast<int>(numParams), localBuffer);
       cgh.parallel_for(parallelWorkSize, *kernelPtr);
     } else {
       cgh.parallel_for(parallelWorkSize, *kernelPtr);
     }
   };
-  auto event = queuePtr->submit(cgf);
+  queuePtr->submit(cgf);
 }
 #endif
