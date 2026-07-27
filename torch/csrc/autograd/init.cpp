@@ -30,6 +30,10 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#ifdef USE_KINETO
+#include <ActivityType.h>
+#include <ITraceActivity.h>
+#endif
 #include <torch/csrc/utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
@@ -368,12 +372,64 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
 
+#ifdef USE_KINETO
+  py::class_<libkineto::ITraceActivity>(m, "_ITraceActivity")
+      .def("name", &libkineto::ITraceActivity::name)
+      .def("timestamp", &libkineto::ITraceActivity::timestamp)
+      .def("duration", &libkineto::ITraceActivity::duration)
+      .def("device_id", &libkineto::ITraceActivity::deviceId)
+      .def("resource_id", &libkineto::ITraceActivity::resourceId)
+      .def("correlation_id", &libkineto::ITraceActivity::correlationId)
+      .def("flow_id", &libkineto::ITraceActivity::flowId)
+      .def("flow_type", &libkineto::ITraceActivity::flowType)
+      .def("flow_start", &libkineto::ITraceActivity::flowStart)
+      .def(
+          "type",
+          [](const libkineto::ITraceActivity& a) {
+            return libkineto::toString(a.type());
+          })
+      .def("metadata_json", &libkineto::ITraceActivity::metadataJson)
+      .def(
+          "linked_correlation_id",
+          [](const libkineto::ITraceActivity& a) -> int64_t {
+            auto* linked = a.linkedActivity();
+            return linked ? linked->correlationId() : 0;
+          })
+      .def(
+          "linked_activity",
+          [](const libkineto::ITraceActivity& a)
+              -> const libkineto::ITraceActivity* {
+            return a.linkedActivity();
+          },
+          py::return_value_policy::reference);
+#endif
+
   py::class_<ProfilerResult>(m, "_ProfilerResult")
       .def("trace_start_ns", &ProfilerResult::trace_start_ns)
       .def("events", &ProfilerResult::events)
       .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
       .def("save", &ProfilerResult::save)
+      .def(
+          "trace_activities",
+          [](py::object self) {
+            auto& r = self.cast<ProfilerResult&>();
+            auto* activities = r.traceActivities();
+            if (!activities) {
+              return py::list();
+            }
+            py::list result(activities->size());
+            for (size_t i = 0; i < activities->size(); i++) {
+              // reference_internal ties each element's lifetime to self,
+              // preventing use-after-free if the list outlives the
+              // ProfilerResult.
+              result[i] = py::cast(
+                  (*activities)[i],
+                  py::return_value_policy::reference_internal,
+                  self);
+            }
+            return result;
+          })
 #endif // USE_KINETO
       ;
 
@@ -443,11 +499,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     std::set<torch::profiler::impl::ActivityType> activities{
         torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO)
-#if (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+#if defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
-#endif // (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+#endif // defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
@@ -1342,8 +1398,7 @@ static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
       c10::AutogradState::get_tls_state().get_graph_exec_group();
   if (group.has_value()) {
     PyObject* obj = group->ptr(getPyInterpreter());
-    Py_INCREF(obj);
-    return obj;
+    return Py_NewRef(obj);
   } else {
     Py_RETURN_NONE;
   }
@@ -1454,8 +1509,7 @@ static PyObject* pop_torch_function_stack(
   HANDLE_TH_ERRORS
   const auto& mode = at::impl::PythonTorchFunctionTLS::pop_stack();
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1472,8 +1526,7 @@ static PyObject* get_function_stack_at(
   auto idx = _r.toInt64(0);
   const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1543,8 +1596,7 @@ static PyObject* pop_torch_dispatch_stack(
   // Note: We cannot use release() here because the SafePyObject may be shared
   // via ThreadLocalState copies, and release() would null out data_ causing
   // other shared_ptr holders to see nullptr.
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1561,8 +1613,7 @@ static PyObject* get_dispatch_stack_at(
   auto idx = _r.toInt64(0);
   const auto& mode = c10::impl::TorchDispatchModeTLS::get_stack_at(idx);
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1596,8 +1647,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1611,8 +1661,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 

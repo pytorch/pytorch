@@ -41,7 +41,7 @@ extern PyObject* guard_error_hook;
 typedef PyObject FrameState;
 typedef struct CacheEntry CacheEntry;
 
-// ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
+// ExtraState encapsulates CacheEntry and FrameState. ExtraState is the highest
 // level of abstraction of what is stored on the extra code object. Previously,
 // we saved different parts on different extra indexes.  We prefer this way
 // because of cleaner abstraction and faster SetExtra access.
@@ -195,6 +195,17 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe);
+
+// Try to resolve a cache lookup without materializing frame locals or running
+// guard managers. Returns true when the lookup is complete (hit or miss), and
+// false when the caller must fall back to lookup().
+bool try_lookup_without_guard_eval(
+    ExtraState* extra_state,
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,

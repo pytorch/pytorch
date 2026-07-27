@@ -6,14 +6,20 @@ This module provides CuteDSL implementations of common operations used in
 template kernels, particularly for flex attention modifications.
 """
 
+import dataclasses
 import math
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import sympy
 
 import torch
 from torch._inductor.codegen.common import CSEVariable, OpOverrides
+from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import get_bounds_index_expr
 from torch._inductor.virtualized import OpsValue, V
+from torch.utils._sympy.functions import Max, Min
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -26,12 +32,58 @@ class CuteDSLCSEVariable(CSEVariable):
         shape=None,
         *,
         is_scalar_expr: bool = False,
+        index_expr: sympy.Expr | None = None,
     ):
         super().__init__(name, bounds, dtype, shape)
         self.is_scalar_expr = is_scalar_expr
+        self.index_expr = index_expr
 
 
 CuteDSLArg = CSEVariable | str | bool | float | int
+
+
+_CUTEDSL_FAST_MATH: ContextVar[bool] = ContextVar("cutedsl_fast_math", default=False)
+
+
+@contextmanager
+def use_cutedsl_fast_math(enabled: bool) -> Iterator[None]:
+    """Scope whether CuTeDSL math operations request fast-math lowering."""
+    token = _CUTEDSL_FAST_MATH.set(enabled)
+    try:
+        yield
+    finally:
+        _CUTEDSL_FAST_MATH.reset(token)
+
+
+@dataclasses.dataclass(frozen=True)
+class TensorSSAReduction:
+    """Describe the CuTeDSL lowering for one TensorSSA value reduction."""
+
+    cute_op: str
+    init_val: str
+    combine_expr: str
+
+
+TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
+    "sum": TensorSSAReduction("cute.ReductionOp.ADD", "0.0", "lhs + rhs"),
+    "prod": TensorSSAReduction("cute.ReductionOp.MUL", "1.0", "lhs * rhs"),
+    "max": TensorSSAReduction(
+        "cute.ReductionOp.MAX", 'float("-inf")', "cutlass.max(lhs, rhs)"
+    ),
+    "min": TensorSSAReduction(
+        "cute.ReductionOp.MIN", 'float("inf")', "cutlass.min(lhs, rhs)"
+    ),
+}
+
+
+def tensorssa_reduction(reduction_type: ReductionType) -> TensorSSAReduction:
+    """Return the TensorSSA descriptor for reductions representable by CuTe."""
+    reduction = TENSORSSA_REDUCTIONS.get(reduction_type)
+    if reduction is None:
+        raise NotImplementedError(
+            f"{reduction_type} does not map to a CuTe TensorSSA reduction"
+        )
+    return reduction
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
@@ -108,6 +160,17 @@ class CuteDSLOpOverrides(OpOverrides):
         return cse_var is not None and not CuteDSLOpOverrides._is_scalar_expr(arg)
 
     @staticmethod
+    def _index_expr(arg: CuteDSLArg) -> sympy.Expr | None:
+        cse_var = CuteDSLOpOverrides._get_cse_var(arg)
+        if isinstance(cse_var, CuteDSLCSEVariable):
+            return cse_var.index_expr
+        if isinstance(arg, (int, sympy.Integer)):
+            return sympy.Integer(arg)
+        if isinstance(arg, str) and arg.lstrip("-").isdigit():
+            return sympy.Integer(int(arg))
+        return None
+
+    @staticmethod
     def _ensure_tensor_ssa(
         arg: CuteDSLArg, template_tensor: CuteDSLArg, *, is_tensor: bool
     ) -> str:
@@ -139,7 +202,12 @@ class CuteDSLOpOverrides(OpOverrides):
         return None, ValueRanges.unknown()
 
     @staticmethod
-    def _apply_binary_op(a: CuteDSLArg, b: CuteDSLArg, op_format: str) -> CuteDSLArg:
+    def _apply_binary_op(
+        a: CuteDSLArg,
+        b: CuteDSLArg,
+        op_format: str,
+        index_expr_fn=None,
+    ) -> CuteDSLArg:
         """
         Apply a binary operation with automatic scalar-to-tensor conversion.
 
@@ -197,9 +265,17 @@ class CuteDSLOpOverrides(OpOverrides):
             else:
                 shape = tuple(expected.size()) if expected is not None else None
 
-            return V.kernel.cse.generate(
+            result = V.kernel.cse.generate(
                 V.kernel.body, result_expr, bounds=bounds, dtype=dtype, shape=shape
             )
+            if index_expr_fn is not None and isinstance(result, CuteDSLCSEVariable):
+                a_expr = CuteDSLOpOverrides._index_expr(a)
+                b_expr = CuteDSLOpOverrides._index_expr(b)
+                if a_expr is not None and b_expr is not None:
+                    result.index_expr = V.graph.sizevars.simplify(
+                        index_expr_fn(a_expr, b_expr)
+                    )
+            return result
 
         result_expr = op_format.format(
             a=CuteDSLOpOverrides._as_expr(a),
@@ -216,6 +292,13 @@ class CuteDSLOpOverrides(OpOverrides):
             dtype=dtype if dtype is not None else torch.int32,
         )
         result.is_scalar_expr = True
+        if index_expr_fn is not None and isinstance(result, CuteDSLCSEVariable):
+            a_expr = CuteDSLOpOverrides._index_expr(a)
+            b_expr = CuteDSLOpOverrides._index_expr(b)
+            if a_expr is not None and b_expr is not None:
+                result.index_expr = V.graph.sizevars.simplify(
+                    index_expr_fn(a_expr, b_expr)
+                )
         return result
 
     @staticmethod
@@ -235,13 +318,22 @@ class CuteDSLOpOverrides(OpOverrides):
         return f"{cute_type}({expr})"
 
     @staticmethod
-    def _apply_unary_op(x: CuteDSLArg, op_format: str) -> CuteDSLArg:
+    def _math_call(name: str, *args: str) -> str:
+        fast_math = ", fastmath=True" if _CUTEDSL_FAST_MATH.get() else ""
+        return f"cute.math.{name}({', '.join(args)}{fast_math})"
+
+    @staticmethod
+    def _apply_unary_op(
+        x: CuteDSLArg, op_format: str, index_expr_fn=None
+    ) -> CuteDSLArg:
         """
         Apply a unary operation, returning CSEVariable if input is a tensor.
 
         Args:
             x: Input operand (CSEVariable for tensors, str for scalars, or OpsValue wrapper)
             op_format: Format string with {x} placeholder for the operation
+            index_expr_fn: Optional sympy builder to propagate index semantics
+                through the op for lane analysis
 
         Returns:
             CSEVariable if input is a tensor, otherwise string
@@ -256,11 +348,21 @@ class CuteDSLOpOverrides(OpOverrides):
                 dtype=cse_var.dtype,
                 shape=cse_var.shape,
             )
+            if index_expr_fn is not None and isinstance(result, CuteDSLCSEVariable):
+                x_expr = CuteDSLOpOverrides._index_expr(x)
+                if x_expr is not None:
+                    result.index_expr = V.graph.sizevars.simplify(index_expr_fn(x_expr))
             if CuteDSLOpOverrides._is_scalar_expr(x):
                 result.is_scalar_expr = True
             return result
 
         return op_format.format(x=x)
+
+    @staticmethod
+    def _apply_math_unary_op(x: CuteDSLArg, name: str) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_unary_op(
+            x, CuteDSLOpOverrides._math_call(name, "{x}")
+        )
 
     @staticmethod
     def constant(value: bool | float | int, dtype: torch.dtype) -> str:
@@ -286,19 +388,33 @@ class CuteDSLOpOverrides(OpOverrides):
             dtype=dtype,
         )
         result.is_scalar_expr = True
+        if isinstance(result, CuteDSLCSEVariable):
+            result.index_expr = V.graph.sizevars.simplify(expr)
         return result
 
     @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> CuteDSLArg:
+        # CuteDSL index_expr already emits the requested dtype, so value_expr
+        # has the same lowering here.
+        return CuteDSLOpOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def add(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} + {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} + {b})", lambda a_expr, b_expr: a_expr + b_expr
+        )
 
     @staticmethod
     def mul(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} * {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} * {b})", lambda a_expr, b_expr: a_expr * b_expr
+        )
 
     @staticmethod
     def sub(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} - {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} - {b})", lambda a_expr, b_expr: a_expr - b_expr
+        )
 
     @staticmethod
     def truediv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
@@ -306,15 +422,21 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def floordiv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} // {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} // {b})", lambda a_expr, b_expr: a_expr // b_expr
+        )
 
     @staticmethod
     def mod(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        # Inductor ops.mod is C-style; SymPy/Python % is Python-style for
+        # negative values, so don't attach index_expr metadata here.
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
 
     @staticmethod
     def remainder(a, b):
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} % {b})", lambda a_expr, b_expr: a_expr % b_expr
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -323,38 +445,90 @@ class CuteDSLOpOverrides(OpOverrides):
         if CuteDSLOpOverrides._get_cse_var(x) is None:
             x = CuteDSLOpOverrides._cast_expr(str(x), torch.float32)
         return CuteDSLOpOverrides._apply_unary_op(
-            x, f"cute.math.exp2({{x}} * {CuteDSLOpOverrides.LOG2_E})"
+            x,
+            CuteDSLOpOverrides._math_call(
+                "exp2", f"{{x}} * {CuteDSLOpOverrides.LOG2_E}"
+            ),
         )
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def exp2(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "exp2")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sqrt(x: CuteDSLArg) -> CuteDSLArg:
         """Square root using CuteDSL cute.math.sqrt function."""
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.sqrt({x})")
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "sqrt")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def rsqrt(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "rsqrt")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def log(x: CuteDSLArg) -> CuteDSLArg:
         """Natural logarithm using CuteDSL cute.math.log function."""
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.log({x})")
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "log")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def log2(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "log2")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def log10(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "log10")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def cos(x: CuteDSLArg) -> CuteDSLArg:
         """Cosine using CuteDSL cute.math.cos function."""
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.cos({x})")
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "cos")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sin(x: CuteDSLArg) -> CuteDSLArg:
         """Sine using CuteDSL cute.math.sin function."""
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.sin({x})")
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "sin")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def tan(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "tan")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def acos(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "acos")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def asin(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "asin")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def atan(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "atan")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def atan2(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(
+            a,
+            b,
+            CuteDSLOpOverrides._math_call("atan2", "{a}", "{b}"),
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def erf(x: CuteDSLArg) -> CuteDSLArg:
         """Error function using CuteDSL cute.math.erf function."""
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.erf({x})")
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "erf")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -370,9 +544,12 @@ class CuteDSLOpOverrides(OpOverrides):
         else:
             x_fp32 = CuteDSLOpOverrides._cast_expr(str(x), torch.float32)
 
+        exp = CuteDSLOpOverrides._math_call(
+            "exp2", f"-{{x}} * {CuteDSLOpOverrides.LOG2_E}"
+        )
         result = CuteDSLOpOverrides._apply_unary_op(
             x_fp32,
-            f"(1.0 / (1.0 + cute.math.exp2(-{{x}} * {CuteDSLOpOverrides.LOG2_E})))",
+            f"(1.0 / (1.0 + {exp}))",
         )
 
         expected = CuteDSLOpOverrides._expected_tensor_val()
@@ -390,11 +567,15 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def _minmax(a: CuteDSLArg, b: CuteDSLArg, *, op: str) -> CuteDSLArg:
+        index_expr_fn = Max if op == ">" else Min
         if CuteDSLOpOverrides._is_tensor_like(a) or CuteDSLOpOverrides._is_tensor_like(
             b
         ):
             return CuteDSLOpOverrides._apply_binary_op(
-                a, b, f"cute.where(({{a}}) {op} ({{b}}), {{a}}, {{b}})"
+                a,
+                b,
+                f"cute.where(({{a}}) {op} ({{b}}), {{a}}, {{b}})",
+                index_expr_fn,
             )
 
         lhs = CuteDSLOpOverrides._as_expr(a)
@@ -415,6 +596,13 @@ class CuteDSLOpOverrides(OpOverrides):
             bounds=bounds,
             dtype=dtype if dtype is not None else torch.int32,
         )
+        if isinstance(result, CuteDSLCSEVariable):
+            a_expr = CuteDSLOpOverrides._index_expr(a)
+            b_expr = CuteDSLOpOverrides._index_expr(b)
+            if a_expr is not None and b_expr is not None:
+                result.index_expr = V.graph.sizevars.simplify(
+                    index_expr_fn(a_expr, b_expr)
+                )
         result.is_scalar_expr = True
         return result
 
@@ -490,6 +678,11 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def floor(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_math_unary_op(x, "floor")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x: CuteDSLArg) -> CuteDSLArg:
         """Absolute value using CuteDSL cute.math.abs function."""
         if isinstance(x, CSEVariable):
@@ -508,17 +701,24 @@ class CuteDSLOpOverrides(OpOverrides):
             return CuteDSLOpOverrides._apply_unary_op(
                 x,
                 f"cute.TensorSSA({abs_op}({{x}}), {{x}}.shape, {{x}}.dtype)",
+                index_expr_fn=sympy.Abs,
             )
-        return CuteDSLOpOverrides._apply_unary_op(x, f"{abs_op}({{x}})")
+        return CuteDSLOpOverrides._apply_unary_op(
+            x, f"{abs_op}({{x}})", index_expr_fn=sympy.Abs
+        )
 
     @staticmethod
     def neg(x: CuteDSLArg) -> CuteDSLArg:
         """Negation for both TensorSSA and scalar-like expressions."""
         if CuteDSLOpOverrides._is_tensor_like(x):
             return CuteDSLOpOverrides._apply_unary_op(
-                x, "cute.TensorSSA(-{x}, {x}.shape, {x}.dtype)"
+                x,
+                "cute.TensorSSA(-{x}, {x}.shape, {x}.dtype)",
+                index_expr_fn=lambda expr: -expr,
             )
-        return CuteDSLOpOverrides._apply_unary_op(x, "(-{x})")
+        return CuteDSLOpOverrides._apply_unary_op(
+            x, "(-{x})", index_expr_fn=lambda expr: -expr
+        )
 
     @staticmethod
     def to_dtype(
@@ -551,6 +751,12 @@ class CuteDSLOpOverrides(OpOverrides):
             )
             if CuteDSLOpOverrides._is_scalar_expr(x):
                 result.is_scalar_expr = True
+            if (
+                dtype in (torch.int32, torch.int64)
+                and isinstance(result, CuteDSLCSEVariable)
+                and isinstance(x, CuteDSLCSEVariable)
+            ):
+                result.index_expr = x.index_expr
             return result
 
         return f"{x}.to({cute_type})"
@@ -558,7 +764,7 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def tanh(x0: CuteDSLArg) -> CuteDSLArg:
         """Hyperbolic tangent using CuteDSL cute.math.tanh function."""
-        return CuteDSLOpOverrides._apply_unary_op(x0, "cute.math.tanh({x})")
+        return CuteDSLOpOverrides._apply_math_unary_op(x0, "tanh")
 
     # Logical operations
     @staticmethod
@@ -568,6 +774,10 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def logical_or(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} | {b})")
+
+    @staticmethod
+    def logical_xor(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} ^ {b})")
 
     # Bitwise operations (override parent class to properly CSE)
     @staticmethod

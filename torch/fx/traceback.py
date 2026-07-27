@@ -1,5 +1,6 @@
 import copy
 import logging
+import threading
 import traceback
 from collections import defaultdict
 from collections.abc import Callable, Iterator
@@ -40,6 +41,12 @@ __all__ = [
 
 current_meta: dict[str, Any] = {}
 current_replay_node: Node | None = None
+# Thread-local holder for the optional name of the subgraph being compiled by a
+# nested/regional inductor compile (e.g. a regional inductor scooped-out region
+# or an invoke_subgraph submodule). Used to disambiguate trace_structured
+# records emitted from sub-compiles within a single frame. Used for debugging
+# only!
+_regional_inductor_subgraph_name_tls = threading.local()
 # Preserve the node meta fields in torch.fx.proxy._COPY_META_FIELDS
 should_preserve_node_meta = False
 # Preserve the "seq_nr" node meta field
@@ -297,7 +304,7 @@ def set_stack_trace(stack: list[str]) -> None:
             current_meta["stack_trace"] = "".join(stack)
         else:
             # when the stack is empty, we explicitly clear the stack_trace to avoid
-            # propagating it to future node.˙
+            # propagating it to future node.
             current_meta.pop("stack_trace", None)
 
 
@@ -354,6 +361,26 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
             current_meta["custom"] = old_custom
         else:
             del current_meta["custom"]
+
+
+# Key under node.meta["custom"] used to carry the activation-checkpointing budget
+# set by ``torch.autograd.graph.region_activation_memory_budget``. Shared by that
+# writer and the reader below so the partitioner / AOTAutograd cache read it the
+# same way.
+MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+
+
+def _get_memory_budget_annotation(node: Node) -> float | None:
+    """
+    Read the ``region_activation_memory_budget`` annotation off an FX node,
+    returning ``None`` if absent. The value is written only by
+    ``torch.autograd.graph.region_activation_memory_budget``, which validates it
+    and stores a ``float``.
+    """
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return None
+    return custom.get(MEMORY_BUDGET_ANNOTATION_KEY)
 
 
 @compatibility(is_backward_compatible=False)
@@ -517,7 +544,7 @@ def get_current_meta() -> dict[str, Any]:
 @contextmanager
 def set_current_replay_node(node: Node | None) -> Iterator[None]:
     """
-    Set the currently replay node. If `current_replay_node` is not None,
+    Set the current replay node. If `current_replay_node` is not None,
     then we're re-generating the `current_replay_node` in FunctionalTensorMode.
     """
     # See [Note] annotation for more details.
@@ -533,9 +560,35 @@ def set_current_replay_node(node: Node | None) -> Iterator[None]:
 @compatibility(is_backward_compatible=False)
 def get_current_replay_node() -> Node | None:
     """
-    Get the currently replay node
+    Get the current replay node
     """
     return current_replay_node
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def _set_regional_inductor_subgraph_name(name: str | None) -> Iterator[None]:
+    """
+    Set the name of the subgraph currently being sub-compiled by regional
+    inductor (a scooped-out region or an invoke_subgraph submodule). Used to
+    tag trace_structured records so artifacts emitted from different
+    sub-compiles within the same frame can be distinguished.
+    """
+    saved = getattr(_regional_inductor_subgraph_name_tls, "value", None)
+    try:
+        _regional_inductor_subgraph_name_tls.value = name
+        yield
+    finally:
+        _regional_inductor_subgraph_name_tls.value = saved
+
+
+@compatibility(is_backward_compatible=False)
+def _get_regional_inductor_subgraph_name() -> str | None:
+    """
+    Get the name of the subgraph currently being sub-compiled by regional
+    inductor, or None.
+    """
+    return getattr(_regional_inductor_subgraph_name_tls, "value", None)
 
 
 @compatibility(is_backward_compatible=False)

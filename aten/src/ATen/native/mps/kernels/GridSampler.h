@@ -22,15 +22,15 @@ using at::native::GridSamplerInterpolation;
 using at::native::GridSamplerPadding;
 #endif
 
-template <unsigned N = 5, typename idx_type_t = int32_t>
+template <unsigned N = 5, typename idx_t = int32_t>
 struct GridSamplerParams {
   int32_t sampler_dims;
-  ::c10::metal::array<idx_type_t, N> output_sizes;
-  ::c10::metal::array<idx_type_t, N> output_strides;
-  ::c10::metal::array<idx_type_t, N> input_sizes;
-  ::c10::metal::array<idx_type_t, N> input_strides;
-  ::c10::metal::array<idx_type_t, N> grid_sizes;
-  ::c10::metal::array<idx_type_t, N> grid_strides;
+  ::c10::metal::array<idx_t, N> output_sizes;
+  ::c10::metal::array<idx_t, N> output_strides;
+  ::c10::metal::array<idx_t, N> input_sizes;
+  ::c10::metal::array<idx_t, N> input_strides;
+  ::c10::metal::array<idx_t, N> grid_sizes;
+  ::c10::metal::array<idx_t, N> grid_strides;
   bool align_corners;
 
 #ifndef __METAL_VERSION__
@@ -42,28 +42,27 @@ struct GridSamplerParams {
       : sampler_dims(N - 2), align_corners(align_corners_) {
     for (unsigned dim = 0; dim < N; dim++) {
       output_sizes[dim] =
-          c10::checked_convert<idx_type_t>(output.size(dim), "int32_t");
+          c10::checked_convert<idx_t>(output.size(dim), "int32_t");
       output_strides[dim] =
-          c10::checked_convert<idx_type_t>(output.stride(dim), "int32_t");
+          c10::checked_convert<idx_t>(output.stride(dim), "int32_t");
       input_sizes[dim] =
-          c10::checked_convert<idx_type_t>(input.size(dim), "int32_t");
+          c10::checked_convert<idx_t>(input.size(dim), "int32_t");
       input_strides[dim] =
-          c10::checked_convert<idx_type_t>(input.stride(dim), "int32_t");
-      grid_sizes[dim] =
-          c10::checked_convert<idx_type_t>(grid.size(dim), "int32_t");
+          c10::checked_convert<idx_t>(input.stride(dim), "int32_t");
+      grid_sizes[dim] = c10::checked_convert<idx_t>(grid.size(dim), "int32_t");
       grid_strides[dim] =
-          c10::checked_convert<idx_type_t>(grid.stride(dim), "int32_t");
+          c10::checked_convert<idx_t>(grid.stride(dim), "int32_t");
     }
   }
 #endif
 };
 
-template <unsigned N = 5, typename idx_type_t = int32_t>
+template <unsigned N = 5, typename idx_t = int32_t>
 struct GridSamplerBackwardParams {
-  GridSamplerParams<N, idx_type_t> forward;
-  ::c10::metal::array<idx_type_t, N> grad_output_strides;
-  ::c10::metal::array<idx_type_t, N> grad_input_strides;
-  ::c10::metal::array<idx_type_t, N> grad_grid_strides;
+  GridSamplerParams<N, idx_t> forward;
+  ::c10::metal::array<idx_t, N> grad_output_strides;
+  ::c10::metal::array<idx_t, N> grad_input_strides;
+  ::c10::metal::array<idx_t, N> grad_grid_strides;
   GridSamplerPadding padding_mode;
   GridSamplerInterpolation interpolation_mode;
   bool compute_grad_input;
@@ -87,12 +86,12 @@ struct GridSamplerBackwardParams {
             interpolation_mode_ != GridSamplerInterpolation::Nearest) {
     for (unsigned dim = 0; dim < N; dim++) {
       grad_output_strides[dim] =
-          c10::checked_convert<idx_type_t>(grad_output.stride(dim), "int32_t");
+          c10::checked_convert<idx_t>(grad_output.stride(dim), "int32_t");
       grad_input_strides[dim] = grad_input.defined()
-          ? c10::checked_convert<idx_type_t>(grad_input.stride(dim), "int32_t")
+          ? c10::checked_convert<idx_t>(grad_input.stride(dim), "int32_t")
           : 0;
       grad_grid_strides[dim] =
-          c10::checked_convert<idx_type_t>(grad_grid.stride(dim), "int32_t");
+          c10::checked_convert<idx_t>(grad_grid.stride(dim), "int32_t");
     }
   }
 #endif

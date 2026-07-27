@@ -677,7 +677,7 @@ prefill_attention_mpp(
   const int qL_rem = qL - NQ_aligned * BQ;
   const bool align_Q = (qL_rem == 0);
 
-  const ulong kv_head_idx = head_idx / params->gqa_factor;
+  const int kv_head_idx = head_idx / params->gqa_factor;
 
   Q += batch_idx * params->Q_strides[0] + head_idx * params->Q_strides[1] +
       (block_idx * BQ) * params->Q_strides[2];
@@ -690,6 +690,13 @@ prefill_attention_mpp(
     mask += batch_idx * mask_params->M_strides[0] +
         head_idx * mask_params->M_strides[1];
   }
+
+  // Narrowed back to 32-bit: these only ever multiply in-tile offsets, the
+  // base pointers having already been advanced.
+  const int q_seq_stride = int(params->Q_strides[2]);
+  const int k_seq_stride = int(params->K_strides[2]);
+  const int v_seq_stride = int(params->V_strides[2]);
+  const int o_seq_stride = int(params->O_strides[2]);
 
   // Pre-multiply by 1/ln(2) so we can use exp2 in the inner softmax.
   const AccumType scale2 =
@@ -719,7 +726,7 @@ prefill_attention_mpp(
   Otile.clear();
 
   const short tm = kU * TQ * simd_group_id;
-  Q += tm * params->Q_strides[2];
+  Q += tm * q_seq_stride;
 
   const short2 simd_coord = otile_t::MPPFrag_t::get_coord();
   const short sm = simd_coord.y;
@@ -765,21 +772,19 @@ prefill_attention_mpp(
           MPPTile<T, 1, 1, QFrag_t> Qtile;
           MPPTile<T, 2, 1, KFrag_t> Ktile;
 
-          const int Q_load_off = iq * kU * params->Q_strides[2] + id * kU;
-          const int K_load_off = ik * kU * params->K_strides[2] + id * kU;
+          const int Q_load_off = iq * kU * q_seq_stride + id * kU;
+          const int K_load_off = ik * kU * k_seq_stride + id * kU;
 
           if (!align_Q && is_last_q) {
-            Qtile.load_rows(
-                Q + Q_load_off, params->Q_strides[2], lim_rows_q - iq * kU);
+            Qtile.load_rows(Q + Q_load_off, q_seq_stride, lim_rows_q - iq * kU);
           } else {
-            Qtile.load(Q + Q_load_off, params->Q_strides[2]);
+            Qtile.load(Q + Q_load_off, q_seq_stride);
           }
 
           if (!align_K && is_last_k) {
-            Ktile.load_rows(
-                K + K_load_off, params->K_strides[2], lim_rows_k - ik * kU);
+            Ktile.load_rows(K + K_load_off, k_seq_stride, lim_rows_k - ik * kU);
           } else {
-            Ktile.load(K + K_load_off, params->K_strides[2]);
+            Ktile.load(K + K_load_off, k_seq_stride);
           }
 
           QFrag_t::mma(
@@ -873,7 +878,7 @@ prefill_attention_mpp(
             mtile_t::MPPFrag_t::load(
                 mfrag,
                 mask,
-                int(mask_params->M_strides[2]),
+                mask_params->M_strides[2],
                 Int<1>{},
                 row_pos,
                 col_pos);
@@ -881,7 +886,7 @@ prefill_attention_mpp(
             mtile_t::MPPFrag_t::load_safe(
                 mfrag,
                 mask,
-                int(mask_params->M_strides[2]),
+                mask_params->M_strides[2],
                 Int<1>{},
                 qL,
                 kL,
@@ -943,12 +948,11 @@ prefill_attention_mpp(
         MPP_PRAGMA_UNROLL
         for (short ik = 0; ik < TK; ik++) {
           MPPTile<T, 1, 2, QFrag_t> Vtile;
-          const int V_load_off = ik * kU * params->V_strides[2] + id * kU;
+          const int V_load_off = ik * kU * v_seq_stride + id * kU;
           if (!align_K && is_last_k) {
-            Vtile.load_rows(
-                V + V_load_off, params->V_strides[2], lim_rows_k - ik * kU);
+            Vtile.load_rows(V + V_load_off, v_seq_stride, lim_rows_k - ik * kU);
           } else {
-            Vtile.load(V + V_load_off, params->V_strides[2]);
+            Vtile.load(V + V_load_off, v_seq_stride);
           }
           QFrag_t::mma(
               Otile.frag_at(iq, id),
@@ -962,9 +966,13 @@ prefill_attention_mpp(
       }
     }
 
-    K += BK * params->K_strides[2];
-    V += BK * params->V_strides[2];
+    K += BK * k_seq_stride;
+    V += BK * v_seq_stride;
   }
+
+  // Drains the cooperative-tensor pipeline before the O registers are read
+  // back below.
+  threadgroup_barrier(mem_flags::mem_none);
 
   // Treat fully-masked rows as zero output.
   MPP_PRAGMA_UNROLL
@@ -980,14 +988,14 @@ prefill_attention_mpp(
   }
   Otile.template row_bin_op<MulOp>(rcp);
 
-  O += tm * params->O_strides[2];
+  O += tm * o_seq_stride;
   if (!align_Q && is_last_q) {
     if (lim_rows_q <= 0) {
       return;
     }
-    Otile.store_rows(O, params->O_strides[2], lim_rows_q);
+    Otile.store_rows(O, o_seq_stride, lim_rows_q);
   } else {
-    Otile.store(O, params->O_strides[2]);
+    Otile.store(O, o_seq_stride);
   }
 }
 
@@ -1027,23 +1035,24 @@ prefill_attention_mpp(
   instantiate_mpp_attn_arch(                                                \
       "a9", false, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype);
 
+// BK is always 32: mpp_prefill_block_shape_for_head_dim returns it for every
+// supported head dim.
 #define instantiate_mpp_attn_shapes(iname, itype, hm, dc, mname, mtype)        \
   instantiate_mpp_attn(iname, itype, 64, 32, 256, 4, 1, hm, dc, mname, mtype); \
   instantiate_mpp_attn(iname, itype, 64, 32, 128, 4, 1, hm, dc, mname, mtype); \
   instantiate_mpp_attn(iname, itype, 64, 32, 96, 4, 1, hm, dc, mname, mtype);  \
-  instantiate_mpp_attn(iname, itype, 64, 32, 64, 4, 1, hm, dc, mname, mtype);  \
-  instantiate_mpp_attn(iname, itype, 64, 64, 128, 4, 1, hm, dc, mname, mtype); \
-  instantiate_mpp_attn(iname, itype, 64, 64, 64, 4, 1, hm, dc, mname, mtype);
+  instantiate_mpp_attn(iname, itype, 64, 32, 64, 4, 1, hm, dc, mname, mtype);
 
-#define instantiate_mpp_attn_causal(iname, itype, mname, mtype)  \
-  instantiate_mpp_attn_shapes(iname, itype, 0, 0, mname, mtype); \
-  instantiate_mpp_attn_shapes(iname, itype, 0, 1, mname, mtype); \
-  instantiate_mpp_attn_shapes(iname, itype, 1, 0, mname, mtype); \
-  instantiate_mpp_attn_shapes(iname, itype, 1, 1, mname, mtype);
+#define instantiate_mpp_attn_causal(iname, itype, hm, mname, mtype) \
+  instantiate_mpp_attn_shapes(iname, itype, hm, 0, mname, mtype);   \
+  instantiate_mpp_attn_shapes(iname, itype, hm, 1, mname, mtype);
 
-#define instantiate_mpp_attn_mask(iname, itype)            \
-  instantiate_mpp_attn_causal(iname, itype, iname, itype); \
-  instantiate_mpp_attn_causal(iname, itype, bool_, bool);
+// A bool mask name is only reachable with hm=1: the host leaves the mask dtype
+// at the query dtype when there is no mask.
+#define instantiate_mpp_attn_mask(iname, itype)               \
+  instantiate_mpp_attn_causal(iname, itype, 0, iname, itype); \
+  instantiate_mpp_attn_causal(iname, itype, 1, iname, itype); \
+  instantiate_mpp_attn_causal(iname, itype, 1, bool_, bool);
 
 instantiate_mpp_attn_mask(float16, half);
 instantiate_mpp_attn_mask(bfloat16, bfloat);

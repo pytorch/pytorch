@@ -23,7 +23,7 @@ struct CudaIPCGlobalEntities {
   // This class is used as a singleton (see cuda_ipc_global_entities)
   // This variable is used to track its lifetime to avoid accessing it
   // after it was destroyed which would lead to segmentation faults
-  // Note that a trvial type is used which doesn't suffer from construction
+  // Note that a trivial type is used which doesn't suffer from construction
   // and destruction order issues
   static bool alive;
 
@@ -41,12 +41,12 @@ struct CudaIPCGlobalEntities {
   CudaIPCGlobalEntities& operator=(const CudaIPCGlobalEntities&) = delete;
   CudaIPCGlobalEntities& operator=(CudaIPCGlobalEntities&&) = delete;
   ~CudaIPCGlobalEntities() {
+    alive = false;
     CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
     if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
     }
-    alive = false;
   }
   void safe_clean_current_file() {
     std::lock_guard<std::mutex> lock(ref_counters_mutex_);
@@ -194,6 +194,9 @@ CudaIPCSentData::CudaIPCSentData(
 }
 
 CudaIPCSentData::~CudaIPCSentData() {
+  if (!CudaIPCGlobalEntities::alive) {
+    original_ptr_.release_context();
+  }
   ReturnRefCounter(handle_, offset_);
 #if !defined(USE_ROCM)
   try {

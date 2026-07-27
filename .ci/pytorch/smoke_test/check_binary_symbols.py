@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import concurrent.futures
-import distutils.sysconfig
 import functools
 import itertools
 import os
 import re
+import sysconfig
 from pathlib import Path
 from typing import Any
 
@@ -182,7 +182,12 @@ int main() { return 0; }
 
     base_compile_flags = [
         "g++",
-        "-std=c++17",
+        # The full torch C++ API (torch/all.h, ATen/ATen.h) enforces a C++20
+        # minimum via header guards; compile at C++20 to match. The other
+        # checks below stay at C++17 on purpose -- they exercise the stable /
+        # header-only / C-shim surface, which must remain buildable under the
+        # older standard.
+        "-std=c++20",
         f"-I{include_dir}",
         f"-I{include_dir}/torch/csrc/api/include",
         "-c",  # Compile only, don't link
@@ -322,6 +327,7 @@ def check_headeronly_symbols(install_root: Path) -> None:
     # Filter out platform-specific headers that may not compile everywhere
     platform_specific_keywords = [
         "cpu/vec",
+        "win32-headers.h",
     ]
 
     filtered_headers = []
@@ -476,7 +482,7 @@ def main() -> None:
         if os.getenv("PACKAGE_TYPE") == "libtorch":
             install_root = Path(os.getcwd())
         else:
-            install_root = Path(distutils.sysconfig.get_python_lib()) / "torch"
+            install_root = Path(sysconfig.get_path("purelib")) / "torch"
 
     libtorch_cpu_path = str(install_root / "lib" / "libtorch_cpu.so")
     check_lib_symbols_for_abi_correctness(libtorch_cpu_path)
