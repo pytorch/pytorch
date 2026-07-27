@@ -1436,6 +1436,10 @@ class FlexGemmEpilogueEmitter:
 
     def render(self) -> tuple[str, str]:
         """Render the generated epilogue and physical callback source."""
+        from torch._inductor.kernel.flex_gemm.quant_intrinsics import (
+            quant_intrinsics_cache_key,
+        )
+
         body = "\n".join(f"    {line}" for line in self.kernel.body.lines)
         if body:
             body += "\n"
@@ -1471,6 +1475,7 @@ class FlexGemmEpilogueEmitter:
             )
         )
         key_payload = (
+            f"quant_intrinsics={quant_intrinsics_cache_key()}\n"
             f"fast_math={self.fast_math}\n{self.graph_module.code}\n"
             f"{body}\nreturn {result}{physical_reduction_payload}"
         )
