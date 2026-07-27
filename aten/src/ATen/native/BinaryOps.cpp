@@ -1575,8 +1575,8 @@ static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& othe
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
-    .add_input(self)
-    .add_input(other)
+    .add_const_input(self)
+    .add_const_input(other)
     .build();
 
   ldexp_stub(iter.device_type(), iter);
