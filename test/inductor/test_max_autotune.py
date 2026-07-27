@@ -5908,17 +5908,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             self.assertTrue(
                 all(config.num_stages == 1 for config in heuristic.mm_configs)
             )
-            configs = list(
-                heuristic.get_exhaustive_mm_configs()(
-                    128,
-                    128,
-                    128,
-                    dtype_size=2,
-                    tdm_a_row_major=True,
-                    tdm_b_row_major=True,
-                )
-            )
-            stages = {config.num_stages for config in configs}
+            stages = {config.num_stages for config in heuristic.exhaustive_configs}
             self.assertIn(1, stages)
             self.assertIn(2, stages)
         finally:
