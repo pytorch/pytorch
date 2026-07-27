@@ -398,7 +398,6 @@ _rocm_core_libs: list[str] = [
     "libamdhip64.so",
     "libhiprtc.so",
     "librocm-core.so",
-    "librocm_smi64.so",
     "libroctx64.so",
     "libroctracer64.so",
     "librocblas.so",
@@ -1873,6 +1872,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
         * :func:`torch.Tensor.index_put` with ``accumulate=False``
@@ -1925,7 +1925,6 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -3228,7 +3227,7 @@ def compile(
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
           This is an unsafe feature and there is no backward compatibility guarantee provided
           for dynamo guards as data types.
-          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          For stable helper functions to use, see the documentation in `torch.compiler`, for example:
           - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
           - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
           - `torch.compiler.keep_tensor_guards_unsafe`
