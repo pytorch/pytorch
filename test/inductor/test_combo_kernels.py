@@ -2125,6 +2125,65 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
 class ComboKernelBenchmarkTestsPerSubkernelBlocks(ComboKernelBenchmarkTests):
     combo_kernel_per_subkernel_blocks = True
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "max_autotune": False,
+            "max_autotune_pointwise": False,
+            "triton.persistent_reductions": False,
+        }
+    )
+    def test_no_autotune_regular_reduction(self):
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        source_only_configs = []
+        source_only_kernel_deltas = []
+        orig_generate = SIMDScheduling.generate_combo_kernel_code
+
+        def capture_source_only_config(scheduling, *args, **kwargs):
+            old_kernel_count = torch._inductor.metrics.generated_kernel_count
+            result = orig_generate(scheduling, *args, **kwargs)
+            if kwargs.get("only_gen_src_code"):
+                source_only_kernel_deltas.append(
+                    torch._inductor.metrics.generated_kernel_count - old_kernel_count
+                )
+                source_only_configs.extend(
+                    kernel.no_bench_stitched_config.kwargs
+                    for _, kernel, nodes in result
+                    if kernel is not None
+                    and len(nodes) > 1
+                    and kernel.no_bench_stitched_config is not None
+                )
+            return result
+
+        inps = (
+            torch.randn(512, 2048, device=GPU_TYPE),
+            torch.randn(256, 2048, device=GPU_TYPE),
+        )
+        expected = fn(*inps)
+
+        with (
+            fresh_cache(),
+            patch.object(
+                SIMDScheduling,
+                "generate_combo_kernel_code",
+                capture_source_only_config,
+            ),
+        ):
+            actual = torch.compile(fn)(*inps)
+
+        self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
+        self.assertEqual(len(source_only_configs), 1)
+        self.assertEqual(source_only_kernel_deltas, [1])
+        self.assertEqual(
+            {key for key in source_only_configs[0] if key.startswith("R0_BLOCK")},
+            {"R0_BLOCK_0", "R0_BLOCK_1"},
+        )
+
 
 class ComboKernelDynamicShapesTestsPerSubkernelBlocks(ComboKernelDynamicShapesTests):
     combo_kernel_per_subkernel_blocks = True
