@@ -662,10 +662,14 @@ class TestFlopCounterDeviceType(TestCase):
         )
 
         flops_fw_math = run_uniform_flops(SDPBackend.MATH, with_backward=False)
-        flops_fw_flash = run_uniform_flops(SDPBackend.FLASH_ATTENTION, with_backward=False)
+        flops_fw_flash = run_uniform_flops(
+            SDPBackend.FLASH_ATTENTION, with_backward=False
+        )
         self.assertEqual(flops_fw_math, flops_fw_flash)
 
-        flops_fw_bw_flash = run_uniform_flops(SDPBackend.FLASH_ATTENTION, with_backward=True)
+        flops_fw_bw_flash = run_uniform_flops(
+            SDPBackend.FLASH_ATTENTION, with_backward=True
+        )
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
 
     @requires_capabilities(Capability.attention.mem_efficient_attention)
@@ -694,10 +698,14 @@ class TestFlopCounterDeviceType(TestCase):
         )
 
         flops_fw_math = run_uniform_flops(SDPBackend.MATH, with_backward=False)
-        flops_fw_efficient = run_uniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=False)
+        flops_fw_efficient = run_uniform_flops(
+            SDPBackend.EFFICIENT_ATTENTION, with_backward=False
+        )
         self.assertEqual(flops_fw_math, flops_fw_efficient)
 
-        flops_fw_bw_efficient = run_uniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=True)
+        flops_fw_bw_efficient = run_uniform_flops(
+            SDPBackend.EFFICIENT_ATTENTION, with_backward=True
+        )
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_efficient)
 
         run_nonuniform_flops = functools.partial(
@@ -713,10 +721,14 @@ class TestFlopCounterDeviceType(TestCase):
         )
 
         flops_fw_nu_math = run_nonuniform_flops(SDPBackend.MATH, with_backward=False)
-        flops_fw_nu_efficient = run_nonuniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=False)
+        flops_fw_nu_efficient = run_nonuniform_flops(
+            SDPBackend.EFFICIENT_ATTENTION, with_backward=False
+        )
         self.assertEqual(flops_fw_nu_math, flops_fw_nu_efficient)
 
-        flops_fw_bw_nu_efficient = run_nonuniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=True)
+        flops_fw_bw_nu_efficient = run_nonuniform_flops(
+            SDPBackend.EFFICIENT_ATTENTION, with_backward=True
+        )
         self.assertExpectedInline(str(flops_fw_bw_nu_efficient), """939524096""")
 
     @requires_capabilities(Capability.attention.flash_attention)
@@ -779,7 +791,10 @@ class TestFlopCounterDeviceType(TestCase):
         self.assertEqual(gqa_flops, mha_flops)
         self.assertTrue(gqa_flops > 0)
 
-    @requires_capabilities(Capability.attention.flash_attention, Capability.attention.mem_efficient_attention)
+    @requires_capabilities(
+        Capability.attention.flash_attention,
+        Capability.attention.mem_efficient_attention,
+    )
     def test_sdpa_nested_tensor(self, device):
         def get_flops(q, k, v, backend, with_backward=False):
             mode = FlopCounterMode()
@@ -1524,7 +1539,9 @@ class TestFlexAttentionEstimationCUDA(TestCase):
 class TestFlopCounterCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN attention not supported")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN attention not supported"
+    )
     def test_sdpa_cudnn(self):
         device = "cuda"
         batch_size = 4
@@ -1549,10 +1566,14 @@ class TestFlopCounterCUDA(TestCase):
         )
 
         flops_fw_math = run_uniform_flops(SDPBackend.MATH, with_backward=False)
-        flops_fw_cudnn = run_uniform_flops(SDPBackend.CUDNN_ATTENTION, with_backward=False)
+        flops_fw_cudnn = run_uniform_flops(
+            SDPBackend.CUDNN_ATTENTION, with_backward=False
+        )
         self.assertEqual(flops_fw_math, flops_fw_cudnn)
 
-        flops_fw_bw_cudnn = run_uniform_flops(SDPBackend.CUDNN_ATTENTION, with_backward=True)
+        flops_fw_bw_cudnn = run_uniform_flops(
+            SDPBackend.CUDNN_ATTENTION, with_backward=True
+        )
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_cudnn)
 
 
