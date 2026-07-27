@@ -46,8 +46,9 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
-from .variables.script_object import TorchScriptObjectVariable
+from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -304,7 +305,16 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
+            # Recompute from the operands at runtime instead of burning in the value
+            self.uses[value] += 1
+            self.call_reconstruct(value)
+            if allow_cache and value in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(value)
+        elif value.is_python_constant() and is_safe_constant(
+            value.as_python_constant()
+        ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -349,7 +359,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)
