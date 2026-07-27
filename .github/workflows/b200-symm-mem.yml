@@ -41,7 +41,6 @@ jobs:
       runner_prefix: "mt-"
       runner: l-x86iavx512-16-128
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100-symm
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11
       cuda-arch-list: '10.0'

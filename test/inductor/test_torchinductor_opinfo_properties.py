@@ -54,6 +54,7 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     IS_WINDOWS,
     parametrize,
     skipIfTorchDynamo,
@@ -504,6 +505,50 @@ ROCM_XFAIL_DICTS = {
     "binary_numerical": ROCM_BINARY_NUMERICAL_XFAILS,
 }
 
+# fbcode ships a different Triton fork (triton+fb) and cuBLAS/CUDA/GPU stack than
+# OSS CI (e.g. A100 vs L4), which changes compiled-path numerics. These combos pass
+# in OSS but not in fbcode, so they are merged in only when IS_FBCODE (CUDA).
+FBCODE_BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "bmm": {fp32},
+    },
+    "inductor_default": {
+        "bmm": {fp32},
+    },
+    "inductor_numerics": {
+        "bmm": {fp32},
+    },
+}
+
+FBCODE_UNARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "sqrt": {bf16, fp32},
+    },
+    "inductor_numerics": {
+        "exp2": {bf16, fp32},
+        "expm1": {bf16, fp32},
+        "log1p": {fp32},
+        "reciprocal": {bf16, fp32},
+        "rsqrt": {bf16, fp32},
+        "sin": {fp32},
+        "sqrt": {bf16, fp32},
+        "tan": {bf16, fp32},
+        "tanh": {fp32},
+    },
+}
+
+FBCODE_BINARY_NUMERICAL_XFAILS = {
+    "inductor_numerics": {
+        "fmod": {bf16, fp32},
+    },
+}
+
+FBCODE_XFAIL_DICTS = {
+    "batch_invariance": FBCODE_BATCH_INVARIANCE_XFAILS,
+    "unary_numerical": FBCODE_UNARY_NUMERICAL_XFAILS,
+    "binary_numerical": FBCODE_BINARY_NUMERICAL_XFAILS,
+}
+
 ROCM_RELAXED_PROPERTY_CASES = {
     "eager_equivalence": {
         "inductor_default": {
@@ -529,7 +574,15 @@ ROCM_RELAXED_PROPERTY_CASES = {
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
     xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
-    xfails = xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set())
+    xfails = set(xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set()))
+    # fbcode's Triton fork + cuBLAS/GPU stack differ from OSS CI, so some combos
+    # fail the compiled-vs-eager numerics only in fbcode. Gate on IS_FBCODE (CUDA
+    # only) so OSS does not hit spurious XPASS on these.
+    if IS_FBCODE and torch.version.hip is None:
+        fbcode_xfails = (
+            FBCODE_XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
+        )
+        xfails = xfails | fbcode_xfails
     return dtype in xfails or ALL in xfails
 
 
@@ -836,6 +889,14 @@ class TestOpInfoProperties(TestCase):
     @parametrize("backend", BACKENDS)
     def test_eager_equivalence(self, device, dtype, op, backend):
         """Test bitwise equivalence with eager execution."""
+        if (
+            op.name == "nn.functional.gelu"
+            and dtype == torch.float32
+            and backend == "inductor_default"
+        ):
+            # Disabled due to CI failures; see
+            # https://github.com/pytorch/pytorch/issues/190242
+            self.skipTest("disabled due to CI failures; see #190242")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 
