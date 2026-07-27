@@ -9,16 +9,26 @@ namespace c10::xpu {
  * acquired from the first recording stream. Later streams that record the event
  * must match the same device.
  *
- * Currently, XPUEvent does NOT support to export an inter-process event from
- * another process via inter-process communication(IPC). So it means that
- * inter-process communication for event handles between different processes is
- * not available. This could impact some applications that rely on cross-process
- * synchronization and communication.
+ * IPC (inter-process communication) for event handles is supported only when
+ * built with SYCL compiler >= 2026.2. On older compilers, constructing an
+ * XPUEvent with enable_ipc=true will raise an error at record() time.
  */
 struct XPUEvent {
   // Constructors
-  XPUEvent(bool enable_timing = false) noexcept
-      : enable_timing_{enable_timing} {}
+  XPUEvent(bool enable_timing = false, bool enable_ipc = false) noexcept
+      : enable_timing_{enable_timing}, enable_ipc_{enable_ipc} {}
+
+#if SYCL_COMPILER_VERSION >= 20260200
+  XPUEvent(
+      DeviceIndex device_index,
+      const sycl::ext::oneapi::experimental::ipc::handle_data_t& handle)
+      : device_index_(device_index) {
+    event_ = std::make_unique<sycl::event>(
+        sycl::ext::oneapi::experimental::ipc::event::open(
+            handle, c10::xpu::get_device_context()));
+    enable_ipc_ = true;
+  }
+#endif
 
   ~XPUEvent() {
     if (isCreated()) {
@@ -83,11 +93,11 @@ struct XPUEvent {
     if (!isCreated()) {
       device_index_ = stream.device_index();
 #if SYCL_COMPILER_VERSION >= 20260200
-      event_ = std::make_unique<sycl::event>(
-          sycl::ext::oneapi::experimental::make_event(
-              c10::xpu::get_device_context(),
-              sycl::ext::oneapi::experimental::enable_profiling{
-                  enable_timing_}));
+      using syclex = sycl::ext::oneapi::experimental;
+      event_ = std::make_unique<sycl::event>(syclex::make_event(
+          c10::xpu::get_device_context(),
+          {syclex::enable_profiling{enable_timing_},
+           syclex::enable_ipc{enable_ipc_}}));
 #else
       assignEvent(stream.queue());
 #endif
@@ -109,7 +119,8 @@ struct XPUEvent {
 #endif
     }
 #if SYCL_COMPILER_VERSION >= 20260200
-    sycl::ext::oneapi::experimental::enqueue_signal_event(queue, *event_);
+    sycl::ext::oneapi::experimental::enqueue_signal_event(
+        stream.queue(), *event_);
 #endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
@@ -171,6 +182,30 @@ struct XPUEvent {
     }
   }
 
+#if SYCL_COMPILER_VERSION >= 20260200
+  sycl::ext::oneapi::experimental::ipc::handle_data_t ipc_handle() {
+    if (!isCreated()) {
+      using syclex = sycl::ext::oneapi::experimental;
+      TORCH_CHECK(
+          enable_ipc_,
+          "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
+      event_ = std::make_unique<sycl::event>(syclex::make_event(
+          c10::xpu::get_device_context(),
+          {syclex::enable_profiling{enable_timing_},
+           syclex::enable_ipc{enable_ipc_}}));
+      device_index_ = c10::xpu::current_device();
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_creation(
+            c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+      }
+    }
+    // TODO: Confirm with SYCL compiler team whether a paired pull() call is
+    // required to release each handle returned by ipc::event::get().
+    return sycl::ext::oneapi::experimental::ipc::event::get(*event_).data();
+  }
+#endif
+
  private:
   void assignEvent(sycl::queue& queue) {
     if (enable_timing_) {
@@ -179,6 +214,8 @@ struct XPUEvent {
     } else {
       event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
     }
+    TORCH_CHECK(
+        !enable_ipc_, "XPUEvent IPC requires SYCL compiler 2026.2 or later.");
   }
 
   void reassignEvent(sycl::queue& queue) {
@@ -187,6 +224,7 @@ struct XPUEvent {
   }
 
   bool enable_timing_ = false;
+  bool enable_ipc_ = false;
   c10::DeviceIndex device_index_ = -1;
   // Only need to track the last event, as events in an in-order queue are
   // executed sequentially.

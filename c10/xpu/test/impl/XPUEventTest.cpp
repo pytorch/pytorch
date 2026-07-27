@@ -1,0 +1,31 @@
+#include <gtest/gtest.h>
+
+#include <c10/xpu/XPUEvent.h>
+#include <c10/xpu/test/impl/XPUTest.h>
+
+
+
+static bool has_xpu() {
+  return c10::xpu::device_count() > 0;
+}
+
+TEST(XPUEventTest, IPCSupport) {
+  if (!has_xpu()) {
+    return;
+  }
+
+  c10::xpu::XPUEvent event1(false, true);
+
+  event1.record(c10::xpu::getCurrentXPUStream());
+  EXPECT_EQ(event1.event().ext_oneapi_ipc_enabled(), true);
+  auto handle = event1.ipc_handle();
+
+  auto current_device = c10::xpu::current_device();
+  c10::xpu::XPUEvent event2(current_device, handle);
+  EXPECT_EQ(event2.event().ext_oneapi_ipc_enabled(), true);
+
+  // TODO: Confirm with SYCL compiler team whether a paired pull() call is required to release each handle returned by ipc::event::get().
+
+  event1.synchronize();
+  event2.synchronize();
+}
