@@ -803,7 +803,7 @@ def dynamo_timed(
 
     cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
-        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        wc_name = waitcounter_name_override or key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
@@ -1340,7 +1340,7 @@ def lazily_unpack(
     iterable: VariableTracker,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+    from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
@@ -1349,7 +1349,7 @@ def lazily_unpack(
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break

@@ -195,13 +195,13 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
-    generic_bool,
-    generic_contains,
     generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_is_true,
     generic_setitem,
     pyiter_send,
+    pysequence_contains,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -959,7 +959,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():
                 if truth_fn(result.as_python_constant()):
                     if push:
@@ -998,7 +998,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif not value.is_tensor():
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if truth_fn(result):
                 if push:
                     self.push(value)
@@ -4446,7 +4446,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
+        self.push(pysequence_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 
