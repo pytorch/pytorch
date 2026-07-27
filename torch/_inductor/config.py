@@ -257,7 +257,7 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
-# Preserve eager signed-zero semantics at the expense of codegen performance.
+# Use slower compare/select reductions for their ordered signed-zero tie behavior.
 # NaNs are propagated regardless of this setting.
 strict_signed_zero = False
 
