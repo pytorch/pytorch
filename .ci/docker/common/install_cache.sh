@@ -6,6 +6,12 @@ install_ubuntu() {
   ARCH=$(uname -m)
   VERSION=0.16.0
   FEATURES="sccache sccache-dist"
+  if [[ "${ARCH}" == "riscv64" ]]; then
+    # Rust's riscv64 arch is riscv64gc
+    ARCH=riscv64gc
+    # sccache-dist is not available on riscv64, so we only install sccache
+    FEATURES="sccache"
+  fi
   echo "Downloading sccache binaries from GitHub mozilla/sccache release"
   for feature in $FEATURES; do
     curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/${feature}-v${VERSION}-${ARCH}-unknown-linux-musl.tar.gz | \
