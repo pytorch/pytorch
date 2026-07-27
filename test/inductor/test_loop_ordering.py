@@ -3,7 +3,7 @@
 import contextlib
 import os
 import unittest
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
 import numpy as np
 import sympy
@@ -14,10 +14,11 @@ from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
+from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import SchedulerNode
+from torch._inductor.scheduler import _LoopMutationTracker, SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -171,6 +172,115 @@ class ImplDetailTest(MockSchedulerTest):
         # we cache pointwise_read_writes result on a scheduler node
         # make sure new_var_ranges is refreshed by invalidating the cache.
         self.assertTrue(len(new_var_ranges) == 1)  # 2 dimensions get merged
+
+    def test_reorder_invalidates_tiling_cache(self):
+        buf = self._create_computed_buffer_ax2()
+        snode = SchedulerNode(V.graph.scheduler, buf)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            tiling_before = snode.get_tiling(*snode.group[1])
+            self.assertIs(tiling_before, snode.get_tiling(*snode.group[1]))
+            self.assertEqual(select_tiling.call_count, 1)
+
+            snode.apply_new_loop_order([1, 0])
+            tiling_after = snode.get_tiling(*snode.group[1])
+            self.assertEqual(select_tiling.call_count, 2)
+            self.assertNotEqual(tiling_before, tiling_after)
+
+    def test_read_writes_invalidate_tiling_cache(self):
+        buf = self._create_computed_buffer_ax2()
+        snode = SchedulerNode(V.graph.scheduler, buf)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            snode.get_tiling(*snode.group[1])
+            snode.get_tiling(*snode.group[1])
+            self.assertEqual(select_tiling.call_count, 1)
+
+            snode.set_read_writes(snode.read_writes)
+            snode.get_tiling(*snode.group[1])
+            self.assertEqual(select_tiling.call_count, 2)
+
+    def test_tiling_cache_is_per_node(self):
+        snode1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        snode2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        self.assertEqual(snode1.group, snode2.group)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            snode1.get_tiling(*snode1.group[1])
+            snode2.get_tiling(*snode2.group[1])
+            snode1.get_tiling(*snode1.group[1])
+            snode2.get_tiling(*snode2.group[1])
+            self.assertEqual(select_tiling.call_count, 2)
+
+    def test_tiling_cache_does_not_require_direct_simd_backend(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+
+        with mock.patch.object(
+            MockScheduler,
+            "get_backend",
+            side_effect=AssertionError("unexpected backend lookup"),
+        ):
+            snode.get_tiling(*snode.group[1])
+
+    def test_tiling_cache_keys_iteration_extents(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+
+        with mock.patch.object(
+            SIMDScheduling, "select_tiling", return_value={}
+        ) as select_tiling:
+            snode.get_tiling(sympy.Integer(1), sympy.Integer(1))
+            snode.get_tiling(sympy.Integer(1), sympy.Integer(1))
+            snode.get_tiling(sympy.Integer(2), sympy.Integer(1))
+            self.assertEqual(select_tiling.call_count, 2)
+
+    def test_fusion_reuses_node_tiling_cache(self):
+        snode1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        snode2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        backend = TritonScheduling(V.graph.scheduler)
+
+        with mock.patch.object(
+            SIMDScheduling,
+            "select_tiling",
+            wraps=SIMDScheduling.select_tiling,
+        ) as select_tiling:
+            self.assertTrue(backend.can_fuse(snode1, snode2))
+            self.assertEqual(select_tiling.call_count, 3)
+
+            self.assertTrue(backend.can_fuse(snode1, snode2))
+            self.assertEqual(select_tiling.call_count, 4)
+
+    def test_template_producer_loop_state_rollback(self):
+        layout = ir.FixedLayout(
+            torch.device(GPU_TYPE), torch.float32, [sympy.Integer(8)], [1]
+        )
+        template = ir.TemplateBuffer(layout, [], None)
+        template_node = SchedulerNode(V.graph.scheduler, template)
+        computed_node = SchedulerNode(
+            V.graph.scheduler, self._create_computed_buffer_ax2()
+        )
+        original_body = computed_node._body
+        tracker = _LoopMutationTracker.create((template_node, computed_node))
+
+        try:
+            computed_node.apply_indexing_exprs({})
+            self.assertIsNot(computed_node._body, original_body)
+        finally:
+            tracker.finish(rollback=True)
+
+        self.assertIsNone(template_node._body)
+        self.assertIs(computed_node._body, original_body)
 
     def test_reorder_modular_indexing(self):
         """
@@ -653,6 +763,47 @@ class LoopOrderingTest(TestCase):
         self.assertTrue(same(expect, actual, tol=1e-2))
         # variance reduction + block reduction = 2 kernels
         self.assertEqual(2, metrics.generated_kernel_count)
+
+    @inductor_config.patch(
+        {
+            "assert_indirect_indexing": False,
+            "benchmark_kernel": False,
+            "fx_graph_cache": False,
+            "loop_index_inversion_in_fusion": True,
+            "loop_ordering_after_fusion": False,
+            "loop_reindexing_after_fusion": False,
+        }
+    )
+    def test_rejected_index_inversion_rollback(self):
+        from torch._inductor.choices import InductorChoices
+
+        class RejectInvertedFusion(InductorChoices):
+            def __init__(self):
+                self.rejected_inversion = False
+
+            def can_fuse(self, scheduler, node1, node2, shared_data_score):
+                if any(not write.is_contiguous() for write in node2.read_writes.writes):
+                    self.rejected_inversion = True
+                    return False
+                return InductorChoices.can_fuse(
+                    scheduler, node1, node2, shared_data_score
+                )
+
+        def f(x):
+            y = realize(x + 1)
+            p = torch.arange(8, device=x.device)
+            z = realize(y[4 * (p % 2) + p // 2])
+            return z * 3
+
+        x = torch.arange(8, device=self.device, dtype=torch.float32)
+        choices = RejectInvertedFusion()
+
+        with V.set_choices_handler(choices):
+            actual = torch.compile(f, fullgraph=True)(x)
+
+        self.assertTrue(choices.rejected_inversion)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+        self.assertEqual(actual, f(x))
 
     def test_reshape_reindexing_fused_pointwise(self):
         """
@@ -1943,6 +2094,34 @@ class TestIndexInversion(TestCase):
             (4 * p, False, 64),  # expr and inverse not bijections
             # when sorted, invertible
             (ModularIndexing(p, 1, 10) + 10 * ModularIndexing(p, 10, 10), True, None),
+            (
+                4 * FloorDiv(p, 512)
+                + ModularIndexing(p, 1, 4)
+                + 4096 * ModularIndexing(p, 4, 4)
+                + 128 * ModularIndexing(p, 16, 32),
+                False,
+                None,
+            ),
+            # Missing the source chunk ModularIndexing(p, 4, 4).
+            (
+                4 * FloorDiv(p, 512)
+                + ModularIndexing(p, 1, 4)
+                + 128 * ModularIndexing(p, 16, 32),
+                False,
+                None,
+            ),
+            (
+                4 * FloorDiv(p, 4)
+                + 2 * FloorDiv(ModularIndexing(p, 1, 5), 2)
+                + ModularIndexing(p, 1, 2),
+                False,
+                None,
+            ),
+            (
+                4 * FloorDiv(p, 4) + ModularIndexing(p, 1, 4) + 100,
+                False,
+                None,
+            ),
             # Wrong coefficient ratios: 4 ≠ 1×2
             (4 * ModularIndexing(p, 1, 8) + ModularIndexing(p, 8, 2), False, None),
             (
@@ -1969,6 +2148,36 @@ class TestIndexInversion(TestCase):
                     reconstruction,
                     lambda msg: f"{msg}\nExpected non-invertible: {expr}",
                 )
+
+        bounded_expr = (
+            4 * FloorDiv(p, 512)
+            + ModularIndexing(p, 1, 4)
+            + 4096 * ModularIndexing(p, 4, 4)
+            + 128 * ModularIndexing(p, 16, 32)
+        )
+        self.assertIsNone(generate_inverse_formula(bounded_expr, p))
+        self.assertEqual(
+            generate_inverse_formula(bounded_expr, p, 16384),
+            4 * FloorDiv(p, 4096)
+            + ModularIndexing(p, 1, 4)
+            + 512 * ModularIndexing(p, 4, 32)
+            + 16 * ModularIndexing(p, 128, 32),
+        )
+        self.assertIsNone(generate_inverse_formula(bounded_expr, p, 4096))
+        self.assertIsNone(generate_inverse_formula(bounded_expr, p, 32768))
+
+        overlapping_floors = (
+            ModularIndexing(p, 1, 2) + 2 * FloorDiv(p, 2) + 4 * FloorDiv(p, 4)
+        )
+        self.assertIsNone(generate_inverse_formula(overlapping_floors, p, 8))
+
+        blockwise_expr = (
+            100 * FloorDiv(p, 100)
+            + 10 * ModularIndexing(p, 1, 10)
+            + FloorDiv(ModularIndexing(p, 1, 100), 10)
+        )
+        self.assertIsNone(generate_inverse_formula(blockwise_expr, p, 15))
+        self.assertIsNotNone(generate_inverse_formula(blockwise_expr, p, 100))
 
 
 if __name__ == "__main__":
