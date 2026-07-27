@@ -19131,6 +19131,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out.stride(), (1,))
         self.assertTrue(out._is_zerotensor())
 
+    def test_issue_190765_tiny_repro(self):
+        def fn(p):
+            return torch.flip(torch.repeat_interleave(torch.flatten(p + 1.0), 2), [0])
+
+        torch.manual_seed(0)
+        p = torch.randn(2, 2, dtype=torch.float32, device=self.device)
+        compiled = torch.compile(fn, backend="inductor", dynamic=True)
+        for _ in range(4):
+            self.assertEqual(compiled(p), fn(p))
+
+    def test_issue_190765_intermediate_graph(self):
+        def postprocess(z):
+            return torch.flip(torch.repeat_interleave(torch.flatten(z), 2), [0])
+
+        def fn(x, a, b):
+            left = (x @ a).transpose(0, 1)
+            right = (x @ b).transpose(0, 1)
+            return postprocess((left + right).transpose(0, 1))
+
+        torch.manual_seed(0)
+        x = torch.randn(8, 6, dtype=torch.float32, device=self.device)
+        a = torch.randn(6, 8, dtype=torch.float32, device=self.device)
+        b = torch.randn(6, 8, dtype=torch.float32, device=self.device)
+        compiled = torch.compile(fn, backend="inductor", dynamic=True)
+        for _ in range(4):
+            self.assertEqual(compiled(x, a, b), fn(x, a, b))
+
     # end of class CommonTemplate - add new tests here
 
 
