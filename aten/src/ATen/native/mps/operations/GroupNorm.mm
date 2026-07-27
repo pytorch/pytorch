@@ -42,13 +42,8 @@ static void group_norm_forward(const Tensor& X,
   TORCH_INTERNAL_ASSERT(X.numel() == N * C * HxW);
   TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == C);
   TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == C);
-  TORCH_INTERNAL_ASSERT(X.is_contiguous());
   TORCH_INTERNAL_ASSERT(!(gamma.defined() && beta.defined()) || (gamma.scalar_type() == beta.scalar_type()));
   TORCH_INTERNAL_ASSERT(mean.scalar_type() == rstd.scalar_type());
-
-  if (X.numel() == 0) {
-    return;
-  }
 
   idx_T channels_per_group = C / group;
   idx_T elements_per_group = channels_per_group * HxW;
@@ -226,15 +221,6 @@ static void GroupNormBackwardKernelImpl(const Tensor& dY,
                                         Tensor& dX,
                                         Tensor& dgamma,
                                         Tensor& dbeta) {
-  if (X.numel() == 0) {
-    if (dgamma.defined()) {
-      dgamma.zero_();
-    }
-    if (dbeta.defined()) {
-      dbeta.zero_();
-    }
-    return;
-  }
   if (dX.defined()) {
     if (X.numel() >= (uint64_t(1) << 32)) {
       group_norm_backward_x<uint64_t>(dY, X, mean, rstd, gamma, N, C, HxW, group, dX);
