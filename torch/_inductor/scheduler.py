@@ -7554,20 +7554,18 @@ class Scheduler:
             rollback_snapshot.restore()
             return False
 
-        # score_fusion_memory() intersects deps exactly, so it is 0 when the deps
-        # only match after normalization, making this zero-tolerance for that case
-        # and proportional elsewhere. uncoalesced_addrs weights writes 2x, so the
-        # comparison errs toward rolling back.
+        # Budget is 0 by design when deps only match after normalize():
+        # that weaker win must not cost any coalescing.
         uncoalesced_after = _uncoalesced_memory_score(snodes)
         if uncoalesced_before is not None and uncoalesced_after is not None:
             uncoalesced_added = uncoalesced_after - uncoalesced_before
-            shared_bytes = self.score_fusion_memory(node1, node2)
-            if uncoalesced_added > shared_bytes:
+            coalescing_budget = self.score_fusion_memory(node1, node2)
+            if uncoalesced_added > coalescing_budget:
                 loop_ordering_log.debug(
-                    "rolling back reindex of %s: uncoalesced +%d > shared %d",
+                    "rolling back reindex of %s: uncoalesced +%d > budget %d",
                     pw_node.get_name(),
                     uncoalesced_added,
-                    shared_bytes,
+                    coalescing_budget,
                 )
                 rollback_snapshot.restore()
                 return False
