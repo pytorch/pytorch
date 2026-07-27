@@ -341,9 +341,11 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
@@ -389,6 +391,7 @@ class TestTritonHeuristics(TestCase):
             "inductor_meta": inductor_meta,
         }
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_pre_hook_assert(self):
         # assert if any of the configs passed to the CachingAutotuner have pre-hooks
         args = self._get_cos_kernel_caching_autotuner_args()
@@ -403,6 +406,7 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
             CachingAutotuner(**args)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device(GPU_TYPE))
         device_props = device_props._replace(warp_size=8)
@@ -591,6 +595,7 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
 # attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
 # used by these tests. CUDA paths are unaffected.
 @skipIfRocm
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
 
@@ -1475,11 +1480,13 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         mock_precompile.assert_called_once_with(dynamic_cfg)
 
 
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCheckLauncherCallArgs(TestCase):
     """Unit tests for CachingAutotuner._check_launcher_call_args.
 
-    These tests are pure-Python (no GPU / Triton compilation) and guard
-    against regressions in the improved arg-mismatch error path.
+    These exercise the arg-mismatch error path without Triton compilation,
+    but the shared cos-kernel fixture still builds a CachingAutotuner (which
+    resolves DeviceProperties for GPU_TYPE), so they require a GPU.
     """
 
     def _make_autotuner(self):
