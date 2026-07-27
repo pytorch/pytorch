@@ -32,6 +32,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     canonical_tensorssa_reduction_type,
     materialize_tensorssa_reduction,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
 
 log = logging.getLogger(__name__)
@@ -250,18 +251,14 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         epilogue_outputs, output_count, primary_output = _epilogue_outputs(
             args, "compile_time_tensor"
         )
+        reduction_args = GemmReductionArguments.from_operator_args(args)
         local_reduce_out = _local_reduce_abi_tensor(args)
-        local_reduce_feed_out = getattr(args, "local_reduce_feed_out", None)
-        local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
-        if (
-            local_reduce_out is not None
-            or local_reduce_feed_out is not None
-            or local_reduce_feeds_main
-        ):
+        if reduction_args.primary_enabled:
+            local_reduce_feed_out = reduction_args.feed_output
             reduction = materialize_tensorssa_reduction(
-                canonical_tensorssa_reduction_type(args.local_reduce_type),
-                args.local_reduce_source,
-                args.local_reduce_type,
+                canonical_tensorssa_reduction_type(reduction_args.reduction_type),
+                reduction_args.source_type,
+                reduction_args.reduction_type,
             )
             return self.cute_compile(
                 self.impl,
@@ -290,11 +287,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     if local_reduce_feed_out is not None
                     else None
                 ),
-                args.local_reduce_group,
-                args.local_reduce_axis,
-                args.local_reduce_type,
-                args.local_reduce_source,
-                local_reduce_feeds_main,
+                reduction_args.group,
+                reduction_args.axis,
+                reduction_args.reduction_type,
+                reduction_args.source_type,
+                reduction_args.feeds_main,
                 reduction.reduce_op,
                 reduction.init_val,
                 reduction.combine,
@@ -345,16 +342,12 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         epilogue_tensors = _epilogue_tensors(args, "runtime_tensor")
         epilogue_outputs, _, _ = _epilogue_outputs(args, "runtime_tensor")
 
-        logical_reduce_out = getattr(args, "local_reduce_out", None)
+        reduction = GemmReductionArguments.from_operator_args(args)
+        logical_reduce_out = reduction.output
         with torch.cuda.stream(stream):
             local_reduce_out = _local_reduce_abi_tensor(args)
-        local_reduce_feed_out = getattr(args, "local_reduce_feed_out", None)
-        local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
-        if (
-            local_reduce_out is not None
-            or local_reduce_feed_out is not None
-            or local_reduce_feeds_main
-        ):
+        if reduction.primary_enabled:
+            local_reduce_feed_out = reduction.feed_output
             self.cute_run(  # pyrefly: ignore[missing-attribute]
                 compiled_gemm,
                 args.A.tensor,
@@ -411,15 +404,12 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         # check wrongly rejected valid NVFP4 args on the transposed B operand).
         from cutlass.operators.arguments import ScaledOperand
 
-        local_reduce_out = getattr(args, "local_reduce_out", None)
-        local_reduce_feed_out = getattr(args, "local_reduce_feed_out", None)
-        if (
-            local_reduce_out is not None
-            or local_reduce_feed_out is not None
-            or getattr(args, "local_reduce_feeds_main", False)
-        ):
-            group = args.local_reduce_group
-            axis = args.local_reduce_axis
+        reduction = GemmReductionArguments.from_operator_args(args)
+        if reduction.primary_enabled:
+            local_reduce_out = reduction.output
+            local_reduce_feed_out = reduction.feed_output
+            group = reduction.group
+            axis = reduction.axis
             m, n = args.out.shape[-2:]
             selected_size = n if axis == 1 else m
             max_group = (
