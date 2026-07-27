@@ -50,6 +50,41 @@ project(${SKBUILD_PROJECT_NAME}
 # For standalone cmake invocations, find it via find_package.
 find_package(Python COMPONENTS Interpreter REQUIRED)
 
+# ---[ Where the Python packages go.
+# scikit-build-core exports each wheel tree to CMake as SKBUILD_<TREE>_DIR, and
+# wheel.install-dir picks which one becomes CMAKE_INSTALL_PREFIX. We set it to
+# "torch" so the C++ distribution lands at torch/lib and torch/include, as the
+# install rpath and torch/__init__.py both require; the prefix therefore sits
+# one level below platlib, and the Python-side install rules address
+# SKBUILD_PLATLIB_DIR directly instead of reaching it through the prefix.
+#
+# Those rules are guarded on SKBUILD, so a build with no wheel behind it
+# (libtorch, tools/build_libtorch.py, downstream cmake --install) installs the
+# C++ distribution alone and keeps package data out of a conventional prefix
+# (see gh-191102).
+#
+# The extension modules resolve the C++ tree through an $ORIGIN/lib install
+# rpath and torch/__init__.py resolves bin/ and lib/ off its own __file__, so
+# the prefix has to be the torch package directory. Enforce it rather than let
+# a mismatch produce an install that only fails at import time.
+if(SKBUILD)
+  get_filename_component(_torch_pkg_dir "${SKBUILD_PLATLIB_DIR}/torch" ABSOLUTE)
+  get_filename_component(_torch_prefix "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
+  if(NOT _torch_pkg_dir STREQUAL _torch_prefix)
+    message(FATAL_ERROR
+      "CMAKE_INSTALL_PREFIX must be the torch package directory: the "
+      "extension modules load the C++ libraries through an $ORIGIN/lib rpath "
+      "relative to themselves.\n"
+      "  SKBUILD_PLATLIB_DIR  : ${SKBUILD_PLATLIB_DIR}\n"
+      "  expected prefix      : ${_torch_pkg_dir}\n"
+      "  CMAKE_INSTALL_PREFIX : ${_torch_prefix}\n"
+      "Keep wheel.install-dir = \"torch\" in pyproject.toml, which is what "
+      "makes the two agree.")
+  endif()
+  unset(_torch_pkg_dir)
+  unset(_torch_prefix)
+endif()
+
 # Forward environment variables to CMake variables, replicating the behavior
 # previously handled by setup.py / tools/setup_helpers/cmake.py.
 # When built via setup.py, these are already set as -D flags; the module
@@ -1488,17 +1523,17 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
-# File mirroring: copy source files into torchgen/packaged/, vendored
-# inductor templates, and symlink-replacement copies.  Previously handled
-# by setup.py; now consolidated here for both scikit-build-core and
-# setuptools builds.
-include(cmake/FileMirroring.cmake)
+if(SKBUILD)
+  # File mirroring: copy source files into torchgen/packaged/, vendored
+  # inductor templates, and symlink-replacement copies.  Previously handled
+  # by setup.py.
+  include(cmake/FileMirroring.cmake)
 
-# Package data: install non-Python data files (type stubs, templates,
-# headers, etc.) into the torch package.  Previously declared via
-# setup.py package_data; now consolidated here for both scikit-build-core
-# and setuptools builds.
-include(cmake/PackageData.cmake)
+  # Package data: install non-Python data files (type stubs, templates,
+  # headers, etc.) into the torch package.  Previously declared via
+  # setup.py package_data.
+  include(cmake/PackageData.cmake)
+endif()
 
 include(cmake/PostBuildSteps.cmake)
 
