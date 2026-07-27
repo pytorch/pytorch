@@ -122,7 +122,7 @@ def _should_save_cache(*compiled_fns: Callable[..., Any]) -> bool:
     if should_bundle_autograd_cache():
         return True
     return all(
-        getattr(fn, "_fx_graph_cache_key", None) is not None for fn in compiled_fns
+        getattr(fn, "fx_graph_cache_key", None) is not None for fn in compiled_fns
     )
 
 
@@ -2682,7 +2682,7 @@ def _cache_autograd_info(
                 # use the compiled_bw_func's inductor compile time instead.
                 # It's possible this changes in the future, in which case we should
                 # update backward_time_taken_ns to be more inclusive
-                backward_time_taken_ns = getattr(compiled_bw_func, "_time_taken_ns", 0)
+                backward_time_taken_ns = getattr(compiled_bw_func, "time_taken_ns", 0)
 
                 aot_forward_graph_str: str | None = fw_module_str
                 aot_backward_graph_str: str | None = bw_module_str

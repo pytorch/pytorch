@@ -12667,9 +12667,9 @@ class MockFXGraphCache:
         if gm is not None:
             gm = make_boxed_func(gm)
             gm = MockFXGraphCacheOutput(gm)
-            gm._fx_graph_cache_key = key  # (cache_key, debug lines)
-            gm._fx_graph_cache_debug_lines = []
-            gm._time_taken_ns = 0
+            gm.fx_graph_cache_key = key  # (cache_key, debug lines)
+            gm.fx_graph_cache_debug_lines = []
+            gm.time_taken_ns = 0
         return gm, {}
 
 

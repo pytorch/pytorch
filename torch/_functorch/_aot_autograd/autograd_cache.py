@@ -1473,9 +1473,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             )
 
         else:
-            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+            fw_key = getattr(compiled_fw_func, "fx_graph_cache_key", None)
             fw_debug_lines = getattr(
-                compiled_fw_func, "_fx_graph_cache_debug_lines", []
+                compiled_fw_func, "fx_graph_cache_debug_lines", []
             )
 
             if fw_key is None:
@@ -1486,9 +1486,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             )
             compiled_backward = None
             if compiled_bw_func is not None:
-                bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+                bw_key = getattr(compiled_bw_func, "fx_graph_cache_key", None)
                 bw_debug_lines = getattr(
-                    compiled_bw_func, "_fx_graph_cache_debug_lines", []
+                    compiled_bw_func, "fx_graph_cache_debug_lines", []
                 )
                 if bw_key is None:
                     raise AssertionError("bw_key must not be None")

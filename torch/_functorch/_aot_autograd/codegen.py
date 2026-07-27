@@ -191,7 +191,7 @@ def _compile_and_exec_source(
     """Compile generated source, exec it, and return the named function.
 
     If wrapped_fn is provided, applies functools.update_wrapper so that
-    __wrapped__ and __dict__ (e.g. _fx_graph_cache_key) propagate to the
+    __wrapped__ and __dict__ (e.g. fx_graph_cache_key) propagate to the
     generated function.
     """
     if log.isEnabledFor(logging.DEBUG):
