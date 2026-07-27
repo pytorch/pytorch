@@ -1515,7 +1515,7 @@ Tensor narrow_copy_sparse(
   } else {
     /* This means we are narrowing on a dense dim, which is in effect just a
         regular narrow on _values() */
-    new_indices = indices;
+    new_indices = std::move(indices);
     int64_t dense_dim = dim - sparse_dim + 1;
     new_values = self._values().narrow_copy(dense_dim, start, length);
   }
@@ -1938,9 +1938,9 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
   return self.repeat_symint(reps);
 }
 
-//
-// templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
-//
+// Handles both int (ArrayRef<int64_t>/SmallVector<int64_t>) and symbolic
+// (ArrayRef<c10::SymInt>/SymDimVector) shapes and strides; the element type of
+// Vec selects the concrete vs symbolic storage offset.
 template <typename Vec>
 static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
@@ -1957,51 +1957,18 @@ static Tensor alias_with_sizes_and_strides(
         self.key_set(),
         self.dtype(),
         get_qtensorimpl(self)->quantizer());
-    auto* self_tmp_ = self_.unsafeGetTensorImpl();
-    self_tmp_->set_storage_offset(self.storage_offset());
-    self_tmp_->set_sizes_and_strides(sizes, strides);
   } else {
     self_ = at::detail::make_tensor<TensorImpl>(
         c10::TensorImpl::VIEW,
         Storage(self.storage()),
         self.key_set(),
         self.dtype());
-    auto* self_tmp_ = self_.unsafeGetTensorImpl();
-    self_tmp_->set_storage_offset(self.storage_offset());
-    self_tmp_->set_sizes_and_strides(sizes, strides);
   }
-  return self_;
-}
-
-// specialization for symbolic shapes and strides.
-// SymIntArrayRef/ArrayRef<c10::SymInt> and
-// SmallVector<c10::SymInt>/SymDimVector
-template <template <typename...> typename Container>
-static Tensor alias_with_sizes_and_strides(
-    const Tensor& self,
-    const Container<c10::SymInt>& sizes,
-    const Container<c10::SymInt>& strides) {
-  // caller should make sure that sizes and strides are valid for self
-  //(storage is sufficient, strides are non-negative, strides and sizes array
-  // size is the same)
-  Tensor self_;
-  if (self.is_quantized()) {
-    self_ = at::detail::make_tensor<QTensorImpl>(
-        c10::TensorImpl::VIEW,
-        Storage(self.storage()),
-        self.key_set(),
-        self.dtype(),
-        get_qtensorimpl(self)->quantizer());
-    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
-        sizes, strides, self.sym_storage_offset());
+  auto* self_tmp_ = self_.unsafeGetTensorImpl();
+  if constexpr (std::is_same_v<typename Vec::value_type, c10::SymInt>) {
+    self_tmp_->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
   } else {
-    self_ = at::detail::make_tensor<TensorImpl>(
-        c10::TensorImpl::VIEW,
-        Storage(self.storage()),
-        self.key_set(),
-        self.dtype());
-    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
-        sizes, strides, self.sym_storage_offset());
+    self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
   return self_;
 }
@@ -2286,10 +2253,8 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
     result = as_strided_qtensorimpl(
         self, sizes, strides, storage_offset, std::move(quantizer));
   } else {
-    std::vector<c10::SymInt> sizes(
-        self.sym_sizes().begin(), self.sym_sizes().end());
-    std::vector<c10::SymInt> strides(
-        self.sym_strides().begin(), self.sym_strides().end());
+    SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+    SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
     auto storage_offset = self.sym_storage_offset() + index * strides[dim];
     sizes.erase(sizes.begin() + dim);
     strides.erase(strides.begin() + dim);
