@@ -694,11 +694,14 @@ class TestFP8Matmul(TestCase):
     def test_float8_basics_layout_permutations(self, device) -> None:
         if "cuda" in device:
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                # SM 10 and 11 support all permutations, SM 12 TT and TN, SM 9 only TN
+                # SM 8.9 and 9 only support TN
+                # SM 10 and 11 support all permutations
+                # SM 12 support depends on CUDA version
                 major, minor = torch.cuda.get_device_capability(0)
-                if major in (10, 11):
+                cuda_version = _get_torch_cuda_version()
+                if major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
                     layouts_supported = True
-                elif major == 12 and (minor == 1 or _get_torch_cuda_version() >= (13, 1)):
+                elif major == 12 and (minor == 1 or cuda_version >= (13, 1)):
                     layouts_supported = x_cm
                 else:
                     layouts_supported = (x_cm, y_cm) == (True, False)
