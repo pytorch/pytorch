@@ -1685,6 +1685,27 @@ compile_worker_wait_timeout: int = int(
     os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT", "0")
 )
 
+# Memory enforcement mode for compile workers.
+# Options: "auto" (default), "cgroup" (not yet supported), "poll", "off"
+compile_worker_memory_enforcement: str = os.environ.get(
+    "TORCHINDUCTOR_COMPILE_WORKER_MEMORY_ENFORCEMENT", "auto"
+)
+
+# Memory limit (kB) for a single compile worker. 0 (the default)
+# means unlimited. The sidecar watchdog sums /proc/<pid> PSS for the worker
+# and kills the worker if over this limit.
+compile_worker_memory_limit_kb: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_MEMORY_LIMIT_KB", "0")
+)
+
+# Wall-clock timeout (seconds) for a single kernel compilation inside a
+# compile worker. 0 (the default) means no per-kernel limit.
+# Distinct from compile_worker_wait_timeout, which only bounds how long the
+# parent waits on futures and does not stop the worker itself.
+compile_worker_per_kernel_timeout: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_PER_KERNEL_TIMEOUT", "0")
+)
+
 enable_autograd_for_aot: bool = False
 
 
