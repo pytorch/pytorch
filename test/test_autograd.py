@@ -3719,6 +3719,27 @@ class TestAutograd(TestCase):
         self.assertIs(next_functions[0][0], a.grad_fn)
         self.assertIs(next_functions[1][0], None)
 
+    def test_copy_slices_wrapped_node(self):
+        leaf = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        base = leaf.clone()
+        view = base[:2]
+        view_grad_fn = view.grad_fn
+        view.exp_()
+
+        copy_slices = base.grad_fn
+        wrapped_node = copy_slices._wrapped_node
+        self.assertIsInstance(copy_slices, torch._C._functions.CopySlices)
+        self.assertEqual(wrapped_node.name(), "ExpBackward0")
+        self.assertIs(copy_slices._wrapped_node, wrapped_node)
+        # exp_ saves its result after rebase_history creates CopySlices.
+        self.assertEqual(wrapped_node._saved_result, view)
+        self.assertEqual(wrapped_node._input_metadata[0].shape, view.shape)
+        self.assertIs(wrapped_node.next_functions[0][0], view_grad_fn)
+
+        base.sum().backward()
+        self.assertEqual(leaf.grad, torch.tensor([math.exp(1), math.exp(2), 1.0, 1.0]))
+        self.assertIsNone(copy_slices._wrapped_node)
+
     def test_inplace(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
