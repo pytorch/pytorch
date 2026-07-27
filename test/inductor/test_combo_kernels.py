@@ -379,6 +379,90 @@ class ComboKernelTests(TestCase):
         self.assertTrue(torch._inductor.metrics.generated_kernel_count <= 2)
 
     @requires_gpu_and_triton
+    def test_uniform_dispatch_identical_reductions(self):
+        # Uniform dispatch collapses N structurally-identical persistent-reduction
+        # sub-kernels into a single body dispatched via a pointer table. The
+        # sub-kernels are matched by comparing their structured op traces, so
+        # this verifies that path produces numerically correct results.
+        def ln_silu(x):
+            mean = x.mean(dim=-1, keepdim=True)
+            var = x.var(dim=-1, keepdim=True, unbiased=False)
+            ln = (x - mean) * torch.rsqrt(var + 1e-5)
+            return ln * torch.sigmoid(ln)
+
+        def fn(a, b, c, d):
+            return ln_silu(a), ln_silu(b), ln_silu(c), ln_silu(d)
+
+        # Identical shapes/dtypes so all four sub-kernels are structurally
+        # identical and eligible for uniform dispatch.
+        inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            out_eager = fn(*inps)
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+
+        self.assertEqual(out_eager, out_compiled)
+
+        # Correctness alone is vacuous here: if the pass silently bailed (op-trace
+        # mismatch, structural pre-check failure, fallback to sequential dispatch)
+        # the output would still be correct. So assert the generated code actually
+        # contains the codegen patterns that ONLY the uniform-dispatch path emits.
+        full_code = "\n".join(code)
+
+        # Locate the generated kernel that took the uniform path via a token that
+        # no other dispatch strategy produces.
+        uniform_srcs = [
+            c for c in code if "kernel_idx = pid // num_blocks_per_kernel" in c
+        ]
+        self.assertEqual(
+            len(uniform_srcs),
+            1,
+            "expected exactly one generated kernel using uniform dispatch",
+        )
+        src = uniform_srcs[0]
+
+        # (a) Runtime pointer-table dispatch scaffolding. A single program id is
+        #     split into (kernel_idx, pid_offset); kernel_idx selects the
+        #     sub-kernel's buffers from a pointer table. These pid // and pid %
+        #     forms are emitted unconditionally by UniformDispatch and by no
+        #     other strategy (Sequential/RoundRobin use num_xblocks_N + if/elif).
+        self.assertIn("num_blocks_per_kernel =", src)
+        self.assertIn("kernel_idx = pid // num_blocks_per_kernel", src)
+        self.assertIn("pid_offset = pid % num_blocks_per_kernel", src)
+
+        # (b) The branch chain is gone: the whole point of the pass is to replace
+        #     the per-sub-kernel `if pid < .../elif pid < ...` dispatch with one
+        #     shared body. Its absence proves the N bodies collapsed into one.
+        self.assertNotIn("elif pid", src)
+
+        # (c) Every buffer is loaded indirectly from its slot table and cast to a
+        #     typed pointer -- the defining transform of uniform dispatch.
+        loaded_slots = sorted(
+            int(i)
+            for i in re.findall(
+                r"tl\.load\(_slot_(\d+)_ptrs \+ kernel_idx\)\.to\(tl\.pointer_type\(",
+                src,
+            )
+        )
+        self.assertTrue(loaded_slots, "expected pointer-table indirection loads")
+
+        # (d) Structural invariant: every slot table declared as a kernel
+        #     parameter is consumed by exactly one indirection load, and slots
+        #     are numbered contiguously from 0.
+        declared_slots = sorted(
+            {int(i) for i in re.findall(r"(?<!_uniform)_slot_(\d+)_ptrs", src)}
+        )
+        self.assertEqual(loaded_slots, declared_slots)
+        self.assertEqual(loaded_slots, list(range(len(loaded_slots))))
+
+        # (e) Wrapper side (may be emitted in a separate code object): the pointer
+        #     tables are int64 GPU tensors built from each sub-kernel buffer's
+        #     data_ptr(). `_uniform_slot_*` is unique to this pass.
+        self.assertIn("_uniform_slot_0_ptrs", full_code)
+        self.assertIn(".data_ptr()", full_code)
+        self.assertIn("dtype=torch.int64", full_code)
+
+    @requires_gpu_and_triton
     def test_mutated_args(self):
         def test_mutated(a, b, c, d):
             a.add_(1)
