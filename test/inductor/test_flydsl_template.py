@@ -307,7 +307,7 @@ class TestFlyDSLTemplate(TestCase):
                 b = torch.randn(n, k, device="cuda", dtype=dtype)
                 code = self._assert_compiled_mm(a, b)
                 self.assertIn(".mark_layout_dynamic()", code)
-                self.assertNotIn(".run(", code)
+                self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")

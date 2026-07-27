@@ -14,18 +14,30 @@ from torch._inductor.ir import (
     MutableBox,
     ReinterpretView,
 )
-from torch._inductor.stream_constants import DEFAULT_STREAM_IDX
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Any
 
 
 MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
+
+
+class FlyDSLKernelWrapper:
+    """Provide the standard ``.run()`` interface for FlyDSL kernels."""
+
+    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
+        self.kernel_fn = kernel_fn
+        self.kernel_path = kernel_path
+        log.info("FlyDSL kernel path: %s", kernel_path)
+
+    def run(self, *args, stream=None, **kwargs):
+        return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
 class FlyDSLTemplateKernel(Kernel):
@@ -154,6 +166,7 @@ class FlyDSLTemplateKernel(Kernel):
     def call_kernel(self, name: str, node=None):
         wrapper = V.graph.wrapper_code
         call_args = []
+        arg_types = []
 
         for _, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)
@@ -162,25 +175,25 @@ class FlyDSLTemplateKernel(Kernel):
                 if reinterpret_view is not None
                 else input_node.get_name()
             )
+            arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
         with self._patch_get_dtype_for_args():
-            orig_arg_defs, orig_call_args, _, _ = self.args.python_argdefs()
-        for arg_def, call_arg in zip(orig_arg_defs, orig_call_args):
+            orig_arg_defs, orig_call_args, _, orig_arg_types = (
+                self.args.python_argdefs()
+            )
+        for arg_def, call_arg, arg_type in zip(
+            orig_arg_defs, orig_call_args, orig_arg_types
+        ):
             if arg_def.full_name() in self._seen_input_args:
                 continue
             call_args.append(call_arg)
+            arg_types.append(arg_type)
 
-        # FlyDSL generated modules expose `{kernel_name}_main` as a normal
-        # Python callable.  Calling it directly avoids the Triton-specific
-        # `.run(..., stream=...)` adapter while preserving the same stream logic.
-        device = V.graph.get_current_device_or_throw()
-        call_args_str = ", ".join(wrapper.prepare_triton_kernel_call(call_args))
-        current_stream_idx = V.graph.scheduler.current_stream_idx
-        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
-            wrapper.write_get_raw_stream_header()
-            stream_name = "raw_stream"
-            wrapper.writeline(f"{stream_name} = get_raw_stream({device.index})")
-        else:
-            stream_name = wrapper.write_get_raw_stream(device.index, V.graph.name)
-
-        wrapper.writeline(f"{name}({call_args_str}, {stream_name})")
+        # TODO: The `triton` argument identifies the common `.run()` calling
+        # convention and should be renamed independently of this integration.
+        wrapper.generate_kernel_call(
+            name,
+            call_args,
+            triton=True,
+            arg_types=arg_types,
+        )

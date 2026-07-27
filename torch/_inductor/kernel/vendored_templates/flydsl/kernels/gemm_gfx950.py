@@ -960,7 +960,7 @@ def gemm_hti_gfx950_kernel(
 
 
 @flyc.jit
-def launch_gemm_gfx950(
+def gemm_gfx950(
     out: fx.Tensor,
     a: fx.Tensor,
     b: fx.Tensor,

@@ -4,8 +4,10 @@ import threading
 
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
-    launch_gemm_gfx950,
     make_gemm_param_and_validate,
+)
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+    gemm_gfx950,
 )
 from torch._inductor.runtime.flydsl_cache import (
     ensure_flydsl_cache_dir,
@@ -93,10 +95,10 @@ def _temporary_env(updates):
                 stream,
             )
             if os.environ.get("COMPILE_ONLY"):
-                flyc.compile(launch_gemm_gfx950, *compile_args)
+                flyc.compile(gemm_gfx950, *compile_args)
             else:
                 executor = run_cached_flydsl(
-                    launch_gemm_gfx950,
+                    gemm_gfx950,
                     *compile_args,
                     constexpr_param=param,
                     compiler=flyc.compile,
