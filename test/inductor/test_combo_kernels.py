@@ -306,6 +306,90 @@ class ComboKernelPartitionLoggingTests(TestCase):
         self.assertEqual(len(large_pointwise_logs), 2)
 
 
+class ComboKernelDataIndependentCSETests(TestCase):
+    def test_cse_scope(self):
+        from torch._inductor.fx_passes.post_grad import (
+            _annotate_data_independent_cse_tokens,
+        )
+        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            lhs = torch.sin(x)
+            rhs = torch.sin(x)
+            first = torch.full((4,), 1.0)
+            second = torch.full((4,), 1.0)
+            return lhs + rhs + first + second
+
+        gm = make_fx(fn)(torch.randn(4))
+        _annotate_data_independent_cse_tokens(gm)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(targets.count(torch.ops.aten.sin.default), 2)
+        self.assertEqual(targets.count(torch.ops.aten.full.default), 2)
+        sin_groups = [
+            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.sin.default
+        ]
+        full_groups = [
+            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.full.default
+        ]
+        self.assertEqual(sin_groups, [None, None])
+        self.assertEqual(len(set(full_groups)), 1)
+        self.assertIsNotNone(full_groups[0])
+
+    def test_cse_symbolic_shape_dependencies(self):
+        from torch._inductor.fx_passes.post_grad import (
+            _annotate_data_independent_cse_tokens,
+        )
+        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            size = x.shape[0]
+            first = torch.arange(size)
+            second = torch.arange(size)
+            return x + first + second
+
+        gm = make_fx(fn, tracing_mode="symbolic")(torch.randn(4))
+        _annotate_data_independent_cse_tokens(gm)
+        groups = [
+            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.arange.default
+        ]
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(len(set(groups)), 1)
+        self.assertIsNotNone(groups[0])
+
+    def test_cse_preserves_distinct_mutation_bases(self):
+        from torch._inductor.fx_passes.post_grad import (
+            _annotate_data_independent_cse_tokens,
+        )
+        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
+
+        graph = torch.fx.Graph()
+        bases = [
+            graph.call_function(torch.ops.aten.zeros.default, ((4,),)) for _ in range(2)
+        ]
+        mutations = [
+            graph.call_function(
+                torch.ops.aten.add_.Tensor,
+                (base, 1),
+            )
+            for base in bases
+        ]
+        graph.output(tuple(mutations))
+        gm = torch.fx.GraphModule({}, graph)
+
+        _annotate_data_independent_cse_tokens(gm)
+
+        tokens = [base.meta.get(DATA_INDEPENDENT_CSE_TOKEN) for base in bases]
+        self.assertEqual(tokens, [None, None])
+
+
 @instantiate_parametrized_tests
 class ComboKernelTests(TestCase):
     check_model_gpu = check_model_gpu
@@ -356,23 +440,20 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
-    def test_data_independent_mask_not_combined_for_attention(self):
-        # Data-independent (0-read) producers -- here iota-derived attention
-        # masks -- that feed a memory-bound extern (SDPA attention) must NOT be
-        # combo-fused: fusing hoists them to the front of the graph and they get
-        # evicted from cache before attention reads them. With the guard on they
-        # stay as separate per-consumer kernels; numerics are unchanged either
-        # way. (Producers feeding Triton / compute-bound externs are unaffected.)
+    @parametrize("identical", [False, True])
+    def test_data_independent_mask_cse_combo(self, identical):
         import torch.nn.functional as F
 
+        def make_mask(size, dtype, other):
+            idx = torch.arange(size, device=GPU_TYPE)
+            causal = idx[:, None] >= idx[None, :]
+            return torch.where(causal, 0.0, other).to(dtype)
+
         def fn(q, k, v):
-            s = q.shape[-2]
-            idx = torch.arange(s, device=q.device)
-            base = idx[:, None] >= idx[None, :]
-            # two distinct 0-read mask producers of the same shape -> combinable
-            m1 = torch.where(base, 0.0, float("-inf")).to(q.dtype)
-            m2 = torch.where(base, 0.0, -1e4).to(q.dtype)
+            size = q.shape[-2]
+            m1 = make_mask(size, q.dtype, float("-inf"))
             o1 = F.scaled_dot_product_attention(q, k, v, attn_mask=m1)
+            m2 = make_mask(size, q.dtype, float("-inf") if identical else -1e4)
             o2 = F.scaled_dot_product_attention(q, k, v, attn_mask=m2)
             return o1 + o2
 
@@ -381,19 +462,36 @@ class ComboKernelTests(TestCase):
             for _ in range(3)
         ]
         out_eager = fn(*inps)
+        out, code = run_and_get_code(torch.compile(fn), *inps)
 
-        # a combo kernel groups >=2 outputs -> its def has an `out_ptr1` arg.
-        combo_re = re.compile(r"def triton_\w+\([^)]*out_ptr1")
+        self.assertEqual(out_eager, out)
+        source = "\n".join(code)
+        if identical:
+            self.assertNotIn("'num_kernels': 2", source)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        else:
+            self.assertIn("'num_kernels': 2", source)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-        def num_combos(flag):
-            with torch._inductor.config.patch(combo_kernels_skip_data_independent=flag):
-                torch._dynamo.reset()
-                out, code = run_and_get_code(torch.compile(fn), *inps)
-            self.assertEqual(out_eager, out)  # numerics preserved
-            return sum(len(combo_re.findall(c)) for c in code)
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch("cse", False)
+    def test_data_independent_cse_same_consumer_can_combo(self):
+        def make_matrix(size, dtype):
+            idx = torch.arange(size, device=GPU_TYPE)
+            return (idx[:, None] >= idx[None, :]).to(dtype)
 
-        # guard off: the two masks are combined; guard on: they are excluded.
-        self.assertGreater(num_combos(False), num_combos(True))
+        def fn(x):
+            size = x.shape[0]
+            lhs = make_matrix(size, x.dtype)
+            rhs = make_matrix(size, x.dtype)
+            return torch.mm(lhs, rhs)
+
+        inp = torch.randn(128, device=GPU_TYPE, dtype=torch.float16)
+        out, code = run_and_get_code(torch.compile(fn), inp)
+
+        self.assertEqual(out, fn(inp))
+        self.assertIn("'num_kernels': 2", "\n".join(code))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     def test_reduce_functions(self):
@@ -2223,100 +2321,62 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
     @requires_gpu_and_triton
-    def test_compile_time_autotune_excludes_indirect_indexing(self):
+    @parametrize("benchmark_combo_kernel", [False, True])
+    def test_benchmarking_excludes_indirect_indexing(self, benchmark_combo_kernel):
         def fn(a, b, c, idx):
-            return a[idx], b * 2.0, c + 1.0
+            return a[idx + 1024], b * 2.0, c + 1.0
 
         inps = [
             torch.randn(1024, device=GPU_TYPE),
             torch.randn(256, device=GPU_TYPE),
             torch.randn(256, device=GPU_TYPE),
-            torch.randint(0, 1024, (256,), device=GPU_TYPE),
+            # Real indices map to zero; synthetic zero-filled indices map out of bounds.
+            torch.full((256,), -1024, device=GPU_TYPE, dtype=torch.int64),
         ]
-        out, code = run_and_get_code(torch.compile(fn), *inps)
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "benchmark_combo_kernel": benchmark_combo_kernel,
+                    "combo_kernel_compile_time_autotune": not benchmark_combo_kernel,
+                }
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         src = code[0]
         # The gather is its own kernel; the combo stitches only the 2 pointwise subkernels.
-        FileCheck().check("triton_poi_fused_index").check("'num_kernels': 2").run(src)
-
-    @requires_gpu_and_triton
-    def test_register_pressure_guard_occupancy(self):
-        # Classification uses the actual gemma-3 q/k RMSNorm+rope reduction register
-        # signature we measured: 216 registers at num_warps=1 -> ~14% register-limited
-        # occupancy, which the guard flags as register-bound. A combo's winning launch
-        # config (32 registers at num_warps=4) reaches full occupancy and is not flagged.
-        from types import SimpleNamespace
-
-        from torch._inductor.codegen.simd import _register_limited_occupancy
-
-        # GB200-class register file; the math is device-portable via these props.
-        props = SimpleNamespace(
-            regs_per_multiprocessor=65536,
-            warp_size=32,
-            max_threads_per_multi_processor=2048,
-        )
-        gemma_occ = _register_limited_occupancy(216, 1, props)
-        winner_occ = _register_limited_occupancy(32, 4, props)
-        self.assertAlmostEqual(gemma_occ, 9 * 32 / 2048, places=5)  # ~0.14
-        self.assertEqual(winner_occ, 1.0)
-        self.assertLess(gemma_occ, 0.2)  # below the default ratio -> register-bound
-        self.assertGreaterEqual(winner_occ, 0.2)  # not register-bound
-        # Missing device props -> None so the caller treats it as not register-bound.
-        self.assertIsNone(
-            _register_limited_occupancy(
-                216,
-                1,
-                SimpleNamespace(
-                    regs_per_multiprocessor=None,
-                    warp_size=32,
-                    max_threads_per_multi_processor=2048,
-                ),
-            )
+        FileCheck().check("triton_poi_fused_add_index").check("'num_kernels': 2").run(
+            src
         )
 
     @requires_gpu_and_triton
-    def test_register_pressure_guard_carves_register_bound_reduction(self):
-        # Two reductions of different shapes are combo-fused by default. When a
-        # sub-kernel's register-limited occupancy is below the guard ratio it is carved
-        # out to run standalone (its faster non-combo form); numerics are unchanged.
-        def fn(a, b):
-            return a.sum(-1), b.sum(-1)
+    @parametrize("mode", ["autotune_disabled", "deterministic"])
+    def test_no_benchmark_keeps_indirect_indexing(self, mode):
+        def fn(a, b, c, idx):
+            return a[idx + 1024], b * 2.0, c + 1.0
 
         inps = [
-            torch.randn(1024, 512, device=GPU_TYPE),
-            torch.randn(1024, 768, device=GPU_TYPE),
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.full((256,), -1024, device=GPU_TYPE, dtype=torch.int64),
         ]
-
-        def run(ratio):
-            torch._dynamo.reset()
-            counters.clear()
-            with (
-                fresh_cache(),
-                torch._inductor.config.patch(
-                    combo_kernel_register_pressure_ratio=ratio
-                ),
-            ):
-                out, code = run_and_get_code(torch.compile(fn), *inps)
-            self.assertEqual(out, fn(*inps))  # numerics preserved
-            return " ".join(code), counters["inductor"]["combo_register_bound_carveout"]
-
-        # guard off: the two reductions are combo-fused, nothing carved out.
-        code_off, carve_off = run(0.0)
-        FileCheck().check("'num_kernels': 2").run(code_off)
-        self.assertEqual(carve_off, 0)
-
-        # guard on with an occupancy floor above these light reductions: both are
-        # flagged register-bound, so fewer than two remain fusable and the whole group
-        # is emitted standalone -- no combo kernel.
-        code_on, carve_on = run(0.99)
-        self.assertEqual(carve_on, 2)
-        self.assertNotIn("num_kernels", code_on)
+        config = (
+            {"combo_kernels_autotune": 0}
+            if mode == "autotune_disabled"
+            else {"deterministic": True}
+        )
+        with fresh_cache(), torch._inductor.config.patch(config):
+            out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        FileCheck().check("'num_kernels': 3").run(code[0])
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_deterministic_mode(self):
         # Deterministic mode bans timing-based benchmarking (may_ban_benchmarking).
-        # Compile-time autotune must skip its subkernel benchmark (and the register
-        # guard's precompile) and fall back to default configs -- not crash.
+        # Compile-time autotune must skip its subkernel benchmark and fall back to
+        # default configs -- not crash.
         def f(a, b, c, d, e, g):
             return a + b, c * d, e.sum(-1), g.amax(-1)
 
@@ -3363,6 +3423,29 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         combo, combo_step = run(self._thresholds(abs_thr_gb=1.0))
         self.assertIsNotNone(combo)
         self.assertEqual(combo_step, 0)
+
+    def test_cse_consumers_use_fused_nodes(self):
+        from torch._inductor.scheduler import NodeUser, Scheduler
+
+        producer1 = _PeakMemFakeNode("producer1")
+        producer2 = _PeakMemFakeNode("producer2")
+        consumer1 = _PeakMemFakeNode("consumer1")
+        consumer2 = _PeakMemFakeNode("consumer2")
+        fused_consumer = _PeakMemFakeNode("fused_consumer")
+        producer1._outputs = [SimpleNamespace(users=[NodeUser(consumer1)])]
+        producer2._outputs = [SimpleNamespace(users=[NodeUser(consumer2)])]
+        scheduler = _PeakMemFakeScheduler(
+            [producer1, producer2, fused_consumer],
+            {
+                consumer1.get_name(): fused_consumer,
+                consumer2.get_name(): fused_consumer,
+            },
+        )
+
+        self.assertEqual(
+            Scheduler._combo_canonical_consumers(scheduler, producer1),
+            Scheduler._combo_canonical_consumers(scheduler, producer2),
+        )
 
     def test_region_carry_in_uses_post_free_boundary(self):
         a = _PeakMemFakeNode("a")
