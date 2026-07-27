@@ -813,6 +813,68 @@ class TestFakePG(TestCase):
         self.assertIsNotNone(new_pg)
         self.assertEqual(new_pg.size(), 2)
 
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    @parametrize("rank", [0, 1, 2, 3])
+    def test_split_group_consistent_naming_after_partial_split(self, rank):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190396.
+        #
+        # _hash_ranks_to_str previously used len(_world.pg_names) as the
+        # uniqueness suffix. Non-member ranks of a partial split don't register
+        # the PG, so their counter stayed lower than member ranks. Subsequent
+        # splits then computed different names for the same communicator on
+        # different ranks, causing inconsistent teardown ordering and (for NCCL)
+        # circular ncclCommFinalize waits that deadlock destroy_process_group.
+        #
+        # The fix uses _world.group_count as the salt. _process_group_name now
+        # increments group_count on BOTH paths so it advances on every rank that
+        # reaches it, including non-members, keeping it collective-consistent.
+        # This test verifies group_count advances consistently even for non-member
+        # ranks and that PG names are computed from it correctly.
+        world_size = 4
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=rank,
+            world_size=world_size,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+        import hashlib as _hashlib
+
+        from torch.distributed import distributed_c10d
+
+        # group_count starts at 1 (the default PG consumed count 0).
+        count_after_init = distributed_c10d._world.group_count
+
+        # Partial split: ranks 0,1,2 are members; rank 3 is not.
+        partial = dist.split_group(split_ranks=[[0, 1, 2]])
+
+        # group_count must advance on ALL ranks, including non-member rank 3,
+        # because _process_group_name is called before the member check.
+        self.assertEqual(distributed_c10d._world.group_count, count_after_init + 1)
+        if rank == 3:
+            self.assertNotIsInstance(partial, dist.ProcessGroup)
+        else:
+            self.assertIsInstance(partial, dist.ProcessGroup)
+
+        # Full split: all ranks are members.
+        full = dist.split_group(split_ranks=[[0, 2], [1, 3]])
+        self.assertEqual(distributed_c10d._world.group_count, count_after_init + 2)
+        self.assertIsInstance(full, dist.ProcessGroup)
+
+        # PG name must use count_after_init+1 as the group_count salt
+        # (the value at the time of the second split_group call, before it
+        # was incremented). Co-participants of [0,2] and [1,3] each compute
+        # the same name because group_count is consistent across all ranks.
+        pg_name = distributed_c10d._world.pg_names[full]
+        my_group = [0, 2] if rank in [0, 2] else [1, 3]
+        rank_join = "_".join(map(str, my_group))
+        expected = _hashlib.sha1(
+            f"{rank_join}_{count_after_init + 1}".encode(), usedforsecurity=False
+        ).hexdigest()
+        self.assertEqual(pg_name, expected)
+
 
 instantiate_parametrized_tests(TestFakePG)
 

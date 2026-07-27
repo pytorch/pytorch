@@ -358,6 +358,8 @@ def _trace_window_entries(
                 c["dst_kind"].tolist(),
             )
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -377,6 +379,8 @@ def _trace_window_entries(
                         "src kind": _MEMORY_KIND_NAMES.get(sk_l[i], sk_l[i]),
                         "dst kind": _MEMORY_KIND_NAMES.get(dk_l[i], dk_l[i]),
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -386,6 +390,8 @@ def _trace_window_entries(
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -404,6 +410,8 @@ def _trace_window_entries(
                         "value": val_l[i],
                         "memory kind": mk_l[i],
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -446,7 +454,9 @@ def _trace_window_entries(
                 if gid_l[i]:
                     a["graph id"] = gid_l[i]
                 if gnid_l[i]:
-                    a["graph node id"] = gnid_l[i]
+                    # Upper 32 bits are the graph id (emitted separately above); keep only the
+                    # lower 32-bit node id here rather than the full 9-digit packed value.
+                    a["graph node id"] = gnid_l[i] & 0xFFFFFFFF
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
