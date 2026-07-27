@@ -36,6 +36,7 @@ from torch._inductor.ir import (
     MutableBox,
     ReinterpretView,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 from torch._inductor.virtualized import V
 
 
@@ -582,22 +583,12 @@ def _tensor_sig(t):
     return (t.shape, t.stride(), t.dtype)
 
 
-_LOCAL_REDUCE_SPECIALIZATION_KEYS = (
-    "local_reduce_group",
-    "local_reduce_axis",
-    "local_reduce_type",
-    "local_reduce_source",
-    "local_reduce_feeds_main",
-    "local_reduce_secondary_feed_type",
-)
-
-
 def _local_reduce_specialization(variant_kwargs: dict | None) -> tuple:
     if variant_kwargs is None:
         return ()
     return tuple(
         (key, variant_kwargs[key])
-        for key in _LOCAL_REDUCE_SPECIALIZATION_KEYS
+        for key in GemmReductionArguments.SPECIALIZATION_KEYS
         if key in variant_kwargs
     )
 
