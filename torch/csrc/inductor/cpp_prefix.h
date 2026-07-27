@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <type_traits>
+#include <vector>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -24,6 +25,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 
+#include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
@@ -1064,7 +1066,13 @@ typename std::enable_if_t<std::is_integral_v<T>> atomic_add(
     T offset) {
   static_assert(sizeof(std::atomic<T>) == sizeof(T), "std::atomic issue");
   std::atomic<T>* atomic_addr = (std::atomic<T>*)addr;
-  atomic_addr->fetch_add(offset, std::memory_order_relaxed);
+  if constexpr (std::is_same_v<T, bool>) {
+    if (offset) {
+      atomic_addr->store(true, std::memory_order_relaxed);
+    }
+  } else {
+    atomic_addr->fetch_add(offset, std::memory_order_relaxed);
+  }
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
@@ -1077,6 +1085,30 @@ void atomic_add_vec(
   constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
+  __at_align__ std::array<int64_t, len> tmpidx;
+  offset.store(tmpbuf.data(), len);
+  index.store(tmpidx.data(), len);
+  int size = tail_size.has_value() ? tail_size.value() : len;
+  for (int i = 0; i < size; i++) {
+    atomic_add(addr + tmpidx[i], tmpbuf[i]);
+  }
+}
+
+template <
+    typename T,
+    int NI,
+    int NV,
+    typename mask_t,
+    int NM,
+    std::enable_if_t<std::is_same_v<T, bool>, int> = 0>
+void atomic_add_vec(
+    T* addr,
+    at::vec::VectorizedN<int64_t, NI> index,
+    at::vec::VecMask<mask_t, NM> offset,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= at::vec::VecMask<mask_t, NM>::size());
+  __at_align__ std::array<bool, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data(), len);
   index.store(tmpidx.data(), len);
@@ -1141,34 +1173,24 @@ inline void transpose_mxn(
 #endif
 
 // NOLINTBEGIN(*-avoid-c-arrays)
-inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(
-    int64_t number) {
-  int count = 0;
+inline std::vector<int64_t> _get_factors(int64_t number) {
+  std::vector<int64_t> factors;
   for (auto i = static_cast<int64_t>(std::sqrt(number)); i > 0; --i) {
     if (number % i == 0) {
-      count += 2;
+      factors.emplace_back(number / i);
+      factors.emplace_back(i);
     }
   }
-  auto factors = std::shared_ptr<int64_t[]>(new int64_t[count]);
-  int index = 0;
-  for (auto i = static_cast<int64_t>(std::sqrt(number)); i > 0; --i) {
-    if (number % i == 0) {
-      factors[index++] = number / i;
-      factors[index++] = i;
-    }
-  }
-  return std::make_tuple(factors, count);
+  return factors;
 }
 
-inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
-  thread_local std::
-      unordered_map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>>
-          cache;
+inline c10::ArrayRef<int64_t> get_factors(int64_t number) {
+  thread_local std::unordered_map<int64_t, std::vector<int64_t>> cache;
   auto [it, inserted] = cache.try_emplace(number);
   if (inserted) {
     it->second = _get_factors(number);
   }
-  return it->second;
+  return c10::ArrayRef<int64_t>(it->second);
 }
 // NOLINTEND(*-avoid-c-arrays)
 
@@ -1212,11 +1234,10 @@ inline void _mm_get_thread_blocking(
   int64_t n_blocks = (N + Nr - 1) / Nr;
   int64_t k_blocks = (K + Kr - 1) / Kr;
 
-  auto [factors, count] = get_factors(num_threads);
-  assert(count > 0);
+  auto factors = get_factors(num_threads);
+  assert(!factors.empty());
 
-  for (int i = 0; i < count; ++i) {
-    int64_t n_factor = factors[i];
+  for (int64_t n_factor : factors) {
     int64_t m_factor = num_threads / n_factor;
     if (n_blocks >= n_factor && m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] =
@@ -1231,13 +1252,11 @@ inline void _mm_get_thread_blocking(
     return;
   }
 
-  for (int i = 0; i < count; ++i) {
-    int64_t k_factor = factors[i];
+  for (int64_t k_factor : factors) {
     if (k_blocks >= k_factor &&
         (max_k_slices == 0 || k_factor <= max_k_slices)) {
-      auto [mxn_factors, mxn_count] = get_factors(num_threads / k_factor);
-      for (int j = 0; j < mxn_count; ++j) {
-        int64_t n_factor = mxn_factors[j];
+      auto mxn_factors = get_factors(num_threads / k_factor);
+      for (int64_t n_factor : mxn_factors) {
         int64_t m_factor = num_threads / (k_factor * n_factor);
         if (n_blocks >= n_factor && m_blocks >= m_factor) {
           auto [Mt_, Nt_, Kt_] = get_blocking(
@@ -1254,8 +1273,7 @@ inline void _mm_get_thread_blocking(
     return;
   }
 
-  for (int i = 0; i < count; ++i) {
-    int64_t n_factor = factors[i];
+  for (int64_t n_factor : factors) {
     int64_t m_factor = num_threads / n_factor;
     if (n_blocks >= n_factor || m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] =
