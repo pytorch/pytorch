@@ -28,22 +28,29 @@ def _disabled():
 @skipIfNoCuteDSL
 class TestCuTeDSLReductionWiring(TestCase):
     def _fired_count(self, fn):
-        # Count invocations of the dispatcher entry point our overrides funnel
-        # through, to prove a call routed to our kernel rather than aten.
+        # Count invocations of the dispatcher entry points our overrides funnel
+        # through (reduce_dim / reduce_all single-output, reduce_dim2 two-output),
+        # to prove a call routed to our kernel rather than aten.
         from torch._native.ops.reductions import kernel_general as kg
 
-        orig = kg.reduce_dim
+        names = ("reduce_dim", "reduce_dim2", "reduce_all")
+        orig = {nm: getattr(kg, nm) for nm in names}
         n = [0]
 
-        def counting(*a, **k):
-            n[0] += 1
-            return orig(*a, **k)
+        def wrap(f):
+            def counting(*a, **k):
+                n[0] += 1
+                return f(*a, **k)
 
-        kg.reduce_dim = counting
+            return counting
+
+        for nm in names:
+            setattr(kg, nm, wrap(orig[nm]))
         try:
             fn()
         finally:
-            kg.reduce_dim = orig
+            for nm in names:
+                setattr(kg, nm, orig[nm])
         return n[0]
 
     def test_supported_call_fires(self):
@@ -53,6 +60,9 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertEqual(self._fired_count(lambda: torch.sum(x, dim=-1)), 1)
         self.assertEqual(self._fired_count(lambda: torch.mean(x, dim=-1)), 1)
         self.assertEqual(self._fired_count(lambda: torch.amax(x, dim=-1)), 1)
+        # Group B: single-output index (argmax) and two-output (max.dim).
+        self.assertEqual(self._fired_count(lambda: torch.argmax(x, dim=-1)), 1)
+        self.assertEqual(self._fired_count(lambda: torch.max(x, dim=-1)), 1)
 
     def test_unsupported_dtype_falls_back(self):
         # Integer input is outside the supported set -> must NOT hit our kernel.

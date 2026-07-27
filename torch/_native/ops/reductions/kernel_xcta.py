@@ -29,7 +29,7 @@ import cuda.bindings.driver as cuda
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Int32
+from cutlass import const_expr, Float32, Int32, Int64
 
 import torch
 
@@ -41,7 +41,7 @@ from . import (  # safe: kernel_general imports us only lazily
 )
 
 
-_PART_TORCH = {Float32: torch.float32, Int32: torch.int32}
+_PART_TORCH = {Float32: torch.float32, Int32: torch.int32, Int64: torch.int64}
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)

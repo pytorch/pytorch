@@ -373,7 +373,7 @@ _stream = _L.stream
 _compile = (
     _L.compile
 )  # _L.compile: cute.compile + options="--enable-tvm-ffi" (fast per-call arg passing)
-_PART_TORCH = {Float32: torch.float32, Int32: torch.int32}
+_PART_TORCH = {Float32: torch.float32, Int32: torch.int32, Int64: torch.int64}
 
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
