@@ -1689,6 +1689,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(128, 256, 64, 1, 8, group_m=16),
         ]
 
+        self.tdm_scaled_persistent_mm_configs: list[BaseConfig] = [
+            ROCmGemmConfig(128, 128, 128, 1, 4, group_m=8),
+            ROCmGemmConfig(128, 128, 128, 1, 8, group_m=8),
+            ROCmGemmConfig(256, 128, 128, 1, 8, group_m=16),
+            ROCmGemmConfig(128, 256, 128, 1, 8, group_m=16),
+        ]
+
         # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
@@ -3306,6 +3313,94 @@ class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
     AddMMConfigMixin, ROCmPersistentTDMTemplateConfigHeuristic
 ):
     """Addmm extension for the gfx1250 TDM persistent template."""
+
+
+class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
+    """Shared stable-descriptor options for gfx1250 scaled TDM templates."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = self.tdm_scaled_persistent_mm_configs
+        self.uses_tdm_configs = True
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        kwargs = {
+            **kwargs,
+            "tdm_a_row_major": True,
+            "tdm_b_row_major": False,
+        }
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {
+                **template_kwargs,
+                "NUM_SMS": get_num_sms(),
+                "TMA_EXPERIMENTAL_API": False,
+            }
+
+
+@register_template_heuristic(
+    scaled_mm_device_tma_epilogue_scaling_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="scaled_mm",
+)
+class ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic(
+    ROCmScaledTDMConfigMixin, ROCmConfigHeuristic
+):
+    """gfx1250 scaled TDM heuristic for epilogue scaling."""
+
+
+@register_template_heuristic(
+    scaled_mm_device_tma_main_loop_scaling_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="scaled_mm",
+)
+class ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic(
+    ROCmScaledTDMConfigMixin, ROCmConfigHeuristic
+):
+    """gfx1250 scaled TDM heuristic for main-loop scaling."""
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
+        scale_option_a, scale_option_b = get_scaling_options(
+            mat_a,
+            mat_b,
+            scale_a.get_size(),
+            scale_b.get_size(),
+        )
+        tile_size_a = get_tile_size(scale_option_a)
+        tile_size_b = get_tile_size(scale_option_b)
+
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            template_kwargs["TILE_SIZE_A"] = tile_size_a
+            template_kwargs["TILE_SIZE_B"] = tile_size_b
+            template_kwargs["MIN_BLOCK_TILE_AM"] = min(
+                template_kwargs["BLOCK_M"], tile_size_a
+            )
+            template_kwargs["MIN_BLOCK_TILE_AK"] = min(
+                template_kwargs["BLOCK_K"], tile_size_a
+            )
+            template_kwargs["MIN_BLOCK_TILE_BK"] = min(
+                template_kwargs["BLOCK_K"], tile_size_b
+            )
+            template_kwargs["MIN_BLOCK_TILE_BN"] = min(
+                template_kwargs["BLOCK_N"], tile_size_b
+            )
+            yield template_kwargs
 
 
 @register_template_heuristic(

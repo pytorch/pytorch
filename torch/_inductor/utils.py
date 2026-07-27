@@ -177,6 +177,9 @@ _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES = 128
 _TDM_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
     [torch.float16, torch.bfloat16, torch.float32]
 )
+_TDM_SCALED_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.float8_e4m3fn, torch.float8_e5m2]
+)
 
 # PyTorch dtypes with valid CUtensorMapDataType mappings.
 # Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
@@ -2160,14 +2163,18 @@ def tdm_descriptor_row_major(mat: IRNode, add_guards: bool = False) -> bool | No
     return inner[0] == 1
 
 
-def _tdm_operand_compatible(mat: IRNode, add_guards: bool) -> bool:
+def _tdm_operand_compatible(
+    mat: IRNode,
+    accepted_dtypes: OrderedSet[torch.dtype],
+    add_guards: bool,
+) -> bool:
     """Check descriptor semantics and the preferred TDM request layout."""
     from .virtualized import V
 
     dtype = mat.get_dtype()
     sizes = mat.get_size()
     strides = mat.get_stride()
-    if dtype not in _TDM_SUPPORTED_DTYPES or len(sizes) != 2 or len(strides) != 2:
+    if dtype not in accepted_dtypes or len(sizes) != 2 or len(strides) != 2:
         return False
     if mat.get_name() in V.graph.unaligned_buffers:
         return False
@@ -2228,7 +2235,30 @@ def use_triton_tdm_template(
         for mat in matrices
     ):
         return False
-    return all(_tdm_operand_compatible(mat, add_guards) for mat in matrices)
+    return all(
+        _tdm_operand_compatible(mat, _TDM_SUPPORTED_DTYPES, add_guards)
+        for mat in matrices
+    )
+
+
+def use_triton_tdm_scaled_template(
+    *matrices: IRNode,
+    output_layout: Layout | None = None,
+    add_guards: bool = False,
+) -> bool:
+    """Return whether scaled FP8 MM operands may use gfx1250 TDM descriptors."""
+    del output_layout
+    if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
+        return False
+    if not all(
+        _descriptor_shape_fits_in_int32(mat.get_size(), add_guards=add_guards)
+        for mat in matrices
+    ):
+        return False
+    return all(
+        _tdm_operand_compatible(mat, _TDM_SCALED_SUPPORTED_DTYPES, add_guards)
+        for mat in matrices
+    )
 
 
 def use_triton_tma_template(
