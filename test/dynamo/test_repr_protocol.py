@@ -4,6 +4,7 @@
 import collections
 import enum
 import typing
+import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
