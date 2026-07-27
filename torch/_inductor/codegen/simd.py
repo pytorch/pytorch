@@ -4039,28 +4039,31 @@ class SIMDScheduling(BaseScheduling):
                     continue
                 # Deterministic mode uses the heuristic (no-benchmark) block sizes, same as the
                 # autotune-disabled path, since it forbids timing-based benchmarking.
-                no_bench_mode = (
-                    per_subkernel_blocks
-                    and not only_gen_src_code
-                    and (not enable_autotune or config.deterministic)
+                no_bench_mode = per_subkernel_blocks and (
+                    not enable_autotune or config.deterministic
                 )
                 fusion_pns: list[Any] = []
                 fusion_configs: list[Any] = []
                 carve_out_pns: list[Any] = []
                 if no_bench_mode:
-                    for pn in node_group:
-                        configs, probe_kernel = self._probe_subkernel_heuristic(
-                            node_schedule_map[pn]
-                        )
-                        if torch.version.hip or torch.xpu.is_available():
-                            fuse_ok = configs and not probe_kernel.autotune_hints
-                        else:
-                            fuse_ok = configs and len(configs) <= 2
-                        if fuse_ok:
-                            fusion_pns.append(pn)
-                            fusion_configs.append(configs[0])
-                        else:
-                            carve_out_pns.append(pn)
+                    old_kernel_count = metrics.generated_kernel_count
+                    try:
+                        for pn in node_group:
+                            configs, probe_kernel = self._probe_subkernel_heuristic(
+                                node_schedule_map[pn]
+                            )
+                            if torch.version.hip or torch.xpu.is_available():
+                                fuse_ok = configs and not probe_kernel.autotune_hints
+                            else:
+                                fuse_ok = configs and len(configs) <= 2
+                            if fuse_ok:
+                                fusion_pns.append(pn)
+                                fusion_configs.append(configs[0])
+                            else:
+                                carve_out_pns.append(pn)
+                    finally:
+                        if only_gen_src_code:
+                            metrics.generated_kernel_count = old_kernel_count
                     if len(fusion_pns) < 2:
                         fusion_pns = []
                         fusion_configs = []

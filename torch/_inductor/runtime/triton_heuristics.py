@@ -5036,22 +5036,15 @@ def foreach(
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
     configs = []
-    combo_meta = inductor_meta.get("combo_grid_meta") or {}
-    signature_keys = OrderedSet(triton_meta.get("signature", ()))
-    default_config = {
-        k: v
-        for k, v in (combo_meta.get("default_config") or {}).items()
-        if k in signature_keys
-    }
 
     # Naive autotuning path for num_warps
     if not (
         inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
     ):
-        configs.append(triton.Config(default_config, num_stages=1, num_warps=8))
+        configs.append(triton.Config({}, num_stages=1, num_warps=8))
     else:
         for warps in [1, 2, 4, 8]:
-            configs.append(triton.Config(default_config, num_stages=1, num_warps=warps))
+            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
 
     return cached_autotune(
         None,
