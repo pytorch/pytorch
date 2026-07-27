@@ -127,8 +127,11 @@ def addmm_patterns_init():
     addmm related patterns.
     To avoid duplication, also includes int8 WoQ GEMM pattern without bias.
     """
+    from torch._dynamo.device_interface import get_interface_for_device
+
     device = next(
-        (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
+        (gpu for gpu in GPU_TYPES if get_interface_for_device(gpu).is_available()),
+        "cpu",
     )
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
     scale = functools.partial(torch.empty, (10,), device=device, requires_grad=False)

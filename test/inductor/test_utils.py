@@ -1262,6 +1262,26 @@ class TestDeviceClassification(TestCase):
         self.assertNotIn("fakegpu:0", result)
         self.assertNotIn("fakecpu", result)
 
+    def test_gpu_types_consumer_resolves_out_of_tree_via_registry(self):
+        # A third-party PrivateUse1 backend (here "acc") registers a GPU-class
+        # DeviceInterface but exposes no torch.acc submodule. Consumers that
+        # iterate GPU_TYPES must resolve availability through the interface
+        # registry; getattr(torch, name) would raise AttributeError here.
+        self._register("acc", _GpuWithStream)
+        self.assertFalse(hasattr(torch, "acc"))
+        with mock.patch.object(inductor_utils, "_gpu_types", return_value=["acc"]):
+            self.assertIn("acc", inductor_utils.GPU_TYPES)
+            # Mirrors freezing_patterns.addmm_patterns_init()'s device pick.
+            device = next(
+                (
+                    gpu
+                    for gpu in inductor_utils.GPU_TYPES
+                    if di.get_interface_for_device(gpu).is_available()
+                ),
+                "cpu",
+            )
+        self.assertEqual(device, "acc")
+
     # ---- get_gpu_type() ----
     def test_get_gpu_type_single_available(self):
         self._register("fakegpu", _GpuWithStream)
