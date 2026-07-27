@@ -96,7 +96,10 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
 
 
 class TestNVGemmPickling(TestCase):
-    @skipIfNoCuteDSL
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass_api) library not available",
+    )
     def test_scaled_operand_constraints_pickle_round_trip(self):
         import cutlass
         from cutlass.operators import ScaleMode, ScaleSwizzleMode
