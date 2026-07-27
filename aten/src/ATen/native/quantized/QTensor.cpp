@@ -395,6 +395,6 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   at::Tensor xmin_tensor = at::empty({1});
   xmax_tensor[0] = xmax;
   xmin_tensor[0] = xmin;
-  return std::make_tuple(xmax_tensor, xmin_tensor);
+  return std::make_tuple(std::move(xmax_tensor), std::move(xmin_tensor));
 }
 } // namespace at::native

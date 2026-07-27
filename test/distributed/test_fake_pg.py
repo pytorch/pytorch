@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -10,7 +11,7 @@ import torch.nn as nn
 from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DeviceMesh, Shard
+from torch.distributed.tensor import Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -59,6 +60,21 @@ class TestFakePG(TestCase):
         output = torch.ones(3, 3) * dist.get_rank()
         dist.all_reduce(output)
         self.assertEqual(tuple(output.shape), (3, 3))
+
+    def test_set_timeout(self):
+        # FakeProcessGroup used to inherit Backend's default set_timeout, which
+        # raised "does not support setting timeout". Setting a timeout is a
+        # no-op for a group that does no real communication, but it must not
+        # raise.
+        backend = FakeProcessGroup._create_internal(0, world_size=2)
+        backend.set_timeout(timedelta(seconds=42))
+
+    def test_set_timeout_via_dist(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        # Forwards through ProcessGroup to the fake backend; must not raise (the
+        # default init path leaves the backend options null).
+        dist.set_timeout(timedelta(seconds=30))
 
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
@@ -206,9 +222,6 @@ class TestFakePG(TestCase):
             backend="fake", rank=0, world_size=world_size, store=store
         )
 
-        device_mesh = DeviceMesh(
-            device_type, torch.arange(0, world_size).view(-1, tp_size)
-        )
         device_mesh = init_device_mesh(
             device_type, (world_size // tp_size, tp_size), mesh_dim_names=["dp", "tp"]
         )
@@ -718,6 +731,149 @@ class TestFakePG(TestCase):
         inputs = [torch.ones(3, 3)]
         with self.assertRaisesRegex(RuntimeError, "invalid output size"):
             dist.all_gather_coalesced(output, inputs)
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    @parametrize("rank", [0, 1, 2, 3])
+    def test_split_group(self, rank):
+        world_size = 4
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=rank,
+            world_size=world_size,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+
+        parent_pg = dist.distributed_c10d._get_default_group()
+        self.assertTrue(
+            parent_pg._get_backend(torch.device(device_type)).supports_splitting
+        )
+
+        # Interleaved, unsorted subgroups: each rank shares a group with the
+        # rank two away, and is not always listed first. split_group preserves
+        # the order ranks are listed in, so the child rank is the position
+        # within the subgroup as given -- which here differs from the parent
+        # rank, making this a meaningful check of rank assignment.
+        split_ranks = [[2, 0], [3, 1]]
+        new_pg = dist.split_group(split_ranks=split_ranks)
+        self.assertIsNotNone(new_pg)
+
+        my_group = next(g for g in split_ranks if rank in g)
+        self.assertEqual(new_pg.size(), len(my_group))
+        self.assertEqual(new_pg.rank(), my_group.index(rank))
+        # Independent cross-check: the child rank must map back to this
+        # process's original global rank via the world's rank mapping, which is
+        # built separately from the C++ backend's rank.
+        self.assertEqual(
+            dist.distributed_c10d.get_global_rank(new_pg, new_pg.rank()), rank
+        )
+
+        # Collectives on the split group should still work.
+        tensor = torch.ones(3, 3)
+        dist.all_reduce(tensor, group=new_pg)
+        self.assertEqual(tuple(tensor.shape), (3, 3))
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_split_group_non_member(self):
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=0,
+            world_size=4,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+
+        # Rank 0 is in none of the splits, so it gets the non-member sentinel.
+        new_pg = dist.split_group(split_ranks=[[1, 2, 3]])
+        self.assertIs(new_pg, dist.GroupMember.NON_GROUP_MEMBER)
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_split_group_store_not_retained(self):
+        # split_group clones the parent's store, and the process group holds the
+        # store only at the C++ level. FakeStore.clone() must therefore be a
+        # real C++ method: a pure-Python Store.clone() override would be garbage
+        # collected once the caller drops its reference, and the split would
+        # fail with "pure virtual function Store::clone".
+        def setup():
+            dist.init_process_group(
+                backend="fake",
+                rank=0,
+                world_size=2,
+                store=FakeStore(),
+                device_id=torch.device(device_type, 0),
+            )
+
+        setup()  # the only Python reference to the store is dropped here
+        new_pg = dist.split_group(split_ranks=[[0, 1]])
+        self.assertIsNotNone(new_pg)
+        self.assertEqual(new_pg.size(), 2)
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    @parametrize("rank", [0, 1, 2, 3])
+    def test_split_group_consistent_naming_after_partial_split(self, rank):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190396.
+        #
+        # _hash_ranks_to_str previously used len(_world.pg_names) as the
+        # uniqueness suffix. Non-member ranks of a partial split don't register
+        # the PG, so their counter stayed lower than member ranks. Subsequent
+        # splits then computed different names for the same communicator on
+        # different ranks, causing inconsistent teardown ordering and (for NCCL)
+        # circular ncclCommFinalize waits that deadlock destroy_process_group.
+        #
+        # The fix uses _world.group_count as the salt. _process_group_name now
+        # increments group_count on BOTH paths so it advances on every rank that
+        # reaches it, including non-members, keeping it collective-consistent.
+        # This test verifies group_count advances consistently even for non-member
+        # ranks and that PG names are computed from it correctly.
+        world_size = 4
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=rank,
+            world_size=world_size,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+        import hashlib as _hashlib
+
+        from torch.distributed import distributed_c10d
+
+        # group_count starts at 1 (the default PG consumed count 0).
+        count_after_init = distributed_c10d._world.group_count
+
+        # Partial split: ranks 0,1,2 are members; rank 3 is not.
+        partial = dist.split_group(split_ranks=[[0, 1, 2]])
+
+        # group_count must advance on ALL ranks, including non-member rank 3,
+        # because _process_group_name is called before the member check.
+        self.assertEqual(distributed_c10d._world.group_count, count_after_init + 1)
+        if rank == 3:
+            self.assertNotIsInstance(partial, dist.ProcessGroup)
+        else:
+            self.assertIsInstance(partial, dist.ProcessGroup)
+
+        # Full split: all ranks are members.
+        full = dist.split_group(split_ranks=[[0, 2], [1, 3]])
+        self.assertEqual(distributed_c10d._world.group_count, count_after_init + 2)
+        self.assertIsInstance(full, dist.ProcessGroup)
+
+        # PG name must use count_after_init+1 as the group_count salt
+        # (the value at the time of the second split_group call, before it
+        # was incremented). Co-participants of [0,2] and [1,3] each compute
+        # the same name because group_count is consistent across all ranks.
+        pg_name = distributed_c10d._world.pg_names[full]
+        my_group = [0, 2] if rank in [0, 2] else [1, 3]
+        rank_join = "_".join(map(str, my_group))
+        expected = _hashlib.sha1(
+            f"{rank_join}_{count_after_init + 1}".encode(), usedforsecurity=False
+        ).hexdigest()
+        self.assertEqual(pg_name, expected)
 
 
 instantiate_parametrized_tests(TestFakePG)

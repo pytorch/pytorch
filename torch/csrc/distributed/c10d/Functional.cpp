@@ -866,219 +866,6 @@ class Irecv : public torch::autograd::Function<Irecv> {
 } // namespace
 
 namespace {
-class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
- public:
-  static torch::autograd::Variable forward(
-      torch::autograd::AutogradContext* ctx,
-      const at::Tensor& input,
-      // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      at::SymIntArrayRef output_split_sizes,
-      // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      at::SymIntArrayRef input_split_sizes,
-      const c10::IValue& group_name) {
-    // swap sizes for backwards pass
-    ctx->saved_data["output_split_sizes"] = input_split_sizes.vec();
-    ctx->saved_data["input_split_sizes"] = output_split_sizes.vec();
-    ctx->saved_data["group_name"] = group_name;
-
-    return c10::Dispatcher::singleton()
-        .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
-        .typed<decltype(all_to_all_single_dispatch)>()
-        .call(input, output_split_sizes, input_split_sizes, group_name);
-  }
-
-  static torch::autograd::variable_list backward(
-      torch::autograd::AutogradContext* ctx,
-      const torch::autograd::variable_list& grad_out_list) {
-    std::vector<c10::SymInt> output_split_sizes =
-        ctx->saved_data["output_split_sizes"].toSymIntVector();
-    std::vector<c10::SymInt> input_split_sizes =
-        ctx->saved_data["input_split_sizes"].toSymIntVector();
-    auto group_name = ctx->saved_data["group_name"];
-
-    DCHECK(grad_out_list.size() == 1);
-    auto grad_out = grad_out_list[0].contiguous();
-
-    auto out =
-        c10::Dispatcher::singleton()
-            .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
-            .typed<decltype(all_to_all_single_dispatch)>()
-            .call(grad_out, output_split_sizes, input_split_sizes, group_name);
-
-    // do an explicit wait to avoid cuda stream issues
-    // TODO: track active cuda stream in wait
-    out = c10::Dispatcher::singleton()
-              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(c10d::wait_tensor)>()
-              .call(out);
-
-    return {out, at::Tensor(), at::Tensor(), at::Tensor()};
-  }
-};
-
-at::Tensor all_to_all_single_autograd(
-    const at::Tensor& input,
-    at::SymIntArrayRef output_split_sizes,
-    at::SymIntArrayRef input_split_sizes,
-    const c10::IValue& group_name) {
-  return AllToAllSingle::apply(
-      input, output_split_sizes, input_split_sizes, group_name);
-}
-
-class ReduceScatterTensor
-    : public torch::autograd::Function<ReduceScatterTensor> {
- public:
-  static torch::autograd::Variable forward(
-      torch::autograd::AutogradContext* ctx,
-      const at::Tensor& input,
-      const std::string& reduce_op,
-      int64_t group_size,
-      const c10::IValue& group_name) {
-    TORCH_CHECK(reduce_op == "sum", "Only sum reduce op is supported");
-
-    ctx->saved_data["group_size"] = group_size;
-    ctx->saved_data["group_name"] = group_name;
-
-    return c10::Dispatcher::singleton()
-        .findSchemaOrThrow("_c10d_functional::reduce_scatter_tensor", "")
-        .typed<at::Tensor(
-            const at::Tensor&, std::string, int64_t, const c10::IValue&)>()
-        .call(input, reduce_op, group_size, group_name);
-  }
-
-  static torch::autograd::variable_list backward(
-      torch::autograd::AutogradContext* ctx,
-      const torch::autograd::variable_list& grad_out_list) {
-    const int64_t group_size = ctx->saved_data["group_size"].toInt();
-    auto group_name = ctx->saved_data["group_name"];
-
-    DCHECK(grad_out_list.size() == 1);
-    const auto& grad_out = grad_out_list[0];
-
-    auto out =
-        c10::Dispatcher::singleton()
-            .findSchemaOrThrow("_c10d_functional::all_gather_into_tensor", "")
-            .typed<at::Tensor(const at::Tensor&, int64_t, const c10::IValue&)>()
-            .call(grad_out, group_size, group_name);
-
-    // do an explicit wait to avoid cuda stream issues
-    // TODO: track active cuda stream in wait
-    out = c10::Dispatcher::singleton()
-              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(c10d::wait_tensor)>()
-              .call(out);
-
-    return {
-        out,
-        at::Tensor(),
-        at::Tensor(),
-        at::Tensor(),
-    };
-  }
-};
-
-at::Tensor reduce_scatter_tensor_autograd(
-    const at::Tensor& input,
-    const std::string& reduce_op,
-    int64_t group_size,
-    const c10::IValue& group_name) {
-  return ReduceScatterTensor::apply(input, reduce_op, group_size, group_name);
-}
-
-class AllGatherIntoTensor
-    : public torch::autograd::Function<AllGatherIntoTensor> {
- public:
-  static torch::autograd::Variable forward(
-      torch::autograd::AutogradContext* ctx,
-      const at::Tensor& input,
-      int64_t group_size,
-      const c10::IValue& group_name) {
-    ctx->saved_data["group_size"] = group_size;
-    ctx->saved_data["group_name"] = group_name;
-
-    return c10::Dispatcher::singleton()
-        .findSchemaOrThrow("_c10d_functional::all_gather_into_tensor", "")
-        .typed<at::Tensor(const at::Tensor&, int64_t, const c10::IValue&)>()
-        .call(input, group_size, group_name);
-  }
-
-  static torch::autograd::variable_list backward(
-      torch::autograd::AutogradContext* ctx,
-      const torch::autograd::variable_list& grad_out_list) {
-    const int64_t group_size = ctx->saved_data["group_size"].toInt();
-    auto group_name = ctx->saved_data["group_name"];
-
-    DCHECK(grad_out_list.size() == 1);
-    const auto& grad_out = grad_out_list[0];
-
-    auto out =
-        c10::Dispatcher::singleton()
-            .findSchemaOrThrow("_c10d_functional::reduce_scatter_tensor", "")
-            .typed<at::Tensor(
-                const at::Tensor&, std::string, int64_t, const c10::IValue&)>()
-            .call(grad_out, "sum", group_size, group_name);
-
-    // do an explicit wait to avoid cuda stream issues
-    // TODO: track active cuda stream in wait
-    out = c10::Dispatcher::singleton()
-              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(c10d::wait_tensor)>()
-              .call(out);
-
-    return {
-        out,
-        at::Tensor(),
-        at::Tensor(),
-    };
-  }
-};
-
-at::Tensor all_gather_into_tensor_autograd(
-    const at::Tensor& input,
-    int64_t group_size,
-    const c10::IValue& group_name) {
-  return AllGatherIntoTensor::apply(input, group_size, group_name);
-}
-
-} // namespace
-
-TORCH_LIBRARY(_c10d_functional_autograd, m) {
-  m.def(
-      "all_to_all_single("
-      "Tensor input, "
-      "SymInt[] output_split_sizes, "
-      "SymInt[] input_split_sizes, "
-      "Any group_name) -> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::Autograd,
-          [](const at::Tensor& input,
-             c10::SymIntArrayRef output_split_sizes,
-             c10::SymIntArrayRef input_split_sizes,
-             const c10::IValue& group) {
-            return all_to_all_single_autograd(
-                input, output_split_sizes, input_split_sizes, group);
-          }),
-      {at::Tag::pt2_compliant_tag});
-  m.def(
-      "reduce_scatter_tensor("
-      "Tensor input, "
-      "str reduce_op, "
-      "int group_size, "
-      "Any group_name) -> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::Autograd, ::reduce_scatter_tensor_autograd),
-      {at::Tag::pt2_compliant_tag});
-  m.def(
-      "all_gather_into_tensor("
-      "Tensor input, "
-      "int group_size, "
-      "Any group_name) -> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::Autograd, ::all_gather_into_tensor_autograd),
-      {at::Tag::pt2_compliant_tag});
-}
-
-namespace {
 // DTensor related comm operations, sharing code with functional collective for
 // now
 at::Tensor shard_dim_alltoall(
@@ -1129,6 +916,57 @@ at::Tensor shard_dim_alltoall(
 }
 
 } // namespace
+
+// Backward compatibility: _c10d_functional_autograd namespace
+// These ops are identical to _c10d_functional ops. Autograd is registered
+// separately in Python via torch.library.register_autograd.
+TORCH_LIBRARY(_c10d_functional_autograd, m) {
+  m.def(
+      "all_to_all_single("
+      "Tensor input, "
+      "SymInt[] output_split_sizes, "
+      "SymInt[] input_split_sizes, "
+      "Any group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          all_to_all_single_dispatch),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
+  m.def(
+      "reduce_scatter_tensor("
+      "Tensor input, "
+      "str reduce_op, "
+      "int group_size, "
+      "Any group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          [](const at::Tensor& input,
+             std::string reduce_op,
+             int64_t group_size,
+             const c10::IValue& group) {
+            return c10d::reduce_scatter_tensor(
+                input,
+                std::move(reduce_op),
+                group_size,
+                get_process_group(group, "reduce_scatter_tensor"));
+          }),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
+  m.def(
+      "all_gather_into_tensor("
+      "Tensor input, "
+      "int group_size, "
+      "Any group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          [](const at::Tensor& input,
+             int64_t group_size,
+             const c10::IValue& group) {
+            return c10d::all_gather_into_tensor(
+                input,
+                group_size,
+                get_process_group(group, "all_gather_into_tensor"));
+          }),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
+}
 
 // DTensor comm op registry
 TORCH_LIBRARY(_dtensor, m) {

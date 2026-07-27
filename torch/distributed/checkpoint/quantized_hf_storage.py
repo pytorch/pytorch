@@ -411,7 +411,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 values_per_group = B * 2  # Each byte has 2 nibbles (4-bit values).
 
                 # Calculate which groups we need based on the requested range in dim 2.
-                # Ensure the reequest is in 3D.
+                # Ensure the request is in 3D.
                 if len(req.storage_offsets) != 3:
                     raise AssertionError
 
