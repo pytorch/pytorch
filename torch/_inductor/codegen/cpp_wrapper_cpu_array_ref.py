@@ -971,6 +971,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         for (inner_input, inner_input_val), outer_input in zip(
             subgraph.graph.graph_inputs.items(), outer_inputs
         ):
+            if isinstance(inner_input_val, sympy.Symbol):
+                if str(inner_input_val) != outer_input:
+                    self.writeline(
+                        f"{self.codegen_unbacked_symbol_decl(inner_input_val)} = {outer_input};"
+                    )
+                continue
             if not isinstance(inner_input_val, ir.TensorBox):
                 continue
 
@@ -991,6 +997,29 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
 
+    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
+        for inner_output, outer_output in zip(
+            subgraph.graph.graph_outputs, outer_outputs
+        ):
+            src = inner_output.codegen_reference()
+            if isinstance(inner_output, ir.ShapeAsConstantBuffer):
+                self.writeline(f"{outer_output} = {src};")
+                continue
+
+            self.writeline(f"{outer_output}.reset();")
+            # Stack-allocated ArrayRefTensor outputs cannot be moved into a
+            # RAIIAtenTensorHandle loop state.  Materialize them before the
+            # subgraph scope ends.
+            self.writeline(
+                f"[&](auto&& _t) {{ "
+                f"if constexpr (::torch::aot_inductor::is_arrayref_tensor_type_v"
+                f"<std::decay_t<decltype(_t)>>) {{ "
+                f"{outer_output} = expensive_copy_to_tensor_if_needed(_t); "
+                f"}} else {{ "
+                f"{outer_output} = std::move(_t); "
+                f"}} }}({src});"
+            )
+
     def codegen_while_loop(self, while_loop, stack_output=False):
         if stack_output:
             raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
@@ -1004,7 +1033,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
-        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
+        carried_outputs = self._get_while_loop_carried_outputs(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -1012,14 +1041,29 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
-            self.writeline(f"AtenTensorHandle {out_name}_handle;")
-            self.writeline(
-                "AOTI_TORCH_ERROR_CODE_CHECK("
-                f"aoti_torch_assign_tensors_out(borrow_arrayref_tensor_as_tensor({inp}), "
-                f"&{out_name}_handle));"
-            )
-            self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
+        for inp, out in zip(outer_carried_inputs, carried_outputs):
+            if isinstance(out, ir.ShapeAsConstantBuffer):
+                if not isinstance(out.expr, sympy.Symbol):
+                    raise AssertionError(out)
+                out_name = out.codegen_reference()
+                self.writeline(
+                    f"{self.codegen_unbacked_symbol_decl(out.expr)} = {inp};"
+                )
+            else:
+                out_name = out.get_name()
+                self.writeline(f"RAIIAtenTensorHandle {out_name};")
+                self.writeline(
+                    f"[&](auto&& _t) {{ "
+                    f"if constexpr (::torch::aot_inductor::is_arrayref_tensor_type_v"
+                    f"<std::decay_t<decltype(_t)>>) {{ "
+                    f"{out_name} = expensive_copy_to_tensor_if_needed(_t); "
+                    f"}} else {{ "
+                    f"AtenTensorHandle {out_name}_handle; "
+                    f"AOTI_TORCH_ERROR_CODE_CHECK("
+                    f"aoti_torch_assign_tensors_out(_t, &{out_name}_handle)); "
+                    f"{out_name} = RAIIAtenTensorHandle({out_name}_handle); "
+                    f"}} }}({inp});"
+                )
             cond_outer_inputs.append(out_name)
 
         cond_outer_inputs.extend(outer_additional_inputs)
