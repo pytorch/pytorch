@@ -7288,22 +7288,14 @@ class Scheduler:
             )
             if reindex_inverse is not None:
                 flat_var, inverse = reindex_inverse
-                reindex_snapshot = _LoopStateSnapshot.create((node2,))
-                success = False
-                try:
-                    node2.apply_loop_reindexing([sympy_product(node1_write.size)])
-                    reindexed_vars = node2._body.vars[0]
-                    if len(reindexed_vars) != 1:
-                        return -1
-                    inverse = sympy_subs(inverse, {flat_var: reindexed_vars[0]})
-                    score = self.shared_data_after_inverting_indexing(
-                        node1, node2, precomputed_inverse=inverse
-                    )
-                    success = score >= 0
-                    return score
-                finally:
-                    if not success:
-                        reindex_snapshot.restore()
+                node2.apply_loop_reindexing([sympy_product(node1_write.size)])
+                reindexed_vars = node2._body.vars[0]
+                if len(reindexed_vars) != 1:
+                    raise AssertionError("expected one reindexed variable")
+                inverse = sympy_subs(inverse, {flat_var: reindexed_vars[0]})
+                return self.shared_data_after_inverting_indexing(
+                    node1, node2, precomputed_inverse=inverse
+                )
 
         if not node2_write.is_contiguous():
             return -1
