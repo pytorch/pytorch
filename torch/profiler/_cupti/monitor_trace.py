@@ -358,6 +358,8 @@ def _trace_window_entries(
                 c["dst_kind"].tolist(),
             )
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -377,6 +379,8 @@ def _trace_window_entries(
                         "src kind": _MEMORY_KIND_NAMES.get(sk_l[i], sk_l[i]),
                         "dst kind": _MEMORY_KIND_NAMES.get(dk_l[i], dk_l[i]),
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -386,6 +390,8 @@ def _trace_window_entries(
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -404,6 +410,8 @@ def _trace_window_entries(
                         "value": val_l[i],
                         "memory kind": mk_l[i],
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -446,7 +454,9 @@ def _trace_window_entries(
                 if gid_l[i]:
                     a["graph id"] = gid_l[i]
                 if gnid_l[i]:
-                    a["graph node id"] = gnid_l[i]
+                    # Upper 32 bits are the graph id (emitted separately above); keep only the
+                    # lower 32-bit node id here rather than the full 9-digit packed value.
+                    a["graph node id"] = gnid_l[i] & 0xFFFFFFFF
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
@@ -720,23 +730,35 @@ def _gpu_user_annotation_events(
         return []
 
     span_map: dict[tuple[int, int, int], dict[str, int]] = {}
+    # (device, stream) lanes that still render real GPU work after lane reassignment. A graphed
+    # op the resolver moved to a logical lane no longer displays on its capture stream (mirrors
+    # the display rule in _trace_window_entries); a span stranded on such a stream is dropped
+    # below.
+    streams_with_display: set[tuple[int, int]] = set()
     for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
         c = columns.get(ks)
         if not c or not len(c["correlation_id"]):
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
-        # Follow graphed ops onto their reassigned logical lane so the spanning annotation
-        # lands on the same lane as its kernels (else it stays on the capture stream).
-        stream_arr = c["stream_id"]
-        lane_col = c.get("logical_lane")
-        if lane_col is not None:
-            reassign = (c["graph_node_id"] != 0) & (lane_col != stream_arr)
-            stream_arr = np.where(reassign, lane_col, stream_arr)
-        str_l = stream_arr.tolist()
+        # Keep the annotation on the kernel's real capture stream; do not follow graphed
+        # ops onto the synthetic logical lanes assigned by the lane resolver.
+        str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
+        lane_col = c.get("logical_lane")
+        gnid_col = c.get("graph_node_id")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        gnid_l = gnid_col.tolist() if gnid_col is not None else None
         for i in range(len(corr_l)):
+            reassigned = (
+                lane_l is not None
+                and gnid_l is not None
+                and gnid_l[i]
+                and lane_l[i] != str_l[i]
+            )
+            if not reassigned:
+                streams_with_display.add((dev_l[i], str_l[i]))
             external_id = correlation_to_user_external.get(corr_l[i])
             if external_id is None:
                 continue
@@ -754,6 +776,10 @@ def _gpu_user_annotation_events(
     for (external_id, device_id, stream_id), span in sorted(span_map.items()):
         name = user_annotations.get(external_id)
         if not isinstance(name, str):
+            continue
+        # Orphaned span: the capture stream's ops all moved to logical lanes, so it would sit
+        # alone on an empty lane divorced from its kernels -- drop it instead.
+        if (device_id, stream_id) not in streams_with_display:
             continue
         start_us = max((span["start_ns"] - base_ns) / 1000.0 - 0.001, 0.0)
         dur_us = max((span["end_ns"] - span["start_ns"]) / 1000.0 + 0.002, 0.0)
