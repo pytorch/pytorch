@@ -63,6 +63,12 @@ class TestCuTeDSLReductionWiring(TestCase):
         # Group B: single-output index (argmax) and two-output (max.dim).
         self.assertEqual(self._fired_count(lambda: torch.argmax(x, dim=-1)), 1)
         self.assertEqual(self._fired_count(lambda: torch.max(x, dim=-1)), 1)
+        # Group C: parameterized / non-float-output single reductions.
+        self.assertEqual(self._fired_count(lambda: torch.var(x, dim=-1)), 1)
+        self.assertEqual(
+            self._fired_count(lambda: torch.linalg.vector_norm(x, dim=-1)), 1
+        )
+        self.assertEqual(self._fired_count(lambda: torch.count_nonzero(x, dim=-1)), 1)
 
     def test_unsupported_dtype_falls_back(self):
         # Integer input is outside the supported set -> must NOT hit our kernel.
