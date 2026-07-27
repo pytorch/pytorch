@@ -5425,8 +5425,64 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
   return std::make_tuple(std::move(dX), std::move(dgamma));
 }
 
-std::tuple<Tensor, Tensor, Tensor>
-infinitely_differentiable_native_group_norm_backward(
+std::
+    tuple<Tensor, Tensor, Tensor> static inline infinitely_differentiable_native_group_norm_backward(
+        const Tensor& dY,
+        const Tensor& X,
+        const Tensor& mean,
+        const Tensor& rstd,
+        const std::optional<Tensor>& gamma,
+        const c10::SymInt& N,
+        const c10::SymInt& C,
+        const c10::SymInt& HxW,
+        int64_t group,
+        std::array<bool, 3> grad_input_mask) {
+  const int64_t G = group;
+  const auto D = C / G;
+  c10::SymFloat s = c10::SymFloat(1.0) / c10::SymFloat(D * HxW);
+
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (!dY.defined()) {
+    return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+  }
+
+  const Tensor X_tensor = X.reshape_symint({N, G, D, HxW});
+  const Tensor mean_tensor = mean.reshape_symint({N, G, 1, 1});
+  const Tensor rstd_tensor = rstd.reshape_symint({N, G, 1, 1});
+  const Tensor dY_tensor{dY.reshape_symint({N, G, D, HxW})};
+  const Tensor ds{(dY_tensor * X_tensor).sum(3, /* keepdim */ true)};
+  const Tensor db{dY_tensor.sum(3, /* keepdim */ true)};
+
+  if (grad_input_mask[0]) {
+    Tensor gamma_tensor;
+    if (isDefined(gamma)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      gamma_tensor = gamma->reshape_symint({1, G, D, 1});
+    }
+    const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
+    const Tensor a =
+        isDefined(gamma) ? rstd_tensor * gamma_tensor : rstd_tensor;
+    Tensor b = (isDefined(gamma) ? (ds * gamma_tensor) : ds)
+                   .sum(2, /* keepdim */ true);
+    Tensor c = (isDefined(gamma) ? (db * gamma_tensor) : db)
+                   .sum(2, /* keepdim */ true);
+    b = (c * mean_tensor - b) * rstd_cube * s;
+    c = -b * mean_tensor - c * rstd_tensor * std::move(s);
+    dX = (a * dY_tensor + b * X_tensor + c).reshape_as(X);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_symint({C});
+  }
+  if (grad_input_mask[2]) {
+    dbeta = db.sum(0).reshape_symint({C});
+  }
+
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+}
+
+std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_dispatcher(
     const Tensor& dY,
     const Tensor& dmean,
     const Tensor& drstd,
@@ -5438,72 +5494,52 @@ infinitely_differentiable_native_group_norm_backward(
     const c10::SymInt& C,
     const c10::SymInt& HxW,
     int64_t group,
-    double eps,
     std::array<bool, 3> grad_input_mask) {
-  const int64_t G = group;
-  const auto D = C / G;
-  c10::SymFloat s = c10::SymFloat(1.0) / c10::SymFloat(D * HxW);
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
-  const Tensor X_tensor = X.reshape_symint({N, G, D, HxW});
-  const Tensor mean_tensor = mean.reshape_symint({N, G, 1, 1});
-  const Tensor rstd_tensor = rstd.reshape_symint({N, G, 1, 1});
-  Tensor dY_tensor;
-  Tensor ds;
-  Tensor db;
-  if (dY.defined()) {
-    dY_tensor = dY.reshape_symint({N, G, D, HxW});
-    ds = (dY_tensor * X_tensor).sum(3, /* keepdim */ true);
-    db = dY_tensor.sum(3, /* keepdim */ true);
-  }
-  if (grad_input_mask[0]) {
-    Tensor gamma_tensor;
-    if (isDefined(gamma)) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      gamma_tensor = gamma->reshape_symint({1, G, D, 1});
+  Tensor dX{}, dgamma{}, dbeta{};
+  if (GradMode::is_enabled()) {
+    std::tie(dX, dgamma, dbeta) =
+        infinitely_differentiable_native_group_norm_backward(
+            dY, X, mean, rstd, gamma, N, C, HxW, group, grad_input_mask);
+  } else if (dY.defined()) {
+    std::tie(dX, dgamma, dbeta) = at::native_group_norm_backward_symint(
+        dY, X, mean, rstd, gamma, N, C, HxW, group, grad_input_mask);
+  } else {
+    // Define only dgamma and dbeta, since dX is guaranteed to be defined below
+    // if we're here.
+    auto dparam_options{
+        (gamma && gamma->defined() ? gamma->options() : X.options())
+            .memory_format(at::MemoryFormat::Contiguous)};
+    if (grad_input_mask[1]) {
+      dgamma = at::zeros_symint({C}, dparam_options);
     }
-    const Tensor var =
-        ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
-    const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
+    if (grad_input_mask[2]) {
+      dbeta = at::zeros_symint({C}, dparam_options);
+    }
+  }
+
+  if (grad_input_mask[0] && (dmean.defined() || drstd.defined())) {
     Tensor dvar;
     if (drstd.defined()) {
-      dvar = -0.5 * rstd_cube * drstd.view_symint({N, G, 1, 1});
+      auto rstd_view = rstd.reshape_symint({N, group, 1});
+      dvar = -0.5 * rstd_view * rstd_view * rstd_view *
+          drstd.view_symint({N, group, 1});
     }
-    if (dY.defined()) {
-      const Tensor a =
-          isDefined(gamma) ? rstd_tensor * gamma_tensor : rstd_tensor;
-      Tensor b = (isDefined(gamma) ? (ds * gamma_tensor) : ds)
-                     .sum(2, /* keepdim */ true);
-      Tensor c = (isDefined(gamma) ? (db * gamma_tensor) : db)
-                     .sum(2, /* keepdim */ true);
-      b = (c * mean_tensor - b) * rstd_cube * s;
-      c = -b * mean_tensor - c * rstd_tensor * std::move(s);
-      dX = a * dY_tensor + b * X_tensor + c;
-      if (dmean.defined() && drstd.defined()) {
-        dX = dX +
-            var_mean_backward(
+
+    auto getVarMean{[&]() -> Tensor {
+      return var_mean_backward(
                  dvar,
-                 dmean.view_symint({N, G, 1, 1}),
-                 X_tensor,
-                 {2, 3},
+                 dmean.defined() ? dmean.reshape_symint({N, group, 1}) : dmean,
+                 X.reshape_symint({N, group, C / group * HxW}),
+                 {2},
                  0,
-                 true);
-      }
-      dX = dX.reshape_as(X);
-    } else if (dmean.defined() && drstd.defined()) {
-      dX = var_mean_backward(
-               dvar, dmean.view_symint({N, G, 1, 1}), X_tensor, {2, 3}, 0, true)
-               .reshape_as(X);
+                 true)
+          .reshape(X.sizes());
+    }};
+    if (dX.defined()) {
+      dX = dX + getVarMean();
+    } else {
+      dX = getVarMean();
     }
-  }
-  if (grad_input_mask[1] && dY.defined()) {
-    dgamma = ((ds - db * mean_tensor) * rstd_tensor)
-                 .sum(0)
-                 .reshape_as(toNonOptTensor(gamma));
-  }
-  if (grad_input_mask[2] && dY.defined()) {
-    dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
