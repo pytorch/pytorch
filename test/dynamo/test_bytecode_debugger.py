@@ -204,7 +204,7 @@ class TestBytecodeDebugger(TestCase):
                     stack_at_call,
                     """\
 Stack (TOS at end):
-  [0] 0xADDR <function forward at 0xADDR>
+  [0] 0xADDR <bound method forward of GraphModule()>
   [1] 0x0 <NULL>
   [2] 0xADDR tensor(...)""",
                 )
@@ -214,7 +214,7 @@ Stack (TOS at end):
                     """\
 Stack (TOS at end):
   [0] 0x0 <NULL>
-  [1] 0xADDR <function forward at 0xADDR>
+  [1] 0xADDR <bound method forward of GraphModule()>
   [2] 0xADDR tensor(...)""",
                 )
             else:
@@ -223,7 +223,7 @@ Stack (TOS at end):
                     stack_at_call,
                     """\
 Stack (TOS at end):
-  [0] 0xADDR <function forward at 0xADDR>
+  [0] 0xADDR <bound method forward of GraphModule()>
   [1] 0xADDR tensor(...)""",
                 )
 
@@ -459,18 +459,18 @@ Stack (TOS at end):
             if sys.version_info >= (3, 13):
                 self.assertExpectedInline(
                     stack_list,
-                    """[<function forward at 0xADDR>, <NULL>, tensor(...)]""",
+                    """[<bound method forward of GraphModule()>, <NULL>, tensor(...)]""",
                 )
             elif sys.version_info >= (3, 11):
                 self.assertExpectedInline(
                     stack_list,
-                    """[<NULL>, <function forward at 0xADDR>, tensor(...)]""",
+                    """[<NULL>, <bound method forward of GraphModule()>, tensor(...)]""",
                 )
             else:
                 # Python 3.10
                 self.assertExpectedInline(
                     stack_list,
-                    """[<function forward at 0xADDR>, tensor(...)]""",
+                    """[<bound method forward of GraphModule()>, tensor(...)]""",
                 )
 
         InteractiveDebugSession(fn, (torch.ones(3),), test_logic)
