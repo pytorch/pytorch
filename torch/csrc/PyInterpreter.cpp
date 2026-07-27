@@ -295,15 +295,17 @@ void ConcretePyInterpreterVTable::dispatch(
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
   std::vector<at::Tensor> mutable_tensor_list_args;
-  for (const auto idx : c10::irange(arguments.size())) {
-    const auto* alias_info = schema.arguments()[idx].alias_info();
-    if (alias_info == nullptr || !alias_info->isWrite() ||
-        !arguments[idx].isList()) {
-      continue;
-    }
-    for (const auto& item : arguments[idx].toListRef()) {
-      if (item.isTensor()) {
-        mutable_tensor_list_args.push_back(item.toTensor());
+  if (schema.operator_name().name.rfind("aten::_foreach_", 0) == 0) {
+    for (const auto idx : c10::irange(arguments.size())) {
+      const auto* alias_info = schema.arguments()[idx].alias_info();
+      if (alias_info == nullptr || !alias_info->isWrite() ||
+          !arguments[idx].isList()) {
+        continue;
+      }
+      for (const auto& item : arguments[idx].toListRef()) {
+        if (item.isTensor()) {
+          mutable_tensor_list_args.push_back(item.toTensor());
+        }
       }
     }
   }
@@ -355,15 +357,13 @@ void ConcretePyInterpreterVTable::dispatch(
       &op,
       &arguments,
       TorchFunctionName::TorchDispatch);
-  // In-place TensorList ops redispatch before native foreach kernels can
-  // update the original tensors' version counters.
-  if (obj != nullptr) {
-    for (const auto& tensor : mutable_tensor_list_args) {
-      tensor.unsafeGetTensorImpl()->bump_version();
-    }
-  }
   pushPyOutToStack(
       op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
+  // In-place TensorList ops redispatch before native foreach kernels can
+  // update the original tensors' version counters.
+  for (const auto& tensor : mutable_tensor_list_args) {
+    tensor.unsafeGetTensorImpl()->bump_version();
+  }
 }
 
 void ConcretePyInterpreterVTable::python_dispatcher(

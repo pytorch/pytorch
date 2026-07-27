@@ -1120,6 +1120,17 @@ $1: f32[1] = torch._ops.aten.detach.default($0)""",
             [version + 2 for version in versions],
         )
 
+    def test_mutable_tensor_list_custom_op_version(self) -> None:
+        @torch.library.custom_op(
+            "test_python_dispatch::mutate_tensor_list", mutates_args={"tensors"}
+        )
+        def mutate_tensor_list(tensors: list[torch.Tensor]) -> None:
+            torch._foreach_add_(tensors, 1)
+
+        tensor = LoggingTensor(torch.ones(1))
+        mutate_tensor_list([tensor])
+        self.assertEqual(tensor._version, 1)
+
     def test_subclass_priority(self) -> None:
         class ErrorA(RuntimeError):
             pass
