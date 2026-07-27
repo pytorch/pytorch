@@ -81,6 +81,7 @@ class TestCase(TorchTestCase):
                 raise_on_ctx_manager_usage=True,
                 suppress_errors=False,
                 log_compilation_metrics=False,
+                canonicalize_output_graph_node_order=True,
             ),
         )
 
@@ -130,6 +131,7 @@ class TestCase(TorchTestCase):
     def assertExpectedInline(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if config.debug_disable_compile_counter:
             return
+        kwargs["skip"] = kwargs.get("skip", 0) + 1
         return super().assertExpectedInline(*args, **kwargs)
 
 

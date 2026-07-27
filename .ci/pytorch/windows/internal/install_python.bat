@@ -7,6 +7,16 @@ if "%DESIRED_PYTHON%"=="3.14t" (
     set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.14.0/python-3.14.0-amd64.exe"
     set ADDITIONAL_OPTIONS="Include_freethreaded=1"
     set PYTHON_EXEC="python3.14t"
+) else if "%DESIRED_PYTHON%"=="3.15t" (
+    echo Python version is set to 3.15t
+    rem 3.15 is still pre-release; python.org ships only beta installers, kept
+    rem under the final-release directory (/ftp/python/3.15.0/).
+    set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.15.0/python-3.15.0b3-amd64.exe"
+    set ADDITIONAL_OPTIONS="Include_freethreaded=1"
+    set PYTHON_EXEC="python3.15t"
+) else if "%DESIRED_PYTHON%"=="3.15" (
+    echo Python version is set to 3.15
+    set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.15.0/python-3.15.0b3-amd64.exe"
 ) else (
     echo Python version is set to %DESIRED_PYTHON%
     set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/%DESIRED_PYTHON%.0/python-%DESIRED_PYTHON%.0-amd64.exe" %= @lint-ignore =%
@@ -20,5 +30,5 @@ start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_t
 if errorlevel 1 exit /b 1
 
 set "PATH=%CD%\Python\Scripts;%CD%\Python;%PATH%"
-%PYTHON_EXEC% -m pip install --upgrade pip setuptools packaging wheel build
+%PYTHON_EXEC% -m pip install --upgrade pip setuptools packaging wheel build scikit-build-core==1.0.0
 if errorlevel 1 exit /b 1

@@ -5,11 +5,14 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
+#include <c10/util/TypeCast.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -18,10 +21,14 @@
 #else
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/kthvalue_native.h>
+#include <ATen/ops/median_native.h>
+#include <ATen/ops/nanmedian_native.h>
 #include <ATen/ops/sort.h>
 #include <ATen/ops/sort_native.h>
 #include <ATen/ops/topk_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 namespace at::native {
 namespace {
@@ -534,8 +541,9 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
     indices.copy_(values.toType(at::ScalarType::Long));
     return;
   }
-  // to mimic cpu behaviour
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "kthvalue_mps", [] {});
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "kthvalue_mps not implemented for ",
+                              self.scalar_type());
 
   sort_out_mps_impl(self,
                     /*stable=*/false,
@@ -544,6 +552,133 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
                     values,
                     indices,
                     TopKParams{/*offset=*/static_cast<int>(k - 1), /*count=*/1});
+}
+
+// Float median: full sort along the last dim, then a per-row NaN-aware pick.
+static void median_sort_gather(const Tensor& in_l, const Tensor& out_vals, const Tensor& out_idxs, bool ignore_nan) {
+  const int64_t sort_size = in_l.size(-1);
+  const int64_t n_rows = in_l.numel() / sort_size;
+  auto sorted_vals = at::empty(in_l.sizes(), in_l.options());
+  auto sorted_idxs = at::empty(in_l.sizes(), in_l.options().dtype(kLong));
+  sort_out_mps_impl(in_l, /*stable=*/false, in_l.dim() - 1, /*descending=*/false, sorted_vals, sorted_idxs);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = mpsStream->commandEncoder();
+      const auto kernel = fmt::format("median_gather_{}", scalarToMetalTypeString(in_l));
+      auto pso = lib.getPipelineStateForFunc(kernel);
+      getMPSProfiler().beginProfileKernel(pso, kernel, {sorted_vals});
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, sorted_vals, sorted_idxs, out_vals, out_idxs, static_cast<uint32_t>(sort_size), ignore_nan);
+      mtl_dispatch1DJob(enc, pso, n_rows);
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+}
+
+static std::tuple<Tensor&, Tensor&> median_with_indices_impl_mps(Tensor& values,
+                                                                 Tensor& indices,
+                                                                 const Tensor& self,
+                                                                 int64_t dim,
+                                                                 bool keepdim,
+                                                                 bool ignore_nan) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "median_mps not implemented for ",
+                              self.scalar_type());
+  checkDeviceType("median", {values, indices}, self.device().type());
+  checkScalarType("median", {indices, "indices", 1}, kLong);
+  checkSameType("median", {values, "values", 0}, {self, "self", 2});
+
+  std::vector<int64_t> out_shape = self.sizes().vec();
+  zero_numel_check_dims(self, dim, "median()");
+  if (self.dim() > 0) {
+    if (keepdim) {
+      out_shape[dim] = 1;
+    } else {
+      out_shape.erase(out_shape.begin() + dim);
+    }
+  }
+
+  resize_output(values, out_shape);
+  resize_output(indices, out_shape);
+
+  if (self.numel() == 0) {
+    return std::forward_as_tuple(values, indices);
+  }
+  if (self.dim() == 0) {
+    values.copy_(self);
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
+
+  Tensor vals = keepdim ? values : values.unsqueeze(dim);
+  Tensor inds = keepdim ? indices : indices.unsqueeze(dim);
+
+  if (!self.is_floating_point()) {
+    // no NaNs possible: select rank (n-1)/2 directly, like kthvalue
+    const auto k = static_cast<int>((self.size(dim) - 1) / 2);
+    sort_out_mps_impl(self, /*stable=*/false, dim, /*descending=*/false, vals, inds, TopKParams{k, 1});
+  } else {
+    const bool direct = vals.is_contiguous() && inds.is_contiguous();
+    Tensor mv = direct ? vals : at::empty(vals.sizes(), vals.options());
+    Tensor mi = direct ? inds : at::empty(inds.sizes(), inds.options());
+    Tensor in_l = dim == self.dim() - 1 ? self : self.movedim(dim, -1);
+    median_sort_gather(in_l, mv, mi, ignore_nan);
+    if (!direct) {
+      vals.copy_(mv);
+      inds.copy_(mi);
+    }
+  }
+  return std::forward_as_tuple(values, indices);
+}
+
+// Global median via radix selection (see Sort.metal); no sort materialized.
+static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool ignore_nan) {
+  const int n_passes = static_cast<int>(flat.element_size());
+  const auto numel = c10::checked_convert<uint32_t>(flat.numel(), "uint32_t");
+  auto state = at::zeros({3}, flat.options().dtype(kLong));
+  auto hist = at::zeros({257}, flat.options().dtype(kInt));
+  const auto n_tgs = std::min<uint32_t>(at::ceil_div(numel, 256u), 256u);
+
+  const auto type_str = scalarToMetalTypeString(flat);
+  const auto hist_name = fmt::format("median_select_hist_{}", type_str);
+  const auto pick_name = fmt::format("median_select_pick_{}", type_str);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = mpsStream->commandEncoder();
+      auto hist_pso = lib.getPipelineStateForFunc(hist_name);
+      auto pick_pso = lib.getPipelineStateForFunc(pick_name);
+      getMPSProfiler().beginProfileKernel(hist_pso, hist_name, {flat});
+      for (int p = 0; p < n_passes; p++) {
+        const auto shift = static_cast<uint32_t>((n_passes - 1 - p) * 8);
+        const bool first = p == 0;
+        const bool last = p == n_passes - 1;
+        [enc setComputePipelineState:hist_pso];
+        mtl_setArgs(enc, flat, state, hist, numel, shift, first);
+        [enc dispatchThreadgroups:MTLSizeMake(n_tgs, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [enc setComputePipelineState:pick_pso];
+        mtl_setArgs(enc, out_val, state, hist, numel, first, last, ignore_nan);
+        mtl_dispatch1DJob(enc, pick_pso, 1);
+      }
+      getMPSProfiler().endProfileKernel(hist_pso);
+    }
+  });
+}
+
+static Tensor median_impl_mps(const Tensor& self, bool ignore_nan) {
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "median_mps not implemented for ",
+                              self.scalar_type());
+  if (self.numel() == 0) {
+    return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
+  }
+  auto out_val = at::empty({}, self.options());
+  median_radix_select(self.flatten().contiguous(), out_val, ignore_nan);
+  return out_val;
 }
 
 } // namespace
@@ -637,5 +772,29 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_mps(const Tensor& self,
   }
 
   return std::forward_as_tuple(values, indices);
+}
+
+Tensor median_mps(const Tensor& self) {
+  return median_impl_mps(self, /*ignore_nan=*/false);
+}
+
+Tensor nanmedian_mps(const Tensor& self) {
+  return median_impl_mps(self, /*ignore_nan=*/self.is_floating_point());
+}
+
+std::tuple<Tensor&, Tensor&> median_out_mps(const Tensor& self,
+                                            int64_t dim,
+                                            bool keepdim,
+                                            Tensor& values,
+                                            Tensor& indices) {
+  return median_with_indices_impl_mps(values, indices, self, dim, keepdim, /*ignore_nan=*/false);
+}
+
+std::tuple<Tensor&, Tensor&> nanmedian_out_mps(const Tensor& self,
+                                               int64_t dim,
+                                               bool keepdim,
+                                               Tensor& values,
+                                               Tensor& indices) {
+  return median_with_indices_impl_mps(values, indices, self, dim, keepdim, /*ignore_nan=*/self.is_floating_point());
 }
 } // namespace at::native

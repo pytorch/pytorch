@@ -2837,7 +2837,12 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as warns:
             fn_script = torch.jit.script(fn)
             fn_script(torch.tensor(0))
-        warns = [str(w.message) for w in warns]
+        # torch.jit.script now emits a visible deprecation warning; ignore it.
+        warns = [
+            str(w.message)
+            for w in warns
+            if "Please switch to `torch." not in str(w.message)
+        ]
         self.assertEqual(len(warns), 0)
 
     @unittest.skipIf(True, "TODO: re-enable with https://github.com/pytorch/pytorch/pull/29339")
@@ -3743,6 +3748,8 @@ def foo(x):
 
         with warnings.catch_warnings(record=True) as warns:
             scripted = torch.jit.script(check_subclass_warn)
+        # torch.jit.script now emits a visible deprecation warning; ignore it.
+        warns = [w for w in warns if "Please switch to `torch." not in str(w.message)]
         FileCheck().check("TorchScript will treat type annotations of Tensor").run(str(warns[0]))
 
     def test_first_class_module(self):
@@ -7613,7 +7620,7 @@ dedent """
             self.assertEqual(
                 cu.func(),
                 scope['func'](),
-                msg=f"Failed with op: {op}, lhs: {args[0]}, rhs: {args[1]}"
+                msg=lambda msg: f"{msg}\nFailed with op: {op}, lhs: {args[0]}, rhs: {args[1]}"
             )
 
         ops = ['is', 'is not']
@@ -7695,7 +7702,7 @@ dedent """
             self.assertEqual(
                 cu.func(inp),
                 scope['func'](inp),
-                msg=f"Failed with typ: {typ}"
+                msg=lambda msg: f"{msg}\nFailed with typ: {typ}"
             )
 
         inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,), [1, 2], 1]
@@ -15224,6 +15231,9 @@ dedent """
                 def ignored_code(self, x):
                     self.some_state = torch.tensor((100,))
 
+        # script_method now emits a visible deprecation warning; ignore it (but
+        # keep the FutureWarning this test checks for).
+        warns = [w for w in warns if "Please switch to `torch." not in str(w.message)]
         FileCheck().check("TorchScript will now drop the function").run(str(warns[0]))
 
         # Assert ignored code is run

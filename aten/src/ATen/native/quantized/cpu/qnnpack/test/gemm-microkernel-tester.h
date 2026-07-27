@@ -869,7 +869,7 @@ class GemmMicrokernelTester {
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
           cRef[mIndex * n() + nIndex] =
-              std::max(std::min(cRef[mIndex * n() + nIndex], cMax), cMin);
+              std::clamp(cRef[mIndex * n() + nIndex], cMin, cMax);
         }
       }
 
@@ -971,7 +971,7 @@ class GemmMicrokernelTester {
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
           cRef[mIndex * n() + nIndex] =
-              std::max(std::min(cRef[mIndex * n() + nIndex], cMax), cMin);
+              std::clamp(cRef[mIndex * n() + nIndex], cMin, cMax);
         }
       }
 

@@ -157,11 +157,14 @@ def annotate_trace(
             for ann in annotations[graph_node_id]:
                 if isinstance(ann, dict):
                     for key, value in ann.items():
-                        args[key] = str(value)
+                        # Legacy pickles wrapped bare strings as {"str": ...};
+                        # the canonical key is "name".
+                        args["name" if key == "str" else key] = str(value)
                     if "stream" in ann:
                         stream_id = int(ann["stream"])
                 else:
-                    args["annotation"] = str(ann)
+                    # Legacy pickles stored bare strings unwrapped.
+                    args["name"] = str(ann)
             annotated += 1
 
         # Reassign stream: use annotated stream if available, else default
