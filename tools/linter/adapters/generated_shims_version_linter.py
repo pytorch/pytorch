@@ -25,6 +25,7 @@ from tools.linter.adapters._stable_shim_utils import (
     get_current_version,
     LintMessage,
     LintSeverity,
+    merge_base_with_main,
 )
 
 
@@ -112,27 +113,7 @@ def _read_at_merge_base(filename: str) -> str | None:
     Return `filename` contents at the merge-base of HEAD with origin/main, or
     None if the file did not exist at that point. Raises if git operations fail.
     """
-    result = subprocess.run(
-        ["git", "fetch", "origin", "main"],
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to fetch origin. Error: {result.stderr.strip()}")
-
-    result = subprocess.run(
-        ["git", "merge-base", "HEAD", "origin/main"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Failed to find merge-base with origin/main. "
-            f"Error: {result.stderr.strip()}"
-        )
-    merge_base = result.stdout.strip()
+    merge_base = merge_base_with_main()
 
     # `git show <ref>:<path>` requires <path> relative to the repo root;
     # lintrunner may pass `filename` as an absolute path.
@@ -141,7 +122,9 @@ def _read_at_merge_base(filename: str) -> str | None:
         ["git", "show", f"{merge_base}:{rel_path}"],
         capture_output=True,
         text=True,
-        timeout=5,
+        # On a blobless partial clone (CI), the blob at merge-base is not local
+        # and git lazily fetches it over the network, which can exceed a few s.
+        timeout=60,
     )
     if result.returncode != 0:
         # File didn't exist at merge-base; treat all current entries as new.
