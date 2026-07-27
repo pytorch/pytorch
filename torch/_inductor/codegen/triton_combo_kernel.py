@@ -13,12 +13,11 @@ import sympy
 from sympy import Integer, Symbol
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
     import triton
-
-from torch.utils._ordered_set import OrderedSet
 
 from .. import config, metrics
 from ..runtime.hints import DeviceProperties, TritonMeta
@@ -1155,9 +1154,11 @@ class ComboKernel(Kernel):
                     local_to_main[argdef.name] = self.args.size(expr)
                 elif expr not in self.args.sizevars:
                     name = argdef.name
-                    existing_names = tuple(self.args.sizevars.values())
+                    existing_names = OrderedSet(self.args.sizevars.values())
                     if name in existing_names:
-                        suffix = sum(1 for v in existing_names if v.startswith(name))
+                        suffix = 1
+                        while f"{name}{suffix}" in existing_names:
+                            suffix += 1
                         name = f"{name}{suffix}"
                     self.args.sizevars[expr] = name
                     local_to_main[argdef.name] = name
