@@ -3472,6 +3472,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self._normalize_trace_value(value),
                 self._normalize_trace_value(mode),
             )
+        elif name == "store_reduction":
+            # Uniform dispatch targets reduction kernels, so reduction stores
+            # must be captured (buffer-agnostic) like regular stores.
+            buffer_name, index, value = args
+            normalized_args = (
+                self._trace_buffer(buffer_name, store=True),
+                self._normalize_trace_value(index),
+                self._normalize_trace_value(value),
+            )
         else:
             normalized_args = tuple(self._normalize_trace_value(arg) for arg in args)
 

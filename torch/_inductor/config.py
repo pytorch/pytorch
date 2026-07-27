@@ -1127,6 +1127,10 @@ combo_kernel_peak_memory_pct_threshold: float | None = 0.05
 # sub-windows. Set to -1 (or any negative value) to disable splitting
 # and treat each parallel group as one window.
 combo_kernel_max_distance: int = -1
+# When True, detect identical sub-kernels in combo groups and generate a single
+# code body with pointer-array indexing instead of if/elif branching.
+# This eliminates register pressure and branching overhead for uniform sub-kernels.
+combo_kernel_uniform_dispatch = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
