@@ -43,6 +43,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     is_big_gpu,
+    run_triton_code_in_subprocess,
     running_on_tdm_device,
 )
 from torch.utils._sympy.symbol import SymT
@@ -2359,8 +2360,6 @@ class TestTDMScaled(TestCase):
         if not has_triton_amd_tdm_device("gfx1250"):
             self.skipTest("Triton without gfx1250 TDM backend support")
 
-        import subprocess
-        import sys
         import textwrap
 
         child = textwrap.dedent(
@@ -2399,12 +2398,7 @@ class TestTDMScaled(TestCase):
             print("<<<SEP>>>".join(outputs))
             """
         )
-        proc = subprocess.run(
-            [sys.executable, "-c", child],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
+        proc = run_triton_code_in_subprocess(child)
         if proc.returncode != 0:
             self.fail(proc.stderr.strip())
         parts = proc.stdout.split("<<<SEP>>>")
