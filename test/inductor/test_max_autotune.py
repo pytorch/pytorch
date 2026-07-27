@@ -1752,9 +1752,6 @@ class TestMaxAutotune(TestCase):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
     @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
@@ -1817,13 +1814,19 @@ class TestMaxAutotune(TestCase):
             # We assume with the large k dim relative to m, n, decompose_k will be most performant
             out, code = run_and_get_code(compiled_func, a, b)
 
+            bmm_dtype_kernel = (
+                "aoti_torch_cuda_bmm_dtype_out"
+                if config.cpp_wrapper
+                else "extern_kernels.bmm_dtype"
+            )
+
             if dynamic:
-                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                    "decompose_k"
-                ).run(code[0])
+                FileCheck().check_not(bmm_dtype_kernel).check_not("decompose_k").run(
+                    code[0]
+                )
             else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
+                FileCheck().check(bmm_dtype_kernel).check_regex(
+                    "triton_.*_fused_.*"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
@@ -1832,12 +1835,12 @@ class TestMaxAutotune(TestCase):
             compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
             out, code = run_and_get_code(compiled_func, a, b)
             if dynamic:
-                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                    "decompose_k"
-                ).run(code[0])
+                FileCheck().check_not(bmm_dtype_kernel).check_not("decompose_k").run(
+                    code[0]
+                )
             else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
+                FileCheck().check(bmm_dtype_kernel).check_regex(
+                    "triton_.*_fused_.*"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
@@ -1852,12 +1855,12 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(compiled_func, a, b)
 
             if dynamic:
-                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                    "decompose_k"
-                ).run(code[0])
+                FileCheck().check_not(bmm_dtype_kernel).check_not("decompose_k").run(
+                    code[0]
+                )
             else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*_0.run"
+                FileCheck().check(bmm_dtype_kernel).check_regex(
+                    "triton_.*_fused_.*_0"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
@@ -1874,9 +1877,6 @@ class TestMaxAutotune(TestCase):
                 bf16_red_setting
             )
 
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
     @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
@@ -1915,11 +1915,22 @@ class TestMaxAutotune(TestCase):
                 )
 
                 out, code = run_and_get_code(compiled_func, a, b)
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
-                    r"2\*s[0-9]+"
-                ).check_regex("s[0-9]+ = 32").run(code[0])
+                if config.cpp_wrapper:
+                    FileCheck().check_regex(
+                        "triton_.*_fused_.*_result = runTritonKernelWithAutotune"
+                    ).check_regex(r"int64_t s[0-9]+;").check_regex(
+                        r"aoti_torch_item_int64.*, &s[0-9]+"
+                    ).check("decompose_k").check_regex(r"2L\*s[0-9]+").check(
+                        "aoti_torch_cuda_bmm_dtype_out"
+                    ).check_regex(r"s[0-9]+ = 32").run(code[0])
+                else:
+                    FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                        "triton_.*_fused_.*.run"
+                    ).check("decompose_k").check_regex(
+                        r"s[0-9]+ = s[0-9]+"
+                    ).check_regex(r"2\*s[0-9]+").check_regex("s[0-9]+ = 32").run(
+                        code[0]
+                    )
                 torch.testing.assert_close(
                     out,
                     f(a, b),
@@ -1927,9 +1938,6 @@ class TestMaxAutotune(TestCase):
                     rtol=1e-4,
                 )
 
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
     @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
@@ -1973,18 +1981,24 @@ class TestMaxAutotune(TestCase):
                 out, code = run_and_get_code(compiled_func, a, b)
                 out.backward()
 
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
-                    r"256\*s[0-9]+"
-                ).check_regex("s[0-9]+ = 8").run(
-                    # code[1] in this case given backwards
-                    code[1]
-                )
+                # code[1] in this case given backwards
+                if config.cpp_wrapper:
+                    FileCheck().check_regex(
+                        "triton_.*_fused_.*_result = runTritonKernelWithAutotune"
+                    ).check_regex(r"int64_t s[0-9]+;").check_regex(
+                        r"aoti_torch_item_int64.*, &s[0-9]+"
+                    ).check("decompose_k").check_regex(r"256L\*s[0-9]+").check(
+                        "aoti_torch_cuda_bmm_dtype_out"
+                    ).check_regex(r"s[0-9]+ = 8").run(code[1])
+                else:
+                    FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                        "triton_.*_fused_.*.run"
+                    ).check("decompose_k").check_regex(
+                        r"s[0-9]+ = s[0-9]+"
+                    ).check_regex(r"256\*s[0-9]+").check_regex("s[0-9]+ = 8").run(
+                        code[1]
+                    )
 
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
     @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
@@ -2027,11 +2041,18 @@ class TestMaxAutotune(TestCase):
                 # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
                 self.assertEqual(out.stride(), (1096, 1))
 
-                FileCheck().check_not("extern_kernels.bmm_dtype").check(
-                    "decompose_k"
-                ).check(
-                    f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
-                ).run(code[0])
+                if config.cpp_wrapper:
+                    FileCheck().check("decompose_k").check_not(
+                        "aoti_torch_cuda_bmm_dtype_out"
+                    ).check_regex(
+                        rf"aoti_torch_empty_strided.*, cached_torch_dtype_bfloat16, cached_torch_device_type_{GPU_TYPE}"
+                    ).run(code[0])
+                else:
+                    FileCheck().check_not("extern_kernels.bmm_dtype").check(
+                        "decompose_k"
+                    ).check(
+                        f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
+                    ).run(code[0])
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
@@ -2303,7 +2324,6 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(len(configs), 1)
                 self.assertEqual(configs[0], expected_config)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_bmm_out_dtype(self):
         def f(a, b):
             return torch.bmm(a, b, out_dtype=torch.float32)
@@ -2317,10 +2337,13 @@ class TestMaxAutotune(TestCase):
         ):
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
-            FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
+            FileCheck().check(
+                "aoti_torch_cuda_bmm_dtype_out"
+                if config.cpp_wrapper
+                else "extern_kernels.bmm_dtype"
+            ).run(code[0])
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_triton_bmm_out_dtype(self):
         def f(a, b, out_dtype=torch.float32):
             return torch.bmm(a, b, out_dtype=out_dtype)
@@ -2649,9 +2672,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @fresh_cache()
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
     @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
