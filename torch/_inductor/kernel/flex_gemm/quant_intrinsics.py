@@ -7,13 +7,22 @@ the eager custom op and TorchAO's compiled RCEIL path bit-for-bit, while matched
 fused benchmarks showed no material performance regression.
 """
 
+import functools
+import hashlib
 import math
+from pathlib import Path
 
 import cutlass
 import cutlass.cute as cute
 from cutlass._mlir import ir
 from cutlass._mlir.dialects import arith, llvm, vector
 from cutlass.cutlass_dsl import dsl_user_op, T
+
+
+@functools.cache
+def quant_intrinsics_cache_key() -> str:
+    """Include this module's source in generated epilogue cache keys."""
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
 def extract_vector_element(value: ir.Value, index: int) -> ir.Value:
