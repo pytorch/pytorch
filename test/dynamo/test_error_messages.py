@@ -505,10 +505,12 @@ from user code:
                 "method: <WarningOnceLogger>.warning_once",
                 s,
             )
-            return re.sub(
-                r"`(?:__main__|test_error_messages)\.WarningOnceLogger\.warning_once`",
-                "`WarningOnceLogger.warning_once`",
-                s,
+            logger_method_name = (
+                f"{WarningOnceLogger.__module__}."
+                f"{WarningOnceLogger.__qualname__}.warning_once"
+            )
+            return s.replace(
+                f"`{logger_method_name}`", "`WarningOnceLogger.warning_once`"
             )
 
         self.assertExpectedInlineMunged(
@@ -1580,6 +1582,8 @@ TRACE STORE_FAST 'z' [TensorVariable()]
 TRACE LOAD_GLOBAL 'torch' []
 TRACE LOAD_ATTR '_dynamo' [LazyVariableTracker(unrealized: <class 'module'>)]
 TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker(unrealized: <class 'module'>)]
+TRACE PUSH_NULL <class 'torch._dynamo.bytecode_transformation._NotProvided'> [LazyVariableTracker(unrealized: <class 'function'>)]
+TRACE SWAP <class 'torch._dynamo.bytecode_transformation._NotProvided'> [LazyVariableTracker(unrealized: <class 'function'>), NullVariable]
 TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
 """,
         )
