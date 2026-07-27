@@ -3,6 +3,10 @@ name: distributed-triage
 description: Sub-triages issues in the oncall:distributed queue by assigning distributed module labels, routing to sub-oncalls, and marking triaged. Use when an issue has been routed to oncall:distributed and needs second-level triage.
 hooks:
   PreToolUse:
+    - matcher: "mcp__github__issue_write|mcp__github__update_issue|mcp__github__add_issue_comment|mcp__github__transfer_issue"
+      hooks:
+        - type: command
+          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/validate_issue_target.py"
     - matcher: "mcp__github__issue_write|mcp__github__update_issue"
       hooks:
         - type: command
@@ -16,6 +20,7 @@ This sub-skill picks up where the PT-level triage bot leaves off. It processes i
 ## Contents
 - [MCP Tools Available](#mcp-tools-available)
 - [Reference Files](#reference-files)
+- [Comment Deduplication](#comment-deduplication)
 - [Distributed Triage Steps](#distributed-triage-steps)
   - Step 0: Already Triaged by Human
   - Step 1: Is This Actually a Distributed Issue?
@@ -47,6 +52,19 @@ Use these GitHub MCP tools for triage:
 
 ---
 
+## Comment Deduplication
+
+Before adding any issue comment:
+1. Read the existing comments with `mcp__github__issue_read`.
+2. Check whether the triage bot has already posted the same template or a substantially equivalent request/explanation.
+3. If a duplicate exists, do not add another comment. Continue with any non-comment actions that are still needed, such as labels.
+
+Treat a comment as duplicate even if the wording differs slightly or an older
+template version was used. For distributed triage, this includes an existing
+distributed reproduction request or an existing "not distributed" notice.
+
+---
+
 ## Distributed Triage Steps
 
 ### 0) Already Triaged by Human?
@@ -75,7 +93,7 @@ Read the issue title, description, and comments. Determine whether the issue is 
 
 **If NOT a distributed issue:**
 1. Add `triage review` + `bot-triaged` labels
-2. Post a comment using the `not_distributed` template from [templates.json](templates.json)
+2. Post a comment using the `not_distributed` template from [templates.json](templates.json), unless an equivalent "not distributed" comment already exists
 3. Do **NOT** remove `oncall: distributed` — let the human oncall re-route
 4. **STOP**
 
@@ -145,7 +163,7 @@ High priority criteria for distributed issues:
 If the issue lacks a minimal reproduction script:
 
 1. Add `needs reproduction` + `bot-triaged` labels
-2. Post a comment using the `needs_distributed_reproduction` template from [templates.json](templates.json)
+2. Post a comment using the `needs_distributed_reproduction` template from [templates.json](templates.json), unless an equivalent distributed reproduction request already exists
 
 **Do NOT request reproduction when:**
 - The issue already has a code snippet, script, or steps that someone could follow to reproduce
@@ -165,6 +183,7 @@ If the issue lacks a minimal reproduction script:
 - Add `triaged` when you are NOT confident in the classification — i.e. any time the action also applies `triage review` or `needs reproduction`, or in the §5 high-priority flow
 - Add labels not in [distributed-labels.json](distributed-labels.json)
 - Add comments to issues except when using the templates in Step 1 (mislabel) or Step 6 (reproduction)
+- Add a comment when the bot has already posted the same template or a substantially equivalent message on the issue
 - Assign issues to users
 - Add `high priority` directly — use `triage review` and let humans decide
 
@@ -174,4 +193,5 @@ If the issue lacks a minimal reproduction script:
 - Add `triaged` ONLY when you reach a confident, complete classification: a human already classified it (Step 0), a confident sub-oncall routing (Step 2), or a HIGH/MEDIUM-confidence module classification (Step 3).
 - Always add a sub-oncall label (Step 2) before module labels (Step 3)
 - Read the full issue including comments before classifying
+- Read existing comments before every comment action and skip duplicate bot messages
 - Check the rubric's "Common Mislabel Traps" section before finalizing
