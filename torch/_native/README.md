@@ -216,6 +216,67 @@ their functional counterparts (`aten::add_` → `aten::add`) before running
 decompositions. If you want overrides to fire in compiled graphs as well
 as eager, register overrides for the **functional** variant too.
 
+### Scalar arguments and type promotion on the fallback path
+
+Ops like `add`/`sub`/`mul`/`div`/comparisons accept a Python number where a
+Tensor is expected (`x + 0.5`, `2.0 - x`, `x.div(1e5)`). aten coerces that
+number into a **wrapped-number tensor** in its unboxed arg-parsing layer,
+*above* the dispatcher (`torch/csrc/utils/python_arg_parser.cpp`, which builds a
+0-d tensor via `scalar_to_tensor` then flags it with
+`TensorImpl::set_wrapped_number(true)` -- cf. `at::native::wrapped_scalar_tensor`
+in `aten/src/ATen/ScalarOps.h` and the flag in `c10/core/TensorImpl.h`). Our
+eager
+router is installed at a **backend dispatch key**, *below* that layer, so when a
+`cond` declines and we fall back to the captured aten kernel, the raw Python
+number is still sitting in a Tensor slot and `call_boxed` rejects it. The
+registry's `_scalar_arg_coercer` reconstructs the wrapped-number coercion before
+calling the fallback.
+
+A wrapped number is a **weak** operand with two independent properties that must
+both be reproduced:
+
+- **Value** is held at full precision and the op computes in fp32 opmath. So
+  `fp16_tensor + (-70000.0)` must stay `-10000` (not overflow to `-inf`), and
+  `fp16_0d.div(1e5)` must keep `1e5` exact (not round it to `inf`).
+- **Dtype** promotion is weak: the number's dtype *category* participates but its
+  width does not. `bf16 + 1.5 -> bf16`, `int + 0.5 -> float`, `int + 2 -> int`.
+  Whether the category propagates depends on the other operands' dimensionality
+  (documented in `torch/_prims_common/__init__.py::elementwise_dtypes`): against
+  a **dim>0** tensor the number never bumps the category (`fp16[4] + 1e5 ->
+  fp16`), but among only **0-d** ("scalar-like") operands categories *do* combine
+  (`uint8_0d + 1 -> uint8`, and `long_0d + half_0d -> half`). The ground-truth
+  promotion lives in `aten/src/ATen/TensorIterator.cpp::compute_types` and
+  `aten/src/ATen/native/TypeProperties.cpp::result_type`.
+
+There is **no Python binding** for `set_wrapped_number`, so we cannot build a
+true wrapped number; the coercer approximates it in three steps:
+
+1. Wrap each scalar at **natural precision** -- `torch.as_tensor(num)` (float ->
+   f64, int -> i64, bool -> bool, complex -> c128). This never rounds the value,
+   so the fp32-opmath value semantics are preserved.
+2. Compute the **weak-promotion output dtype** by folding `torch.result_type`
+   over the *raw* operands (numbers must stay numbers -- pre-wrapping them into
+   strong 0-d tensors would defeat the weak rule).
+3. Call the fallback, then **cast the result down** to that dtype -- but *only*
+   when the result and the target are the **same kind** (both integer, or both
+   floating). A differing kind means the op itself changed category (`div` maps
+   int -> float), in which case `result_type` is *not* the output dtype and
+   casting to it would truncate (`div(-10, tensor(9)) -> 1` instead of `1.11`).
+   The same-kind gate also leaves bool comparison outputs untouched.
+
+Against a dim>0 tensor the natural wrap already yields the correct dtype, so the
+cast is a no-op; it only fires to narrow the over-promotion that the natural wrap
+introduces among 0-d operands (`uint8_0d + 1` naturally gives `int64`, cast back
+to `uint8`). Op families that override scalar-overload siblings
+(`add`/`sub`/`mul`/`div`/...) get this for free via the shared router; families
+with no Tensor slots pay nothing (the coercer is `None`).
+
+Separately, an override's own `cond` must **decline inputs its kernels cannot
+serve** so the fallback (with this coercion) handles them: e.g. the pointwise
+family declines complex scalar args (`add(real, real, alpha=1j)`) and operands
+on a different device from `self`, letting aten raise its native errors instead
+of launching a real-dtype CUDA kernel on them.
+
 ## Registering a New Operator
 
 We currently don't have a use for this functionality, please come talk to us if you want it!
