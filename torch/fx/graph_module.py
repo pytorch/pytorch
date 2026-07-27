@@ -876,7 +876,7 @@ class {module_name}(torch.nn.Module):
                 # ["foo", "bar", "baz"]
                 fullpath = node.target.split(".")
 
-                # If we're looking at multiple parts of a path, join
+                # If we're looking at multiple parts of a path,
                 # join them with a dot. Otherwise, return that single
                 # element without doing anything to it.
                 def join_fn(x: str, y: str) -> str:
