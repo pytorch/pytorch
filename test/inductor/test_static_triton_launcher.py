@@ -135,6 +135,8 @@ class TestStaticTritonLauncherUnit(TestCase):
         self.assertIsNone(owner_ref())
 
     def test_global_scratch_allocation(self):
+        import types
+
         fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
         src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
         metadata = SimpleNamespace(
@@ -163,16 +165,22 @@ class TestStaticTritonLauncherUnit(TestCase):
         launch_kernel = mock.Mock()
         kernel.C_impl = SimpleNamespace(_launch_kernel=launch_kernel)
 
-        from triton.runtime import _allocation
-
-        allocator = SimpleNamespace(get=lambda: alloc_fn)
-        with mock.patch.object(_allocation, "_allocator", allocator):
+        allocation = types.ModuleType("triton.runtime._allocation")
+        allocation._allocator = SimpleNamespace(get=lambda: alloc_fn)
+        runtime = types.ModuleType("triton.runtime")
+        runtime._allocation = allocation
+        triton_module = types.ModuleType("triton")
+        triton_module.runtime = runtime
+        modules = {
+            "triton": triton_module,
+            "triton.runtime": runtime,
+            "triton.runtime._allocation": allocation,
+        }
+        with mock.patch.dict("sys.modules", modules):
             kernel.run(2, 3, 1, 4, 5)
 
         alloc_fn.assert_called_once_with(192, 16, 4)
         launch_kernel.assert_called_once_with(1, 2, 3, 1, 4, 0, "OO", (5, scratch), 4)
-
-        import types
 
         def launcher_body(grid_0, grid_1, grid_2, stream, *args):
             runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
