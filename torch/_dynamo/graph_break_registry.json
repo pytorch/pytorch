@@ -3792,6 +3792,24 @@
       ]
     }
   ],
+  "GB3069": [
+    {
+      "Gb_type": "Custom op missing fake impl during tracing",
+      "Context": "{node.target}",
+      "Explanation": "A custom operator was defined and register_fake'd inside the compiled function, then called before the register_fake side effect was applied.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom op missing fake impl during tracing",
+      "Context": "{node.target}",
+      "Explanation": "A custom operator was called during tracing before its fake/abstract impl was registered.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0249": [
     {
       "Gb_type": "bad device argument to torch.accelerator.current_stream",
@@ -4519,6 +4537,16 @@
       "Gb_type": "call to a callable object with no traceable __call__",
       "Context": "object={self.value}",
       "Explanation": "Dynamo could not trace a Python `__call__` method on this object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4532": [
+    {
+      "Gb_type": "hasattr on wrapper subclass raised in fake probe",
+      "Context": "hasattr({self}, {name})",
+      "Explanation": "Probing hasattr on the fake wrapper subclass for attribute '{name}' raised a non-AttributeError exception.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
