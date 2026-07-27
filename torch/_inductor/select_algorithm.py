@@ -3236,14 +3236,14 @@ class ExternKernelChoice:
 
     def __init__(
         self,
-        kernel,
-        cpp_kernel=None,
+        kernel: Callable[..., Any],
+        cpp_kernel: str | None = None,
         *,
-        name=None,
-        has_out_variant=True,
-        op_overload=None,
-        use_fallback_kernel=False,
-        kernel_creator=None,
+        name: str | None = None,
+        has_out_variant: bool = True,
+        op_overload: torch._ops.OpOverload | None = None,
+        use_fallback_kernel: bool = False,
+        kernel_creator: Callable[..., ir.ExternKernel] | None = None,
     ) -> None:
         super().__init__()
         name = name or kernel.__name__
@@ -3275,7 +3275,7 @@ class ExternKernelChoice:
     def lookup(cls, name: str) -> Optional["ExternKernelChoice"]:
         return cls._registry.get(name)
 
-    def to_callable(self):
+    def to_callable(self) -> Callable[..., Any]:
         return getattr(extern_kernels, self.name)
 
     def call_name(self):
@@ -3481,22 +3481,19 @@ class ExternKernelCaller(ChoiceCaller):
 
         # Determine if this is a GPU or CPU kernel
         if self.layout:
-            device = self.layout.device
+            self.device = self.layout.device
         else:
-            device = None
+            self.device = torch.device("cpu")
             for inp_node in self.input_nodes:
                 dev = inp_node.get_device()
                 if dev and dev.type != "cpu":
-                    device = dev
+                    self.device = dev
                     break
-
-            if not device:
-                device = torch.device("cpu")
 
         self.input_tensor_meta: list[TensorMeta] | TensorMeta
         self.output_tensor_meta: list[TensorMeta] | TensorMeta
         self.input_tensor_meta, self.output_tensor_meta = [], []
-        if device.type == "cpu":
+        if self.device.type == "cpu":
             benchmark_cls = ExternKernelCPUBenchmarkRequest
         else:
             try:
@@ -3558,6 +3555,34 @@ class ExternKernelCaller(ChoiceCaller):
             ]
         )
 
+    def get_cpp_kernel_name(self) -> str | None:
+        """In cpp_wrapper mode, the cpp_kernel_name (if present) won't match the C-shim
+        name.  Re-derive the correct cpp_kernel_name in that case."""
+        if not config.cpp_wrapper:
+            return self.choice.cpp_kernel_name
+
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        from .codegen.cpp_wrapper_cpu import CppWrapperCpu
+
+        op_overload = self.choice.op_overload or self.choice.to_callable()
+        op_overload_name = (
+            str(op_overload)
+            if isinstance(op_overload, torch._ops.OpOverload)
+            else (
+                f"{op_overload}.default"
+                if isinstance(op_overload, torch._ops.OpOverloadPacket)
+                else ""
+            )
+        )
+        if op_overload_name in inductor_fallback_ops:
+            op_overload = cast(torch._ops.OperatorBase, op_overload)
+            return CppWrapperCpu.get_c_shim_func_name(
+                op_overload.name(), self.device.type
+            )
+
+        return self.choice.cpp_kernel_name
+
     def output_node(self):
         if self.choice.use_fallback_kernel:
             if self.choice.op_overload is None:
@@ -3575,7 +3600,7 @@ class ExternKernelCaller(ChoiceCaller):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 python_kernel_name=self.choice.call_name(),
-                cpp_kernel_name=self.choice.cpp_kernel_name,
+                cpp_kernel_name=self.get_cpp_kernel_name(),
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 op_overload=self.choice.op_overload,
                 kwargs=self.kwargs,
@@ -4789,16 +4814,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         kernel_name=c.bmreq.kernel_name, source_code=source_code
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
-                elif (
-                    nvgemm_choice
-                    and use_nvgemm_subprocess
-                    # Scaled-GEMM enum args now pickle (see _register_enum_pickling
-                    # in nv_universal_gemm_utils), but the scaled precompile worker
-                    # still initializes CUDA and then forks -> "Cannot re-initialize
-                    # CUDA in forked subprocess". Keep scaled in-process until that
-                    # worker is made fork-safe (or the pool forced to spawn).
-                    and c.bmreq.variant.name != "SCALED_GEMM"
-                ):
+                elif nvgemm_choice and use_nvgemm_subprocess:
                     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
                         CUDAContextMetadata,
                     )
