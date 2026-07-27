@@ -9,9 +9,9 @@ namespace c10::xpu {
  * acquired from the first recording stream. Later streams that record the event
  * must match the same device.
  *
- * IPC (inter-process communication) for event handles is supported only when
- * built with SYCL compiler >= 2026.2. On older compilers, constructing an
- * XPUEvent with enable_ipc=true will raise an error at record() time.
+ * IPC (inter-process communication) for event handles is supported. If
+ * reconstructed from a handle or ipc_handle() is called, the XPUEvent is
+ * initialized eagerly instead of lazily.
  */
 struct XPUEvent {
   // Constructors
