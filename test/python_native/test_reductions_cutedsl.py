@@ -52,6 +52,7 @@ class TestCuTeDSLReductionWiring(TestCase):
         x = torch.randn(128, 512, device="cuda")
         self.assertEqual(self._fired_count(lambda: torch.sum(x, dim=-1)), 1)
         self.assertEqual(self._fired_count(lambda: torch.mean(x, dim=-1)), 1)
+        self.assertEqual(self._fired_count(lambda: torch.amax(x, dim=-1)), 1)
 
     def test_unsupported_dtype_falls_back(self):
         # Integer input is outside the supported set -> must NOT hit our kernel.
