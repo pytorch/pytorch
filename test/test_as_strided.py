@@ -3,7 +3,11 @@
 from collections import deque
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def get_state(t: torch.Tensor) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -84,6 +88,8 @@ def enumerate_reachable_states(
 
 
 class TestAsStrided(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_size_10_exhaustive(self) -> None:
         """Test that size 10 produces exactly the expected 54 states."""
         expected_states = {
