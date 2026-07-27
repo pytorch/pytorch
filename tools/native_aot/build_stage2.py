@@ -67,10 +67,17 @@ def _torch_probe(expr: str) -> bool:
     cwd=HERE: `python -c` puts the cwd on sys.path (unlike `python
     script.py`, which uses the script's dir), so probing from the repo
     root would import the SOURCE torch/ tree instead of the installed
-    wheel and always fail."""
-    code = f"import sys, torch; sys.exit(0 if ({expr}) else 1)"
-    probe = subprocess.run([sys.executable, "-c", code], capture_output=True, cwd=HERE)
-    return probe.returncode == 0
+    wheel and always fail.
+
+    The verdict travels via stdout, not the exit code: a CUDA torch
+    can segfault in interpreter-shutdown teardown on GPU-less
+    machines AFTER the expression evaluated (observed on the B200
+    build job), which would corrupt an exit-code verdict."""
+    code = f"import torch; print('PROBE_OK' if ({expr}) else 'PROBE_NO', flush=True)"
+    probe = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
+    )
+    return "PROBE_OK" in probe.stdout
 
 
 def should_run() -> bool:
@@ -107,13 +114,28 @@ def _installed_lib_dir() -> str:
     the compiled _C extension rather than torch.__file__: editable
     redirect installs serve Python from the source tree while compiled
     artifacts live in site-packages (same trick as _load_dll_libraries
-    in torch/__init__.py). Wheel installs resolve both to the same dir."""
-    import importlib.util
+    in torch/__init__.py). Wheel installs resolve both to the same dir.
 
-    spec = importlib.util.find_spec("torch._C")
-    if spec is None or not spec.origin:
+    Resolved in a subprocess like every other torch touch in this
+    driver: find_spec("torch._C") imports the parent torch package,
+    and a CUDA torch can segfault in interpreter-shutdown teardown on
+    GPU-less build machines -- which would fail the build AFTER stage
+    2 finished (observed on the B200 build job). The probe prints the
+    path BEFORE its interpreter exits, so trust non-empty output even
+    if the probe process then dies in teardown."""
+    code = (
+        "import importlib.util, os\n"
+        "spec = importlib.util.find_spec('torch._C')\n"
+        "if spec is not None and spec.origin:\n"
+        "    print(os.path.dirname(spec.origin), flush=True)\n"
+    )
+    probe = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
+    )
+    out = probe.stdout.strip()
+    if not out:
         raise RuntimeError("cannot locate installed torch._C")
-    return os.path.join(os.path.dirname(spec.origin), "lib")
+    return os.path.join(out, "lib")
 
 
 def _wheel_hash_and_size(path: str) -> tuple[str, int]:
