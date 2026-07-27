@@ -1036,9 +1036,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # preserved.
             return args[0].call_method(tx, name, [], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
-            from .object_protocol import generic_len
+            from .object_protocol import generic_size
 
-            return generic_len(tx, args[0])
+            return generic_size(tx, args[0])
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
@@ -4616,7 +4616,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Dict implements __len__ via mp_length (mapping protocol), not
-        # sq_length (sequence protocol). Redirect so generic_len works.
+        # sq_length (sequence protocol). Redirect so generic_size works.
         return self.mp_length(tx)
 
     def mp_subscript_impl(
