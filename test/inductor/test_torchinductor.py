@@ -19671,6 +19671,29 @@ if RUN_GPU:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_barrier_on_reduction_loop_readback(self):
+            # A buffer stored in a reduction loop and read back after it needs
+            # a barrier, or one warp may read what another wrote.
+            def fn(a, b, w, bias):
+                y = a + b
+                mean = y.mean(-1, keepdim=True)
+                var = y.var(-1, keepdim=True, unbiased=False)
+                normed = (y - mean) * torch.rsqrt(var + 1e-6) * w + bias
+                return y, normed
+
+            N = 4096
+            inps = [
+                torch.randn(64, N, device=GPU_TYPE),
+                torch.randn(64, N, device=GPU_TYPE),
+                torch.randn(N, device=GPU_TYPE),
+                torch.randn(N, device=GPU_TYPE),
+            ]
+            fn_opt = torch.compile(fn, backend="inductor")
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertTrue("tl.debug_barrier()" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
         def test_index_expr_pure_indexing_no_int64(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 idx = torch.arange(0, 128, device=GPU_TYPE, dtype=torch.int64)
