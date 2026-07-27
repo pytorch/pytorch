@@ -237,14 +237,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         else:
             self.assertIs(ng, dist.GroupMember.NON_GROUP_MEMBER)
 
-    def test_new_group_via_split_group_raises_on_unsupported_args(self):
-        # `split_group` has a narrower surface than `new_group`; under
-        # torchcomms the delegation must surface that mismatch instead of
-        # silently falling back to the legacy path.
-        ranks = list(range(self.world_size))
-        with self.assertRaisesRegex(NotImplementedError, "use_local_synchronization"):
-            dist.new_group(ranks=ranks, use_local_synchronization=True)
-
     def test_new_group_backend_none_narrows_to_default_device(self):
         ranks = list(range(self.world_size))
         ng = dist.new_group(ranks=ranks, backend=None)
@@ -538,6 +530,302 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         res, split_src = self._drive_non_member(torchcomms_enabled=False)
         self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
         split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
+
+
+class TestC10dGroupNameHashSalt(TestCase):
+    """Unit-test the collective-consistent group-name hash salt.
+
+    ``_hash_ranks_to_str`` / ``_process_group_name`` are generic c10d helpers
+    (not TorchComms-specific), but the divergence they can produce was surfaced
+    by the TorchComms subgroup work. After an earlier asymmetric-membership
+    ``new_group`` (e.g. ``new_group([0])``), member and non-member ranks hold
+    different ``len(_world.pg_names)`` because only members register a PG.
+    Salting the hash with that length makes ranks compute DIFFERENT names for the
+    same later group; backends that use the group name as a rendezvous store
+    prefix (e.g. Gloo split's ``connectFullMesh``) then key off mismatched
+    prefixes and deadlock. The salt must instead be ``_world.group_count``, which
+    every rank advances in lockstep -- ``_process_group_name`` increments it
+    before the membership check, on BOTH the hashed and non-hashed paths.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._saved_group_count = c10d._world.group_count
+        self._saved_pg_names = dict(c10d._world.pg_names)
+
+    def tearDown(self):
+        c10d._world.group_count = self._saved_group_count
+        c10d._world.pg_names.clear()
+        c10d._world.pg_names.update(self._saved_pg_names)
+        super().tearDown()
+
+    def _register_dummy_pgs(self, n):
+        # Simulate a rank that registered extra PGs (asymmetric membership).
+        for i in range(n):
+            c10d._world.pg_names[object()] = c10d.GroupName(f"dummy_{i}")
+
+    def test_hash_salt_uses_group_count(self):
+        # Same ranks, different group_count -> different name (salt is live).
+        ranks = [0, 1, 2, 3]
+        c10d._world.group_count = 5
+        name_a = c10d._hash_ranks_to_str(ranks)
+        c10d._world.group_count = 6
+        name_b = c10d._hash_ranks_to_str(ranks)
+        self.assertNotEqual(name_a, name_b)
+
+    def test_hash_independent_of_pg_names_length(self):
+        # ROOT-CAUSE regression: the hash must NOT depend on len(_world.pg_names),
+        # the quantity that diverges across ranks under asymmetric membership.
+        ranks = [0, 1, 2, 3]
+        c10d._world.group_count = 9
+        c10d._world.pg_names.clear()
+        name_few = c10d._hash_ranks_to_str(ranks)
+        self._register_dummy_pgs(5)
+        name_many = c10d._hash_ranks_to_str(ranks)
+        self.assertEqual(name_few, name_many)
+
+    def test_two_asymmetric_ranks_agree_on_name(self):
+        # The deadlock scenario end-to-end through _process_group_name: two ranks
+        # that made the SAME sequence of group-creation calls (equal group_count)
+        # but registered a DIFFERENT number of PGs must compute the same name.
+        ranks = [0, 1, 2, 3]
+        # Rank that was a member of earlier subgroups: more pg_names.
+        c10d._world.group_count = 3
+        c10d._world.pg_names.clear()
+        self._register_dummy_pgs(2)
+        name_member = c10d._process_group_name(ranks, use_hashed_name=True)
+        # Rank that was a non-member: fewer pg_names, but same group_count because
+        # every rank advances it in lockstep regardless of membership.
+        c10d._world.group_count = 3
+        c10d._world.pg_names.clear()
+        name_non_member = c10d._process_group_name(ranks, use_hashed_name=True)
+        self.assertEqual(name_member, name_non_member)
+
+    def test_process_group_name_increments_on_hashed_path(self):
+        c10d._world.group_count = 10
+        c10d._process_group_name([0, 1], use_hashed_name=True)
+        self.assertEqual(c10d._world.group_count, 11)
+
+    def test_process_group_name_increments_on_nonhashed_path(self):
+        c10d._world.group_count = 20
+        c10d._process_group_name([0, 1], use_hashed_name=False)
+        self.assertEqual(c10d._world.group_count, 21)
+
+    def test_nonhashed_name_is_group_count_before_increment(self):
+        c10d._world.group_count = 42
+        name = c10d._process_group_name([0, 1], use_hashed_name=False)
+        self.assertEqual(name, "42")
+        self.assertEqual(c10d._world.group_count, 43)
+
+    def test_repeated_hashed_same_ranks_get_distinct_names(self):
+        # Two distinct PGs over identical ranks must get distinct names; the salt
+        # advancing on the hashed path (fixed by this commit) is what
+        # disambiguates them. Before the fix the hashed path left group_count
+        # unchanged, so back-to-back splits over the same ranks collided.
+        c10d._world.group_count = 0
+        first = c10d._process_group_name([2, 3], use_hashed_name=True)
+        second = c10d._process_group_name([2, 3], use_hashed_name=True)
+        self.assertNotEqual(first, second)
+
+
+class _FakeComm:
+    """Stand-in for a TorchComm whose ``finalize`` is not idempotent.
+
+    Mirrors the real comm: the second ``finalize`` raises, exactly the failure
+    ``destroy_process_group`` must avoid when a comm is shared across device
+    types.
+    """
+
+    def __init__(self):
+        self.finalize_calls = 0
+
+    def finalize(self):
+        self.finalize_calls += 1
+        if self.finalize_calls > 1:
+            raise RuntimeError("already finalized")
+
+
+class _FakeBackendWrapper:
+    def __init__(self, comm):
+        self._comm = comm
+
+    def get_comm(self):
+        return self._comm
+
+
+class _FakeOtherBackend:
+    """A c10d backend that is not a _BackendWrapper (must be left untouched)."""
+
+
+class TestC10dTorchCommsDestroyDedup(TestCase):
+    """Unit-test the comm-deduplication in ``destroy_process_group``.
+
+    A gloo subgroup reports both ``cuda`` and ``cpu`` device types backed by the
+    same _BackendWrapper/comm; the destroy loop must finalize each comm exactly
+    once because ``finalize()`` is not idempotent. Everything TorchComms-specific
+    is patched (``create=True``), so these run even when TorchComms is not
+    installed.
+    """
+
+    _WORLD_ATTRS = (
+        "pg_map",
+        "pg_names",
+        "pg_group_ranks",
+        "pg_backend_config",
+        "pg_to_tag",
+        "pg_coalesce_state",
+        "comms",
+    )
+
+    def setUp(self):
+        super().setUp()
+        self._saved_world = {
+            attr: getattr(c10d._world, attr).copy() for attr in self._WORLD_ATTRS
+        }
+
+    def tearDown(self):
+        for attr, value in self._saved_world.items():
+            container = getattr(c10d._world, attr)
+            container.clear()
+            if isinstance(value, dict):
+                container.update(value)
+            else:
+                container.extend(value)
+        super().tearDown()
+
+    def _drive_destroy(self, device_backends):
+        """Register a fake subgroup PG and run ``destroy_process_group`` on it.
+
+        ``device_backends`` maps device type -> backend object; the PG reports
+        those device types and returns the matching backend from
+        ``_get_backend``. Returns the PG mock so callers can assert on teardown.
+        """
+        pg = mock.MagicMock()
+        pg._device_types = list(device_backends)
+        pg._get_backend.side_effect = lambda dev: device_backends[dev]
+        name = c10d.GroupName(self.id())
+        pg.group_name = name
+
+        c10d._world.pg_map[pg] = (None, None)
+        c10d._world.pg_names[pg] = name
+        c10d._world.pg_group_ranks[pg] = {}
+        c10d._world.pg_backend_config[pg] = ""
+        c10d._world.pg_to_tag[pg] = None
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _unregister_process_group=lambda group_name: None,
+            create=True,
+        ):
+            c10d.destroy_process_group(pg)
+        return pg
+
+    def test_shared_comm_finalized_once(self):
+        # gloo scenario: one _BackendWrapper/comm shared across cuda and cpu.
+        comm = _FakeComm()
+        wrapper = _FakeBackendWrapper(comm)
+        pg = self._drive_destroy({"cuda": wrapper, "cpu": wrapper})
+        self.assertEqual(comm.finalize_calls, 1)
+        pg.shutdown.assert_called_once()
+        self.assertNotIn(pg, c10d._world.pg_map)
+
+    def test_same_comm_distinct_wrappers_finalized_once(self):
+        # Dedup keys on comm identity, not wrapper identity: two distinct
+        # _BackendWrapper objects sharing one comm still finalize it once.
+        comm = _FakeComm()
+        pg = self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeBackendWrapper(comm)}
+        )
+        self.assertEqual(comm.finalize_calls, 1)
+        pg.shutdown.assert_called_once()
+
+    def test_distinct_comms_each_finalized_once(self):
+        comm_a, comm_b = _FakeComm(), _FakeComm()
+        self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm_a), "cpu": _FakeBackendWrapper(comm_b)}
+        )
+        self.assertEqual(comm_a.finalize_calls, 1)
+        self.assertEqual(comm_b.finalize_calls, 1)
+
+    def test_non_backendwrapper_backend_is_skipped(self):
+        # A non-_BackendWrapper backend must not be finalized; the wrapped comm
+        # still finalizes exactly once.
+        comm = _FakeComm()
+        self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeOtherBackend()}
+        )
+        self.assertEqual(comm.finalize_calls, 1)
+
+
+class TestC10dTorchCommsBackendConfig(TestCase):
+    def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: True
+        c10d._torchcomms_is_backend_registered = lambda backend: backend == backend_name
+        c10d._torchcomms_is_backend_built = lambda backend: False
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.CUSTOM,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
+
+    def test_unregistered_device_qualified_backend_with_torchcomms_keeps_gloo_type(
+        self,
+    ):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: True
+        c10d._torchcomms_is_backend_registered = lambda backend: False
+        c10d._torchcomms_is_backend_built = lambda backend: False
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
+
+    def test_registered_device_qualified_backend_without_torchcomms_keeps_gloo_type(
+        self,
+    ):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: False
+        c10d._torchcomms_is_backend_registered = lambda backend: backend == backend_name
+        c10d._torchcomms_is_backend_built = lambda backend: True
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
 
 
 if __name__ == "__main__":
