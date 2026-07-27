@@ -12,7 +12,7 @@ _INV33 = tl.constexpr(2.0**-33)
 
 
 def _dropout_log_key(*args, **kwargs) -> str:
-    return f"fused_dropout n={args[7]}"
+    return f"fused_dropout n={args[7]} capture={kwargs['IS_CAPTURE']}"
 
 
 @instrumented_triton_cache("aten::native_dropout", key_fn=_dropout_log_key)
@@ -20,8 +20,8 @@ def _dropout_kernel(
     X_ptr,
     OUT_ptr,
     MASK_ptr,
-    SEED_ptr,
-    OFF_ptr,
+    SEED,
+    OFF,
     intra,
     stride,
     n,
@@ -29,15 +29,24 @@ def _dropout_kernel(
     P_KEEP,
     SCALE,
     BLOCK: tl.constexpr,
+    IS_CAPTURE: tl.constexpr,
 ):
     # Bit-exact replica of aten's fused_dropout_kernel_vec (VEC=4):
     # counter = offset/4 + iteration, subsequence = global thread id, each
-    # curand_uniform4 covers 4 contiguous elements.
+    # curand_uniform4 covers 4 contiguous elements. Mirrors PhiloxCudaState:
+    # under capture SEED/OFF are pointers to the generator's extragraph state
+    # (DevState, loaded at run time so replays see fresh values); in eager
+    # they are int64 scalar arguments (HostState).
     pid = tl.program_id(0)
     tid = (pid * BLOCK + tl.arange(0, BLOCK)).to(tl.int64)
 
-    seed = tl.load(SEED_ptr)
-    off4 = (tl.load(OFF_ptr) + intra) >> 2
+    if IS_CAPTURE:
+        seed = tl.load(SEED)
+        off = tl.load(OFF)
+    else:
+        seed = SEED
+        off = OFF
+    off4 = (off + intra) >> 2
 
     c2 = (tid & 0xFFFFFFFF).to(tl.uint32)
     c3 = ((tid >> 32) & 0xFFFFFFFF).to(tl.uint32)
@@ -74,6 +83,7 @@ def dropout_fwd(x: torch.Tensor, p: float) -> tuple[torch.Tensor, torch.Tensor]:
     grid, counter_offset, num_iters = launch_plan(n, x.device.index or 0)
     p_keep, scale = keep_prob_and_scale(p)
     seed_t, offset_t, intra = philox_args(x, counter_offset)
+    is_capture = seed_t.is_cuda
     out = torch.empty_like(x)
     mask = torch.empty_like(x, dtype=torch.bool)
     stride = grid * _BLOCK * 4
@@ -81,8 +91,8 @@ def dropout_fwd(x: torch.Tensor, p: float) -> tuple[torch.Tensor, torch.Tensor]:
         x,
         out,
         mask,
-        seed_t,
-        offset_t,
+        seed_t if is_capture else seed_t.item(),
+        offset_t if is_capture else offset_t.item(),
         intra,
         stride,
         n,
@@ -90,5 +100,6 @@ def dropout_fwd(x: torch.Tensor, p: float) -> tuple[torch.Tensor, torch.Tensor]:
         p_keep,
         scale,
         BLOCK=_BLOCK,
+        IS_CAPTURE=is_capture,
     )
     return out, mask

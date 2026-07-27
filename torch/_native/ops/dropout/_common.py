@@ -6,11 +6,12 @@ philox counter mapping (counter=(offset/4 + iter), subsequence=global thread
 id), same curand uniform transform and comparison, so results and generator
 offset advancement are bit-identical to aten.
 
-RNG state comes from ``Generator.philox_state(increment)``: 1-element int64
-device tensors (seed, offset) plus a CPU intragraph offset tensor. The kernels
-load seed/offset from the device tensors, which makes them CUDA-graph-safe for
-free: during capture those tensors alias the generator's extragraph state that
-``replay_prologue`` refills on every replay.
+RNG state comes from ``Generator.philox_state(increment)``, which mirrors the
+C++ PhiloxCudaState protocol: outside capture (HostState) seed/offset are CPU
+tensors and the kernels take their values as scalar arguments; during capture
+(DevState) they are CUDA tensors aliasing the generator's extragraph state
+that ``replay_prologue`` refills on every replay, and the kernels load them
+from device memory at run time.
 """
 
 import functools
@@ -70,7 +71,9 @@ def eligible(x: torch.Tensor, p: float, train) -> bool:
 
 def philox_args(x: torch.Tensor, counter_offset: int):
     """Reserve counter_offset from the default generator of x's device and
-    return (seed_t [cuda i64], offset_t [cuda i64], intragraph [python int])."""
+    return (seed_t, offset_t, intragraph [python int]). seed_t/offset_t are
+    CPU tensors in eager (HostState) and CUDA tensors under capture
+    (DevState); callers branch on seed_t.is_cuda."""
     device_index = x.device.index
     if device_index is None:
         device_index = torch.cuda.current_device()

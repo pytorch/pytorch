@@ -6,9 +6,17 @@ id, key = seed). Each thread consumes one uniform4 per grid-stride iteration
 covering 4 contiguous elements, exactly like the aten kernel, so both the
 values and the number of philox draws (hence the generator offset
 advancement) match aten.
+
+Mirroring PhiloxCudaState, the kernel is compiled in two variants: eager
+(HostState: seed/offset arrive as Int64 scalar arguments) and capture
+(DevState: seed/offset are loaded at run time from the generator's extragraph
+tensors, so graph replays see the values replay_prologue wrote).
 """
 
+import functools
+
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
+
 import cutlass
 import cutlass.cute as cute
 from cutlass import Boolean, Float32, Int32, Int64, Uint32, Uint64
@@ -56,8 +64,9 @@ def _uniform(x: Uint32) -> Float32:
 
 
 class _FusedDropout:
-    def __init__(self, num_iters: int):
+    def __init__(self, num_iters: int, is_capture: bool):
         self.num_iters = num_iters
+        self.is_capture = is_capture
 
     @cute.jit
     def __call__(
@@ -67,15 +76,17 @@ class _FusedDropout:
         mMask: cute.Tensor,
         mSeed: cute.Tensor,
         mOff: cute.Tensor,
+        seed_val: Int64,
+        off_val: Int64,
         intra: Int64,
         p_keep: Float32,
         scale: Float32,
         grid_x: Int32,
         stream: cuda.CUstream,
     ):
-        self.kernel(mX, mOut, mMask, mSeed, mOff, intra, p_keep, scale).launch(
-            grid=[grid_x, 1, 1], block=[_BLOCK, 1, 1], stream=stream
-        )
+        self.kernel(
+            mX, mOut, mMask, mSeed, mOff, seed_val, off_val, intra, p_keep, scale
+        ).launch(grid=[grid_x, 1, 1], block=[_BLOCK, 1, 1], stream=stream)
 
     @cute.kernel
     def kernel(
@@ -85,6 +96,8 @@ class _FusedDropout:
         mMask: cute.Tensor,
         mSeed: cute.Tensor,
         mOff: cute.Tensor,
+        seed_val: Int64,
+        off_val: Int64,
         intra: Int64,
         p_keep: Float32,
         scale: Float32,
@@ -95,8 +108,13 @@ class _FusedDropout:
 
         n = mX.shape[0]
         tid = Int64(bidx) * _BLOCK + Int64(tidx)
-        seed = Uint64(mSeed[0])
-        off4 = (Int64(mOff[0]) + intra) >> 2
+        if cutlass.const_expr(self.is_capture):
+            seed = Uint64(mSeed[0])
+            off = Int64(mOff[0])
+        else:
+            seed = Uint64(seed_val)
+            off = off_val
+        off4 = (off + intra) >> 2
         k0 = Uint32(seed & 0xFFFFFFFF)
         k1 = Uint32(seed >> 32)
         c2 = Uint32(Uint64(tid) & 0xFFFFFFFF)
@@ -128,6 +146,11 @@ class _FusedDropout:
                 mMask[base + 3] = Boolean(r3)
 
 
+@functools.cache
+def _eager_state_dummy(device_index: int) -> torch.Tensor:
+    return torch.zeros(1, dtype=torch.int64, device=f"cuda:{device_index}")
+
+
 def _fake_flat(dtype, divisibility=1):
     return cute.runtime.make_fake_tensor(
         dtype,
@@ -137,10 +160,12 @@ def _fake_flat(dtype, divisibility=1):
     )
 
 
-@instrumented_cutedsl_cache(
-    "aten::native_dropout", key_fn=lambda num_iters: f"fused_dropout iters={num_iters}"
-)
-def _compile_dropout(num_iters: int):
+def _dropout_log_key(num_iters, is_capture):
+    return f"fused_dropout iters={num_iters} capture={is_capture}"
+
+
+@instrumented_cutedsl_cache("aten::native_dropout", key_fn=_dropout_log_key)
+def _compile_dropout(num_iters: int, is_capture: bool):
     x_fake = _fake_flat(Float32, 4)
     out_fake = _fake_flat(Float32, 4)
     mask_fake = _fake_flat(Boolean, 4)
@@ -151,12 +176,14 @@ def _compile_dropout(num_iters: int):
         Int64, (1,), stride=(1,), assumed_align=8
     )
     return cute.compile(
-        _FusedDropout(num_iters),
+        _FusedDropout(num_iters, is_capture),
         x_fake,
         out_fake,
         mask_fake,
         state_fake,
         state_fake2,
+        Int64(0),
+        Int64(0),
         Int64(0),
         Float32(0.5),
         Float32(2.0),
@@ -171,10 +198,29 @@ def dropout_fwd(x: torch.Tensor, p: float) -> tuple[torch.Tensor, torch.Tensor]:
     grid, counter_offset, num_iters = launch_plan(n, x.device.index or 0)
     p_keep, scale = keep_prob_and_scale(p)
     seed_t, offset_t, intra = philox_args(x, counter_offset)
+    is_capture = seed_t.is_cuda
     out = torch.empty_like(x)
     mask = torch.empty_like(x, dtype=torch.bool)
     x_flat, out_flat, mask_flat = x.view(-1), out.view(-1), mask.view(-1)
-    _compile_dropout(num_iters)(
-        x_flat, out_flat, mask_flat, seed_t, offset_t, intra, p_keep, scale, grid
+    if is_capture:
+        state1, state2 = seed_t, offset_t
+        seed_val, off_val = 0, 0
+    else:
+        # The unused tensor slots still need valid CUDA tensors matching the
+        # compiled signature; pass a cached dummy (never read).
+        state1 = state2 = _eager_state_dummy(x.device.index or 0)
+        seed_val, off_val = seed_t.item(), offset_t.item()
+    _compile_dropout(num_iters, is_capture)(
+        x_flat,
+        out_flat,
+        mask_flat,
+        state1,
+        state2,
+        seed_val,
+        off_val,
+        intra,
+        p_keep,
+        scale,
+        grid,
     )
     return out, mask
