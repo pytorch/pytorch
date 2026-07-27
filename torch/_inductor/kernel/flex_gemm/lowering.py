@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import sympy
+
 import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.flex_gemm import (
@@ -23,7 +25,10 @@ from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from .constraints import (
+    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     flex_gemm_local_reduce_config_error,
+    FlexGemmGroupedMainOutputTransform,
+    grouped_main_output_config_supported,
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
@@ -183,12 +188,13 @@ def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
     return torch.as_strided(base, sizes, strides, offset)
 
 
-def flex_gemm_config_keys_for_local_reduce(
+def flex_gemm_config_keys(
     device,
     m: int,
     n: int,
     local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
+    main_transform: FlexGemmGroupedMainOutputTransform | None = None,
     explicit_config: dict[str, Any] | None = None,
 ) -> tuple[tuple[Any, ...], ...]:
     """Select QuACK config keys after applying grouped-layout config constraints.
@@ -196,11 +202,19 @@ def flex_gemm_config_keys_for_local_reduce(
     Every grouped geometry constrains the config the same way, whether it backs
     a runtime local-reduce plan or a plan-less grouped TensorSSA fragment
     reshape in the generated epilogue: swap_ab reorients the accumulator
-    fragment and non-divisible tiles split groups across fragments, so either
-    would silently regroup the wrong elements. Explicit config fields constrain
-    the candidate set; untuned selection fills omitted fields from the normal
-    default, while tuned selection benchmarks the matches.
+    fragment and non-divisible tiles split groups across fragments. Contracted
+    main stores additionally require tile_n not to oversubscribe physical N and
+    a single CTA along N until QuACK predicates those layouts correctly. Explicit
+    config fields constrain the candidate set; untuned selection fills omitted
+    fields from the normal default, while tuned selection benchmarks the matches.
     """
+    if main_transform is not None:
+        main_transform.validate_quack(torch.cuda.get_device_capability(device)[0])
+        if isinstance(n, sympy.Expr) and n.free_symbols:
+            raise NotImplementedError(
+                "FlexGEMM grouped main outputs require statically known physical N"
+            )
+
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
@@ -216,15 +230,37 @@ def flex_gemm_config_keys_for_local_reduce(
     )
     if not tuned:
         default_key = default_gemm_config_key(device, m, n, candidate_configs)
+        default_config = gemm_config_from_key(default_key)
         if all(
             validate_flex_gemm_local_reduce_config(
-                gemm_config_from_key(default_key), geometry.group, geometry.axis
+                default_config, geometry.group, geometry.axis
             )
             for geometry in local_reduce_geometries
+        ) and (
+            main_transform is None
+            or grouped_main_output_config_supported(default_config, n)
         ):
             return (default_key,)
 
-    configs = candidate_configs
+    configs = (
+        candidate_configs
+        if main_transform is None
+        else tuple(
+            config
+            for config in candidate_configs
+            if grouped_main_output_config_supported(config, n)
+        )
+    )
+    if main_transform is not None and not configs:
+        if explicit_config is not None:
+            raise NotImplementedError(
+                "FlexGEMM explicit QUACK config constraints are incompatible with "
+                "grouped main output"
+            )
+        raise NotImplementedError(
+            "FlexGEMM grouped main outputs require statically known physical N "
+            "large enough for a single-CTA QuACK tile"
+        )
     for geometry in local_reduce_geometries:
         configs = tuple(
             config
@@ -309,6 +345,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         flex_gemm_epilogue_template,
         FlexGemmEpilogueConfig,
         FlexGemmEpilogueLocalReduceConfig,
+        FlexGemmEpilogueOutputConfig,
     )
     from torch._inductor.select_algorithm import autotune_select_algorithm
 
@@ -346,30 +383,51 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
     # This is where we figure out what the fx-graph body is doing
-    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
+    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
+    outputs = epilogue_analysis.outputs
     if (
         epilogue_analysis.required_geometries
         and gemm_op is not torch.ops.aten.mm.default
     ):
-        raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
-    outputs = epilogue_analysis.outputs
+        error = (
+            FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR
+            if outputs.main_transform is not None
+            else LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
+        )
+        raise NotImplementedError(error)
     local_reduce_store = (
         None if outputs.local_reduce is None else outputs.local_reduce.store
     )
-    output_meta = outputs.output.meta.get("val")
+    output_meta = outputs.main.meta.get("val")
     if output_meta is None:
         raise NotImplementedError(
             "FlexGEMM generated epilogues require output metadata"
         )
-    output_size = ir.convert_shape_to_inductor(output_meta.shape)
+    logical_output_size = ir.convert_shape_to_inductor(output_meta.shape)
+    physical_output_size = [
+        *gemm_args[mat1_index].get_size()[:-1],
+        gemm_args[mat2_index].get_size()[-1],
+    ]
+    main_transform = outputs.main_transform
+    if (
+        main_transform is not None
+        and main_transform.chunked
+        and gemm_args[mat2_index].get_stride()[-1] == 1
+    ):
+        raise NotImplementedError(
+            "FlexGEMM concat-layout grouped-N outputs require B's output "
+            "dimension to be non-contiguous, as in linear weight.t()"
+        )
+    if main_transform is not None and epilogue_args:
+        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     aux_metas = validate_flex_gemm_aux_outputs(
-        gemm_op, outputs.aux_outputs, output_size
+        gemm_op, outputs.aux_outputs, physical_output_size
     )
     local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
         output_meta.dtype,
-        output_size,
+        logical_output_size,
         ir.convert_shape_to_inductor(output_meta.stride()),
     )
     gemm_input_nodes = [
@@ -402,7 +460,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         aux_out_start + len(aux_input_nodes) if local_reduce_input_nodes else None
     )
     epilogue_arg_kinds = infer_flex_gemm_epilogue_arg_kinds(
-        gemm_op, epilogue_input_nodes, output_size
+        gemm_op, epilogue_input_nodes, physical_output_size
     )
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
         outputs.local_reduce, local_reduce_out_index
@@ -414,12 +472,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_arg_placeholders,
         fast_math=fast_math,
     )
-    quack_config_keys = flex_gemm_config_keys_for_local_reduce(
+    quack_config_keys = flex_gemm_config_keys(
         layout.device,
         gemm_args[mat1_index].get_size()[-2],
         gemm_args[mat2_index].get_size()[-1],
         epilogue_analysis.required_geometries,
         tuned,
+        main_transform,
         explicit_config,
     )
     epilogue_arg_indices = tuple(
@@ -444,8 +503,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 quack_config_key=quack_config_key,
                 epilogue_arg_indices=epilogue_arg_indices,
                 epilogue_arg_kinds=epilogue_arg_kinds,
-                aux_out_indices=aux_out_indices,
-                local_reduce=template_local_reduce,
+                outputs=FlexGemmEpilogueOutputConfig(
+                    aux_out_indices=aux_out_indices,
+                    local_reduce=template_local_reduce,
+                    main_transform=main_transform,
+                ),
             ),
         )
         if error is not None:
