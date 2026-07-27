@@ -678,6 +678,72 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         for name in ("flex_attention", "flex_decode", "common"):
             self.assertIn("USE_TMA or USE_TDM", load_flex_template(name))
 
+    def test_flex_shaped_descriptors_lower_to_amdgcn_tdm(self):
+        from torch.utils._triton import has_triton_amd_tdm_device
+
+        if not has_triton_amd_tdm_device("gfx1250"):
+            self.skipTest("Triton without gfx1250 TDM backend support")
+
+        import subprocess
+        import sys
+        import textwrap
+
+        child = textwrap.dedent(
+            """
+            import triton
+            import triton.language as tl
+            from triton.backends.compiler import GPUTarget
+
+            @triton.jit
+            def k(q_ptr, k_ptr, v_ptr, o_ptr, SEQ, HEAD_DIM,
+                  BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+                q_desc = tl.make_tensor_descriptor(
+                    q_ptr, shape=[SEQ, HEAD_DIM], strides=[HEAD_DIM, 1],
+                    block_shape=[BLOCK_M, BLOCK_N])
+                k_desc = tl.make_tensor_descriptor(
+                    k_ptr, shape=[SEQ, HEAD_DIM], strides=[HEAD_DIM, 1],
+                    block_shape=[BLOCK_M, BLOCK_N])
+                v_desc = tl.make_tensor_descriptor(
+                    v_ptr, shape=[SEQ, HEAD_DIM], strides=[HEAD_DIM, 1],
+                    block_shape=[BLOCK_M, BLOCK_N])
+                q = tl.load_tensor_descriptor(q_desc, [0, 0])
+                key = tl.load_tensor_descriptor(k_desc, [0, 0])
+                value = tl.load_tensor_descriptor(v_desc, [0, 0])
+                offsets = (tl.arange(0, BLOCK_M)[:, None] * HEAD_DIM
+                           + tl.arange(0, BLOCK_N)[None, :])
+                tl.store(o_ptr + offsets, q + key + value)
+
+            outputs = []
+            for num_stages in (1, 2):
+                src = triton.compiler.ASTSource(
+                    fn=k,
+                    signature={"q_ptr": "*fp16", "k_ptr": "*fp16",
+                               "v_ptr": "*fp16", "o_ptr": "*fp16",
+                               "SEQ": "i32", "HEAD_DIM": "i32",
+                               "BLOCK_M": "constexpr", "BLOCK_N": "constexpr"},
+                    constexprs={"BLOCK_M": 64, "BLOCK_N": 64},
+                )
+                outputs.append(triton.compile(
+                    src,
+                    target=GPUTarget("hip", "gfx1250", 32),
+                    options={"num_stages": num_stages},
+                ).asm["amdgcn"])
+            print("<<<SEP>>>".join(outputs))
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", child],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if proc.returncode != 0:
+            self.fail(proc.stderr.strip())
+        parts = proc.stdout.split("<<<SEP>>>")
+        self.assertEqual(len(parts), 2)
+        for asm in parts:
+            self.assertRegex(asm, r"async_tdm|tensor_load_to_lds|tensor\.load\.to\.lds")
+
 
 @unittest.skipUnless(
     running_on_tdm_device(),
