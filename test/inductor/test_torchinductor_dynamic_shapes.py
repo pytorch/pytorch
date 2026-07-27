@@ -126,23 +126,25 @@ class DynamicShapesTestCase(TestCase):
         super().tearDownClass()
 
 
+class DynamicShapesOpTests:
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_prod_backward_keeps_input_shape_dynamic(self):
+        def fn(x):
+            return torch.prod(x, 3, keepdim=True)
+
+        self.common(
+            fn,
+            (torch.randn(8, 10, 3, 2, requires_grad=True),),
+            check_gradient=True,
+            assert_dynamic_dims={0: (0, 1, 2, 3)},
+        )
+
+
 if HAS_CPU:
 
-    class DynamicShapesCpuTests(TestCase):
+    class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
         common = check_model
         device = "cpu"
-
-        @torch._dynamo.config.patch(assume_static_by_default=False)
-        def test_prod_backward_keeps_input_shape_dynamic(self):
-            def fn(x):
-                return torch.prod(x, 3, keepdim=True)
-
-            self.common(
-                fn,
-                (torch.randn(8, 10, 3, 2, requires_grad=True),),
-                check_gradient=True,
-                assert_dynamic_dims={0: (0, 1, 2, 3)},
-            )
 
         @torch._dynamo.config.patch(assume_static_by_default=False)
         def test_assert_dynamic_dims_disables_aot_autograd_cache(self):
@@ -195,7 +197,7 @@ if HAS_CPU:
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
-    class DynamicShapesGPUTests(DynamicShapesTestCase):
+    class DynamicShapesGPUTests(DynamicShapesOpTests, DynamicShapesTestCase):
         common = check_model_gpu
         device = GPU_TYPE
 

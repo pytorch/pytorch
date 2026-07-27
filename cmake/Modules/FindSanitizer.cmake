@@ -62,6 +62,12 @@ foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
       endif()
     endif()
   endif()
+  if(sanitizer_name STREQUAL "undefined")
+    # clang-21 removed vptr from the -fsanitize=undefined group; request it
+    # explicitly so USE_ASAN keeps UBSAN vtable checks. Redundant no-op on gcc
+    # and older clang where undefined already implies vptr; needs RTTI.
+    list(APPEND CMAKE_REQUIRED_FLAGS "-fsanitize=vptr")
+  endif()
   if(sanitizer_name STREQUAL "undefined" AND UBSAN_FLAGS)
     list(APPEND CMAKE_REQUIRED_FLAGS "${UBSAN_FLAGS}")
   endif()
