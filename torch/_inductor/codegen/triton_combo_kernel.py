@@ -304,6 +304,13 @@ class SharedBody:
     setup_lhs_names: list[str]
 
 
+@dataclass
+class ComboLaunchConfig:
+    kwargs: dict[str, int]
+    num_warps: int
+    num_stages: int
+
+
 class ComboKernel(Kernel):
     """
     A kernel that combines multiple sub-kernels into a single fused kernel.
@@ -605,6 +612,18 @@ class ComboKernel(Kernel):
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
         self.no_bench_stitched_config: triton.Config | None = None
+        self.combo_compile_time_autotune = False
+        # Compile-time autotune: per-subkernel winning block sizes (XBLOCK_0, ...), passed as args.
+        self.stitched_block_config: dict[str, int] | None = None
+        # Distinct winner launch configs across the subkernels; seeds the combo's kernel-level autotune.
+        self.combo_launch_candidates: list[ComboLaunchConfig] = []
+
+    @property
+    def bake_blocks(self) -> bool:
+        """Bake block sizes as constexpr in the body (only the no-autotune path, which has no
+        autotuner to pass a config through). Otherwise blocks are args; compile-time autotune
+        supplies the chosen blocks via the config (default_config)."""
+        return not self.enable_autotune
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -1452,7 +1471,7 @@ class ComboKernel(Kernel):
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
         block_args = self.get_block_args()
-        if self.enable_autotune:
+        if not self.bake_blocks:
             argdefs.extend([ArgName(x.name, is_constexpr=True) for x in block_args])
             if triton_version_uses_attrs_dict():
                 signature.extend(block_args)
@@ -1477,7 +1496,7 @@ class ComboKernel(Kernel):
             if config.triton.proton_profiling:
                 code.writeline(f'pl.enter_scope("{kernel_name}")')
             code.splice("pid = tl.program_id(0)")
-            if not self.enable_autotune:
+            if self.bake_blocks:
                 self.codegen_blocks(code)
 
             sub_kernel_codes = self._codegen_sub_kernel_bodies()
@@ -1681,9 +1700,23 @@ class ComboKernel(Kernel):
             "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
 
-        if not self.enable_autotune:
+        if self.bake_blocks or self.combo_compile_time_autotune:
             default_config: dict[str, int] = {}
-            if self.no_bench_stitched_config is not None:
+            if self.combo_compile_time_autotune:
+                # Compile-time autotune: per-subkernel winning block sizes are passed as args;
+                # num_warps / num_stages / backend kwargs are autotuned over the distinct winner
+                # launch candidates (flattened to tuples so the meta stays repr-serializable).
+                if not self.combo_launch_candidates:
+                    raise AssertionError(
+                        "compile-time autotune requires at least one launch candidate"
+                    )
+                if self.stitched_block_config is not None:
+                    default_config = dict(self.stitched_block_config)
+                meta["stitched_launch_candidates"] = [
+                    (c.kwargs, c.num_warps, c.num_stages)
+                    for c in self.combo_launch_candidates
+                ]
+            elif self.no_bench_stitched_config is not None:
                 stitched = self.no_bench_stitched_config
                 default_config = {
                     k: int(v) for k, v in stitched.kwargs.items() if "BLOCK" in k
