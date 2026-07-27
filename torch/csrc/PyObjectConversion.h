@@ -1,8 +1,8 @@
 #pragma once
 
+#include <ATen/core/Tensor.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 // Indirection that lets the libtorch-only Python-interop stable shims call into
 // code that only libtorch_python can provide (THPVariable_* &co) without
@@ -21,14 +21,14 @@ namespace torch::detail {
 struct TORCH_API PyObjectConversionInterface {
   virtual ~PyObjectConversionInterface() = default;
 
-  // Wrap a Python torch.Tensor (PyObject*) as a new owning AtenTensorHandle
-  // that shares the underlying TensorImpl. The GIL must be held.
-  virtual AtenTensorHandle tensor_from_pyobject(PyObject* obj) const = 0;
+  // Unpack a Python torch.Tensor (PyObject*) into an at::Tensor that shares the
+  // underlying TensorImpl. The GIL must be held.
+  virtual at::Tensor tensor_from_pyobject(PyObject* obj) const = 0;
 
-  // Wrap an AtenTensorHandle as a new-reference Python torch.Tensor. py_type,
-  // if non-null, is the result's exact PyTypeObject* (e.g. torch.nn.Parameter);
+  // Wrap an at::Tensor as a new-reference Python torch.Tensor. py_type, if
+  // non-null, is the result's exact PyTypeObject* (e.g. torch.nn.Parameter);
   // null means the default torch.Tensor type. The GIL must be held.
-  virtual PyObject* tensor_to_pyobject(AtenTensorHandle ath, PyObject* py_type)
+  virtual PyObject* tensor_to_pyobject(const at::Tensor& t, PyObject* py_type)
       const = 0;
 };
 

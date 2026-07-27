@@ -691,8 +691,11 @@ torch_tensor_from_pyobject(void* py_obj, AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
     TORCH_CHECK(ret != nullptr, "ret must not be null");
-    *ret = torch::detail::getPyObjectConversionImpl().tensor_from_pyobject(
-        static_cast<PyObject*>(py_obj));
+    // AtenTensorHandle is confined to this shim boundary; the conversion vtable
+    // works in at::Tensor. Wrap the result into a new owning handle here.
+    *ret = torch::aot_inductor::new_tensor_handle(
+        torch::detail::getPyObjectConversionImpl().tensor_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
   });
 }
 
@@ -702,7 +705,8 @@ torch_tensor_to_pyobject(AtenTensorHandle ath, void* py_type, void** ret) {
     TORCH_CHECK(ath != nullptr, "ath must not be null");
     TORCH_CHECK(ret != nullptr, "ret must not be null");
     *ret = torch::detail::getPyObjectConversionImpl().tensor_to_pyobject(
-        ath, static_cast<PyObject*>(py_type));
+        *torch::aot_inductor::tensor_handle_to_tensor_pointer(ath),
+        static_cast<PyObject*>(py_type));
   });
 }
 

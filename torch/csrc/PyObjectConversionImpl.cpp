@@ -7,18 +7,14 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/python_headers.h>
-
-using torch::aot_inductor::new_tensor_handle;
-using torch::aot_inductor::tensor_handle_to_tensor_pointer;
 
 namespace torch::detail {
 
 namespace {
 
 struct ConcretePyObjectConversion final : PyObjectConversionInterface {
-  AtenTensorHandle tensor_from_pyobject(PyObject* obj) const override {
+  at::Tensor tensor_from_pyobject(PyObject* obj) const override {
     // The GIL guards the THPVariable access below; a boxed STABLE_TORCH_LIBRARY
     // kernel may run with the GIL released, so assert rather than race.
     TORCH_CHECK(
@@ -29,10 +25,10 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         THPVariable_Check(obj),
         "torch_tensor_from_pyobject: expected torch.Tensor, got ",
         Py_TYPE(obj)->tp_name);
-    return new_tensor_handle(at::Tensor(THPVariable_Unpack(obj)));
+    return THPVariable_Unpack(obj);
   }
 
-  PyObject* tensor_to_pyobject(AtenTensorHandle ath, PyObject* py_type)
+  PyObject* tensor_to_pyobject(const at::Tensor& t, PyObject* py_type)
       const override {
     TORCH_CHECK(
         PyGILState_Check(),
@@ -44,10 +40,9 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         py_type == nullptr || PyType_Check(py_type),
         "torch_tensor_to_pyobject: py_type must be a Python type object, got ",
         Py_TYPE(py_type)->tp_name);
-    at::Tensor* t = tensor_handle_to_tensor_pointer(ath);
     PyObject* py = (py_type != nullptr)
-        ? THPVariable_Wrap(*t, reinterpret_cast<PyTypeObject*>(py_type))
-        : THPVariable_Wrap(*t);
+        ? THPVariable_Wrap(t, reinterpret_cast<PyTypeObject*>(py_type))
+        : THPVariable_Wrap(t);
     if (py == nullptr) {
       // Forward the Python error left set by THPVariable_Wrap.
       throw python_error();
