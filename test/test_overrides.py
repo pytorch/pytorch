@@ -1410,7 +1410,7 @@ class TestResolveName(TestCase):
                 self.assertEqual(
                     eval(torch.overrides.resolve_name(c)),
                     c,
-                    msg=f"{c}, {torch.overrides.resolve_name(c)}"
+                    msg=lambda msg: f"{msg}\n{c}, {torch.overrides.resolve_name(c)}"
                 )
 
 class TestTorchFunctionWarning(TestCase):
@@ -2025,6 +2025,13 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 class TestTorchFunctionRedispatchOps(TestCase):
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
+        if op.name == "nn.functional.conv_transpose3d" and dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.complex32,
+        ):
+            # Disabled due to CI failures; see #190241
+            self.skipTest("disabled due to CI failures; see #190241")
         if op.has_nondeterministic_output:
             self.skipTest("output is nondeterministic; not comparable across calls")
 

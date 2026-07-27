@@ -33,7 +33,7 @@ std::vector<c10::IValue> SerialGraphExecutor::executeWithPrefilledFrame(
 
       // don't free intermediate values when static memory planning is enabled
       if (executorConfig_.tryFreeUnmanagedValuesAfterUse) {
-        // Free the intermediate values that are no used anymore
+        // Free the intermediate values that are not used anymore
         for (const auto& valueKey : execPlan_->valuesToFree[nodeIdx]) {
           executionFrame.releaseValueIfNeeded(valueKey);
         }
