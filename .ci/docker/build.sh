@@ -290,6 +290,18 @@ case "$tag" in
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
     GCC_VERSION=14
+    PYTHON_VERSION=3.12
+    OPENBLAS=yes
+    if [[ "$(uname -m)" != "riscv64" ]]; then
+      platform_flag="--platform linux/riscv64" # we are building using QEMU
+    fi
+    # Use a custom PyPI index to get pre-built wheels for RISC-V
+    # See https://riseproject-dev.github.io/python-wheels/
+    PIP_EXTRA_INDEX_URL=https://pypi.riseproject.dev/simple
+    PIP_PREFER_BINARY=1
+    ;;
+  pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
+    GCC_VERSION=14
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -366,6 +378,7 @@ fi
 build_image() {
   docker buildx build \
        ${progress_flag} \
+       ${platform_flag:-} \
        ${cache_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
@@ -398,6 +411,8 @@ build_image() {
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}" \
+       --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        ${output_flag} \
        "$@" \
