@@ -2127,7 +2127,7 @@ class SIMDScheduling(BaseScheduling):
                 # 3. If a candidate node (node2) uses a different loop order (e.g., (z,x,y,r)),
                 #    its tiling is incompatible with native matmul tiling (z,y,x,r).
                 #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
-                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
+                tiling = node1.get_tiling(numel1, rnumel1)
                 if not all(
                     SIMDKernel.is_compatible(
                         tiling.values(), n2.get_ranges(), reduction_numel=rnumel1
@@ -2177,8 +2177,8 @@ class SIMDScheduling(BaseScheduling):
                     return True
 
             # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
+            tiling1 = node1.get_tiling(numel1, rnumel1)
+            tiling2 = node2.get_tiling(numel1, rnumel1)
             tiling3 = self.select_tiling(
                 node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
             )
@@ -2220,7 +2220,7 @@ class SIMDScheduling(BaseScheduling):
                     and not node1.is_template()
                 ):
                     is_reduction_tiling_valid = tuple(
-                        self.select_tiling(node1.get_nodes(), numel1).values()
+                        node1.get_tiling(numel1, sympy.S.One).values()
                     ) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),

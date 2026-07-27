@@ -192,13 +192,19 @@ _XCCL_AVAILABLE = True
 try:
     try:
         # pyrefly: ignore [missing-import]
-        from torchcomms._comms import _BackendWrapper
+        from torchcomms._comms import (
+            _BackendWrapper,
+            _is_backend_registered as _torchcomms_is_backend_registered,
+        )
     except ImportError:
         # pyrefly: ignore [missing-import]
         from torchcomms._backend_wrapper import _BackendWrapper
 
+        def _torchcomms_is_backend_registered(backend: str) -> bool:
+            return False
+
     # pyrefly: ignore [missing-import]
-    from torchcomms import new_comm
+    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
 
     # pyrefly: ignore [missing-import]
     from torchcomms.hooks import FlightRecorderHook
@@ -207,10 +213,23 @@ try:
 except ImportError:
     _TORCHCOMM_AVAILABLE = False
 
+    def _torchcomms_is_backend_built(backend: str) -> bool:
+        return False
+
+    def _torchcomms_is_backend_registered(backend: str) -> bool:
+        return False
+
 
 def _use_torchcomms_enabled() -> bool:
     """Check if torchcomms is enabled via config."""
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
+
+
+def _is_torchcomms_backend(backend: str) -> bool:
+    return _use_torchcomms_enabled() and (
+        _torchcomms_is_backend_registered(backend)
+        or _torchcomms_is_backend_built(backend)
+    )
 
 
 def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
@@ -961,6 +980,27 @@ def _parse_backend_string(
             f"or use one of: {sorted(Backend.default_device_backend_map.values())}"
         )
     return dict.fromkeys(device_types, backend)
+
+
+def _get_default_backend_type_for_backend_config(
+    backend_config: BackendConfig,
+) -> ProcessGroup.BackendType:
+    if Backend.NCCL in backend_config.device_backend_map.values():
+        return ProcessGroup.BackendType.NCCL
+
+    custom_backend = next(
+        (
+            backend
+            for backend in backend_config.device_backend_map.values()
+            if Backend.backend_type_map.get(str(backend))
+            == ProcessGroup.BackendType.CUSTOM
+            or _is_torchcomms_backend(str(backend))
+        ),
+        None,
+    )
+    if custom_backend is not None:
+        return ProcessGroup.BackendType.CUSTOM
+    return ProcessGroup.BackendType.GLOO
 
 
 class _reduce_op:
@@ -2635,22 +2675,9 @@ def _new_process_group_helper(
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
     if not pg_backend_set:
-        if Backend.NCCL in backend_config.device_backend_map.values():
-            pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-        else:
-            custom_backend = next(
-                (
-                    backend
-                    for backend in backend_config.device_backend_map.values()
-                    if Backend.backend_type_map.get(str(backend))
-                    == ProcessGroup.BackendType.CUSTOM
-                ),
-                None,
-            )
-            if custom_backend is not None:
-                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+        pg._set_default_backend(
+            _get_default_backend_type_for_backend_config(backend_config)
+        )
 
     if device_id:
         pg.bound_device_id = device_id
@@ -2927,10 +2954,19 @@ def destroy_process_group(
         _world.group_count = 0
     else:
         if _TORCHCOMM_AVAILABLE:
+            # A single comm may be shared across multiple device types (e.g. a
+            # gloo group reports both 'cuda' and 'cpu' device types backed by the
+            # same _BackendWrapper). Deduplicate by comm identity so we finalize
+            # each comm exactly once — finalize() is not idempotent and raises
+            # "already finalized" on a second call.
+            finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:
                 backend = pg._get_backend(device_type)
                 if isinstance(backend, _BackendWrapper):
-                    backend.get_comm().finalize()
+                    comm = backend.get_comm()
+                    if id(comm) not in finalized_comm_ids:
+                        comm.finalize()
+                        finalized_comm_ids.add(id(comm))
             _world.comms.clear()
         pg.shutdown()
         del _world.pg_map[pg]
@@ -6328,8 +6364,16 @@ def _create_process_group_wrapper(
 # helper function for hashing a list of ranks to a unique string
 def _hash_ranks_to_str(ranks: Sequence[int]) -> str:
     rank_join: str = "_".join(map(str, ranks))
-    # In case there is already a PG with the same rank composition
-    unique_str = "_".join([rank_join, str(len(_world.pg_names))])
+    # Disambiguate multiple PGs with the same rank composition. The salt MUST be
+    # identical across all ranks that create this group, otherwise ranks compute
+    # different group names for the same group. Backends that use the group name
+    # as a rendezvous store prefix (e.g. Gloo split's connectFullMesh) then key
+    # off different prefixes and deadlock. len(_world.pg_names) is NOT safe here:
+    # it diverges across ranks after an earlier asymmetric-membership new_group()
+    # (non-member ranks register fewer PGs). _world.group_count is incremented by
+    # _process_group_name() on every rank that reaches it (before the member
+    # check), so it stays consistent and monotonic across ranks.
+    unique_str = "_".join([rank_join, str(_world.group_count)])
     return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
 
@@ -6355,8 +6399,12 @@ def _process_group_name(ranks: Sequence[int], use_hashed_name: bool) -> GroupNam
         pg_name = GroupName(_hash_ranks_to_str(ranks))
     else:
         pg_name = GroupName(str(_world.group_count))
-        _world.group_count += 1
-    # TODO: why is group count incremented only in the else path?
+    # Increment on BOTH paths so group_count advances once per group-creation
+    # call on every rank that reaches here. This keeps it a collective-consistent,
+    # monotonic counter usable as the uniqueness salt in _hash_ranks_to_str
+    # (see the comment there). Names need only be unique, not contiguous, so the
+    # hashed path consuming counter values is harmless for the non-hashed names.
+    _world.group_count += 1
     return pg_name
 
 
