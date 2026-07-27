@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This is a simple interpreter for Sympy expressions that dispatches to
 classes following the torch._inductor.virtualized calling convention.
@@ -10,6 +9,7 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 
 import functools
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import sympy
@@ -53,7 +53,7 @@ log = logging.getLogger(__name__)
 
 
 @functools.cache
-def handlers():
+def handlers() -> dict[type[sympy.Basic], str]:
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 
     # TODO default to some decompositions if the interpreter doesn't have them
@@ -122,7 +122,12 @@ def handlers():
 ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
-def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
+def _run_sympy_handler(
+    analysis: Any,
+    args: list[Any],
+    expr: sympy.Basic,
+    index_dtype: torch.dtype = torch.int64,
+) -> Any:
     # Special cases
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
@@ -184,13 +189,13 @@ _nil = object()
 
 
 def sympy_interp(
-    analysis,
+    analysis: Any,
     env: dict[sympy.Symbol, Any],
     expr: sympy.Expr | SympyBoolean,
     *,
-    index_dtype=torch.int64,
-    missing_handler=None,
-):
+    index_dtype: torch.dtype = torch.int64,
+    missing_handler: Callable[[sympy.Symbol], object] | None = None,
+) -> Any:
     # Handle base cases
     dtype = None
     if isinstance(expr, BooleanAtom):
