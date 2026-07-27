@@ -172,9 +172,12 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
-        # Dynamo-inserted autocast CM nodes. Behavior is fully determined by
-        # their graph args (device_type/dtype/enabled/cache_enabled); ambient
-        # autocast dtype is keyed separately in _record_runtime_state.
+        # Dynamo-inserted autocast CM nodes. _enter_autocast is only cache-safe
+        # when dtype is a non-None constant in node.args (enforced below):
+        # ambient get_autocast_dtype is keyed in _record_runtime_state only for
+        # devices where autocast is already enabled. cache_enabled=None is OK
+        # because AOT tracing disables the autocast weight cache
+        # (disable_autocast_cache), so ambient cache_enabled is inert.
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
     )
@@ -252,6 +255,23 @@ def check_node_safe(node: Node) -> None:
             raise BypassAOTAutogradCache(
                 f"Unsupported call_function target {node.target}. \n Function module: {module}, \nFunction name: {name}"
             )
+        # _enter_autocast(*vals) with dtype=None resolves via
+        # torch.get_autocast_dtype at call time. That ambient default is not
+        # part of the AOTAutograd cache key unless autocast is already enabled,
+        # so refuse to cache the unresolved form.
+        if (
+            getattr(node.target, "__module__", None) == "torch.amp.autocast_mode"
+            and getattr(node.target, "__name__", None) == "_enter_autocast"
+        ):
+            # Expected args: (device_type, dtype, enabled, cache_enabled)
+            dtype_arg = node.args[1] if len(node.args) > 1 else None
+            if isinstance(dtype_arg, Node) or dtype_arg is None:
+                raise BypassAOTAutogradCache(
+                    "_enter_autocast with dtype=None (or non-constant dtype) is "
+                    "not cacheable: effective dtype is resolved from ambient "
+                    "torch.get_autocast_dtype, which is only keyed when "
+                    "autocast is already enabled"
+                )
     elif node.op == "call_method":
         method_name = node.target
         method_target = node.args[0]
