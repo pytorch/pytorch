@@ -4031,6 +4031,20 @@ class WrapperDescriptorVariable(VariableTracker):
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        # descr_check: wrapperdescr_get rejects binding to an object that is
+        # not an instance of the descriptor's owning type.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L91
+        try:
+            obj_type = obj.python_type()
+            if not issubclass(obj_type, self.descriptor.__objclass__):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{self.descriptor.__name__}' for "
+                    f"'{self.descriptor.__objclass__.__name__}' objects "
+                    f"doesn't apply to a '{obj_type.__name__}' object",
+                )
+        except NotImplementedError:
+            pass
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4223,6 +4237,20 @@ class MethodDescriptorVariable(VariableTracker):
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        # descr_check: method_get rejects binding to an object that is not an
+        # instance of the descriptor's owning type.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L91
+        try:
+            obj_type = obj.python_type()
+            if not issubclass(obj_type, self.descriptor.__objclass__):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{self.descriptor.__name__}' for "
+                    f"'{self.descriptor.__objclass__.__name__}' objects "
+                    f"doesn't apply to a '{obj_type.__name__}' object",
+                )
+        except NotImplementedError:
+            pass
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 

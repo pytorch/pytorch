@@ -547,6 +547,76 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
 
+    def test_method_descriptor_bind_wrong_type_raises(self):
+        """Binding a method_descriptor (list.append) to a wrong-type object
+        raises TypeError at bind time (descr_check), matching eager."""
+
+        class Borrower:
+            append = list.append
+
+        def fn(x, obj):
+            try:
+                _ = obj.append
+                return x + 1
+            except TypeError:
+                return x + 2
+
+        x = torch.randn(4)
+        obj = Borrower()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
+        self.assertEqual(compiled, fn(x, obj))
+
+    def test_method_descriptor_bind_subclass_ok(self):
+        """Binding a method_descriptor to a subclass instance does not raise."""
+
+        class SubList(list):
+            pass
+
+        class Holder(SubList):
+            append = list.append
+
+        def fn(obj):
+            obj.append(9)
+            return obj
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(Holder([1, 2]))
+        self.assertEqual(compiled, fn(Holder([1, 2])))
+
+    def test_wrapper_descriptor_bind_wrong_type_raises(self):
+        """Binding a wrapper_descriptor (list.__add__) to a wrong-type object
+        raises TypeError at bind time (descr_check), matching eager."""
+
+        class Borrower:
+            add = list.__add__
+
+        def fn(x, obj):
+            try:
+                _ = obj.add
+                return x + 1
+            except TypeError:
+                return x + 2
+
+        x = torch.randn(4)
+        obj = Borrower()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
+        self.assertEqual(compiled, fn(x, obj))
+
+    def test_wrapper_descriptor_bind_subclass_ok(self):
+        """Binding a wrapper_descriptor to a subclass instance does not raise."""
+
+        class SubList(list):
+            pass
+
+        class Holder(SubList):
+            add = list.__add__
+
+        def fn(obj):
+            return obj.add([9])
+
+        obj = Holder([1, 2])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(obj)
+        self.assertEqual(compiled, fn(obj))
+
     def test_classmethod_descriptor_dict_fromkeys(self):
         """dict.fromkeys is a classmethod_descriptor."""
 
