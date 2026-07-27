@@ -1882,7 +1882,7 @@ def _sink_params(
 
         inputs_to_state_of_scope[node] = state_name
 
-    # Record name of remove inputs for return purpose.
+    # Record name of removed inputs for return purpose.
     inputs_removed: set[str] = set()
 
     for node, state_name in inputs_to_state_of_scope.items():
