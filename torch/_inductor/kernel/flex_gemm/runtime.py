@@ -544,13 +544,6 @@ def gemm_epilogue(
         if config_key is not None
         else candidate_gemm_configs_for_device(a.device)[0]
     )
-    if main_transform is not None:
-        device_capacity = (
-            device_capacity_override
-            if device_capacity_override is not None
-            else torch.cuda.get_device_capability(a.device)
-        )
-        main_transform.validate_quack(device_capacity[0])
     logical_output_shape = output_plan.output_shape(physical_output_shape)
     if main_transform is not None and (
         a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args
