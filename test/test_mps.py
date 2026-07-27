@@ -5934,6 +5934,17 @@ class TestMPS(TestCaseMPS):
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
 
+    @parametrize("n", [33, 64, 100, 1000, 20000, 262185, 1 << 20])
+    def test_int64_minmax_partial_simdgroups(self, n):
+        # simd_max/min<long> is emulated on top of simd_shuffle_and_fill_down and
+        # reads its neighbours' registers, so a reduction stage that leaves fewer
+        # than 32 lanes active used to fold their zeros into the result. Sizes
+        # span threadgroups of 64 to 1024 threads over the single-pass and
+        # split-K paths.
+        x = -torch.arange(1, n + 1, dtype=torch.int64, device="mps")
+        self.assertEqual(x.amax().cpu(), x.cpu().amax())
+        self.assertEqual((-x).amin().cpu(), (-x).cpu().amin())
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
@@ -9095,6 +9106,27 @@ class TestMPS(TestCaseMPS):
             helper(2, 2, 10, dtype)
             helper(5, 2, 10, dtype)
             helper(2, 2, 0, dtype)
+
+    @parametrize("dtype,start,end,steps", [
+        (torch.int32, 2**24, 2**24 + 8, 9),
+        (torch.int64, 2**40, 2**40 + 8, 9),
+        (torch.int64, -(2**40), -(2**40) + 8, 9),
+        (torch.int64, 2**40 + 8, 2**40, 9),
+    ])
+    def test_linspace_integral_precision(self, dtype, start, end, steps):
+        expected = torch.linspace(start, end, steps, dtype=dtype)
+        actual = torch.linspace(start, end, steps, dtype=dtype, device="mps")
+        self.assertEqual(actual.cpu(), expected)
+
+        storage = torch.empty(steps * 2, dtype=dtype, device="mps")
+        out = storage[::2]
+        torch.linspace(start, end, steps, out=out)
+        self.assertEqual(out.cpu(), expected)
+
+        storage = torch.empty((steps, 2), dtype=dtype, device="mps")
+        out = storage[:, :1]
+        torch.linspace(start, end, steps, out=out)
+        self.assertEqual(out.flatten().cpu(), expected)
 
     # Test argange
     def test_arange(self):
@@ -15880,7 +15912,7 @@ class TestConsistency(TestCaseMPS):
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
-        # TODO: Rounding is broken for linspace, see https://github.com/pytorch/pytorch/issues/137635
+        # Integral linspace can differ from CPU by one due to interpolation rounding.
         if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
             return (1.0, 0.0)
         if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16, torch.bfloat16]:
