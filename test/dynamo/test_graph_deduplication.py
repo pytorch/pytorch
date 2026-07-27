@@ -966,7 +966,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_mutation_ordering(self):
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
@@ -1008,35 +1007,35 @@ class <lambda>(torch.nn.Module):
 
 
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-    subgraph_0 = self.subgraph_0
     l_x_ = L_x_
     l_y_ = L_y_
-    x0 = l_x_.view((10, 10))
-    o0 = x0.view((10, 10));  x0 = None
-    x0_1 = l_x_.view((10, 10))
-    o1 = x0_1.view((10, 10));  x0_1 = None
+    view = l_x_.view((10, 10))
+    view_1 = l_x_.view((10, 10))
+    view_2 = view.view((10, 10));  view = None
+    view_3 = view_1.view((10, 10));  view_1 = None
     add_ = l_x_.add_(l_x_);  add_ = None
-    add_2 = o0 + o1;  o0 = o1 = None
+    add = view_2 + view_3;  view_2 = view_3 = None
+    subgraph_0 = self.subgraph_0
     invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     getitem = invoke_subgraph[0];  invoke_subgraph = None
-    sum_5 = getitem.sum();  getitem = None
-    add_3 = add_2 + sum_5;  add_2 = sum_5 = None
     invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
     getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-    sum_6 = getitem_1.sum();  getitem_1 = None
-    add_4 = add_3 + sum_6;  add_3 = sum_6 = None
-    return (add_4,)
+    sum_1 = getitem.sum();  getitem = None
+    add_1 = add + sum_1;  add = sum_1 = None
+    sum_2 = getitem_1.sum();  getitem_1 = None
+    add_2 = add_1 + sum_2;  add_1 = sum_2 = None
+    return (add_2,)
     """,
         )
 
         # Shuffle nodes in the graph
         add_ = get_node("add_")
         mul_ = get_node("mul_")
-        o1 = get_node("o1")
-        o1.append(mul_)
-        add_2 = get_node("add_2")
-        add_2.append(add_)
+        view_3 = get_node("view_3")
+        view_3.append(mul_)
+        add_node = get_node("add")
+        add_node.append(add_)
 
         self.assertExpectedInline(
             graph_code(graph),
@@ -1045,25 +1044,25 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
 
 
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-    subgraph_0 = self.subgraph_0
     l_x_ = L_x_
     l_y_ = L_y_
-    x0 = l_x_.view((10, 10))
-    o0 = x0.view((10, 10));  x0 = None
-    x0_1 = l_x_.view((10, 10))
-    o1 = x0_1.view((10, 10));  x0_1 = None
+    view = l_x_.view((10, 10))
+    view_1 = l_x_.view((10, 10))
+    view_2 = view.view((10, 10));  view = None
+    view_3 = view_1.view((10, 10));  view_1 = None
     mul_ = l_y_.mul_(l_y_);  mul_ = None
-    add_2 = o0 + o1;  o0 = o1 = None
+    add = view_2 + view_3;  view_2 = view_3 = None
     add_ = l_x_.add_(l_x_);  add_ = None
+    subgraph_0 = self.subgraph_0
     invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
     getitem = invoke_subgraph[0];  invoke_subgraph = None
-    sum_5 = getitem.sum();  getitem = None
-    add_3 = add_2 + sum_5;  add_2 = sum_5 = None
     invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
     getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-    sum_6 = getitem_1.sum();  getitem_1 = None
-    add_4 = add_3 + sum_6;  add_3 = sum_6 = None
-    return (add_4,)
+    sum_1 = getitem.sum();  getitem = None
+    add_1 = add + sum_1;  add = sum_1 = None
+    sum_2 = getitem_1.sum();  getitem_1 = None
+    add_2 = add_1 + sum_2;  add_1 = sum_2 = None
+    return (add_2,)
     """,
         )
         _stable_topological_sort(
@@ -1076,25 +1075,25 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
 
 
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-    subgraph_0 = self.subgraph_0
     l_x_ = L_x_
     l_y_ = L_y_
-    x0 = l_x_.view((10, 10))
-    o0 = x0.view((10, 10));  x0 = None
-    x0_1 = l_x_.view((10, 10))
-    o1 = x0_1.view((10, 10));  x0_1 = None
-    add_2 = o0 + o1;  o0 = o1 = None
+    view = l_x_.view((10, 10))
+    view_1 = l_x_.view((10, 10))
+    view_2 = view.view((10, 10));  view = None
+    view_3 = view_1.view((10, 10));  view_1 = None
+    add = view_2 + view_3;  view_2 = view_3 = None
     add_ = l_x_.add_(l_x_);  add_ = None
+    subgraph_0 = self.subgraph_0
     invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     getitem = invoke_subgraph[0];  invoke_subgraph = None
-    sum_5 = getitem.sum();  getitem = None
-    add_3 = add_2 + sum_5;  add_2 = sum_5 = None
     invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
     getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-    sum_6 = getitem_1.sum();  getitem_1 = None
-    add_4 = add_3 + sum_6;  add_3 = sum_6 = None
-    return (add_4,)
+    sum_1 = getitem.sum();  getitem = None
+    add_1 = add + sum_1;  add = sum_1 = None
+    sum_2 = getitem_1.sum();  getitem_1 = None
+    add_2 = add_1 + sum_2;  add_1 = sum_2 = None
+    return (add_2,)
     """,
         )
 

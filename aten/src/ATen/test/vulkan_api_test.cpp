@@ -4203,7 +4203,7 @@ TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
   {
     const auto in_cpu =
         at::rand({3, 9, 11, 7, 3}, at::device(at::kCPU).dtype(at::kFloat));
-    const std::vector<int64_t> repeats = {5, 7, 3, 9, 2};
+    const at::IntArrayRef repeats = {5, 7, 3, 9, 2};
 
     // Act
     EXPECT_THROW(
@@ -4216,7 +4216,7 @@ TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
   {
     const auto in_cpu =
         at::rand({3, 5, 11, 13}, at::device(at::kCPU).dtype(at::kFloat));
-    const std::vector<int64_t> repeats = {5, 7};
+    const at::IntArrayRef repeats = {5, 7};
 
     // Act
     EXPECT_THROW(
@@ -4228,7 +4228,7 @@ TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
   {
     const auto in_cpu =
         at::rand({3, 9, 11, 7}, at::device(at::kCPU).dtype(at::kFloat));
-    const std::vector<int64_t> repeats = {5, 7, 3, 9, 2};
+    const at::IntArrayRef repeats = {5, 7, 3, 9, 2};
 
     // Act
     EXPECT_THROW(
@@ -7014,7 +7014,7 @@ TEST_F(VulkanAPITest, tile_invalid_inputs_exceptions) {
   {
     const auto in_cpu =
         at::rand({3, 9, 5, 7, 3}, at::device(at::kCPU).dtype(at::kFloat));
-    const std::vector<int64_t> repeats = {7, 3, 9, 2};
+    const at::IntArrayRef repeats = {7, 3, 9, 2};
 
     // Act
     EXPECT_THROW(
@@ -7028,7 +7028,7 @@ TEST_F(VulkanAPITest, tile_invalid_outpus_exceptions) {
   {
     const auto in_cpu =
         at::rand({3, 9, 5, 13}, at::device(at::kCPU).dtype(at::kFloat));
-    const std::vector<int64_t> repeats = {5, 7, 3, 9, 2};
+    const at::IntArrayRef repeats = {5, 7, 3, 9, 2};
 
     // Act
     EXPECT_THROW(

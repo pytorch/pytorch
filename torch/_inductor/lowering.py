@@ -993,6 +993,8 @@ def _float8_e8m0fnu_to_dtype(x: TensorBox, dtype: torch.dtype) -> TensorBox:
     x_u8 = to_dtype_bitcast(x, torch.uint8)
 
     def _to_float(value):
+        # E8M0's exponent bits map directly to FP32; only encodings 0 and 255
+        # need special handling for 2^-127 and NaN, respectively.
         value_i32 = ops.to_dtype(value, torch.int32)
         f32_bits = ops.bitwise_left_shift(value_i32, ops.constant(23, torch.int32))
         f32_bits = ops.where(
@@ -2793,7 +2795,8 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         if not node:
             return True
 
-        # allow bitcast, views, memory movement, but not arithmetic
+        # Allow bitcasts, views, memory movement, and supported conversions,
+        # but not arithmetic.
         # TODO: delete once triton adds native support
         if not isinstance(node.target, torch._ops.OpOverload):
             return True

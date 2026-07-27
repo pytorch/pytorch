@@ -3820,7 +3820,7 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_custom_metaclass_subclasscheck_non_bool(self):
         # __subclasscheck__ returning a non-bool should be coerced via
-        # PyObject_IsTrue (abstract.c L2812) — exercises the generic_bool
+        # PyObject_IsTrue (abstract.c L2812) — exercises the generic_is_true
         # branch at the bottom of generic_issubclass.
         result = issubclass(int, _IssubclassClassWithNonBoolMeta)
         self.assertIs(result, True)
