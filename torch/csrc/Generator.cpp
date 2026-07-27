@@ -225,19 +225,14 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_philoxCudaState(
+static PyObject* THPGenerator_philoxState(
     PyObject* _self,
     PyObject* increment) {
   HANDLE_TH_ERRORS
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      gen.device().type() == at::kCUDA,
-      "philox_cuda_state is only supported on CUDA generators, but got a "
-      "generator on ",
-      gen.device());
   TORCH_CHECK(
       THPUtils_checkLong(increment),
-      "philox_cuda_state expected an int, but got ",
+      "philox_state expected an int, but got ",
       THPUtils_typename(increment));
   // Deliberately not unpack_uint64: a negative increment is never
   // meaningful, so let the OverflowError propagate.
@@ -343,7 +338,7 @@ static PyMethodDef THPGenerator_methods[] = {
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
-    {"philox_cuda_state", THPGenerator_philoxCudaState, METH_O, nullptr},
+    {"philox_state", THPGenerator_philoxState, METH_O, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)

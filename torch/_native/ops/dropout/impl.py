@@ -2,7 +2,7 @@
 
 Both DSL implementations reproduce aten's fused_dropout_kernel_vec exactly
 (same philox stream, same launch math, same generator offset advancement) and
-draw RNG state through ``Generator._philox_cuda_state``. Both are registered
+draw RNG state through ``Generator.philox_state``. Both are registered
 (cutedsl first, so it wins when both are enabled); select one with the
 torch.backends.python_native per-DSL controls.
 """

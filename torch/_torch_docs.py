@@ -14403,34 +14403,47 @@ Example:
 )
 
 add_docstr(
-    torch.Generator.philox_cuda_state,
+    torch.Generator.philox_state,
     r"""
-Generator.philox_cuda_state(increment) -> tuple[Tensor, Tensor, Tensor]
+Generator.philox_state(increment) -> tuple[Tensor, Tensor, Tensor]
 
-Reserves ``increment`` values from this CUDA generator's Philox stream and
+Reserves ``increment`` values from this generator's Philox4x32-10 stream and
 returns the reserved position as ``(seed, offset, intragraph_offset)``, three
-1-element ``int64`` tensors. A kernel launched now should consume the Philox
-inputs ``(seed, offset + intragraph_offset)``; this is the same reservation
-protocol aten's CUDA kernels use, so kernels built on it draw from the same
-stream as (and compose with) the built-in random operations.
+1-element ``int64`` tensors. This is the same reservation protocol the
+built-in CUDA random kernels use (``PhiloxCudaState`` in C++), so kernels
+built on it draw from the same stream as, and compose with, the built-in
+random operations. Only Philox-based generators (currently CUDA) support this
+method.
 
-``increment`` must be at least the number of Philox outputs (32-bit random
-values) any single thread of the consuming kernel generates. It is rounded up
-to a multiple of 4, and the generator's offset advances by the rounded amount.
+**What the reservation grants.** With ``effective_offset = offset +
+intragraph_offset`` (a uint64 sum that wraps at ``2**64``), the caller owns
+the Philox counter values ``effective_offset / 4`` through
+``effective_offset / 4 + ceil(increment / 4) - 1`` (the counter advances once
+per 4 generated values), at the fixed ``seed``, for **every** subsequence.
+Following the built-in kernels' convention of one subsequence per thread
+(``curand_init(seed, subsequence, effective_offset, ...)``, where the counter
+occupies ``counter.x/y`` and the subsequence ``counter.z/w``), a thread may
+generate up to ``increment`` values rounded up to a multiple of 4. The
+generator's offset advances by that rounded amount, so ``increment`` must be
+at least the number of 32-bit values any single thread of the consuming
+kernel generates.
 
-The values are returned as tensors rather than integers so the same code is
-safe under CUDA graph capture. Outside capture, ``seed`` and ``offset`` are
+**int64 reinterpretation.** Seed and offset are unsigned 64-bit quantities
+returned bit-exactly in ``int64`` tensors (PyTorch tensors have no uint64
+arithmetic support); values at or above ``2**63`` appear negative. Kernels
+should reinterpret the bits back to uint64 (e.g. load as int64 and bitcast);
+for host-side inspection use ``.item() & (2**64 - 1)``. The offset wraps
+modulo ``2**64`` on advancement.
+
+**Graph capture.** The values are returned as tensors rather than integers so
+the same code is safe under graph capture (:class:`torch.accelerator.Graph`,
+:class:`torch.cuda.CUDAGraph`). Outside capture, ``seed`` and ``offset`` are
 device tensors holding the current values and ``intragraph_offset`` is a CPU
 tensor holding 0. During capture, ``seed`` and ``offset`` alias generator
-state that each :meth:`torch.cuda.CUDAGraph.replay` refills with the values
-current at replay time, and ``intragraph_offset`` holds this reservation's
-position within the graph; a kernel that loads ``seed`` and ``offset`` from
-the tensors at run time therefore replays correctly with no capture-specific
-code.
-
-.. note::
-    The seed and offset are unsigned 64-bit values reinterpreted as ``int64``;
-    values at or above ``2**63`` appear negative.
+state that each replay refills with the values current at replay time, and
+``intragraph_offset`` holds this reservation's position within the graph; a
+kernel that loads ``seed`` and ``offset`` from the tensors at run time
+therefore replays correctly with no capture-specific code.
 
 .. warning::
     Tensors returned during capture alias the capture's state: their contents
@@ -14438,12 +14451,15 @@ code.
     graph is destroyed.
 
 Arguments:
-    increment (int): Number of Philox outputs to reserve; must be
-        non-negative.
+    increment (int): Number of Philox outputs to reserve. Must be
+        non-negative and at most ``2**64 - 1``; the offset it advances
+        wraps modulo ``2**64`` (under graph capture, where the intragraph
+        offset starts at 0, the total reserved within one graph must stay
+        below ``2**64``).
 
 Example:
     >>> g_cuda = torch.Generator(device='cuda')
-    >>> seed, offset, intragraph = g_cuda.philox_cuda_state(4)
+    >>> seed, offset, intragraph = g_cuda.philox_state(4)
 """,
 )
 
