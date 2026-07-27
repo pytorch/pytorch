@@ -519,6 +519,27 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    def test_const_graph_no_autotune_at_compile_time(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(16, 16, device=device)
+                self.b = torch.randn(16, device=device)
+
+            def forward(self, x):
+                w_t = torch.transpose(self.w_pre, 0, 1)
+                w = torch.nn.functional.relu(w_t) + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(16, 16, device=self.device),)
+        with config.patch(
+            {
+                "triton.autotune_at_compile_time": False,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_constant_folding_with_update(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -4760,6 +4781,48 @@ class AOTInductorTestsTemplate:
             )
 
             self.check_model(Model(), inputs)
+
+    def test_scatter_fallback_error_code_check(self):
+        # On GPU, scatter falls back to the aoti_torch_*_scatter c-shim; that
+        # call must be wrapped in AOTI_TORCH_ERROR_CODE_CHECK, otherwise a shim
+        # failure (e.g. setStorage on an empty self) is silently swallowed and
+        # the model returns a wrong result instead of raising. (On CPU, scatter
+        # is lowered to a C++ kernel, so there is no shim call to check.)
+        class Model(torch.nn.Module):
+            def forward(self, inp, index, src):
+                return torch.scatter(inp, 1, index, src)
+
+        inputs = (
+            torch.ones((3, 5), device=self.device, dtype=torch.int64),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.zeros((2, 5), device=self.device, dtype=torch.int64),
+        )
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), inputs)
+        if self.device == GPU_TYPE:
+            FileCheck().check_regex(
+                r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch_\w+_scatter"
+            ).run(code)
+
+    def test_index_put_fallback_error_code_check(self):
+        # Same invariant as test_scatter_fallback_error_code_check, for the
+        # index_put fallback shim call.
+        with DeterministicGuard(True):
+
+            class Model(torch.nn.Module):
+                def forward(self, self_tensor, indices, values):
+                    return torch.index_put(
+                        self_tensor, indices, values, accumulate=True
+                    )
+
+            inputs = (
+                torch.ones(4, device=self.device, dtype=torch.int64),
+                (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
+                torch.ones(4, device=self.device, dtype=torch.int64),
+            )
+            _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), inputs)
+            FileCheck().check_regex(
+                r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch_\w*index_put"
+            ).run(code)
 
     def test_narrow_fallback(self):
         class Model(torch.nn.Module):
