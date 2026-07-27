@@ -171,10 +171,10 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
-    std::vector<sycl::event> event_list{*xpu_event};
     const XPUStream xpu_stream(stream);
 
 #if SYCL_COMPILER_VERSION < 20260200
+    std::vector<sycl::event> event_list{*xpu_event};
     xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
 #else
     sycl::ext::oneapi::experimental::enqueue_wait_event(
