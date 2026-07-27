@@ -23,7 +23,11 @@ def in_toplevel_process() -> bool:
 #
 # This function cannot be an inner function since otherwise mp_context="spawn" would
 # not work for ProcessPoolExecutor since inner functions cannot be pickled.
-def _async_compile_initializer(orig_ppid: int, close_fds: tuple[int, ...] = ()) -> None:
+def _async_compile_initializer(
+    orig_ppid: int,
+    close_fds: tuple[int, ...] = (),
+    own_process_group: bool = False,
+) -> None:
     # In fork mode a worker inherits the sidecar's entire fd table, including the
     # sidecar<->parent pipes. The worker must not keep those open: holding the
     # result pipe's write end would stop the parent from ever seeing EOF when the
@@ -34,6 +38,18 @@ def _async_compile_initializer(orig_ppid: int, close_fds: tuple[int, ...] = ()) 
     for fd in close_fds:
         try:
             os.close(fd)
+        except OSError:
+            pass
+
+    # Pool workers only: put each worker in its own process group so
+    # SIGSTOP/SIGKILL via os.killpg() reaches its compiler children (nvcc,
+    # ptxas, cc1plus, ...) without hitting the sidecar or other workers.
+    # Not used for the sidecar or autotune subprocess -- detaching those from
+    # the launcher's process group only removes reachability on parent death.
+    if own_process_group:
+        try:
+            if hasattr(os, "setpgid"):
+                os.setpgid(0, 0)
         except OSError:
             pass
 

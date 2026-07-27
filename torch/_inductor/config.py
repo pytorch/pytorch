@@ -1741,6 +1741,33 @@ compile_worker_wait_timeout: int = int(
     os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT", "0")
 )
 
+# Memory enforcement mode for compile workers.
+# Options: "auto" (default), "cgroup" (not yet supported), "poll", "off"
+# Env-only: the sidecar is a separate process and reads this from the
+# environment, so setting it via config.patch() has no effect on
+# enforcement.  Use TORCHINDUCTOR_COMPILE_WORKER_MEMORY_ENFORCEMENT.
+# pyrefly: ignore [bad-assignment]
+compile_worker_memory_enforcement: Literal["auto", "cgroup", "poll", "off"] = (
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_MEMORY_ENFORCEMENT", "auto")
+)  # type: ignore[assignment]
+
+# Memory limit (kB) for a single compile worker's process subtree.
+# 0 (the default) means unlimited. Linux-only. Enforcement is poll-based.
+compile_worker_memory_limit_kb: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_MEMORY_LIMIT_KB", "0")
+)
+
+# Per-kernel compilation timeout (seconds) inside a compile worker.
+# 0 (the default) means no per-kernel limit.
+# Enforcement is poll-based: the sidecar watchdog checks on every tick
+# (compile_worker_watchdog_interval_seconds, default 60s), so the actual
+# kill lands at timeout + up to 2x the interval + sibling drain time.
+# Distinct from compile_worker_wait_timeout, which only bounds how long the
+# parent waits on futures and does not stop the worker itself.
+compile_worker_per_kernel_timeout: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_PER_KERNEL_TIMEOUT", "0")
+)
+
 enable_autograd_for_aot: bool = False
 
 
