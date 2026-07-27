@@ -2446,7 +2446,9 @@ class DistributedDataParallelTest(
         with self.assertRaisesRegex(
             ValueError, "device_ids can only be None or contain a single element."
         ):
-            DistributedDataParallel(model, device_ids=gpus, process_group=process_group)
+            DistributedDataParallel(
+                model, device_ids=device_ids, process_group=process_group
+            )
 
         with self.assertRaisesRegex(
             ValueError, "input module must be on the same type of devices"
@@ -2458,7 +2460,9 @@ class DistributedDataParallelTest(
         with self.assertRaisesRegex(
             ValueError, "device_ids can only be None or contain a single element."
         ):
-            DistributedDataParallel(model, device_ids=gpus, process_group=process_group)
+            DistributedDataParallel(
+                model, device_ids=device_ids, process_group=process_group
+            )
 
     def _test_fp16(self, gradient_as_bucket_view=False):
         process_group = self._get_process_group()

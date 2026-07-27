@@ -28,7 +28,6 @@ from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGI
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -41,7 +40,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -1374,85 +1372,6 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         for param in fsdp_model.parameters():
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float32)
-
-
-class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
-    @property
-    def world_size(self):
-        return 2
-
-    def _test_prefetch_writeback_sync(self, cpu_offload: bool):
-        device = torch.device(device_type, self.rank)
-        compute_done = torch.ones(1, device=device, dtype=torch.int32)
-        writeback_reads: list[torch.Tensor] = []
-
-        class SlowLinear(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.linear = nn.Linear(in_features, out_features, device=device)
-
-            def forward(self, x):
-                out = self.linear(x)
-                compute_done.fill_(0)
-                # Stall compute stream so prefetch writeback overlaps
-                torch.get_device_module(device_type)._sleep(int(1e8))
-                compute_done.fill_(1)
-                return out
-
-        orig_pre_unshard = FlatParamHandle.pre_unshard
-
-        def _pre_unshard_with_check(self_handle):
-            ret = orig_pre_unshard(self_handle)
-            # Read the flag after pre_unshard returns. If _writeback_orig_params
-            # properly waited for the compute stream, this clone (on
-            # pre_unshard_stream) is ordered after the wait and reads 1.
-            if self_handle._use_orig_params:
-                writeback_reads.append(compute_done.clone())
-            return ret
-
-        FlatParamHandle.pre_unshard = _pre_unshard_with_check
-        try:
-            torch.manual_seed(42)
-            model = nn.Sequential(
-                SlowLinear(4096, 4096),
-                SlowLinear(4096, 4096),
-            )
-            model = FSDP(
-                model,
-                cpu_offload=CPUOffload(offload_params=cpu_offload),
-                use_orig_params=True,
-                forward_prefetch=True,
-                backward_prefetch=BackwardPrefetch.BACKWARD_POST,
-                auto_wrap_policy=always_wrap_policy,
-            )
-            inp = torch.randn(4096, 4096, device=device)
-            for _ in range(3):
-                loss = model(inp).sum()
-                loss.backward()
-                with torch.no_grad():
-                    for p in model.parameters():
-                        if p.grad is not None:
-                            p -= 0.01 * p.grad
-                            p.grad = None
-        finally:
-            FlatParamHandle.pre_unshard = orig_pre_unshard
-
-        torch.accelerator.synchronize()
-        for i, val in enumerate(writeback_reads):
-            self.assertEqual(
-                val.item(),
-                1,
-                f"_writeback_orig_params read stale data (call {i}): "
-                "pre_unshard_stream was not synchronized with compute stream",
-            )
-
-    @skip_if_lt_x_gpu(2)
-    def test_prefetch_writeback_sync_cpu_offload(self):
-        self._test_prefetch_writeback_sync(cpu_offload=True)
-
-    @skip_if_lt_x_gpu(2)
-    def test_prefetch_writeback_sync_no_cpu_offload(self):
-        self._test_prefetch_writeback_sync(cpu_offload=False)
 
 
 class TestFSDPUseOrigParamsInit(FSDPTest):

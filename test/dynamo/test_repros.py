@@ -90,6 +90,10 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 _orig_module_call = torch.nn.Module.__call__
 
 # Custom operator that only supports CPU and Meta

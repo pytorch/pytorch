@@ -2,7 +2,6 @@
 
 import os
 import pickle
-import unittest
 from io import BytesIO
 from typing import cast
 
