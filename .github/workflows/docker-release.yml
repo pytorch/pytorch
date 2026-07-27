@@ -42,6 +42,7 @@ jobs:
 
   generate-matrix:
     if: github.repository_owner == 'pytorch'
+    needs: select-runner
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
@@ -53,17 +54,27 @@ jobs:
           submodules: 'false'
       - name: Get docker release matrix
         id: generate-matrix
+        # Stamp the per-platform runner (from _select-release-runner) onto each
+        # entry so the build job can use `runs-on: ${{ matrix.runner }}` -- runs-on
+        # cannot mix the matrix and needs contexts in one expression.
+        env:
+          RUNNER_X86: ${{ needs.select-runner.outputs.x86 }}
+          RUNNER_ARM64: ${{ needs.select-runner.outputs.arm64 }}
         run: |
-          MATRIX_BLOB="$(python3 .github/scripts/generate_docker_release_matrix.py)"
+          MATRIX_BLOB="$(python3 .github/scripts/generate_docker_release_matrix.py | python3 -c '
+          import json, os, sys
+          m = json.load(sys.stdin)
+          for e in m["include"]:
+              e["runner"] = os.environ["RUNNER_ARM64"] if e["platform"] == "linux/arm64" else os.environ["RUNNER_X86"]
+          print(json.dumps(m))
+          ')"
           echo "${MATRIX_BLOB}"
           echo "matrix=${MATRIX_BLOB}" >> "${GITHUB_OUTPUT}"
 
   build:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    needs:
-      - select-runner
-      - generate-matrix
-    runs-on: ${{ matrix.platform == 'linux/arm64' && needs.select-runner.outputs.arm64 || needs.select-runner.outputs.x86 }}
+    needs: generate-matrix
+    runs-on: ${{ matrix.runner }}
     container:
       image: ghcr.io/actions/actions-runner:latest
     environment: ${{ (github.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
