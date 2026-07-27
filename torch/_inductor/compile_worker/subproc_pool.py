@@ -6,6 +6,7 @@ import logging
 import multiprocessing
 import os
 import pickle
+import signal
 import struct
 import subprocess
 import sys
@@ -303,7 +304,13 @@ class SubprocPool:
         if args or kwargs:
             # pyrefly: ignore [bad-assignment]
             job_fn = functools.partial(job_fn, *args, **kwargs)
-        job_data = self.pickler.dumps(job_fn)
+        job_data = self.pickler.dumps(
+            (
+                job_fn,
+                config.compile_worker_memory_limit_kb,
+                config.compile_worker_per_kernel_timeout,
+            )
+        )
         future: Future[_T]
         with self.futures_lock:
             if not self.running:
@@ -558,6 +565,20 @@ class SubprocPool:
             status = self.pickler.loads(data)
             if not isinstance(status, dict):
                 return
+            if "enforcement" in status:
+                enforcement = status["enforcement"]
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "compile_worker_memory_enforcement",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: enforcement,
+                    expect_trace_id=False,
+                    suppress_context=True,
+                    record_logging_overhead=False,
+                )
+                return
             with self.futures_lock:
                 pending_job = self.pending_jobs.get(job_id)
             compile_id = pending_job.compile_id if pending_job is not None else None
@@ -643,11 +664,39 @@ class SubprocMain:
         self.nprocs = nprocs
         self.pool: ProcessPoolExecutor | None = None
         self.pool_finalizer: Any | None = None
+        self._submitted_pool: ProcessPoolExecutor | None = None
+        # _pool_lock guards: pool, pool_finalizer, and executor submission.
+        # Prevents the main thread (submit -> _submit_inner) and the watchdog
+        # thread (_end_draining -> _shutdown_pool) from racing on the pool
+        # lifecycle.  Held from pool creation through pool.submit() so that
+        # _shutdown_pool cannot tear down the executor between _ensure_pool
+        # and submission.  Also acquired in _shutdown_pool and submit's
+        # BrokenProcessPool handler.
+        self._pool_lock = threading.Lock()
+
+        # Unlocked: written only by main thread (_shutdown); stale reads by
+        # callbacks/watchdog are harmless (True -> extra send attempt that
+        # finds the pipe closed; False -> skips a send).
         self.running = True
-        # job_id -> monotonic submit time; scanned by the watchdog thread.
+        self._watchdog_stop = threading.Event()
+
+        # _inflight_lock guards: _inflight, _draining, _drain_deadline,
+        # _offenders, _offender_reasons, _draining_jobs.
+        # Exception: _offender_reasons is also popped WITHOUT the lock by
+        # each callback for its own job_id (dict.pop is atomic per key, and
+        # each job_id is owned by exactly one callback).
+        # Why: prevents the main thread (submit), the watchdog thread (limit
+        # checks, drain transitions), and executor callbacks (result delivery,
+        # drain rescue) from racing on job tracking and drain state.
+        # Acquired briefly for snapshots and mutations; expensive work
+        # (/proc reads) runs outside on a snapshot.
         self._inflight: dict[int, float] = {}
         self._inflight_lock = threading.Lock()
-        self._watchdog_stop = threading.Event()
+        self._draining = False
+        self._drain_deadline: float = float("inf")
+        self._offenders: dict[int, int] = {}
+        self._offender_reasons: dict[int, str] = {}
+        self._draining_jobs: dict[int, bytes] = {}
 
     def main(self) -> None:
         # Phase heartbeats rely on fork inheritance of the shared buffer; spawn
@@ -681,21 +730,30 @@ class SubprocMain:
             self.read_pipe.close()
         self._shutdown_pool(terminate_workers=True)
 
-    def _shutdown_pool(self, *, terminate_workers: bool) -> None:
-        if self.pool is None:
-            return
+    def _shutdown_pool(
+        self, *, terminate_workers: bool, expected: ProcessPoolExecutor | None = None
+    ) -> None:
+        # expected=None (default): unconditionally retire the current pool.
+        #   Used by _shutdown (sidecar exit), _quiesce, and _end_draining
+        #   which own the lifecycle and always mean "tear down whatever is live".
+        # expected=<pool>: only retire if self.pool is that exact instance.
+        #   Used by submit's BrokenProcessPool retry to avoid erasing a
+        #   replacement pool that another thread already built.
+        with self._pool_lock:
+            if self.pool is None:
+                return
+            if expected is not None and self.pool is not expected:
+                return
 
-        pool = self.pool
-        self.pool = None
+            pool = self.pool
+            self.pool = None
 
-        if self.pool_finalizer is not None:
-            if terminate_workers:
-                self.pool_finalizer.cancel()
-            self.pool_finalizer = None
+            if self.pool_finalizer is not None:
+                if terminate_workers:
+                    self.pool_finalizer.cancel()
+                self.pool_finalizer = None
 
         if terminate_workers:
-            # The sidecar is exiting, so do not let ProcessPoolExecutor's
-            # interpreter finalization wait for running compiler workers.
             _terminate_process_pool(pool)
         else:
             pool.shutdown(wait=False)
@@ -705,6 +763,9 @@ class SubprocMain:
         # reported elapsed intentionally includes cold pool creation and the fork
         # of the workers -- that wait is real and worth surfacing.
         with self._inflight_lock:
+            if self._draining:
+                self._draining_jobs[job_id] = data
+                return
             self._inflight[job_id] = time.monotonic()
         for _ in range(_BROKEN_POOL_MAX_SUBMIT_ATTEMPTS):
             if not self.running:
@@ -714,15 +775,19 @@ class SubprocMain:
                 return
             except BrokenProcessPool:
                 # If any subprocess in the pool crashes, we get a BrokenProcessPool
-                # exception and the whole pool becomes unusable. Reset it so the
-                # next attempt, or the next job after exhaustion, starts clean.
+                # exception and the whole pool becomes unusable. Handle crashes by
+                # recreating the pool and resubmitting. Only retire the exact
+                # pool that failed; a concurrent thread may have already
+                # replaced it.
                 log.warning(
                     "Compile worker pool broke while submitting job %s; "
                     "resetting the pool.",
                     job_id,
                     exc_info=True,
                 )
-                self._shutdown_pool(terminate_workers=True)
+                self._shutdown_pool(
+                    terminate_workers=True, expected=self._submitted_pool
+                )
         header, payload = self._failure_payload(
             job_id,
             f"worker pool broke on {_BROKEN_POOL_MAX_SUBMIT_ATTEMPTS} "
@@ -807,6 +872,24 @@ class SubprocMain:
             # callback (it logs to its own logger and moves on), so an escape
             # here leaves the parent's future pending forever with nothing sent
             # and nothing logged on the parent side.
+            offender_reason: str | None = None
+            with self._inflight_lock:
+                # Offender whose limit was breached: pop the descriptive
+                # reason under lock, send outside.  Check _offender_reasons
+                # (not _offenders) because _offenders may already be cleared
+                # by _end_draining's lock section by the time this fires.
+                offender_reason = self._offender_reasons.pop(job_id, None)
+                if offender_reason is not None:
+                    self._inflight.pop(job_id, None)
+                elif self._draining:
+                    if fut.cancelled() or fut.exception() is not None:
+                        self._inflight.pop(job_id, None)
+                        self._draining_jobs[job_id] = data
+                        return
+            if offender_reason is not None:
+                header, payload = self._failure_payload(job_id, offender_reason)
+                self._send_result(job_id, header, payload)
+                return
             if not self.running:
                 return
             try:
@@ -819,20 +902,21 @@ class SubprocMain:
                 msg_header, payload = MsgHeader.JOB_ERROR, b""
             self._send_result(job_id, msg_header, payload)
 
-        self._start_pool()
-        if self.pool is None:
-            raise AssertionError("pool must be initialized before submitting jobs")
+        with self._pool_lock:
+            self._ensure_pool()
+            if self.pool is None:
+                raise AssertionError("pool must be initialized before submitting jobs")
+            self._submitted_pool = self.pool
+            future = self.pool.submit(
+                functools.partial(SubprocMain.do_job, self.pickler, job_id, data)
+            )
+            future.add_done_callback(callback)
 
-        future = self.pool.submit(
-            functools.partial(SubprocMain.do_job, self.pickler, job_id, data)
-        )
-        future.add_done_callback(callback)
-
-    def _start_pool(self) -> None:
+    def _ensure_pool(self) -> None:
+        """Create the worker pool if it doesn't exist.  Caller must hold _pool_lock."""
         if self.pool is not None:
             return
 
-        # Recycle heartbeat slots before the new worker generation forks.
         watchdog.reset()
 
         # Only fork workers inherit the sidecar<->parent pipe fds and must close
@@ -857,7 +941,54 @@ class SubprocMain:
         )
         _warm_process_pool(self.pool, self.nprocs)
 
+    def _start_pool(self) -> None:
+        with self._pool_lock:
+            self._ensure_pool()
+
+    def _begin_draining(self, worker_pid: int, job_id: int) -> None:
+        self._offenders[job_id] = worker_pid
+        try:
+            os.killpg(worker_pid, signal.SIGSTOP)
+        except (ProcessLookupError, PermissionError):
+            pass
+        if not self._draining:
+            self._drain_deadline = (
+                time.monotonic() + config.compile_worker_watchdog_interval_seconds
+            )
+        self._draining = True
+
+    def _end_draining(self) -> None:
+        if not self._offenders:
+            return
+        for pid in self._offenders.values():
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        # Descriptive errors for offenders are sent by the callback (which
+        # pops from _offender_reasons), not here -- avoids a double-send race
+        # where the callback fires after _offenders.clear() and also sends.
+        self._shutdown_pool(terminate_workers=True)
+        with self._inflight_lock:
+            for job_id in self._offenders:
+                self._inflight.pop(job_id, None)
+            self._offenders.clear()
+            buffered = dict(self._draining_jobs)
+            self._draining_jobs.clear()
+            self._draining = False
+        for job_id, data in buffered.items():
+            self.submit(job_id, data)
+
     def _start_watchdog(self) -> None:
+        enforcement = config.compile_worker_memory_enforcement
+        status = {"enforcement": enforcement}
+        payload = self.pickler.dumps(status)
+        try:
+            with self.write_lock:
+                if self.running:
+                    _send_msg(self.write_pipe, MsgHeader.STATUS, -1, payload)
+        except (OSError, ValueError):
+            pass
         interval = config.compile_worker_watchdog_interval_seconds
         if interval <= 0:
             return
@@ -868,20 +999,96 @@ class SubprocMain:
             daemon=True,
         ).start()
 
+    def _check_memory_violation(self, worker_pid: int, memory_limit: int) -> bool:
+        if config.compile_worker_memory_enforcement == "off":
+            return False
+        return watchdog.is_worker_memory_limit_exceeded(worker_pid, memory_limit)
+
+    def _check_job_limits(
+        self,
+        job_id: int,
+        heartbeats: dict[int, tuple[int, int, int, int, int, int]],
+        now_ns: int,
+    ) -> tuple[int, str] | None:
+        """Returns (worker_pid, reason) if the job breached its limits, else None.
+
+        Pure check -- no state mutation, safe to call without _inflight_lock.
+        """
+        heartbeat = heartbeats.get(job_id)
+        if heartbeat is None:
+            return None
+        _, _, worker_pid, job_start_ns, memory_limit, timeout = heartbeat
+        elapsed_from_start = (now_ns - job_start_ns) / 1e9
+
+        if timeout > 0 and elapsed_from_start >= timeout:
+            return (
+                worker_pid,
+                f"Compile worker {worker_pid} killed: per-kernel timeout {timeout}s exceeded (elapsed {elapsed_from_start:.1f}s) on job {job_id}",
+            )
+
+        if memory_limit > 0 and self._check_memory_violation(worker_pid, memory_limit):
+            return (
+                worker_pid,
+                f"Compile worker {worker_pid} killed: memory limit {memory_limit} kB exceeded on job {job_id}",
+            )
+
+        return None
+
     def _watchdog_loop(self, interval: float) -> None:
         # Every `interval` seconds, report any job still running past `interval`
         # so a stuck/slow worker leaves a breadcrumb (the parent turns these into
         # tlparse artifacts). Re-reports each tick with a growing elapsed time.
+        # When per-kernel timeout / total memory limits are crossed, stop the offending worker
+        # quiesce the pool and then kill the offending worker. BrokenProcessPool recreates the pool.
+
         while not self._watchdog_stop.wait(interval):
             now = time.monotonic()
             now_ns = time.monotonic_ns()
+
             heartbeats = watchdog.read_heartbeats()
+            slow: list[tuple[int, float]] = []
+            drain_ready = False
+            check_jobs: list[int] = []
+
+            # Snapshot under lock (cheap)
             with self._inflight_lock:
-                slow = [
-                    (job_id, elapsed)
-                    for job_id, start in self._inflight.items()
-                    if (elapsed := now - start) >= interval
-                ]
+                if self._draining:
+                    check_jobs = [
+                        j
+                        for j in self._inflight
+                        if j not in self._offenders and heartbeats.get(j) is not None
+                    ]
+                    drain_ready = now >= self._drain_deadline or all(
+                        j in self._offenders or heartbeats.get(j) is None
+                        for j in self._inflight
+                    )
+                else:
+                    check_jobs = list(self._inflight.keys())
+                    for job_id, start in self._inflight.items():
+                        elapsed = now - start
+                        if elapsed >= interval:
+                            slow.append((job_id, elapsed))
+
+            # Expensive limit checks outside lock (/proc reads)
+            breaches: list[tuple[int, int, str]] = []
+            for job_id in check_jobs:
+                breach = self._check_job_limits(job_id, heartbeats, now_ns)
+                if breach is not None:
+                    breaches.append((job_id, breach[0], breach[1]))
+
+            if breaches:
+                with self._inflight_lock:
+                    for job_id, worker_pid, reason in breaches:
+                        if job_id not in self._inflight:
+                            continue
+                        log.warning("%s; draining siblings before kill", reason)
+                        self._offender_reasons[job_id] = reason
+                        self._begin_draining(worker_pid, job_id)
+
+            if drain_ready:
+                self._end_draining()
+                continue
+
             for job_id, elapsed in slow:
                 self._report_status(job_id, elapsed, heartbeats.get(job_id), now_ns)
 
@@ -889,12 +1096,12 @@ class SubprocMain:
         self,
         job_id: int,
         elapsed: float,
-        heartbeat: tuple[int, int, int] | None,
+        heartbeat: tuple[int, int, int, int, int, int] | None,
         now_ns: int,
     ) -> None:
         status: dict[str, Any] = {"job_id": job_id, "elapsed_s": round(elapsed, 1)}
         if heartbeat is not None:
-            phase, phase_start_ns, worker_pid = heartbeat
+            phase, phase_start_ns, worker_pid, job_start_ns, _, _ = heartbeat
             status["phase"] = watchdog.Phase(phase).name.lower()
             status["phase_elapsed_s"] = round((now_ns - phase_start_ns) / 1e9, 1)
             status["worker_pid"] = worker_pid
@@ -921,11 +1128,14 @@ class SubprocMain:
     @staticmethod
     def do_job(pickler: SubprocPickler, job_id: int, data: bytes) -> bytes:
         # do the pickle/unpickle in the sub-subproc
-        watchdog.set_current_job(job_id)
+        (job_fn, memory_limit, timeout) = typing.cast(
+            tuple[Callable[[], object], int, int],
+            pickler.loads(data),
+        )
+        watchdog.set_current_job(job_id, memory_limit, timeout)
         try:
-            job = typing.cast(Callable[[], object], pickler.loads(data))
             try:
-                result = job()
+                result = job_fn()
             except Exception:
                 result = _SubprocExceptionInfo(traceback.format_exc())
             return pickler.dumps(result)
@@ -954,7 +1164,10 @@ def _terminate_process_pool(pool: ProcessPoolExecutor) -> None:
     for process in processes:
         try:
             if process.is_alive():
-                process.terminate()
+                if hasattr(os, "killpg"):
+                    os.killpg(process.pid, signal.SIGTERM)
+                else:
+                    process.terminate()
         except (OSError, ValueError):
             log.warning("Ignored error terminating compile worker", exc_info=True)
 
@@ -969,7 +1182,10 @@ def _terminate_process_pool(pool: ProcessPoolExecutor) -> None:
             if remaining > 0:
                 process.join(remaining)
             if process.is_alive():
-                process.kill()
+                if hasattr(os, "killpg"):
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
         except (OSError, ValueError, AssertionError):
             log.warning("Ignored error killing compile worker", exc_info=True)
 

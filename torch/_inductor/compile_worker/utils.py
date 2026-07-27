@@ -37,6 +37,15 @@ def _async_compile_initializer(orig_ppid: int, close_fds: tuple[int, ...] = ()) 
         except OSError:
             pass
 
+    # Put this worker in its own process group so SIGSTOP/SIGKILL via
+    # os.killpg() reaches its compiler children (nvcc, ptxas, cc1plus, ...)
+    # without hitting the sidecar or other workers.
+    try:
+        if hasattr(os, "setpgid"):
+            os.setpgid(0, 0)
+    except OSError:
+        pass
+
     import torch._C
 
     def run() -> None:
