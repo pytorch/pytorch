@@ -1543,78 +1543,26 @@ class ComboKernel(Kernel):
             code.splice(sub_kernel_code.setup)
             code.splice(sub_kernel_code.body)
 
-    def _noinline_sub_kernel_params(
-        self,
-        sub_kernel_code: SubKernelCode,
-        num: int,
-        argdefs: list[ArgName],
-    ) -> list[ArgName] | None:
-        """Parameter list for emitting this sub-kernel body as a separate
-        device function: the outer names its code actually references (main
-        kernel args plus the dispatch-computed pid offsets), minus names the
-        sub-kernel's own setup defines. None when the body cannot be
-        tokenized."""
-        lines = self._plain_lines(sub_kernel_code.setup)
-        body_lines = self._plain_lines(sub_kernel_code.body)
-        if lines is None or body_lines is None:
-            return None
-        used = self._names_in_lines(lines + body_lines)
-        if used is None:
-            return None
-        defined = OrderedSet(sub_kernel_code.setup_lhs_names)
-        params = [
-            arg
-            for arg in argdefs
-            if arg.name in used and arg.name not in defined and not arg.is_constexpr
-        ]
-        params.append(ArgName("x_pid_offset"))
-        if self.y_tree_list[num]:
-            params.append(ArgName("y_pid_offset"))
-        params.extend(
-            arg
-            for arg in argdefs
-            if arg.name in used and arg.name not in defined and arg.is_constexpr
-        )
-        if self.bake_blocks:
-            # Baked block sizes are kernel-scope constexprs (codegen_blocks),
-            # not kernel args; thread them through as constexpr parameters.
-            params.extend(
-                ArgName(block, is_constexpr=True)
-                for block in self.block_args
-                if block in used and block not in defined
-            )
-        return params
-
     def _codegen_noinline_sub_kernels(
         self,
         code: IndentedBuffer,
         kernel_name: str,
         sub_kernel_codes: list[SubKernelCode],
-        argdefs: list[ArgName],
-    ) -> list[str] | None:
+    ) -> list[str]:
         """Emit each sub-kernel body as a @triton.jit(noinline=True) device
-        function and return the per-branch call lines.
-        Returns None when any body cannot be emitted this way
-        (caller falls back to inline splicing)."""
+        function and return the per-branch call lines."""
         call_lines: list[str] = []
         defs = IndentedBuffer()
         emitted: dict[tuple[Any, ...], str] = {}
         for num, sub_kernel_code in enumerate(sub_kernel_codes):
-            if self.per_subkernel_blocks:
-                noinline_call = self.noinline_sub_kernel_calls[num]
-                params = noinline_call.params
-                call_args = noinline_call.call_args
-                key = (
-                    sub_kernel_code.setup.getvalue(),
-                    sub_kernel_code.body.getvalue(),
-                    noinline_call.signature_key,
-                )
-            else:
-                params = self._noinline_sub_kernel_params(sub_kernel_code, num, argdefs)
-                if params is None:
-                    return None
-                call_args = [p.name for p in params]
-                key = (num,)
+            noinline_call = self.noinline_sub_kernel_calls[num]
+            params = noinline_call.params
+            call_args = noinline_call.call_args
+            key = (
+                sub_kernel_code.setup.getvalue(),
+                sub_kernel_code.body.getvalue(),
+                noinline_call.signature_key,
+            )
 
             sub_name = emitted.get(key)
             if sub_name is None:
@@ -1720,7 +1668,7 @@ class ComboKernel(Kernel):
         noinline_calls: list[str] | None = None
         if self.per_subkernel_blocks:
             noinline_calls = self._codegen_noinline_sub_kernels(
-                code, kernel_name, sub_kernel_codes, argdefs
+                code, kernel_name, sub_kernel_codes
             )
 
         code.splice(
