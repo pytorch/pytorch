@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for nb_bool / generic_bool: bool() via PyObject_IsTrue in Dynamo."""
+"""Tests for nb_bool / generic_is_true: bool() via PyObject_IsTrue in Dynamo."""
 
 import collections
 import enum
