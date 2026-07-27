@@ -3,8 +3,6 @@
 #include <c10/xpu/XPUEvent.h>
 #include <c10/xpu/test/impl/XPUTest.h>
 
-
-
 static bool has_xpu() {
   return c10::xpu::device_count() > 0;
 }
