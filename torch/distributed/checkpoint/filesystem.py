@@ -157,7 +157,7 @@ class _OverlappingCpuLoader(_TensorLoader):
             stream.device_type if stream else _get_available_device_type()
         )
         self.device_module = _get_device_module(self.device_type)
-        self.stream = stream or self.device_module.current_stream()
+        self.stream = cast(torch.Stream, stream or self.device_module.current_stream())
         if self.stream != self.device_module.current_stream():
             self.stream.wait_stream(self.device_module.current_stream())
 
@@ -382,16 +382,18 @@ def _write_files_from_queue(
     serialization_format: SerializationFormat,
 ) -> None:
     try:
+        device_type = _get_available_device_type()
+        if device_type is not None:
+            device_mod = _get_device_module(device_type)
+            has_stream_support = hasattr(device_mod, "current_stream") and hasattr(
+                device_mod, "stream"
+            )
+        else:
+            has_stream_support = False
+
         while True:
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
-
-            device_type = _get_available_device_type()
-            if device_type is not None:
-                device_mod = _get_device_module(device_type)
-                has_stream_support = hasattr(device_mod, "current_stream")
-            else:
-                has_stream_support = False
 
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
             # performance degradation, observed as being related to cuda stream syncs. We
