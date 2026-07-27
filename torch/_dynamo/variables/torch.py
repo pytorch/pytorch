@@ -3048,6 +3048,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .lists import BaseListVariable
             from .tensor import TensorVariable
 
+            create_graph = args[4] if len(args) > 4 else kwargs.get("create_graph")
+            if (
+                not config.trace_autograd_ops
+                and isinstance(create_graph, ConstantVariable)
+                and bool(create_graph.value)
+            ):
+                unimplemented(
+                    gb_type="using `torch.autograd.grad(create_graph=True)` with `torch._dynamo.config.trace_autograd_ops=False`",
+                    context=f"trace_autograd_ops={config.trace_autograd_ops}",
+                    explanation=(
+                        "Attempted to call `torch.autograd.grad` with "
+                        "`create_graph=True` while config "
+                        "`torch._dynamo.config.trace_autograd_ops` is `False`. "
+                        "Capturing higher-order autograd is still experimental."
+                    ),
+                    hints=[
+                        "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
+                    ],
+                )
+
             tracer = tx.output.current_tracer
             while tracer is not None:
                 if tracer.source_target in (
@@ -3206,8 +3226,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # (to detect returning tensors whose grad_fn was consumed by autograd.grad)
             # Skip if retain_graph=True or create_graph=True since the graph is not
             # consumed in those cases and can be traversed again.
-            retain_graph = kwargs.get("retain_graph")
-            create_graph = kwargs.get("create_graph")
+            retain_graph = args[3] if len(args) > 3 else kwargs.get("retain_graph")
             graph_preserved = (
                 isinstance(retain_graph, ConstantVariable)
                 and retain_graph.value is True

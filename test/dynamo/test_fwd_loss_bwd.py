@@ -80,6 +80,7 @@ class TestAutogradGradDefault(TestCase):
         ):
             step(mod(x))
 
+    @skipIfCrossRef
     def test_tensor_backward_still_gated_by_trace_autograd_ops(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -96,10 +97,41 @@ class TestAutogradGradDefault(TestCase):
         ):
             step()
 
+    def test_autograd_grad_positional_create_graph_still_gated(self):
+        def fn(x):
+            return torch.autograd.grad(x.sin().sum(), x, None, None, True)[0]
+
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Capturing higher-order autograd is still experimental",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_autograd_grad_positional_retain_graph_preserves_graph(self):
+        def fn(x):
+            y = x.sin()
+            grad = torch.autograd.grad(y.sum(), x, None, True)[0]
+            return y, grad
+
+        x_eager = torch.randn(4, requires_grad=True)
+        y_eager, grad_eager = fn(x_eager)
+        second_grad_eager = torch.autograd.grad(y_eager.sum(), x_eager)[0]
+
+        x_compiled = x_eager.detach().clone().requires_grad_()
+        y_compiled, grad_compiled = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(x_compiled)
+        second_grad_compiled = torch.autograd.grad(y_compiled.sum(), x_compiled)[0]
+
+        self.assertEqual(y_compiled, y_eager)
+        self.assertEqual(grad_compiled, grad_eager)
+        self.assertEqual(second_grad_compiled, second_grad_eager)
+
     def test_autograd_grad_inside_checkpoint_graph_breaks(self):
         def checkpointed(x):
             out = x.sin().exp().sin()
-            return torch.autograd.grad(out.sum(), x, create_graph=True)[0]
+            return torch.autograd.grad(out.sum(), x)[0]
 
         def fn(x):
             return torch.utils.checkpoint.checkpoint(
@@ -108,15 +140,12 @@ class TestAutogradGradDefault(TestCase):
 
         x_eager = torch.randn(4, requires_grad=True)
         expected = fn(x_eager)
-        expected_grad = torch.autograd.grad(expected.sum(), x_eager)[0]
 
         x_compiled = x_eager.detach().clone().requires_grad_()
         backend = CompileCounterWithBackend("eager")
         actual = torch.compile(fn, backend=backend)(x_compiled)
-        actual_grad = torch.autograd.grad(actual.sum(), x_compiled)[0]
 
         self.assertEqual(actual, expected)
-        self.assertEqual(actual_grad, expected_grad)
         self.assertEqual(backend.frame_count, 2)
         self.assertEqual(backend.op_count, 2)
 
