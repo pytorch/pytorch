@@ -384,8 +384,17 @@ _scaled_gemm(
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
           Tensor& out,
+          const std::optional<Tensor>& scale_result = std::nullopt,
           const std::optional<Tensor>& alpha = std::nullopt) {
-  cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
+  cublasCommonArgs args(
+      mat1,
+      mat2,
+      out,
+      scale_a,
+      scale_b,
+      isFloat8Type(out.scalar_type()) ? scale_result : std::nullopt,
+      scaling_choice_a,
+      scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
   if (_scaled_mm_allowed_device(true, false)) {
@@ -662,7 +671,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #endif
   }
 
-  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
+  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out, scale_result);
 }
 
 Tensor
@@ -1241,7 +1250,7 @@ _scaled_nvfp4_nvfp4(
 
   auto scaling_choice_a = ScalingType::BlockWise1x16;
   auto scaling_choice_b = ScalingType::BlockWise1x16;
-  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
+  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, std::nullopt, alpha);
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
 #endif
