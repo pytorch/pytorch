@@ -5724,7 +5724,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
 
 
 @instantiate_parametrized_tests
-class TestTDMConfigAndDense(TestCase):
+class TestTDMConfigDenseAndGeneric(TestCase):
     def test_tdm_arch_gate_accepts_only_gfx1250(self):
         from torch._inductor.utils import is_gfx1250_arch
 
@@ -5929,6 +5929,48 @@ class TestTDMConfigAndDense(TestCase):
             issubclass(ROCmAddMMPersistentTDMTemplateConfigHeuristic, AddMMConfigMixin)
         )
 
+    def test_tdm_generic_descriptor_gate_composes_optins(self):
+        from torch._inductor.utils import use_gfx1250_descriptor_codegen
+
+        device = torch.device("cuda")
+        base = {
+            "enable_tdm": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+        with mock.patch(
+            "torch._inductor.utils._gfx1250_device_prereqs", return_value=True
+        ):
+            with config.patch(base):
+                self.assertTrue(use_gfx1250_descriptor_codegen(device))
+            for option in base:
+                with config.patch({**base, option: False}):
+                    self.assertFalse(use_gfx1250_descriptor_codegen(device))
+
+    def test_tdm_generic_descriptor_checker_preserves_backend_dtype_policy(self):
+        from torch._inductor.codegen.triton import TMACompatibilityChecker
+
+        kernel = mock.Mock(no_x_dim=False)
+        graph = mock.Mock()
+        graph.get_current_device_or_throw.return_value = mock.Mock(type="cuda")
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=True,
+            ),
+        ):
+            self.assertTrue(
+                TMACompatibilityChecker(
+                    kernel, torch.float16, for_store=False, force=False
+                ).can_use_tma()
+            )
+            self.assertFalse(
+                TMACompatibilityChecker(
+                    kernel, torch.float8_e4m3fn, for_store=False, force=False
+                ).can_use_tma()
+            )
+
     def _tdm_capable_triton(self):
         from torch.utils._triton import has_triton_amd_tdm_device
 
@@ -5994,6 +6036,82 @@ class TestTDMConfigAndDense(TestCase):
             proc.stdout,
             r"async_tdm|tensor_load_to_lds|tensor\.load\.to\.lds",
         )
+
+    @parametrize("num_stages", (1, 2))
+    def test_tdm_generic_pointwise_reduction_lower_to_tdm(self, num_stages):
+        if not self._tdm_capable_triton():
+            self.skipTest("Triton without gfx1250 TDM backend support")
+
+        import subprocess
+        import sys
+        import textwrap
+
+        child = textwrap.dedent(
+            f"""
+            import triton
+            import triton.language as tl
+            from triton.backends.compiler import GPUTarget
+
+            @triton.jit
+            def pw(x_ptr, y_ptr, o_ptr, M, N,
+                   BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+                x_desc = tl.make_tensor_descriptor(
+                    x_ptr, shape=[M, N], strides=[N, 1],
+                    block_shape=[BLOCK_M, BLOCK_N])
+                y_desc = tl.make_tensor_descriptor(
+                    y_ptr, shape=[M, N], strides=[N, 1],
+                    block_shape=[BLOCK_M, BLOCK_N])
+                o_desc = tl.make_tensor_descriptor(
+                    o_ptr, shape=[M, N], strides=[N, 1],
+                    block_shape=[BLOCK_M, BLOCK_N])
+                x = tl.load_tensor_descriptor(x_desc, [0, 0])
+                y = tl.load_tensor_descriptor(y_desc, [0, 0])
+                tl.store_tensor_descriptor(o_desc, [0, 0], x + y)
+
+            @triton.jit
+            def rd(x_ptr, o_ptr, M, N,
+                   BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+                x_desc = tl.make_tensor_descriptor(
+                    x_ptr, shape=[M, N], strides=[N, 1],
+                    block_shape=[BLOCK_M, BLOCK_N])
+                x = tl.load_tensor_descriptor(x_desc, [0, 0])
+                tl.store(o_ptr + tl.arange(0, BLOCK_M), tl.sum(x, axis=1))
+
+            target = GPUTarget("hip", "gfx1250", 32)
+            outputs = []
+            for fn, signature in (
+                (pw, {{"x_ptr": "*fp16", "y_ptr": "*fp16", "o_ptr": "*fp16",
+                       "M": "i32", "N": "i32",
+                       "BLOCK_M": "constexpr", "BLOCK_N": "constexpr"}}),
+                (rd, {{"x_ptr": "*fp32", "o_ptr": "*fp32",
+                       "M": "i32", "N": "i32",
+                       "BLOCK_M": "constexpr", "BLOCK_N": "constexpr"}}),
+            ):
+                src = triton.compiler.ASTSource(
+                    fn=fn,
+                    signature=signature,
+                    constexprs={{"BLOCK_M": 64, "BLOCK_N": 64}},
+                )
+                outputs.append(triton.compile(
+                    src,
+                    target=target,
+                    options={{"num_stages": {num_stages}}},
+                ).asm["amdgcn"])
+            print("<<<SEP>>>".join(outputs))
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", child],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if proc.returncode != 0:
+            self.fail(proc.stderr.strip())
+        parts = proc.stdout.split("<<<SEP>>>")
+        self.assertEqual(len(parts), 2)
+        for asm in parts:
+            self.assertRegex(asm, r"async_tdm|tensor_load_to_lds|tensor\.load\.to\.lds")
 
 
 def simple_fn():
@@ -6229,6 +6347,16 @@ class TestTDMEndToEnd(TestCase):
         ):
             return run_and_get_code(torch.compile(fn), *args)
 
+    def _compile_generic_and_get_code(self, fn, *args):
+        with config.patch(
+            {
+                "enable_tdm": True,
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        ):
+            return run_and_get_code(torch.compile(fn), *args)
+
     def test_tdm_dense_mm_correctness_and_selection(self):
         def fn(a, b):
             return torch.mm(a, b)
@@ -6253,6 +6381,25 @@ class TestTDMEndToEnd(TestCase):
         self.assertIn("make_tensor_descriptor", joined)
         self.assertIn("load_tensor_descriptor", joined)
         torch.testing.assert_close(result, fn(bias, a, b), atol=2e-2, rtol=2e-2)
+
+    def test_tdm_generic_pointwise_correctness_and_selection(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_generic_and_get_code(fn, x, y)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(x, y), atol=1e-3, rtol=1e-3)
+
+    def test_tdm_generic_reduction_correctness_and_selection(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float32)
+        result, code = self._compile_generic_and_get_code(fn, x)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
 
 
 if __name__ == "__main__":

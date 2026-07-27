@@ -2261,6 +2261,16 @@ def use_triton_tdm_scaled_template(
     )
 
 
+def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
+    """Return whether generic tensor descriptor codegen may target AMD TDM."""
+    return (
+        config.enable_tdm
+        and config.triton.use_tensor_descriptor
+        and config.assume_aligned_inputs
+        and _gfx1250_device_prereqs(device)
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:

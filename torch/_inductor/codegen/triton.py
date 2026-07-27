@@ -73,6 +73,7 @@ from ..scheduler import (
 from ..shape_propagation import get_broadcasted_shape
 from ..stream_utils import get_raw_stream_name
 from ..utils import (
+    _TDM_SUPPORTED_DTYPES,
     _TMA_SUPPORTED_DTYPES,
     cache_on_self,
     DelayReplaceLine,
@@ -91,6 +92,7 @@ from ..utils import (
     triton_type,
     triton_version_uses_attrs_dict,
     upcast_compute_type,
+    use_gfx1250_descriptor_codegen,
 )
 from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -2908,6 +2910,7 @@ class TMACompatibilityChecker:
     force: bool
     # Inductor buffer name being loaded from / stored to.
     buffer_name: str | None = None
+    _using_tdm: bool = dataclasses.field(init=False, default=False)
 
     def __post_init__(self):
         self.failed_debug_prefix = "Cannot use TMA descriptor for load / store since: "
@@ -2919,7 +2922,8 @@ class TMACompatibilityChecker:
         if self.force:
             return True
 
-        device_type = V.graph.get_current_device_or_throw().type
+        device = V.graph.get_current_device_or_throw()
+        device_type = device.type
         if device_type == "cpu":
             if not (
                 config.triton.use_tensor_descriptor
@@ -2936,7 +2940,9 @@ class TMACompatibilityChecker:
             # constraints below do not apply.
             return True
 
-        if not (
+        gfx1250_capable = use_gfx1250_descriptor_codegen(device)
+        self._using_tdm = gfx1250_capable
+        cuda_xpu_capable = not gfx1250_capable and (
             (
                 (
                     device_type == "cuda"
@@ -2947,10 +2953,12 @@ class TMACompatibilityChecker:
             )
             and config.triton.use_tensor_descriptor
             and has_triton_stable_tma_api()
-        ):
+        )
+
+        if not (cuda_xpu_capable or gfx1250_capable):
             log.debug(
-                "%s Requires triton>=3.4.0, a CUDA device with cc>=9.0,"
-                " use_tensor_descriptor=True, and assume_aligned_inputs=True",
+                "%s Requires a supported CUDA/XPU TMA target or a TDM-capable "
+                "gfx1250 target with tensor descriptors and aligned inputs enabled",
                 self.failed_debug_prefix,
             )
             return False
@@ -2966,9 +2974,12 @@ class TMACompatibilityChecker:
             )
             return False
 
-        if self.dtype not in _TMA_SUPPORTED_DTYPES:
+        supported_dtypes = (
+            _TDM_SUPPORTED_DTYPES if gfx1250_capable else _TMA_SUPPORTED_DTYPES
+        )
+        if self.dtype not in supported_dtypes:
             log.debug(
-                "%s dtype %s has no CUtensorMapDataType mapping.",
+                "%s dtype %s is not supported by this descriptor backend.",
                 self.failed_debug_prefix,
                 self.dtype,
             )
@@ -2998,6 +3009,18 @@ class TMACompatibilityChecker:
         else:
             strides = block_params.strides
             constant_offset_expr = sympy.sympify(constant_offset)
+
+        if self._using_tdm:
+            if not 1 <= len(block_params.shape) <= 5:
+                return False
+            int32_max = torch.iinfo(torch.int32).max
+            if not all(
+                V.graph.sizevars.statically_known_true(
+                    sympy.And(sympy.Ge(size, 0), sympy.Le(size, int32_max))
+                )
+                for size in block_params.shape
+            ):
+                return False
 
         # The TMA API requires that the innermost stride is 1
         # and that the outer strides are 16 byte aligned
