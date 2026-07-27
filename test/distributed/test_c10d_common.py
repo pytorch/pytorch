@@ -234,6 +234,7 @@ class BackendEntryPointTest(TestCase):
         )
         self._custom_backend_attrs = {
             "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
+            "NCCL-LEGACY": hasattr(dist.Backend, "NCCL-LEGACY"),
         }
 
     def tearDown(self):
@@ -335,6 +336,45 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("gloo", looked_up)
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
+
+    @parametrize("use_nccl2", [False, True])
+    def test_nccl_backend_registration(self, use_nccl2):
+        with unittest.mock.patch.dict(os.environ):
+            if use_nccl2:
+                os.environ["TORCH_DIST_USE_NCCL2"] = "1"
+            else:
+                os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+            c10d._register_builtin_nccl_backend()
+
+        expected_creator = (
+            c10d._create_nccl2_process_group
+            if use_nccl2
+            else c10d._create_nccl_process_group
+        )
+        self.assertIs(
+            dist.Backend._plugins["NCCL"].creator_fn,
+            expected_creator,
+        )
+        self.assertEqual(
+            dist.Backend.backend_type_map["nccl"],
+            dist.ProcessGroup.BackendType.NCCL,
+        )
+
+    def test_nccl_legacy_backend_registration(self):
+        c10d._register_builtin_nccl_legacy_backend()
+
+        self.assertIs(
+            dist.Backend._plugins["NCCL-LEGACY"].creator_fn,
+            c10d._create_nccl_process_group,
+        )
+        self.assertEqual(dist.Backend.backend_capability["nccl-legacy"], ["cuda"])
+        self.assertEqual(
+            dist.Backend.backend_type_map["nccl-legacy"],
+            dist.ProcessGroup.BackendType.CUSTOM,
+        )
+
+
+instantiate_parametrized_tests(BackendEntryPointTest)
 
 
 class Net(nn.Module):
