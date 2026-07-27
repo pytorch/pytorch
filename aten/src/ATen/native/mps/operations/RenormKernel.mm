@@ -43,7 +43,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
   id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
   id<MTLComputePipelineState> renormPSO = lib.getPipelineStateForFunc(key);
 
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       // this function call is a no-op if MPSProfiler is not enabled
       getMPSProfiler().beginProfileKernel(renormPSO, key, {norm}, mpsStream);

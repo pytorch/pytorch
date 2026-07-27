@@ -220,7 +220,9 @@ bool MPSEventPool::queryEvent(id_t event_id) {
 
 double MPSEventPool::elapsedTime(id_t start_event_id, id_t end_event_id) {
   // first make sure notifyListeners are called to capture events' completion times
-  dispatch_sync(m_default_stream->queue(), ^() {
+  // commitAndWait throws on a faulted command buffer, so route it through the rethrow helper
+  // rather than letting the exception unwind through the dispatch_sync block.
+  dispatch_sync_with_rethrow(m_default_stream->queue(), ^() {
     m_default_stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
