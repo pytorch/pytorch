@@ -4864,6 +4864,9 @@ class Scheduler:
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
+        self._flattened_read_inverse_cache: dict[
+            tuple[Any, ...], tuple[sympy.Symbol, sympy.Expr]
+        ] = {}
 
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
@@ -4996,9 +4999,9 @@ class Scheduler:
             ):
                 self.create_combo_kernel_nodes(num_ck_nodes=None)
 
-        # torch.cond can contain arbitrary subgraphs, which can contain collectives
-        # reordering these can cause a nccl hang
-        self._enforce_conditional_ordering()
+        # torch.cond and torch.switch can contain arbitrary subgraphs with collectives;
+        # reordering them can cause an nccl hang.
+        self._enforce_switch_ordering()
 
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
@@ -5813,10 +5816,8 @@ class Scheduler:
             visit(node)
         return result
 
-    def _enforce_conditional_ordering(self) -> None:
-        conditional_nodes = [
-            n for n in self.nodes if isinstance(n.node, ir.Conditional)
-        ]
+    def _enforce_switch_ordering(self) -> None:
+        conditional_nodes = [n for n in self.nodes if isinstance(n.node, ir.Switch)]
         for i in range(1, len(conditional_nodes)):
             mutating_buf = next(iter(conditional_nodes[i].get_buffer_names()))
             prev_buf = next(iter(conditional_nodes[i - 1].get_buffer_names()))
@@ -7810,17 +7811,17 @@ class Scheduler:
 
         return str(reasons)
 
-    def _can_reindex_consumer_for_index_inversion(
+    def _get_consumer_reindex_inverse(
         self,
         producer_write: MemoryDep,
         consumer_read: MemoryDep,
         consumer_write: MemoryDep,
         consumer: SchedulerNode,
         read_expr: sympy.Expr,
-    ) -> bool:
-        """Return whether flattening the consumer produces an invertible read."""
+    ) -> tuple[sympy.Symbol, sympy.Expr] | None:
+        """Return the inverse of the flattened consumer read, if it exists."""
         if consumer.is_reduction() or consumer_read.size != consumer_write.size:
-            return False
+            return None
 
         flat_size = sympy_product(producer_write.size)
         if not V.graph.sizevars.statically_known_equals(
@@ -7828,18 +7829,36 @@ class Scheduler:
         ) or not V.graph.sizevars.statically_known_equals(
             sympy_product(consumer._sizes[0]), flat_size
         ):
-            return False
+            return None
         if tuple(consumer._sizes[0]) == (flat_size,):
-            return False
+            return None
 
         body = consumer._body
         if body is None or not consumer_write.normalize().is_contiguous():
-            return False
+            return None
 
         iter_vars = body.vars[0]
         iter_sizes = body.sizes[0]
         if len(iter_vars) != len(iter_sizes):
-            return False
+            return None
+
+        return self._get_flattened_read_inverse(
+            read_expr, tuple(iter_vars), tuple(iter_sizes), flat_size
+        )
+
+    def _get_flattened_read_inverse(
+        self,
+        read_expr: sympy.Expr,
+        iter_vars: tuple[sympy.Symbol, ...],
+        iter_sizes: tuple[sympy.Expr, ...],
+        flat_size: sympy.Expr,
+    ) -> tuple[sympy.Symbol, sympy.Expr] | None:
+        if V.graph.sizevars.statically_known_equals(flat_size, 0):
+            return None
+
+        key = (read_expr, iter_vars, iter_sizes, flat_size)
+        if cached_inverse := self._flattened_read_inverse_cache.get(key):
+            return cached_inverse
 
         # A flat reindex decomposes one new loop variable into the old loop domain.
         # Apply that substitution to the read without rebuilding the LoopBody.
@@ -7854,10 +7873,20 @@ class Scheduler:
 
         from torch._inductor.invert_expr_analysis import generate_inverse_formula
 
-        return generate_inverse_formula(flattened_read, flat_var, flat_size) is not None
+        inverse = generate_inverse_formula(flattened_read, flat_var, flat_size)
+        if inverse is None:
+            # ShapeEnv facts can grow during scheduling, so failed proofs are not cached.
+            return None
+        result = (flat_var, inverse)
+        self._flattened_read_inverse_cache[key] = result
+        return result
 
     def shared_data_after_inverting_indexing(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        *,
+        precomputed_inverse: sympy.Expr | None = None,
     ) -> int:
         """
         Attempts to enable fusion between two nodes by inverting indexing patterns.
@@ -7937,16 +7966,29 @@ class Scheduler:
             return -1
         read_expr = next(iter(node2_read_exprs))
 
-        # Check the flattened read before rebuilding the consumer LoopBody.
-        if self._can_reindex_consumer_for_index_inversion(
-            node1_write, node2_read, node2_write, node2, read_expr
-        ):
-            reindex_snapshot = _LoopStateSnapshot.create((node2,))
-            node2.apply_loop_reindexing([sympy_product(node1_write.size)])
-            score = self.shared_data_after_inverting_indexing(node1, node2)
-            if score < 0:
-                reindex_snapshot.restore()
-            return score
+        if precomputed_inverse is None:
+            # Check the flattened read before rebuilding the consumer LoopBody.
+            reindex_inverse = self._get_consumer_reindex_inverse(
+                node1_write, node2_read, node2_write, node2, read_expr
+            )
+            if reindex_inverse is not None:
+                flat_var, inverse = reindex_inverse
+                reindex_snapshot = _LoopStateSnapshot.create((node2,))
+                success = False
+                try:
+                    node2.apply_loop_reindexing([sympy_product(node1_write.size)])
+                    reindexed_vars = node2._body.vars[0]
+                    if len(reindexed_vars) != 1:
+                        return -1
+                    inverse = sympy_subs(inverse, {flat_var: reindexed_vars[0]})
+                    score = self.shared_data_after_inverting_indexing(
+                        node1, node2, precomputed_inverse=inverse
+                    )
+                    success = score >= 0
+                    return score
+                finally:
+                    if not success:
+                        reindex_snapshot.restore()
 
         if not node2_write.is_contiguous():
             return -1
@@ -7983,11 +8025,14 @@ class Scheduler:
         if len(index_vars) != 1:
             return -1
 
-        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+        if precomputed_inverse is None:
+            from torch._inductor.invert_expr_analysis import generate_inverse_formula
 
-        inverse_formula = generate_inverse_formula(
-            read_expr, index_vars[0], node2_read.size[0]
-        )
+            inverse_formula = generate_inverse_formula(
+                read_expr, index_vars[0], node2_read.size[0]
+            )
+        else:
+            inverse_formula = precomputed_inverse
 
         # formula is not invertible
         if inverse_formula is None:
@@ -8527,14 +8572,17 @@ class Scheduler:
         rolled back if the fusion decision ultimately fails.
         """
         tracker = _LoopMutationTracker.create((node1, node2))
-        can_fuse = self._can_fuse_impl(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            allow_mix_order_reduction=allow_mix_order_reduction,
-        )
-        tracker.finish(rollback=not can_fuse)
-        return can_fuse
+        can_fuse = False
+        try:
+            can_fuse = self._can_fuse_impl(
+                node1,
+                node2,
+                can_reorder=can_reorder,
+                allow_mix_order_reduction=allow_mix_order_reduction,
+            )
+            return can_fuse
+        finally:
+            tracker.finish(rollback=not can_fuse)
 
     def _can_fuse_impl(
         self,
@@ -9828,8 +9876,8 @@ class Scheduler:
         if isinstance(node.node, ir.DeviceCopy):
             return "DeviceCopy ops"
 
-        if isinstance(node.node, ir.Conditional):
-            return "Conditional ops"
+        if isinstance(node.node, ir.Switch):
+            return "Switch ops"
 
         if getattr(node.node, "unbacked_bindings", None):
             return "unbacked binding ops"
