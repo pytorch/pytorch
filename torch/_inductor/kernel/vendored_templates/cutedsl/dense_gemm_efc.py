@@ -33,17 +33,20 @@ import cuda.bindings.driver as cuda  # pyrefly: ignore [missing-import]
 
 import cutlass
 import cutlass.cute as cute
+import cutlass.operators.providers.cutedsl.evt.common_efc as common_efc
 import cutlass.pipeline as pipeline
 import cutlass.utils as utils
 import cutlass.utils.blackwell_helpers as sm100_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
-
-import cutlass.operators.providers.cutedsl.evt.common_efc as common_efc
 from cutlass.operators.providers.cutedsl.evt.common_efc import log
+
+from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
 from torch._vendor.quack.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
 )
+from torch.utils._ordered_set import OrderedSet
+
 
 """
 Common base infrastructure for high-performance persistent batched dense GEMM with custom epilogue fusion
@@ -505,10 +508,7 @@ class PersistentDenseGemmEFCKernel:
             and (
                 (
                     self.local_reduce_axis == 0
-                    and (
-                        self.local_reduce_group > 4
-                        or self.local_reduce_feeds_main
-                    )
+                    and (self.local_reduce_group > 4 or self.local_reduce_feeds_main)
                 )
                 or (
                     self.local_reduce_axis == 1
@@ -579,6 +579,11 @@ class PersistentDenseGemmEFCKernel:
         local_reduce_source: cutlass.Constexpr,
         local_reduce_feeds_main: cutlass.Constexpr,
         local_reduce_secondary_feed_type: cutlass.Constexpr,
+        local_reduce_op: cutlass.Constexpr,
+        local_reduce_init: cutlass.Constexpr,
+        local_reduce_combine: cutlass.Constexpr,
+        local_reduce_source_op: cutlass.Constexpr,
+        local_reduce_finalize: cutlass.Constexpr,
         *supplemental_parameters,
     ):
         """Execute the GEMM operation in steps:
@@ -647,59 +652,61 @@ class PersistentDenseGemmEFCKernel:
         self.local_reduce_variance_bias = 0.0
         self.local_reduce_direct_bool = False
         self.local_reduce_secondary_reuses_primary = False
+        secondary_expression = (
+            GemmReductionExpression.parse(local_reduce_secondary_feed_type)
+            if local_reduce_secondary_feed_type is not None
+            else None
+        )
+        secondary_parameters = (
+            () if secondary_expression is None else secondary_expression.parameters
+        )
         if cutlass.const_expr(
-            local_reduce_secondary_feed_type is not None
-            and local_reduce_secondary_feed_type.startswith("sum_mul_affine:")
+            secondary_expression is not None
+            and secondary_expression.kind == "sum_mul_affine"
         ):
-            _, secondary_scale, secondary_bias = (
-                local_reduce_secondary_feed_type.split(":")
-            )
+            secondary_scale, secondary_bias = secondary_parameters
             self.local_reduce_secondary_scale = float(secondary_scale)
             self.local_reduce_secondary_bias = float(secondary_bias)
         elif cutlass.const_expr(
-            local_reduce_secondary_feed_type == "direct_bool_gt_zero"
+            secondary_expression is not None
+            and secondary_expression.kind == "direct_bool_gt_zero"
         ):
             self.local_reduce_direct_bool = True
         elif cutlass.const_expr(local_reduce_secondary_feed_type is not None):
             self.local_reduce_secondary_reuses_primary = True
-        if cutlass.const_expr(local_reduce_type.startswith("mean_linear:")):
-            _, input_coefficient, result_coefficient, bias = (
-                local_reduce_type.split(":")
+        reduction_expression = GemmReductionExpression.parse(local_reduce_type)
+        local_reduce_type = reduction_expression.kind
+        if cutlass.const_expr(local_reduce_type == "mean_linear"):
+            input_coefficient, result_coefficient, bias = (
+                reduction_expression.parameters
             )
-            local_reduce_type = "mean_linear"
             self.local_reduce_input_coefficient = float(input_coefficient)
             self.local_reduce_result_coefficient = float(result_coefficient)
             self.local_reduce_bias = float(bias)
-        elif cutlass.const_expr(local_reduce_type.startswith("variance_affine:")):
-            _, variance_scale, variance_bias = local_reduce_type.split(":")
+        elif cutlass.const_expr(local_reduce_type == "variance_affine"):
+            variance_scale, variance_bias = reduction_expression.parameters
             local_reduce_type = "variance"
             self.local_reduce_variance_scale = float(variance_scale)
             self.local_reduce_variance_bias = float(variance_bias)
-        elif cutlass.const_expr(
-            local_reduce_type.startswith("normalize_sum_affine:")
-        ):
+        elif cutlass.const_expr(local_reduce_type == "normalize_sum_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)
             self.local_reduce_denominator_scale = float(denominator_scale)
             self.local_reduce_denominator_bias = float(denominator_bias)
-        elif cutlass.const_expr(
-            local_reduce_type.startswith("normalize_sum_reverse_affine:")
-        ):
+        elif cutlass.const_expr(local_reduce_type == "normalize_sum_reverse_affine"):
             (
-                _,
                 affine_scale,
                 affine_bias,
                 denominator_scale,
                 denominator_bias,
-            ) = local_reduce_type.split(":")
+            ) = reduction_expression.parameters
             local_reduce_type = "normalize_sum_reverse"
             self.local_reduce_affine_scale = float(affine_scale)
             self.local_reduce_affine_bias = float(affine_bias)
@@ -708,16 +715,23 @@ class PersistentDenseGemmEFCKernel:
         self.local_reduce_type = local_reduce_type
         self.local_reduce_source = local_reduce_source
         self.local_reduce_feeds_main = local_reduce_feeds_main
+        self.local_reduce_op = local_reduce_op
+        self.local_reduce_init = local_reduce_init
+        self.local_reduce_combine = local_reduce_combine
+        self.local_reduce_source_op = local_reduce_source_op
+        self.local_reduce_finalize = local_reduce_finalize
         self.has_local_reduce_tensor = local_reduce_tensor is not None
         # Identify parameters that are remap_modes sources (broadcast tensors).
         # These skip add_batch_mode + permute entirely — they are passed as-is
         # to the EFC and remap_modes inside the kernel handles all the layout
         # work (broadcast expansion, dimension reordering).
-        remap_sources = {
-            attrs.mapped_source
-            for attrs in self.efc.parameter_attributes.values()
-            if attrs.mapped_source
-        }
+        remap_sources = OrderedSet(
+            [
+                attrs.mapped_source
+                for attrs in self.efc.parameter_attributes.values()
+                if attrs.mapped_source
+            ]
+        )
 
         # Add batch mode and permute epilogue parameters, except for
         # broadcast remap sources which are passed untouched.
@@ -892,8 +906,7 @@ class PersistentDenseGemmEFCKernel:
         local_reduce_secondary_feed_tensor: cute.Tensor,
         supplemental_parameters: tuple,
     ):
-        """GPU device kernel performing the Persistent batched GEMM computation.
-        """
+        """GPU device kernel performing the Persistent batched GEMM computation."""
         # Process the variadic parameters.
         self.efc.kernel.unpack_parameters(supplemental_parameters)
 
@@ -971,9 +984,7 @@ class PersistentDenseGemmEFCKernel:
         self.smem = utils.SmemAllocator()
         storage = self.smem.allocate(self.shared_storage)
         sLocalReduce = storage.sLocalReduce.get_tensor(
-            cute.make_layout(
-                (self.local_reduce_smem_rows, self.local_reduce_smem_cols)
-            )
+            cute.make_layout((self.local_reduce_smem_rows, self.local_reduce_smem_cols))
             if self.has_cross_warp_local_reduce
             else cute.make_layout(1)
         )
@@ -1522,9 +1533,7 @@ class PersistentDenseGemmEFCKernel:
                         )
                         direct_flt = cute.filter_zeros(direct_fragment)
                         direct_coordinates = partition_for_epilogue(
-                            cute.make_identity_tensor(
-                                self.cta_tile_shape_mnk[:2]
-                            ),
+                            cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
                             epi_tile=epi_tile,
                             tiled_copy=tiled_copy_t2r,
                             tidx=epi_tidx,
@@ -1533,17 +1542,13 @@ class PersistentDenseGemmEFCKernel:
                         direct_coord_flt = cute.filter_zeros(direct_coordinates)
                         output_m = cute.size(mA_mkl, mode=[0])
                         output_n = cute.size(mB_nkl, mode=[0])
-                        for i in cutlass.range(
-                            cute.size(direct_flt), unroll_full=True
-                        ):
+                        for i in cutlass.range(cute.size(direct_flt), unroll_full=True):
                             global_m = (
-                                mma_tile_coord_mnl[0]
-                                * self.cta_tile_shape_mnk[0]
+                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
                                 + direct_coord_flt[i][0]
                             )
                             global_n = (
-                                mma_tile_coord_mnl[1]
-                                * self.cta_tile_shape_mnk[1]
+                                mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                 + direct_coord_flt[i][1]
                             )
                             if global_m < output_m and global_n < output_n:
@@ -1581,22 +1586,16 @@ class PersistentDenseGemmEFCKernel:
                         acc_fragment = cute.make_rmem_tensor_like(
                             epilogue_context.acc_vec, self.acc_dtype
                         )
-                        acc_fragment.store(
-                            epilogue_context.acc_vec.to(self.acc_dtype)
-                        )
+                        acc_fragment.store(epilogue_context.acc_vec.to(self.acc_dtype))
                         reduced_flt = cute.filter_zeros(acc_fragment)
                         coordinates = partition_for_epilogue(
-                            cute.make_identity_tensor(
-                                self.cta_tile_shape_mnk[:2]
-                            ),
+                            cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
                             epi_tile=epi_tile,
                             tiled_copy=tiled_copy_t2r,
                             tidx=epi_tidx,
                             reference_src=False,
                         )
-                        coordinates = coordinates[
-                            (None, None, None, 0, subtile_idx)
-                        ]
+                        coordinates = coordinates[(None, None, None, 0, subtile_idx)]
                         coord_flt = cute.filter_zeros(
                             tiled_copy_r2s.retile(coordinates)
                         )
@@ -1607,63 +1606,30 @@ class PersistentDenseGemmEFCKernel:
                             cute.size(lane_layout_mn, mode=[0])
                         )
                         assert group > 1 and group <= self.cta_tile_shape_mnk[0]
-                        reduction_group = cutlass.const_expr(
-                            min(group, lanes_in_m)
-                        )
+                        reduction_group = cutlass.const_expr(min(group, lanes_in_m))
                         assert group % reduction_group == 0
                         assert lanes_in_m % reduction_group == 0
                         for i in cutlass.range(
                             cute.size(reduced_flt), unroll_full=True
                         ):
-                            if cutlass.const_expr(
-                                self.local_reduce_source == "square"
-                            ):
-                                reduced_flt[i] *= reduced_flt[i]
-                            elif cutlass.const_expr(
-                                self.local_reduce_source == "abs"
-                            ):
-                                reduced_flt[i] = cute.math.abs(reduced_flt[i])
+                            reduced_flt[i] = self.local_reduce_source_op(reduced_flt[i])
                             rows = reduction_group // 2
                             while rows > 0:
                                 other = cute.arch.shuffle_sync_bfly(
                                     reduced_flt[i],
-                                    offset=cute.crd2idx(
-                                        (rows, 0), lane_layout_mn
-                                    ),
+                                    offset=cute.crd2idx((rows, 0), lane_layout_mn),
                                 )
-                                if cutlass.const_expr(
-                                    self.local_reduce_type
-                                    in (
-                                        "sum",
-                                        "mean",
-                                        "mean_linear",
-                                        "normalize_sum",
-                                        "normalize_sum_reverse",
-                                    )
-                                ):
-                                    reduced_flt[i] += other
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type == "prod"
-                                ):
-                                    reduced_flt[i] *= other
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type == "max"
-                                ):
-                                    reduced_flt[i] = cute.arch.fmax(
-                                        reduced_flt[i], other
-                                    )
-                                else:
-                                    reduced_flt[i] = cute.arch.fmin(
-                                        reduced_flt[i], other
-                                    )
+                                reduced_flt[i] = self.local_reduce_combine(
+                                    reduced_flt[i], other
+                                )
                                 rows //= 2
-                            if cutlass.const_expr(
-                                self.local_reduce_type in ("mean", "mean_linear")
-                            ):
-                                reduced_flt[i] /= group
+                            reduced_flt[i] = self.local_reduce_finalize(
+                                reduced_flt[i], group
+                            )
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[0] // group
                         )
+                        g_reduce: typing.Any = None
                         if cutlass.const_expr(local_reduce_tensor is not None):
                             m_reduce = local_reduce_tensor[
                                 mma_tile_coord_mnl[2], None, None
@@ -1676,8 +1642,7 @@ class PersistentDenseGemmEFCKernel:
                         limit_n = (
                             min(
                                 cute.size(local_reduce_tensor, mode=[2])
-                                - mma_tile_coord_mnl[1]
-                                * self.cta_tile_shape_mnk[1],
+                                - mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1],
                                 self.cta_tile_shape_mnk[1],
                             )
                             if cutlass.const_expr(local_reduce_tensor is not None)
@@ -1699,9 +1664,7 @@ class PersistentDenseGemmEFCKernel:
                         feed_fragment = cute.make_rmem_tensor_like(
                             acc_fragment, self.acc_dtype
                         )
-                        feed_fragment.store(
-                            epilogue_context.acc_vec.to(self.acc_dtype)
-                        )
+                        feed_fragment.store(epilogue_context.acc_vec.to(self.acc_dtype))
                         feed_flt = cute.filter_zeros(feed_fragment)
                         if cutlass.const_expr(group > lanes_in_m):
                             for i in cutlass.range(
@@ -1717,9 +1680,9 @@ class PersistentDenseGemmEFCKernel:
                                     and group_warp_idx > 0
                                     and group_warp_idx < group_warps
                                 ):
-                                    sLocalReduce[
-                                        n_idx, warp_m_idx - group_idx - 1
-                                    ] = reduced_flt[i]
+                                    sLocalReduce[n_idx, warp_m_idx - group_idx - 1] = (
+                                        reduced_flt[i]
+                                    )
                             epilogue_sync_barrier.arrive_and_wait()
                         for i in cutlass.range(
                             cute.size(reduced_flt), unroll_full=True
@@ -1728,8 +1691,7 @@ class PersistentDenseGemmEFCKernel:
                             n_idx = coord_flt[i][1]
                             group_idx = row_idx // group
                             global_group_idx = (
-                                mma_tile_coord_mnl[0] * groups_per_cta
-                                + group_idx
+                                mma_tile_coord_mnl[0] * groups_per_cta + group_idx
                             )
                             group_value = reduced_flt[i]
                             group_warp_start = group_idx * group_warps
@@ -1748,38 +1710,13 @@ class PersistentDenseGemmEFCKernel:
                                             - group_idx
                                             - 1,
                                         ]
-                                        if cutlass.const_expr(
-                                            self.local_reduce_type
-                                            in (
-                                                "sum",
-                                                "mean",
-                                                "mean_linear",
-                                                "normalize_sum",
-                                                "normalize_sum_reverse",
-                                            )
-                                        ):
-                                            group_value += other
-                                        elif cutlass.const_expr(
-                                            self.local_reduce_type == "prod"
-                                        ):
-                                            group_value *= other
-                                        elif cutlass.const_expr(
-                                            self.local_reduce_type == "max"
-                                        ):
-                                            group_value = cute.arch.fmax(
-                                                group_value, other
-                                            )
-                                        else:
-                                            group_value = cute.arch.fmin(
-                                                group_value, other
-                                            )
+                                        group_value = self.local_reduce_combine(
+                                            group_value, other
+                                        )
                             if cutlass.const_expr(self.local_reduce_feeds_main):
-                                if (
-                                    row_idx % group == 0
-                                    and (
-                                        group <= lanes_in_m
-                                        or warp_m_idx == group_warp_start
-                                    )
+                                if row_idx % group == 0 and (
+                                    group <= lanes_in_m
+                                    or warp_m_idx == group_warp_start
                                 ):
                                     feed_flt[i] = group_value
                             if cutlass.const_expr(local_reduce_tensor is not None):
@@ -1788,7 +1725,7 @@ class PersistentDenseGemmEFCKernel:
                                     and n_idx < limit_n
                                     and global_group_idx < limit_groups
                                 ):
-                                    g_reduce[group_idx, n_idx] = group_value  # pyrefly: ignore[unbound-name]
+                                    g_reduce[group_idx, n_idx] = group_value
                         if cutlass.const_expr(group > lanes_in_m):
                             epilogue_sync_barrier.arrive_and_wait()
                         if cutlass.const_expr(self.local_reduce_feeds_main):
@@ -1800,16 +1737,11 @@ class PersistentDenseGemmEFCKernel:
                                 n_idx = coord_flt[i][1]
                                 group_idx = row_idx // group
                                 group_warp_start = group_idx * group_warps
-                                if (
-                                    row_idx % group == 0
-                                    and (
-                                        group <= lanes_in_m
-                                        or warp_m_idx == group_warp_start
-                                    )
+                                if row_idx % group == 0 and (
+                                    group <= lanes_in_m
+                                    or warp_m_idx == group_warp_start
                                 ):
-                                    sLocalReduce[
-                                        n_idx, group_idx + 3
-                                    ] = feed_flt[i]
+                                    sLocalReduce[n_idx, group_idx + 3] = feed_flt[i]
                             epilogue_sync_barrier.arrive_and_wait()
                             for i in cutlass.range(
                                 cute.size(reduced_flt), unroll_full=True
@@ -1826,9 +1758,7 @@ class PersistentDenseGemmEFCKernel:
                             normalized_fragment.store(
                                 epilogue_context.acc_vec.to(self.acc_dtype)
                             )
-                            normalized_flt = cute.filter_zeros(
-                                normalized_fragment
-                            )
+                            normalized_flt = cute.filter_zeros(normalized_fragment)
                             for i in cutlass.range(
                                 cute.size(normalized_flt), unroll_full=True
                             ):
@@ -1861,13 +1791,10 @@ class PersistentDenseGemmEFCKernel:
                                             denominator / normalized_flt[i]
                                         )
                                 normalized_flt[i] = (
-                                    normalized_flt[i]
-                                    * self.local_reduce_affine_scale
+                                    normalized_flt[i] * self.local_reduce_affine_scale
                                     + self.local_reduce_affine_bias
                                 )
-                            if cutlass.const_expr(
-                                local_reduce_feed_tensor is not None
-                            ):
+                            if cutlass.const_expr(local_reduce_feed_tensor is not None):
                                 output_m = cute.size(mA_mkl, mode=[0])
                                 output_n = cute.size(mB_nkl, mode=[0])
                                 for i in cutlass.range(
@@ -1939,9 +1866,7 @@ class PersistentDenseGemmEFCKernel:
                                         ] = secondary_flt[i].to(
                                             local_reduce_secondary_feed_tensor.element_type
                                         )
-                            if cutlass.const_expr(
-                                local_reduce_feed_tensor is not None
-                            ):
+                            if cutlass.const_expr(local_reduce_feed_tensor is not None):
                                 epilogue_context.acc_vec = primary_acc_vec
                             else:
                                 epilogue_context.acc_vec = normalized_fragment.load()
@@ -1952,8 +1877,7 @@ class PersistentDenseGemmEFCKernel:
                             and self.local_reduce_axis == 1
                         )
                         or (
-                            self.local_reduce_feeds_main
-                            and self.local_reduce_axis == 1
+                            self.local_reduce_feeds_main and self.local_reduce_axis == 1
                         )
                     ):
                         assert self.local_reduce_type in (
@@ -1985,9 +1909,7 @@ class PersistentDenseGemmEFCKernel:
                         acc_fragment = cute.make_rmem_tensor_like(
                             epilogue_context.acc_vec, self.acc_dtype
                         )
-                        acc_fragment.store(
-                            epilogue_context.acc_vec.to(self.acc_dtype)
-                        )
+                        acc_fragment.store(epilogue_context.acc_vec.to(self.acc_dtype))
                         acc_flt = cute.filter_zeros(acc_fragment)
                         wide_reduced = None
                         wide_nan = None
@@ -1999,9 +1921,9 @@ class PersistentDenseGemmEFCKernel:
                                 self.local_reduce_type in ("max", "min")
                             ):
                                 nan_grouped = (
-                                    local_reduce_vec != local_reduce_vec
-                                ).to(self.acc_dtype).reshape(
-                                    ((1, fragment_n, 1), 1, 1)
+                                    (local_reduce_vec != local_reduce_vec)
+                                    .to(self.acc_dtype)
+                                    .reshape(((1, fragment_n, 1), 1, 1))
                                 )
                                 wide_nan = nan_grouped.reduce(
                                     cute.ReductionOp.ADD,
@@ -2011,48 +1933,18 @@ class PersistentDenseGemmEFCKernel:
                                 wide_nan = wide_nan.reshape(
                                     ((1, 1, 1), 1, 1)
                                 ).broadcast_to(nan_grouped.shape)
-                            if cutlass.const_expr(
-                                self.local_reduce_source == "square"
-                            ):
-                                local_reduce_vec *= local_reduce_vec
-                            elif cutlass.const_expr(
-                                self.local_reduce_source == "abs"
-                            ):
-                                local_reduce_vec = cute.math.abs(local_reduce_vec)
+                            local_reduce_vec = self.local_reduce_source_op(
+                                local_reduce_vec
+                            )
                             fragment_width = cutlass.const_expr(
                                 cute.size(local_reduce_vec.shape, mode=[0])
                             )
                             grouped = local_reduce_vec.reshape(
                                 ((1, fragment_width, 1), 1, 1)
                             )
-                            if cutlass.const_expr(
-                                self.local_reduce_type
-                                in (
-                                    "sum",
-                                    "mean",
-                                    "variance",
-                                    "normalize_sum",
-                                    "normalize_sum_reverse",
-                                )
-                            ):
-                                reduce_op = cute.ReductionOp.ADD
-                                init_val = 0.0
-                            elif cutlass.const_expr(
-                                self.local_reduce_type == "prod"
-                            ):
-                                reduce_op = cute.ReductionOp.MUL
-                                init_val = 1.0
-                            elif cutlass.const_expr(
-                                self.local_reduce_type == "max"
-                            ):
-                                reduce_op = cute.ReductionOp.MAX
-                                init_val = -cutlass.Float32.inf
-                            else:
-                                reduce_op = cute.ReductionOp.MIN
-                                init_val = cutlass.Float32.inf
                             wide_reduced = grouped.reduce(
-                                reduce_op,
-                                init_val=init_val,
+                                self.local_reduce_op,
+                                init_val=self.local_reduce_init,
                                 reduction_profile=((None, 1, None), 1, 1),
                             )
                             wide_reduced = wide_reduced.reshape(
@@ -2065,39 +1957,19 @@ class PersistentDenseGemmEFCKernel:
                         wide_partial_fragment = cute.make_rmem_tensor_like(
                             acc_fragment, cutlass.Float32
                         )
-                        wide_partial_flt = cute.filter_zeros(
-                            wide_partial_fragment
-                        )
+                        wide_partial_flt = cute.filter_zeros(wide_partial_fragment)
                         for i in cutlass.range(
                             cute.size(wide_partial_flt), unroll_full=True
                         ):
-                            if cutlass.const_expr(
-                                self.local_reduce_type
-                                in ("sum", "mean", "normalize_sum", "normalize_sum_reverse")
-                            ):
-                                wide_partial_flt[i] = cutlass.Float32(0.0)
-                            elif cutlass.const_expr(
-                                self.local_reduce_type == "prod"
-                            ):
-                                wide_partial_flt[i] = cutlass.Float32(1.0)
-                            elif cutlass.const_expr(
-                                self.local_reduce_type == "max"
-                            ):
-                                wide_partial_flt[i] = -cutlass.Float32.inf
-                            else:
-                                wide_partial_flt[i] = cutlass.Float32.inf
+                            wide_partial_flt[i] = self.local_reduce_init
                         coordinates = partition_for_epilogue(
-                            cute.make_identity_tensor(
-                                self.cta_tile_shape_mnk[:2]
-                            ),
+                            cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
                             epi_tile=epi_tile,
                             tiled_copy=tiled_copy_t2r,
                             tidx=epi_tidx,
                             reference_src=False,
                         )
-                        coordinates = coordinates[
-                            (None, None, None, 0, subtile_idx)
-                        ]
+                        coordinates = coordinates[(None, None, None, 0, subtile_idx)]
                         coord_flt = cute.filter_zeros(coordinates)
                         acc_coord_flt = cute.filter_zeros(
                             tiled_copy_r2s.retile(coordinates)
@@ -2105,6 +1977,7 @@ class PersistentDenseGemmEFCKernel:
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[1] // group
                         )
+                        g_reduce: typing.Any = None
                         if cutlass.const_expr(local_reduce_tensor is not None):
                             m_reduce = local_reduce_tensor[
                                 mma_tile_coord_mnl[2], None, None
@@ -2116,8 +1989,7 @@ class PersistentDenseGemmEFCKernel:
                             )
                         limit_m = min(
                             cute.size(mA_mkl, mode=[0])
-                            - mma_tile_coord_mnl[0]
-                            * self.cta_tile_shape_mnk[0],
+                            - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
                             self.cta_tile_shape_mnk[0],
                         )
                         limit_groups = (
@@ -2135,8 +2007,7 @@ class PersistentDenseGemmEFCKernel:
                                 else n_idx // group
                             )
                             global_group_idx = (
-                                mma_tile_coord_mnl[1] * groups_per_cta
-                                + group_idx
+                                mma_tile_coord_mnl[1] * groups_per_cta + group_idx
                             )
                             if (
                                 (
@@ -2152,78 +2023,20 @@ class PersistentDenseGemmEFCKernel:
                                 and logical_row < limit_m
                                 and global_group_idx < limit_groups
                             ):
-                                if cutlass.const_expr(
-                                    self.local_reduce_type
-                                    in (
-                                        "sum",
-                                        "mean",
-                                        "variance",
-                                        "normalize_sum",
-                                        "normalize_sum_reverse",
-                                    )
-                                ):
-                                    reduced = cutlass.Float32(0.0)
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type == "prod"
-                                ):
-                                    reduced = cutlass.Float32(1.0)
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type in ("max", "logsumexp")
-                                ):
-                                    reduced = -cutlass.Float32.inf
-                                else:
-                                    reduced = cutlass.Float32.inf
+                                reduced = self.local_reduce_init
                                 for j in cutlass.range(
                                     cute.size(acc_flt), unroll_full=True
                                 ):
-                                    if (
-                                        coord_flt[j][0] == row_idx
-                                        and (
-                                            cutlass.const_expr(group > fragment_n)
-                                            or coord_flt[j][1] // group == group_idx
-                                        )
+                                    if coord_flt[j][0] == row_idx and (
+                                        cutlass.const_expr(group > fragment_n)
+                                        or coord_flt[j][1] // group == group_idx
                                     ):
                                         value = acc_flt[j]
-                                        if cutlass.const_expr(
-                                            self.local_reduce_source == "square"
-                                        ):
-                                            value *= value
-                                        elif cutlass.const_expr(
-                                            self.local_reduce_source == "abs"
-                                        ):
-                                            value = cute.math.abs(value)
-                                        if cutlass.const_expr(
-                                            self.local_reduce_type
-                                            in (
-                                                "sum",
-                                                "mean",
-                                                "variance",
-                                                "normalize_sum",
-                                                "normalize_sum_reverse",
-                                            )
-                                        ):
-                                            reduced += value
-                                        elif cutlass.const_expr(
-                                            self.local_reduce_type == "prod"
-                                        ):
-                                            reduced *= value
-                                        elif cutlass.const_expr(
-                                            self.local_reduce_type
-                                            in ("max", "logsumexp")
-                                        ):
-                                            reduced = cute.math.max(
-                                                reduced, value
-                                            )
-                                        else:
-                                            reduced = cute.math.min(
-                                                reduced, value
-                                            )
+                                        value = self.local_reduce_source_op(value)
+                                        reduced = self.local_reduce_combine(
+                                            reduced, value
+                                        )
                                 if cutlass.const_expr(
-                                    self.local_reduce_type == "mean"
-                                    and group <= fragment_n
-                                ):
-                                    reduced /= group
-                                elif cutlass.const_expr(
                                     self.local_reduce_type == "logsumexp"
                                     and group <= fragment_n
                                 ):
@@ -2238,9 +2051,7 @@ class PersistentDenseGemmEFCKernel:
                                             coord_flt[j][0] == row_idx
                                             and coord_flt[j][1] // group == group_idx
                                         ):
-                                            exp_sum += cute.math.exp(
-                                                acc_flt[j] - shift
-                                            )
+                                            exp_sum += cute.math.exp(acc_flt[j] - shift)
                                     reduced = cute.math.log(exp_sum) + shift
                                 elif cutlass.const_expr(
                                     self.local_reduce_type == "variance"
@@ -2263,26 +2074,23 @@ class PersistentDenseGemmEFCKernel:
                                         * self.local_reduce_variance_scale
                                         + self.local_reduce_variance_bias
                                     )
-                                if cutlass.const_expr(
-                                    self.local_reduce_feeds_main
-                                ):
+                                elif cutlass.const_expr(group <= fragment_n):
+                                    reduced = self.local_reduce_finalize(reduced, group)
+                                if cutlass.const_expr(self.local_reduce_feeds_main):
                                     reduced_flt[i] = reduced
                                 if cutlass.const_expr(group > fragment_n):
                                     wide_partial_flt[i] = reduced
-                                if cutlass.const_expr(
-                                    local_reduce_tensor is not None
-                                ):
+                                if cutlass.const_expr(local_reduce_tensor is not None):
                                     if cutlass.const_expr(group > fragment_n):
                                         if n_idx % fragment_n == 0:
                                             fragment_idx = (
-                                                subtile_n_idx
-                                                % fragments_per_group
+                                                subtile_n_idx % fragments_per_group
                                             )
-                                            sLocalReduce[
-                                                logical_row, fragment_idx
-                                            ] = reduced
+                                            sLocalReduce[logical_row, fragment_idx] = (
+                                                reduced
+                                            )
                                     elif n_idx % group == 0:
-                                        g_reduce[logical_row, group_idx] = reduced  # pyrefly: ignore[unbound-name]
+                                        g_reduce[logical_row, group_idx] = reduced
                         if cutlass.const_expr(
                             group > fragment_n
                             and local_reduce_tensor is not None
@@ -2291,8 +2099,7 @@ class PersistentDenseGemmEFCKernel:
                             sum_fragment_idx = subtile_n_idx % fragments_per_group
                             sum_group_idx = subtile_n_idx // fragments_per_group
                             sum_global_group_idx = (
-                                mma_tile_coord_mnl[1] * groups_per_cta
-                                + sum_group_idx
+                                mma_tile_coord_mnl[1] * groups_per_cta + sum_group_idx
                             )
                             sum_row_idx = epi_tidx
                             if sum_fragment_idx == 0:
@@ -2342,21 +2149,8 @@ class PersistentDenseGemmEFCKernel:
                             current = wide_reduced
                             if fragment_idx == 0:
                                 partial = current
-                            elif cutlass.const_expr(
-                                self.local_reduce_type
-                                in ("sum", "mean", "normalize_sum", "normalize_sum_reverse")
-                            ):
-                                partial += current
-                            elif cutlass.const_expr(
-                                self.local_reduce_type == "prod"
-                            ):
-                                partial *= current
-                            elif cutlass.const_expr(
-                                self.local_reduce_type == "max"
-                            ):
-                                partial = cute.math.max(partial, current)
                             else:
-                                partial = cute.math.min(partial, current)
+                                partial = self.local_reduce_combine(partial, current)
                             local_reduce_partial.store(partial)
                             if cutlass.const_expr(
                                 self.local_reduce_type in ("max", "min")
@@ -2400,9 +2194,7 @@ class PersistentDenseGemmEFCKernel:
                                         subtile_idx - fragment_idx,
                                     )
                                 ]
-                                store_coord_flt = cute.filter_zeros(
-                                    store_coordinates
-                                )
+                                store_coord_flt = cute.filter_zeros(store_coordinates)
                                 for i in cutlass.range(
                                     cute.size(final_flt), unroll_full=True
                                 ):
@@ -2424,10 +2216,7 @@ class PersistentDenseGemmEFCKernel:
                                         ):
                                             if nan_flt[i] > 0.0:
                                                 value = float("nan")
-                                        if cutlass.const_expr(
-                                            self.local_reduce_type == "mean"
-                                        ):
-                                            value /= group
+                                        value = self.local_reduce_finalize(value, group)
                                         g_reduce[row_idx, group_idx] = value
                         if cutlass.const_expr(self.local_reduce_feeds_main):
                             primary_acc_vec = epilogue_context.acc_vec
@@ -2435,8 +2224,7 @@ class PersistentDenseGemmEFCKernel:
                                 cute.size(acc_flt), unroll_full=True
                             ):
                                 denominator = (
-                                    reduced_flt[i]
-                                    * self.local_reduce_denominator_scale
+                                    reduced_flt[i] * self.local_reduce_denominator_scale
                                     + self.local_reduce_denominator_bias
                                 )
                                 if cutlass.const_expr(
@@ -2449,9 +2237,7 @@ class PersistentDenseGemmEFCKernel:
                                     value * self.local_reduce_affine_scale
                                     + self.local_reduce_affine_bias
                                 )
-                            if cutlass.const_expr(
-                                local_reduce_feed_tensor is not None
-                            ):
+                            if cutlass.const_expr(local_reduce_feed_tensor is not None):
                                 output_m = cute.size(mA_mkl, mode=[0])
                                 output_n = cute.size(mB_nkl, mode=[0])
                                 for i in cutlass.range(
@@ -2475,9 +2261,7 @@ class PersistentDenseGemmEFCKernel:
                                         ] = acc_flt[i].to(
                                             local_reduce_feed_tensor.element_type
                                         )
-                            if cutlass.const_expr(
-                                local_reduce_feed_tensor is not None
-                            ):
+                            if cutlass.const_expr(local_reduce_feed_tensor is not None):
                                 epilogue_context.acc_vec = primary_acc_vec
                             else:
                                 epilogue_context.acc_vec = acc_fragment.load().to(
@@ -2598,8 +2382,7 @@ class PersistentDenseGemmEFCKernel:
         tCgC: cute.Tensor,
         epi_tile: cute.Tile,
     ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
-        """Make tiledCopy for tensor memory load, then use it to partition tensor memory (source) and register array (destination).
-        """
+        """Make tiledCopy for tensor memory load, then use it to partition tensor memory (source) and register array (destination)."""
         # Make tiledCopy for tensor memory load
         copy_atom_t2r = sm100_utils.get_tmem_load_op(
             self.cta_tile_shape_mnk,
