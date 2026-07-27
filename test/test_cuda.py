@@ -83,6 +83,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
+    requires_cuda_python_bindings,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
@@ -96,7 +97,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
-    TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -3300,11 +3300,10 @@ torch.cuda.synchronize()
         g.reset()
         del g
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs; "
-        "cuda-bindings required for debug_dump",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs; "
     )
+    @requires_cuda_python_bindings  # required for debug_dump
     def test_graph_debugdump(self):
         torch.cuda.empty_cache()
         x = torch.randn(1024, device="cuda")
@@ -5021,10 +5020,11 @@ exit(2)
         ):
             raw_pointer = graph.raw_cuda_graph()
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs",
     )
+    @requires_cuda_python_bindings
     def test_cuda_graph_raw_graph(self):
         import cuda.bindings.runtime as cudart
 
@@ -5048,10 +5048,11 @@ exit(2)
 
         graph.replay()
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs",
     )
+    @requires_cuda_python_bindings
     @parametrize("keep_graph", [True, False])
     def test_cuda_graph_raw_graph_exec(self, keep_graph):
         import cuda.bindings.runtime as cudart
@@ -9011,6 +9012,7 @@ class TestMemPool(TestCase):
         self.assertTrue((ptrs_round_1 == ptrs_round_2).all().item())
 
     @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @requires_cuda_python_bindings
     @serialTest()
     def test_nccl_mem_alloc_addresses_in_random_order(self):
         """
@@ -9374,9 +9376,7 @@ class TestMemPool(TestCase):
             )
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
             x = torch.randn(256, 256, device="cuda")
@@ -9386,9 +9386,7 @@ class TestMemPool(TestCase):
         self.assertTrue(z.is_cuda)
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
         with torch.cuda._use_uvm():
@@ -9398,9 +9396,7 @@ class TestMemPool(TestCase):
         self.assertEqual(a_uvm, a_reg)
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
             with torch.autograd.set_multithreading_enabled(False):
@@ -9411,9 +9407,7 @@ class TestMemPool(TestCase):
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_tensor_outlives_context(self):
         # Regression test: a tensor allocated inside _use_uvm() can outlive the
         # context, leaving its block cached in the PrivatePool until a later global
