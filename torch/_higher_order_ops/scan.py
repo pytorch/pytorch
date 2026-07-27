@@ -146,7 +146,8 @@ def scan(
             ``xs.shape[dim]`` and serves only as a consistency check (no constraint when
             ``length`` is ``None``). When ``xs`` has no leaves (``None`` or empty pytree),
             ``length`` drives the number of iterations and ``combine_fn`` receives
-            ``x=None`` each step.
+            ``x=None`` each step. ``length=0`` with no xs tensors is supported in
+            eager mode only; it is not supported under ``torch.compile``.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
@@ -196,6 +197,11 @@ def scan(
 
         if not xs_has_tensors:
             if length == 0:
+                if torch.compiler.is_dynamo_compiling():
+                    # TODO: Resolve this in a follow-up PR
+                    raise RuntimeError(
+                        "scan() with length=0 and no xs tensors is not supported under torch.compile"
+                    )
                 return init, _build_empty_output_for_length_zero(combine_fn, init)
 
             leaves_xs_orig = [torch.zeros(length, dtype=torch.int64)]

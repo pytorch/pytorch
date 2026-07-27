@@ -4826,8 +4826,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             return scan(body, i, None, length=0)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            r"torch\.\* op returned non-Tensor",
+            RuntimeError,
+            r"scan\(\) with length=0 and no xs tensors is not supported under torch\.compile",
         ):
             f(init)
 
