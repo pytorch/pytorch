@@ -4542,9 +4542,13 @@ class Layout(OutputSpec):
             return True
         if sizevars.guard_or_false(sympy.Eq(left, 0)):
             return False
-        return sizevars.guard_or_false(
-            sympy.Ge(left, right)
-        ) or sizevars.guard_or_false(sympy.Eq(left % right, 0))
+        # Prove unbacked divisibility structurally, and keep SymPy from
+        # introducing reciprocal powers into any backed-symbol guard.
+        return (
+            sizevars.guard_or_false(sympy.Ge(left, right))
+            or sizevars.statically_known_multiple_of(left, right)
+            or sizevars.guard_or_false(sympy.Eq(Mod(left, right), 0))
+        )
 
     def is_stride_ordered(self, order: Sequence[int]) -> bool:
         if len(self.stride) != len(order):
