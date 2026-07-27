@@ -6,7 +6,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import (
-    _checkpoint_without_reentrant_generator,
+    _checkpoint_without_reentrant_generator_impl,
     _DEFAULT_DETERMINISM_MODE,
 )
 
@@ -98,7 +98,7 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
                 else:
                     return nullcontext(), _no_hook(module)
 
-            gen = _checkpoint_without_reentrant_generator(
+            gen = _checkpoint_without_reentrant_generator_impl(
                 module,
                 args,
                 kwargs,

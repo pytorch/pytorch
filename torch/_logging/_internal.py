@@ -1062,6 +1062,42 @@ def _default_formatter():
 DEFAULT_FORMATTER = _default_formatter()
 
 
+class _StderrHandler(logging.Handler):
+    """
+    A logging handler that follows the current sys.stderr.
+
+    Test capture tools can replace and later close sys.stderr before Python
+    atexit handlers run.  Some PT2 logs intentionally emit from atexit, so the
+    console handler must not retain a stale captured stream.
+    """
+
+    terminator = "\n"
+
+    @property
+    def stream(self) -> Any:
+        return sys.stderr
+
+    def flush(self) -> None:
+        self.acquire()
+        try:
+            stream = self.stream
+            if stream and hasattr(stream, "flush"):
+                stream.flush()
+        finally:
+            self.release()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            stream.write(msg + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+
 def _setup_handlers(create_handler_fn, log) -> None:
     debug_handler = _track_handler(create_handler_fn())
     debug_handler.setFormatter(DEFAULT_FORMATTER)
@@ -1155,7 +1191,7 @@ def _init_logs(log_file_name=None) -> None:
     for log_qname in log_registry.get_log_qnames():
         log = logging.getLogger(log_qname)
         _setup_handlers(
-            logging.StreamHandler,
+            _StderrHandler,
             log,
         )
 

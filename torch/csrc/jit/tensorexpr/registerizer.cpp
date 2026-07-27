@@ -286,13 +286,13 @@ void RegisterizerAnalysis::visit(const CondPtr& v) {
       std::make_shared<Scope>(false_stmt, prev_scope, ++conditionId_);
 
   if (true_stmt) {
-    currentScope_ = true_scope;
+    currentScope_ = std::move(true_scope);
     true_stmt->accept(this);
     mergeHiddenScope(true);
     mergeCurrentScopeIntoParent();
   }
   if (false_stmt) {
-    currentScope_ = false_scope;
+    currentScope_ = std::move(false_scope);
     false_stmt->accept(this);
     mergeHiddenScope(true);
     mergeCurrentScopeIntoParent();
@@ -330,14 +330,14 @@ void RegisterizerAnalysis::visit(const IfThenElsePtr& v) {
   exprConditionals_.insert(false_scope->conditionId());
 
   if (true_value) {
-    currentScope_ = true_scope;
+    currentScope_ = std::move(true_scope);
     true_value->accept(this);
     mergeHiddenScope(false);
     mergeCurrentScopeIntoParent();
   }
 
   if (false_value) {
-    currentScope_ = false_scope;
+    currentScope_ = std::move(false_scope);
     false_value->accept(this);
     mergeHiddenScope(false);
     mergeCurrentScopeIntoParent();
@@ -632,7 +632,7 @@ void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
     }
   }
 
-  currentScope_ = parent;
+  currentScope_ = std::move(parent);
 }
 
 std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
