@@ -59,6 +59,7 @@
 #endif
 
 #include <c10/util/env.h>
+#include <c10/util/safe_conv.h>
 #include <algorithm>
 #include <string>
 #include <string_view>
@@ -1653,9 +1654,9 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
   MPSStream* stream = getCurrentMPSStream();
 
   UnpackPivotsParams params;
-  params.perm_batch_stride = safe_downcast<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
-  params.pivots_batch_stride = safe_downcast<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
-  params.dim_size = safe_downcast<uint32_t, int64_t>(dim_size);
+  params.perm_batch_stride = c10::safe_conv<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
+  params.pivots_batch_stride = c10::safe_conv<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
+  params.dim_size = c10::safe_conv<uint32_t, int64_t>(dim_size);
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
