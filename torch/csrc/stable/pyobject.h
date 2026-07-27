@@ -9,8 +9,9 @@
 
 // Header-only helpers converting between a Python torch.Tensor (passed as a raw
 // PyObject* / void*) and torch::stable::Tensor. These are libtorch-only to link
-// against, but require libtorch_python to be loaded at runtime (see the note in
-// torch/csrc/stable/c/shim.h). The GIL must be held by the caller.
+// against, but require libtorch_python to be loaded at runtime (see the Python
+// interop shims section in torch/csrc/stable/c/shim.h). The GIL must be held by
+// the caller.
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
@@ -19,7 +20,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 // Wrap a Python torch.Tensor (PyObject* passed as void*) as a stable Tensor
 // that shares its underlying TensorImpl.
 inline Tensor tensor_from_pyobject(void* py_obj) {
-  AtenTensorHandle ath{};
+  AtenTensorHandle ath = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(torch_tensor_from_pyobject(py_obj, &ath));
   return Tensor(ath);
 }

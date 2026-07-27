@@ -296,21 +296,24 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 AOTI_TORCH_EXPORT AOTITorchError
 torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
 
+// --- Python interop shims -------------------------------------------------
+// Unlike the rest of the stable ABI, these convert between a Python
+// torch.Tensor (a PyObject*, passed as an opaque void* so this header stays
+// free of Python.h) and an AtenTensorHandle. The conversion is implemented in
+// libtorch_python via a vtable it registers with libtorch, so an extension
+// still links only libtorch; if libtorch_python is not loaded at runtime the
+// call errors. The GIL must be held.
+
 // Wrap a Python torch.Tensor as a new AtenTensorHandle that shares the
-// underlying TensorImpl with the input. PyObject* crosses the ABI as an opaque
-// void* so this header stays free of Python.h. The conversion is implemented in
-// libtorch_python (via a vtable it registers with libtorch); an extension using
-// this only links libtorch, but libtorch_python must be loaded at runtime or
-// the call errors. The GIL must be held.
+// underlying TensorImpl with the input.
 AOTI_TORCH_EXPORT AOTITorchError torch_tensor_from_pyobject(
     void* py_obj,
     AtenTensorHandle* ret); // returns new reference
 
 // Wrap an AtenTensorHandle as a Python torch.Tensor. If py_type is non-null, it
 // is used as the result's exact PyTypeObject* (e.g. torch.nn.Parameter); null
-// means the default torch.Tensor type. On failure the Python error indicator is
-// left set. See torch_tensor_from_pyobject for the libtorch_python requirement.
-// The GIL must be held.
+// means the default torch.Tensor type. On failure from THPVariable_Wrap the
+// Python error indicator is left set.
 AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
     AtenTensorHandle ath,
     void* py_type,

@@ -15,6 +15,17 @@
 // registered by libtorch_python at load time. Unlike PyInterpreterVTable this
 // is a single process-global (there is no tagged tensor to route through when
 // converting a raw PyObject*), so it assumes a single Python interpreter.
+//
+// How the pieces fit together:
+//   1. torch/csrc/PyObjectConversion.h (this file) - the vtable interface; in
+//      libtorch.
+//   2. torch/csrc/PyObjectConversion.cpp - a NoopPyObjectConversion that errors
+//      by default; in libtorch. This fallback fires when libtorch_python was
+//      never loaded to register a real implementation.
+//   3. torch/csrc/PyObjectConversionPythonImpl.cpp - the concrete impl using
+//      THPVariable_*; in libtorch_python, registers itself at load.
+//   4. torch/csrc/shim_common.cpp - the stable C shims that call through the
+//      vtable; the only place AtenTensorHandle appears.
 
 namespace torch::detail {
 
