@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
+    ensure_diff_blob_local,
     get_current_version,
     LintMessage,
     LintSeverity,
@@ -115,6 +116,10 @@ def _read_at_merge_base(filename: str) -> str | None:
     """
     merge_base = merge_base_with_main()
 
+    # Prefetch the merge-base blob so `git show` below stays fully local (CI uses
+    # a blobless partial clone; otherwise git lazily fetches it mid-command).
+    ensure_diff_blob_local(merge_base, filename)
+
     # `git show <ref>:<path>` requires <path> relative to the repo root;
     # lintrunner may pass `filename` as an absolute path.
     rel_path = Path(filename).resolve().relative_to(REPO_ROOT).as_posix()
@@ -122,9 +127,7 @@ def _read_at_merge_base(filename: str) -> str | None:
         ["git", "show", f"{merge_base}:{rel_path}"],
         capture_output=True,
         text=True,
-        # On a blobless partial clone (CI), the blob at merge-base is not local
-        # and git lazily fetches it over the network, which can exceed a few s.
-        timeout=60,
+        timeout=5,
     )
     if result.returncode != 0:
         # File didn't exist at merge-base; treat all current entries as new.
