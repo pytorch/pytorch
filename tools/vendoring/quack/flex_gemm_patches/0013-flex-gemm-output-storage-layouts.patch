@@ -114,9 +114,9 @@ index 0fc8cc0..b8e4ee6 100644
 +        d["local_reduce_output_layout"] = args.local_reduce_output_layout
 @@ -529,0 +573 @@ class GemmGroupedNContractMixin(GemmActMixin):
 +        GroupedLocalReduce("mLocalReduce"),
-@@ -588,0 +633 @@ class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
+@@ -554,0 +599 @@ class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
 +        GroupedLocalReduce("mLocalReduce"),
-@@ -757,0 +803 @@ def _compile_gemm_act(
+@@ -723,0 +769 @@ def _compile_gemm_act(
 +    local_reduce_output_layout,
 @@ -883 +929,5 @@ def _compile_gemm_act(
 -    if local_reduce_dtype is not None and local_reduce_axis == 0:

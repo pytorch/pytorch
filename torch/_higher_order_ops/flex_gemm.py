@@ -192,7 +192,7 @@ def mx_e8m0_scale(
             ``"floor"``.
 
     Returns:
-        E8M0 scale values with the same shape and strides as ``amax``.
+        E8M0 scale values with the same shape as ``amax``.
     """
     validate_scale_max_value("mx_e8m0_scale", max_value)
     rounding = normalize_mx_scale_rounding(rounding)
@@ -244,12 +244,7 @@ def _(
 ) -> torch.Tensor:
     validate_scale_max_value("mx_e8m0_scale", max_value)
     normalize_mx_scale_rounding(rounding)
-    return torch.empty_strided(
-        tuple(amax.shape),
-        tuple(amax.stride()),
-        device=amax.device,
-        dtype=torch.float8_e8m0fnu,
-    )
+    return torch.empty_like(amax, dtype=torch.float8_e8m0fnu)
 
 
 @torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
@@ -267,7 +262,7 @@ def nvfp4_e4m3_scale(
         rounding: Scale calculation recipe. Only ``"nearest"`` is supported.
 
     Returns:
-        E4M3 scale values with the same shape and strides as ``amax``.
+        E4M3 scale values with the same shape as ``amax``.
     """
     validate_scale_max_value("nvfp4_e4m3_scale", max_value)
     normalize_nvfp4_scale_rounding(rounding)
@@ -288,12 +283,7 @@ def _(
 ) -> torch.Tensor:
     validate_scale_max_value("nvfp4_e4m3_scale", max_value)
     normalize_nvfp4_scale_rounding(rounding)
-    return torch.empty_strided(
-        tuple(amax.shape),
-        tuple(amax.stride()),
-        device=amax.device,
-        dtype=torch.float8_e4m3fn,
-    )
+    return torch.empty_like(amax, dtype=torch.float8_e4m3fn)
 
 
 def nvfp4_e2m1_codes(input: torch.Tensor) -> torch.Tensor:
