@@ -232,6 +232,7 @@ manual_torch_name_rule_map: dict[
     "torch.nn.utils.rnn.pad_packed_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
+    "torch.backends.cuda.SDPAParams": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,

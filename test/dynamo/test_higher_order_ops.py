@@ -277,8 +277,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        # when testing with dynamic shape, symbols are lifted as inputs
+        arg_count = ifdynstaticdefault(3, 5)
         self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_var_used_multiple_times(self):
