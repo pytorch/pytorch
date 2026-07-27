@@ -19,7 +19,12 @@ from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._C._autograd import _make_saved_tensor, SavedTensor
-from typing import NoReturn
+from typing import NoReturn, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+_R = TypeVar("_R")
 
 __all__ = [
     "checkpoint",
@@ -47,7 +52,7 @@ _checkpoint_debug_enabled: bool | None = None
 
 
 @contextlib.contextmanager
-def set_checkpoint_debug_enabled(enabled: bool | None):
+def set_checkpoint_debug_enabled(enabled: bool | None) -> Iterator[None]:
     """
     Context manager that sets whether checkpoint should print additional debug
     information when running. See the ``debug`` flag for
@@ -93,7 +98,7 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
         )
 
 
-def _get_device_module(device="cuda"):
+def _get_device_module(device: str = "cuda") -> Any:
     if device == "meta":
         return torch.device("meta")
     device_module = getattr(torch, device)
@@ -136,7 +141,7 @@ class DefaultDeviceType:
         return DefaultDeviceType._default_device_type
 
 
-def _infer_device_type(*args):
+def _infer_device_type(*args: Any) -> str:
     device_types = []
 
     def add_device_types(arg):
@@ -212,15 +217,15 @@ def set_device_states(devices, states, *, device_type=None) -> None:
             device_module.set_rng_state(state)
 
 
-def _get_autocast_kwargs(device_type="cuda"):
+def _get_autocast_kwargs(device_type: str = "cuda") -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if torch.amp.is_autocast_available(device_type):
-        device_autocast_kwargs = {
+        device_autocast_kwargs: Dict[str, Any] = {
             "enabled": torch.is_autocast_enabled(device_type),
             "dtype": torch.get_autocast_dtype(device_type),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
     else:
-        device_autocast_kwargs = None
+        device_autocast_kwargs = {}
 
     cpu_autocast_kwargs = {
         "enabled": torch.is_autocast_enabled('cpu'),
@@ -337,7 +342,7 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + grads
 
 
-def noop_context_fn():
+def noop_context_fn() -> Tuple[ContextManager[None], ContextManager[None]]:
     return contextlib.nullcontext(), contextlib.nullcontext()
 
 # Note: [torch.compile and checkpoint]
@@ -353,15 +358,15 @@ def noop_context_fn():
 #     utils.checkpoint innards.
 @torch._disable_dynamo
 def checkpoint(
-    function,
-    *args,
+    function: Callable[..., _R],
+    *args: Any,
     use_reentrant: bool | None = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     early_stop: bool = True,
-    **kwargs
-):
+    **kwargs: Any,
+) -> _R:
     r"""Checkpoint a model or part of the model.
 
     Activation checkpointing is a technique that trades compute for memory.
@@ -537,6 +542,8 @@ def checkpoint(
             "torch.utils.checkpoint: expected context_fn generator to yield "
             "exactly twice, but it yielded more than twice."
         )
+
+        raise AssertionError("checkpoint generator yielded more than once")
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwargs):
