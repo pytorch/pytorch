@@ -126,11 +126,17 @@ class CheckpointWrapper(ActivationWrapper):
     ):
         super().__init__(mod)
         self.checkpoint_impl = checkpoint_impl
+        self.uses_torch_utils_checkpoint = (
+            checkpoint_fn is None or checkpoint_fn is torch_utils_checkpoint
+        )
         if checkpoint_fn is None:
             # use torch.utils.checkpoint
-            self.checkpoint_fn = partial(
-                torch_utils_checkpoint,
+            self.checkpoint_fn = torch_utils_checkpoint(
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
+                **checkpoint_fn_kwargs,
+            )
+        elif checkpoint_fn is torch_utils_checkpoint:
+            self.checkpoint_fn = torch_utils_checkpoint(
                 **checkpoint_fn_kwargs,
             )
         else:
@@ -161,10 +167,19 @@ class CheckpointWrapper(ActivationWrapper):
 
             # Pass the function that only takes packed args into reentrant
             # checkpoint API.
+            if self.uses_torch_utils_checkpoint:
+                return self.checkpoint_fn(  # type: ignore[misc]
+                    my_function
+                )(*flat_args)
+            else:
+                return self.checkpoint_fn(  # type: ignore[misc]
+                    my_function,
+                    *flat_args,
+                )
+        elif self.uses_torch_utils_checkpoint:
             return self.checkpoint_fn(  # type: ignore[misc]
-                my_function,
-                *flat_args,
-            )
+                self._checkpoint_wrapped_module
+            )(*args, **kwargs)
         else:
             return self.checkpoint_fn(  # type: ignore[misc]
                 self._checkpoint_wrapped_module, *args, **kwargs
