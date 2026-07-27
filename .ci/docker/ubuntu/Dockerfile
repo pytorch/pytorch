@@ -41,11 +41,7 @@ ENV VIRTUAL_ENV=${VENV_PATH}
 ENV PATH=${VENV_PATH}/bin:$PATH
 COPY requirements-ci.txt requirements-docs.txt /opt/
 COPY ./common/install_python.sh install_python.sh
-COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt /opt/requirements-docs.txt
-# Installed as jenkins (via pip_install) so the venv stays writable for the
-# test-time reinstall, and with --no-deps to avoid pulling torch in here.
-RUN bash -c "source ./common_utils.sh && pip_install --no-deps spmd-types==0.2.1" && rm common_utils.sh
 
 # Install gcc
 ARG GCC_VERSION
@@ -155,10 +151,11 @@ RUN rm install_onnx.sh common_utils.sh
 
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
+ARG CLANG_VERSION
 COPY ./common/install_cpython.sh install_cpython.sh
 COPY requirements-ci.txt /tmp/requirements-ci.txt
 RUN if [ -n "${TSAN}" ]; then \
-      CC=clang-18 CXX=clang++-18 \
+      CC=clang-${CLANG_VERSION} CXX=clang++-${CLANG_VERSION} \
       CPYTHON_VERSIONS="3.14.4t+tsan" bash ./install_cpython.sh && \
       /opt/python/cp314-cp314t+tsan/bin/pip install -r /tmp/requirements-ci.txt; \
     fi

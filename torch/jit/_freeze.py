@@ -105,7 +105,7 @@ def freeze(
     """
     warnings.warn(
         "`torch.jit.freeze` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+        FutureWarning,
     )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
@@ -229,7 +229,7 @@ def optimize_for_inference(
     """
     warnings.warn(
         "`torch.jit.optimize_for_inference` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+        FutureWarning,
     )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(

@@ -13,7 +13,7 @@ __all__ = [
 
 
 class WeightedQuantizedModule(torch.nn.Module, metaclass=abc.ABCMeta):
-    """Wrapper for quantized modules than can be lowered from reference modules."""
+    """Wrapper for quantized modules that can be lowered from reference modules."""
 
     @classmethod
     @abc.abstractmethod

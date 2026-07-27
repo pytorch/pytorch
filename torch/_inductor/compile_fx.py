@@ -65,6 +65,7 @@ from torch._functorch.aot_autograd import (
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
     format_default_skip_message,
     log_cudagraph_skip_and_bump_counter,
@@ -100,7 +101,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
@@ -141,10 +142,11 @@ from .virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.output_code import _StrideExprStr
+    from torch._inductor.output_code import _StrideExprStr, CompiledFnRunner
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
+    from .codecache import CacheInfo
     from .ir import ExternKernelNode
 
 
@@ -177,7 +179,7 @@ if TYPE_CHECKING:
 class FxCompileMode(enum.Enum):
     NORMAL = 0
     # For testing - use the serde FxCompile scheme to debug serialization and
-    # deserialization of GraphMoule and CompiledFxGraph.
+    # deserialization of GraphModule and CompiledFxGraph.
     SERIALIZE = 1
     # Compile using a subprocess instead of in-process.
     SUBPROCESS = 2
@@ -261,6 +263,12 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
 
 def record_original_output_strides(gm: GraphModule) -> None:
     output_node = gm.graph.find_nodes(op="output")[0]
+
+    # Don't overwrite strides that were already recorded (e.g., before
+    # joint_graph_passes which can introduce padded strides via pad_mm).
+    if "original_output_strides" in output_node.meta:
+        return
+
     output_strides = []
 
     if not isinstance(output_node.args[0], torch.fx.Node):
@@ -308,6 +316,10 @@ def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
         _recursive_record_user_visible_output_idxs(subgraph)
 
 
+def _cudagraph_trees_clone_live_user_outputs() -> bool:
+    return cudagraph_trees_clone_live_user_visible_outputs()
+
+
 @functools.lru_cache(None)
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
@@ -320,7 +332,7 @@ def _warn_tf32_disabled() -> None:
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
-        warnings.warn(
+        perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
         )
@@ -508,6 +520,47 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _get_nested_region_inductor_config_patches(
+    gm: GraphModule,
+) -> dict[str, Any] | None:
+    nested_config = getattr(gm, "meta", {}).get("nested_region_config")
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    return patches or None
+
+
+def _patch_nested_region_inductor_config(
+    gm: GraphModule,
+) -> AbstractContextManager[None]:
+    patches = _get_nested_region_inductor_config_patches(gm)
+    if patches is None:
+        return contextlib.nullcontext()
+    return config.patch(patches)
+
+
+def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
+    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
+    # every pass phase because each is an independent entry point that may see a
+    # freshly-created module (e.g. the partitioned backward graph); setdefault
+    # makes re-entry on an already-seeded module a no-op.
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        nested_config = node.meta.get("custom", {}).get("nested_region_config")
+        if nested_config is None:
+            continue
+        subgraph_node = node.args[0]
+        if (
+            not isinstance(subgraph_node, torch.fx.Node)
+            or subgraph_node.op != "get_attr"
+            or not isinstance(subgraph_node.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_node.target, None)
+        if isinstance(subgraph, GraphModule):
+            subgraph.meta.setdefault("nested_region_config", nested_config)
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -517,17 +570,19 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
-        if not config.use_pre_grad_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_pre_grad_passes:
+                return gm
 
-        add_passes = config.add_pre_grad_passes
-        remove_passes = config.remove_pre_grad_passes
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            # as we don't have recursive example inputs, passing empty set here
-            new_subgraph = _recursive_pre_grad_passes(subgraph, ())
-            setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
+            add_passes = config.add_pre_grad_passes
+            remove_passes = config.remove_pre_grad_passes
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                # as we don't have recursive example inputs, passing empty set here
+                new_subgraph = _recursive_pre_grad_passes(subgraph, ())
+                setattr(gm, subgraph_name, new_subgraph)
+            return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(
@@ -547,29 +602,35 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        if not config.use_joint_graph_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_joint_graph_passes:
+                return gm
 
-        # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
-        # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
-        # invoke_subgraph HOP before calling the partitioner on the outer graph.
-        # AOTAutograd has access to partition_fn, which internally calls the
-        # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
-        # skip_invoke_subgraph.
-        old_subgraph_names = OrderedSet(_get_subgraph_names(gm, skip_invoke_subgraph))
-        for subgraph_name in old_subgraph_names:
-            _run_on_sub_graph_module(subgraph_name)
-
-        out_gm = joint_graph_passes(gm, input_device)
-
-        # Some joint graph passes may create new sub graph module. Run one round
-        # for the newly created graph modules.
-        # We should not skip graphs for invoke_subgraph HOPs for newly
-        # generated subgraphs.
-        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph=False):
-            if subgraph_name not in old_subgraph_names:
+            # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
+            # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
+            # invoke_subgraph HOP before calling the partitioner on the outer graph.
+            # AOTAutograd has access to partition_fn, which internally calls the
+            # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
+            # skip_invoke_subgraph.
+            old_subgraph_names = OrderedSet(
+                _get_subgraph_names(gm, skip_invoke_subgraph)
+            )
+            for subgraph_name in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
-        return out_gm
+
+            out_gm = joint_graph_passes(gm, input_device)
+
+            # Some joint graph passes may create new sub graph module. Run one round
+            # for the newly created graph modules.
+            # We should not skip graphs for invoke_subgraph HOPs for newly
+            # generated subgraphs.
+            for subgraph_name in _get_subgraph_names(
+                out_gm, skip_invoke_subgraph=False
+            ):
+                if subgraph_name not in old_subgraph_names:
+                    _run_on_sub_graph_module(subgraph_name)
+            return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -578,13 +639,15 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
-        if not config.use_post_grad_passes:
-            return
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_post_grad_passes:
+                return
 
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            _recursive_post_grad_passes(subgraph, is_inference)
-        post_grad_passes(gm, is_inference)
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                _recursive_post_grad_passes(subgraph, is_inference)
+            post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -822,6 +885,19 @@ def compile_fx_inner(
             stack.enter_context(
                 config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
             )
+        # Host-side TMA only selects the descriptor flavor; it needs the TMA path
+        # itself enabled. Warn (don't silently no-op) if it's set without its
+        # prerequisites.
+        if config.triton.enable_host_side_tma and not (
+            config.triton.use_tensor_descriptor and config.assume_aligned_inputs
+        ):
+            warnings.warn(
+                "config.triton.enable_host_side_tma has no effect unless both "
+                "config.triton.use_tensor_descriptor and "
+                "config.assume_aligned_inputs are also enabled; host-side TMA "
+                "will be skipped.",
+                stacklevel=2,
+            )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
@@ -915,6 +991,8 @@ def _compile_fx_inner(
             f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
         )
 
+    _propagate_invoke_subgraph_nested_region_config(gm)
+
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
     if config.save_args:
@@ -977,7 +1055,7 @@ def _compile_fx_inner(
 
         mb_compiled_graph: OutputCode | None = None
         key_info = None
-        cache_info = None
+        cache_info: CacheInfo | None = None
         remote_cache = None
         constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
@@ -1166,7 +1244,7 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
+        cache_event_metadata = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
             metadata=cache_event_metadata,
@@ -1593,7 +1671,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    compiled_fn_runner = None
+                    compiled_fn_runner: CompiledFnRunner | None = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1958,6 +2036,7 @@ def cudagraphify(
     placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: tuple[int, ...] = (),
     kernel_free_cudagraph: bool = False,
+    user_visible_output_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -1975,6 +2054,7 @@ def cudagraphify(
             placeholders=placeholders,
             mutated_input_idxs=mutated_input_idxs,
             kernel_free_cudagraph=kernel_free_cudagraph,
+            user_visible_output_idxs=user_visible_output_idxs,
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
@@ -2573,6 +2653,11 @@ def compile_fx_forward(
             for arg in output.args[0]  # type: ignore[union-attr]
         ]
 
+        # Record original output strides BEFORE joint_graph_passes, because
+        # pad_mm (run as part of joint_graph_passes) can introduce views with
+        # padded strides that would be incorrectly captured as "original".
+        _recursive_record_original_output_strides(gm)
+
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
@@ -2592,7 +2677,10 @@ def compile_fx_forward(
     )
 
     model_outputs_node = output_node(gm)
-    if config.keep_output_stride:
+    clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
+    model_outputs = None
+    user_visible_output_idxs: list[int] = []
+    if config.keep_output_stride or clone_live_user_outputs:
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
@@ -2633,11 +2721,14 @@ def compile_fx_forward(
                 f"<= num_model_outputs ({num_model_outputs})"
             )
 
-        model_outputs_node.meta["user_visible_output_idxs"] = [
+        user_visible_output_idxs = [
             idx
             for idx in range(original_output_start_index, orig_output_end_idx)
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
+
+    if config.keep_output_stride or clone_live_user_outputs:
+        model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
     else:
         model_outputs_node.meta["user_visible_output_idxs"] = []
 
@@ -3138,7 +3229,7 @@ def _compile_fx_main(
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
-                        elif isinstance(target, torch.ScriptObject) or is_opaque_type(
+                        elif isinstance(target, torch.ScriptObject) or is_custom_class(
                             type(target)
                         ):
                             node.meta["val"] = (
@@ -3232,6 +3323,7 @@ def make_graph_return_tuple(
     with gm.graph.inserting_before(node):
         gm.graph.output(rv)
     gm.graph.erase_node(node)
+    gm.recompile()
     if not graph_returns_tuple(gm):
         raise AssertionError("Expected graph to return a tuple")
 
