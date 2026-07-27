@@ -47,18 +47,22 @@ rand_ops = [
 ]
 
 
-# return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(
+def _fx_graph_cse(
     fx_g: torch.fx.graph.Graph,
-    extra_node_key: Callable[[fx.Node], Hashable] | None = None,
-) -> fx.Graph:
-    new_graph = fx.Graph()
+    extra_node_key: Callable[[fx.Node], Hashable] | None,
+    node_filter: Callable[[fx.Node], bool] | None,
+    node_copy: Callable[
+        [fx.Node, Callable[[fx.Node], fx.Node]],
+        fx.Node,
+    ],
+    on_duplicate: Callable[[fx.Node, fx.Node], None] | None,
+) -> None:
     env: dict[
         fx.Node, fx.Node
-    ] = {}  # map from node in the old graph to node in the new graph
+    ] = {}  # map from each node to its copied node or CSE representative
     hash_env: dict[
         tuple[Any, Hashable | None, int], fx.Node
-    ] = {}  # map from hash to a node in the new graph
+    ] = {}  # map from hash to a CSE representative
     token_map: dict[
         tuple[Any, Hashable | None, int], dict[str, Any]
     ] = {}  # map from hash to token
@@ -107,7 +111,8 @@ def fx_graph_cse(
     nodes_that_alias_outputs = {
         n
         for n in fx_g.nodes
-        if checkable_node(n)
+        if (node_filter is None or node_filter(n))
+        and checkable_node(n)
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
@@ -154,7 +159,8 @@ def fx_graph_cse(
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
         if (
-            n.op == "placeholder"
+            (node_filter is not None and not node_filter(n))
+            or n.op == "placeholder"
             or n.op == "output"
             or n.op == "get_attr"
             or n.is_impure()
@@ -181,7 +187,7 @@ def fx_graph_cse(
                 and free_unbacked_symbols(n.meta["val"])
             )
         ):
-            new_node = new_graph.node_copy(n, lambda x: env[x])
+            new_node = node_copy(n, lambda x: env[x])
             env[n] = new_node
         else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
             # substitute args and kwargs members to their mapping in env if exists
@@ -228,19 +234,61 @@ def fx_graph_cse(
             if hash_val_in_hash_env and token_map[hash_val] == token:
                 duplicate_n_prev = hash_env[hash_val]
                 if same_mutation_regions(n, duplicate_n_prev):
+                    if on_duplicate is not None:
+                        on_duplicate(n, duplicate_n_prev)
                     env[n] = duplicate_n_prev
                     continue
                 else:
                     # any futures duplicates should replace with n, not duplicate_n_prev
                     overwrite_due_to_mutation = True
 
-            new_node = new_graph.node_copy(n, lambda x: env[x])
+            new_node = node_copy(n, lambda x: env[x])
             env[n] = new_node
             if overwrite_due_to_mutation or not hash_val_in_hash_env:
                 hash_env[hash_val] = new_node
                 token_map[hash_val] = token
 
+
+def fx_graph_cse(
+    fx_g: torch.fx.graph.Graph,
+    extra_node_key: Callable[[fx.Node], Hashable] | None = None,
+) -> fx.Graph:
+    """Return a new copy of ``fx_g`` with common expressions eliminated."""
+    new_graph = fx.Graph()
+    _fx_graph_cse(fx_g, extra_node_key, None, new_graph.node_copy, None)
     return new_graph
+
+
+def fx_graph_cse_replacements(
+    fx_g: torch.fx.graph.Graph,
+    extra_node_key: Callable[[fx.Node], Hashable] | None = None,
+    *,
+    node_filter: Callable[[fx.Node], bool] | None = None,
+) -> dict[fx.Node, fx.Node]:
+    """Return CSE duplicates mapped to their representatives in ``fx_g``.
+
+    The graph structure is unchanged. If provided, ``node_filter`` selects the
+    nodes eligible for elimination; excluded nodes remain unique boundaries for
+    matching their descendants.
+    """
+    replacements: dict[fx.Node, fx.Node] = {}
+
+    def preserve_node(
+        node: fx.Node, arg_transform: Callable[[fx.Node], fx.Node]
+    ) -> fx.Node:
+        return node
+
+    def record_duplicate(node: fx.Node, representative: fx.Node) -> None:
+        replacements[node] = representative
+
+    _fx_graph_cse(
+        fx_g,
+        extra_node_key,
+        node_filter,
+        preserve_node,
+        record_duplicate,
+    )
+    return replacements
 
 
 def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
