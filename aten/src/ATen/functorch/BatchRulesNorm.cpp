@@ -362,10 +362,10 @@ static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
   rstd_ = reshape_dim_into(0, 0, rstd_);         // [B0 * N, G]
 
   auto result0 = std::get<0>(native_group_norm_backward(
-      grad_out_.contiguous(),
-      input_.contiguous(),
-      mean_.contiguous(),
-      rstd_.contiguous(),
+      grad_out_,
+      input_,
+      mean_,
+      rstd_,
       std::nullopt, N * bdim_size, C, HxW, group, {true, false, false}));
   return reshape_dim_outof(0, bdim_size, result0);
 }
@@ -642,7 +642,8 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
         normalized_shape,
         mean_value, mean_bdim,
         rstd_value, rstd_bdim);
-    grad_input = makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+    grad_input = makeBatched(
+        std::move(std::get<0>(results)), std::get<1>(results), cur_level);
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
