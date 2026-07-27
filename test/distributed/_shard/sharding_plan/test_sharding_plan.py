@@ -54,7 +54,7 @@ class ChunkAllShardingPlanner(ShardingPlanner):
 class TestShardingPlan(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend()
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_sharding_plan_errors(self):
         rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]
         sharding_plan_wrong_plan = ShardingPlan(
@@ -106,7 +106,7 @@ class TestShardingPlan(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend()
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_custom_sharding_planner(self):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).cuda(
             self.rank
@@ -126,7 +126,7 @@ class TestShardingPlan(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend()
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_shard_module_sub_process_group(self):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank)
         colwise_sharding_spec = ChunkShardingSpec(
