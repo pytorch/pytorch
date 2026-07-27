@@ -114,6 +114,14 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.12
@@ -190,7 +198,8 @@ case "$tag" in
     ROCM_VERSION=nightly
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx942"
+    # rocm-nightly only runs on MI350 (gfx950) runners.
+    PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
