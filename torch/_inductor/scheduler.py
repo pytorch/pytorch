@@ -3535,11 +3535,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 )
             filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
 
-        # Indirect-indexing nodes can't be compile-time benchmarked: the seed kernel has no
-        # real index tensor, so synthetic inputs produce out-of-bounds indices (device assert).
-        # Exclude them from combos on the compile-time autotune path; they codegen standalone.
-        if (
-            config.combo_kernel_per_subkernel_blocks
+        # Synthetic benchmark inputs cannot preserve indirect-index constraints and may
+        # produce out-of-bounds indices. Keep these nodes out of benchmarked combos.
+        if config.benchmark_combo_kernel or (
+            config.combo_kernels_autotune > 0
+            and config.combo_kernel_per_subkernel_blocks
             and config.combo_kernel_compile_time_autotune
         ):
             indirect_nodes = [
