@@ -13795,6 +13795,7 @@ if __name__ == '__main__':
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
+    @tf32_off()
     def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32,
                                         acc_policy=None, acc_dtype=None, bias=False,
                                         none_reduction=False, prob_target=False):
@@ -14265,6 +14266,7 @@ if __name__ == '__main__':
 
         torch.autograd.gradcheck(f, (inp, weight, linear_bias) if bias else (inp, weight))
 
+    @tf32_on_and_off(0.005)
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_no_grad(self, device, acc_policy):
         """Forward-only path under torch.no_grad(): exercises the
@@ -14340,6 +14342,7 @@ if __name__ == '__main__':
 
         torch.autograd.gradcheck(f, (inp, linear_weight, linear_bias))
 
+    @tf32_on_and_off(0.005)
     def test_linear_cross_entropy_linear_bias_chunked_matches_reference(self, device):
         """Chunked path with ``linear_bias``: forward output and the
         backward gradients on ``input`` / ``linear_weight`` /
@@ -14874,6 +14877,7 @@ if __name__ == '__main__':
             self.assertEqual(input_grads[i], input_grads[0])
             self.assertEqual(linear_weight_grads[i], linear_weight_grads[0])
 
+    @tf32_on_and_off(0.005)
     def test_linear_cross_entropy_batch_invariance(self, device):
         """Sum over per-item evaluations equals batched evaluation."""
         torch.manual_seed(42)
