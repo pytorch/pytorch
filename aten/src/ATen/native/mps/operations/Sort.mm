@@ -592,7 +592,6 @@ static std::tuple<Tensor&, Tensor&> median_with_indices_impl_mps(Tensor& values,
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
 
   std::vector<int64_t> out_shape = self.sizes().vec();
-  zero_numel_check_dims(self, dim, "median()");
   if (self.dim() > 0) {
     if (keepdim) {
       out_shape[dim] = 1;
@@ -605,6 +604,8 @@ static std::tuple<Tensor&, Tensor&> median_with_indices_impl_mps(Tensor& values,
   resize_output(indices, out_shape);
 
   if (self.numel() == 0) {
+    values.copy_(at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options()));
+    indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
   if (self.dim() == 0) {

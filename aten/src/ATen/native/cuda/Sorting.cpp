@@ -103,7 +103,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
       " dimensions");
 
   std::vector<int64_t> out_shape = self.sizes().vec();
-  zero_numel_check_dims(self, dim, "median()");
   if (self.dim() > 0) {
     assert(dim >= 0);
     assert(dim < static_cast<int64_t>(out_shape.size()));
@@ -118,14 +117,18 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   values.resize_(out_shape);
   indices.resize_(out_shape);
 
-  // Only launch kernel for non-empty tensors
-  if (self.numel() > 0) {
-    // Ensure #dim is the same for all tensors required for reduction
-    Tensor vals = keepdim && self.dim() > 0 ? values : values.unsqueeze(dim);
-    Tensor inds = keepdim && self.dim() > 0 ? indices : indices.unsqueeze(dim);
-
-    launch_median_kernel(vals, inds, in, dim, ignore_nan);
+  if (self.numel() == 0) {
+    values.copy_(
+        at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options()));
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
   }
+
+  // Ensure #dim is the same for all tensors required for reduction
+  Tensor vals = keepdim && self.dim() > 0 ? values : values.unsqueeze(dim);
+  Tensor inds = keepdim && self.dim() > 0 ? indices : indices.unsqueeze(dim);
+
+  launch_median_kernel(vals, inds, in, dim, ignore_nan);
 
   return std::forward_as_tuple(values, indices);
 }

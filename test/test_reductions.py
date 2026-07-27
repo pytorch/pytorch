@@ -2734,6 +2734,43 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
+    @parametrize("op_name", ["median", "nanmedian"])
+    @parametrize("shape,dim", [
+        ((0,), 0),
+        ((2, 0), 1),
+        ((1, 2, 0), -1),
+        ((0, 2), 0),
+        ((0, 2), 1),
+    ])
+    @parametrize("keepdim", [False, True])
+    @dtypes(torch.float)
+    def test_median_empty_dim(self, device, dtype, op_name, shape, dim, keepdim):
+        op = getattr(torch, op_name)
+        x = torch.empty(shape, dtype=dtype, device=device, requires_grad=True)
+        values, indices = op(x, dim=dim, keepdim=keepdim)
+
+        wrapped_dim = dim % len(shape)
+        expected_shape = list(shape)
+        if keepdim:
+            expected_shape[wrapped_dim] = 1
+        else:
+            del expected_shape[wrapped_dim]
+
+        expected_values = torch.full(expected_shape, nan, dtype=dtype, device=device)
+        expected_indices = torch.zeros(expected_shape, dtype=torch.long, device=device)
+        self.assertEqual(values, expected_values)
+        self.assertEqual(indices, expected_indices)
+
+        values.sum().backward()
+        self.assertEqual(x.grad, torch.zeros_like(x))
+
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(x.detach(), torch.ones_like(x))
+            dual_values = op(dual, dim=dim, keepdim=keepdim).values
+            primal, tangent = torch.autograd.forward_ad.unpack_dual(dual_values)
+            self.assertEqual(primal, expected_values)
+            self.assertEqual(tangent, torch.zeros_like(expected_values))
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
