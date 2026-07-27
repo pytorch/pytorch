@@ -1083,6 +1083,16 @@ class TestTensorCreation(TestCase):
             if torch.version.hip:
                 # HIP min float -> int64 conversion is divergent
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+            elif dtype == torch.uint8:
+                # CUDA out-of-range float -> uint8 is divergent under clang-21:
+                # out-of-range float->int is UB and codegen differs from numpy's
+                # reference. Test only in-range values so torch and numpy agree
+                # deterministically.
+                vals = (0, .5, 1.5, 2)
+            elif dtype in (torch.int8, torch.int16):
+                # CUDA min float -> int8/int16 is divergent under clang-21
+                # (out-of-range float->int is UB). Drop the out-of-range extreme.
+                vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
             else:
                 vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
         elif dtype == torch.uint8:
