@@ -11,11 +11,8 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-    paths:
-      - .ci/docker/**
-      - .github/workflows/build-manywheel-images.yml
-      - .github/actions/binary-docker-build/**
-  pull_request:
+      # ciflow/docker: build + push the content-addressed image to ECR for PR testing
+      - ciflow/docker/*
     paths:
       - .ci/docker/**
       - .github/workflows/build-manywheel-images.yml
@@ -23,7 +20,8 @@ on:
 
 env:
   DOCKER_BUILDKIT: 1
-  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) }}
+  # Publish to Docker Hub on main/release/v*, to ECR on ciflow/docker (chosen per-ref in binary-docker-build)
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/ciflow/docker/')) }}
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -50,6 +48,10 @@ jobs:
   build:
     if: github.repository_owner == 'pytorch'
     needs: select-runner
+    # id-token: write lets the ciflow/docker path assume the ECR push role via OIDC
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
     runs-on: ${{ matrix.runner }}
     container:
