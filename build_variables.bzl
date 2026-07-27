@@ -913,6 +913,7 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 ]
 
 libtorch_python_xpu_sources = [
+    "torch/csrc/XpuIPCTypes.cpp",
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",

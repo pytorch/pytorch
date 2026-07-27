@@ -20,6 +20,10 @@
 #include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
 
 namespace c10::xpu::XPUCachingAllocator {
+C10_DEFINE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback)
+}
+
+namespace c10::xpu::XPUCachingAllocator {
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
@@ -981,6 +985,16 @@ class DeviceCachingAllocator {
     return true;
   }
 
+  bool trigger_free_memory_callbacks(AllocParams& p) {
+    (void)p;
+    bool freed_memory = false;
+    for (const auto& name : c10::xpu::FreeXPUMemoryCallbacksRegistry()->Keys()) {
+      freed_memory |=
+          c10::xpu::FreeXPUMemoryCallbacksRegistry()->Create(name)->Execute();
+    }
+    return freed_memory;
+  }
+
   bool alloc_block(
       AllocParams& p,
       bool isRetry,
@@ -1461,7 +1475,9 @@ class DeviceCachingAllocator {
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
-    bool block_found = get_free_block(params);
+    bool block_found =
+      get_free_block(params) ||
+      (trigger_free_memory_callbacks(params) && get_free_block(params));
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
       block_found = alloc_block(params, false, context) ||

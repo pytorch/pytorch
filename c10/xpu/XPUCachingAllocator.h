@@ -2,9 +2,20 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/util/Registry.h>
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
+
+class C10_XPU_API FreeMemoryCallback {
+ public:
+  virtual ~FreeMemoryCallback() = default;
+  virtual bool Execute() = 0;
+};
+
+C10_DECLARE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback);
+#define REGISTER_FREE_MEMORY_CALLBACK_XPU(name, ...) \
+  C10_REGISTER_CLASS(FreeXPUMemoryCallbacksRegistry, name, __VA_ARGS__)
 
 struct ShareableHandle {
   std::ptrdiff_t offset;
