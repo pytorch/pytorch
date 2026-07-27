@@ -504,11 +504,12 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
  * take a PhiloxCudaState (e.g. Python). Writes 1-element int64 tensors
  * (seed, offset, intragraph_offset); the kernel-visible values are
  * (seed, offset + intragraph_offset), with the uint64 seed and offset
- * reinterpreted as int64. During capture, seed and offset are aliases of
- * the per-capture extragraph device state that replay_prologue refills on
- * every replay; their contents are undefined until the first replay and
- * they are only valid for that capture's lifetime. Otherwise they are
- * device tensors holding the current values.
+ * reinterpreted as int64. Mirrors PhiloxCudaState: outside capture, seed
+ * and offset are CPU tensors holding the current values (HostState);
+ * during capture, they are CUDA aliases of the per-capture extragraph
+ * device state that replay_prologue refills on every replay (DevState) -
+ * their contents are undefined until the first replay and they are only
+ * valid for that capture's lifetime.
  *
  * See Note [Acquire lock when using random generators]
  */
@@ -518,7 +519,6 @@ void CUDAGeneratorImpl::philox_state(
     at::Tensor& offset,
     at::Tensor& intragraph_offset) {
   const auto cpu_opts = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
-  const auto dev_opts = at::TensorOptions().dtype(at::kLong).device(device());
   auto capture_id = at::cuda::currentStreamCaptureId();
   if (capture_id.has_value()) {
     auto* capture_state = state_->get_capture_state(capture_id.value(), true);
@@ -536,8 +536,8 @@ void CUDAGeneratorImpl::philox_state(
   }
   uint64_t current_offset = state_->philox_offset_per_thread_;
   state_->increase(increment);
-  seed = at::full({1}, static_cast<int64_t>(state_->seed_), dev_opts);
-  offset = at::full({1}, static_cast<int64_t>(current_offset), dev_opts);
+  seed = at::full({1}, static_cast<int64_t>(state_->seed_), cpu_opts);
+  offset = at::full({1}, static_cast<int64_t>(current_offset), cpu_opts);
   intragraph_offset = at::zeros({1}, cpu_opts);
 }
 
