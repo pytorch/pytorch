@@ -24,6 +24,7 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
+from torch._higher_order_ops.auto_functionalize import FunctionalCallableWithEpilogue
 from torch._higher_order_ops.schema import find_hop_schema
 from torch._inductor import config as inductor_config
 from torch._inductor.pattern_matcher import (
@@ -31,6 +32,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -1468,6 +1470,81 @@ class GraphModule(torch.nn.Module):
             "Inplace update to inference tensor outside InferenceMode is not allowed",
         ):
             opt_fn(x, y)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_input_mutation_alias_annotated_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("scale_into(Tensor x, Tensor! out, float scale) -> ()")
+
+            def scale_into(x, out, scale):
+                out.copy_(x * scale)
+
+            lib.impl("scale_into", scale_into, "CompositeExplicitAutograd")
+
+            @nested_compile_region
+            def gn(x, y):
+                out = torch.empty_like(y)
+                torch.ops.mylib.scale_into(y, out, 2.0)
+                x.add_(out)
+                return torch.mul(x, y)
+
+            def fn(x, y):
+                return gn(x, y)
+
+            # x is mutated in place, so it cannot require grad (autograd leaf error).
+            x = torch.randn(8, requires_grad=False)
+            x_clone = x.clone()
+            y = torch.randn(8, requires_grad=False)
+
+            backend = AotEagerAndRecordGraphs()
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+            self.assertEqual(opt_fn(x, y), fn(x_clone, y))
+            self.assertEqual(x_clone, x)
+
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_0, identifier = 'auto_functionalized_subgraph_0', arg0 = arg1_1, _arg1_base_index = 0, _all_bases = [arg0_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = arg1_1 = _tree_spec_constant0 = None
+        getitem: "f32[8]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
+        return (getitem,)
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+            empty_like: "f32[8]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False)
+            auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.scale_into.default, x = arg0_1, scale = 2.0, _out_base_index = 0, _all_bases = [empty_like]);  empty_like = None
+            getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+            add: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  getitem_1 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(add, arg0_1);  arg0_1 = None
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return (mul,)""",
+                ignore_empty_lines=True,
+            )
+
+    def test_input_mutation_boxed_subgraph(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, y):
+                x.add_(y)
+                return (torch.mul(x, y),)
+
+        gm = torch.fx.symbolic_trace(Mod())
+        gm.graph.set_codegen(_BoxedCodeGen())
+        gm.recompile()
+        self.assertTrue(gm._boxed_call)
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        x_clone = x.clone()
+        ref = Mod()(x_clone, y)
+
+        self.assertEqual(FunctionalCallableWithEpilogue(gm)([x, y]), ref)
+        self.assertEqual(x_clone, x)
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
