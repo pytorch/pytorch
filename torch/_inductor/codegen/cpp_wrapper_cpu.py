@@ -2742,6 +2742,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for (inner_input, inner_input_val), outer_input in zip(
             subgraph.graph.graph_inputs.items(), outer_inputs
         ):
+            if isinstance(inner_input_val, sympy.Symbol):
+                if str(inner_input_val) != outer_input:
+                    self.writeline(
+                        f"{self.codegen_unbacked_symbol_decl(inner_input_val)} = {outer_input};"
+                    )
+                continue
             if not isinstance(inner_input_val, ir.TensorBox):
                 continue
 
@@ -2772,42 +2778,55 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"{outer_output} = {src};")
 
     @staticmethod
-    def _get_while_loop_carried_output_names(while_loop):
-        mutation_output_names = {
-            mutation_name: mutation_output.get_name()
+    def _get_while_loop_carried_outputs(while_loop):
+        mutation_outputs = {
+            mutation_name: mutation_output
             for mutation_output in while_loop.mutation_outputs
             for mutation_name in mutation_output.get_mutation_names()
         }
 
-        def resolve_mutation_output_name(name):
+        def resolve_mutation_output(name):
             seen = OrderedSet()
-            while name in mutation_output_names:
+            output = None
+            while name in mutation_outputs:
                 if name in seen:
                     raise AssertionError("while_loop mutation outputs contain a cycle")
                 seen.add(name)
-                name = mutation_output_names[name]
-            return name
+                output = mutation_outputs[name]
+                name = output.get_name()
+            return output
 
-        output_names = []
+        carried_outputs = []
         output_idx = 0
         for carried_input in while_loop.carried_inputs:
-            carried_input_name = carried_input.get_name()
-            mutation_output_name = resolve_mutation_output_name(carried_input_name)
-            if mutation_output_name != carried_input_name:
-                output_names.append(mutation_output_name)
+            if isinstance(carried_input, ir.ShapeAsConstantBuffer):
+                mutation_output = None
+            else:
+                mutation_output = resolve_mutation_output(carried_input.get_name())
+            if mutation_output is not None:
+                carried_outputs.append(mutation_output)
                 continue
 
             if output_idx >= len(while_loop.outputs):
                 raise AssertionError(
                     "while_loop has fewer non-mutated outputs than carried inputs"
                 )
-            output_names.append(while_loop.outputs[output_idx].get_name())
+            carried_outputs.append(while_loop.outputs[output_idx])
             output_idx += 1
 
         if output_idx != len(while_loop.outputs):
             raise AssertionError("while_loop has unused non-mutated outputs")
 
-        return output_names
+        return carried_outputs
+
+    @staticmethod
+    def _get_while_loop_carried_output_names(while_loop):
+        return [
+            output.codegen_reference()
+            if isinstance(output, ir.ShapeAsConstantBuffer)
+            else output.get_name()
+            for output in CppWrapperCpu._get_while_loop_carried_outputs(while_loop)
+        ]
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(
@@ -2924,7 +2943,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
-        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
+        carried_outputs = self._get_while_loop_carried_outputs(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -2932,16 +2951,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
-            # in ABI-compatible mode, the carried inputs are codegened
-            # as buffers outside the while loop and set to the initial
-            # values. at the end of each while_loop iteration, they
-            # will be assigned the carried values.
-            self.writeline(f"AtenTensorHandle {out_name}_handle;")
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
-            )
-            self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
+        for inp, out in zip(outer_carried_inputs, carried_outputs):
+            if isinstance(out, ir.ShapeAsConstantBuffer):
+                if not isinstance(out.expr, sympy.Symbol):
+                    raise AssertionError(out)
+                out_name = out.codegen_reference()
+                self.writeline(
+                    f"{self.codegen_unbacked_symbol_decl(out.expr)} = {inp};"
+                )
+            else:
+                # in ABI-compatible mode, the carried inputs are codegened
+                # as buffers outside the while loop and set to the initial
+                # values. at the end of each while_loop iteration, they
+                # will be assigned the carried values.
+                out_name = out.get_name()
+                self.writeline(f"AtenTensorHandle {out_name}_handle;")
+                self.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
+                )
+                self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
 
         # additional inputs will be assigned within the while_loop

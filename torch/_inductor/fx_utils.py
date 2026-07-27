@@ -240,7 +240,7 @@ def _extract_subgraphs_and_args(
 
     def get_subgraph_args(
         subgraph: torch.fx.GraphModule,
-    ) -> tuple[torch.Tensor, ...]:
+    ) -> tuple[Any, ...]:
         return tuple(
             get_fake(n, subgraph) for n in subgraph.graph.find_nodes(op="placeholder")
         )
@@ -347,9 +347,26 @@ def _extract_subgraphs_and_args(
         torch.ops.higher_order.while_loop,
         torch.ops.higher_order.while_loop_stack_output,
     ):
-        subgraph_args = (*args[2], *args[3])
-        yield args[0], subgraph_args
-        yield args[1], subgraph_args
+        raw_subgraph_args = (*args[2], *args[3])
+
+        def normalize_while_loop_args(
+            subgraph: torch.fx.GraphModule,
+        ) -> tuple[Any, ...]:
+            # while_loop tracing intentionally unspecializes scalar carries to
+            # fresh unbacked symbols in the subgraphs.  Preserve those
+            # placeholder fakes here so the updater only rewrites tensor
+            # metadata, whose sizes/strides may have changed.
+            return tuple(
+                raw_arg if isinstance(raw_arg, torch.Tensor) else placeholder_arg
+                for raw_arg, placeholder_arg in zip(
+                    raw_subgraph_args,
+                    get_subgraph_args(subgraph),
+                    strict=True,
+                )
+            )
+
+        yield args[0], normalize_while_loop_args(args[0])
+        yield args[1], normalize_while_loop_args(args[1])
     elif node.target is torch.ops.higher_order.switch:
         # args: (index, [branch_gm_0, ...], operands)
         subgraph_args = tuple(args[2])
