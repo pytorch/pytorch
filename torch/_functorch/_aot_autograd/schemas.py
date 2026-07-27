@@ -498,6 +498,10 @@ class ViewAndMutationMeta:
     # length = # backward graph inputs
     subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
 
+    # Intermediate bases whose traced out-of-place view does not reflect eager's
+    # non-view autograd metadata after an inplace view op.
+    unsafe_view_intermediate_base_indices: list[int] = field(default_factory=list)
+
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
     # At runtime, we don't keep the traced_tangents around since they're not serializable.

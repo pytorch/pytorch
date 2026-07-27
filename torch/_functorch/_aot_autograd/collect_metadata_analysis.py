@@ -420,6 +420,7 @@ def run_functionalized_fw_and_collect_metadata(
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
         intermediate_bases_descs: list[AOTInput] = []
+        unsafe_view_intermediate_base_indices: list[int] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -485,6 +486,10 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
                 is_result_of_custom_autograd_fn = True
 
+            functional_tensor_metadata_mutated = isinstance(
+                o, FunctionalTensor
+            ) and torch._functionalize_has_metadata_mutation(o.elem)  # type: ignore[attr-defined]
+
             if not isinstance(o, Tensor):
                 output_type = OutputType.non_alias
                 base_idx = None
@@ -540,6 +545,25 @@ alias each other from a multi-output view call"
                 base_idx = inp_storage_refs[curr_storage]
                 output_type = OutputType.is_input
 
+            elif (
+                # Functionalization represents inplace view ops on intermediates
+                # as metadata mutations on the functional tensor. Its _is_view()
+                # state tracks eager's distinction: after out.unsqueeze_(0),
+                # `out` is not a differentiable view. The traced graph can return an
+                # out-of-place view op though, and returning that view directly
+                # from a compiled autograd.Function changes the user's ability
+                # to mutate it. Hide that internal view from autograd with the
+                # same unsafe-view epilogue used for simple intermediate views.
+                isinstance(o, FunctionalTensor)
+                and curr_storage not in inp_storage_refs
+                and not o._is_view()
+                and o.requires_grad
+                and grad_fn is not None
+                and functional_tensor_metadata_mutated
+            ):
+                output_type = OutputType.unsafe_view_alias
+                base_idx = None
+
             # We only need to handle the intermediate base case when both
             # the intermediate base and the output require gradients.
             # See Note [AOT Autograd: outputs aliasing inputs or intermediates!]
@@ -552,7 +576,7 @@ alias each other from a multi-output view call"
                     num_aliased_outs - num_multi_output_view_outs
                 )
                 # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
-                if (
+                if not functional_tensor_metadata_mutated and (
                     out_tensor_alias_counts[curr_storage] == 1
                     or num_aliased_outs_that_are_not_multi_output_views <= 1
                 ):
@@ -609,6 +633,16 @@ from a multi-output view call"
                                 new_out_idx
                             )
                             intermediate_bases.append(o._base)
+                            if (
+                                isinstance(o._base, FunctionalTensor)
+                                and not o._base._is_view()
+                                and torch._functionalize_has_metadata_mutation(
+                                    o._base.elem  # type: ignore[attr-defined]
+                                )
+                            ):
+                                unsafe_view_intermediate_base_indices.append(
+                                    new_out_idx
+                                )
                             # NB: The desc we picked here is guaranteed to be
                             # synchronized with the one in
                             # graph_capture_wrappers.py because we
@@ -649,6 +683,25 @@ from a multi-output view call"
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
             view_meta_sequence = None
+            alias_base_has_metadata_mutation = (
+                output_type == OutputType.alias_of_intermediate_base_is_user_output
+                and base_idx is not None
+                and isinstance(flat_f_outs[base_idx], FunctionalTensor)
+                and torch._functionalize_has_metadata_mutation(
+                    flat_f_outs[base_idx].elem  # type: ignore[attr-defined]
+                )
+            ) or (
+                output_type
+                in (
+                    OutputType.alias_of_intermediate,
+                    OutputType.alias_of_intermediate_save_as_output,
+                )
+                and isinstance(o, FunctionalTensor)
+                and isinstance(o._base, FunctionalTensor)
+                and torch._functionalize_has_metadata_mutation(
+                    o._base.elem  # type: ignore[attr-defined]
+                )
+            )
             if (
                 # 1. If the output_type is either of:
                 #    (i) alias_of_intermediate;
@@ -679,7 +732,14 @@ from a multi-output view call"
                 and base_idx is not None
                 and not input_info[base_idx].mutates_metadata
             ):
-                if isinstance(o, FunctionalTensor):
+                # ViewMeta sequences are rooted at the original intermediate. If
+                # the chosen base is metadata-mutated, replaying the sequence from
+                # that already-updated base would apply the inplace view a second
+                # time. Use the metadata reconstruction fallback.
+                if (
+                    isinstance(o, FunctionalTensor)
+                    and not alias_base_has_metadata_mutation
+                ):
                     view_meta_sequence = ViewMetaSequence(o)
 
             requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
@@ -862,6 +922,9 @@ from a multi-output view call"
             input_info=input_info,
             output_info=output_info,
             num_intermediate_bases=len(intermediate_bases),
+            unsafe_view_intermediate_base_indices=(
+                unsafe_view_intermediate_base_indices
+            ),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
