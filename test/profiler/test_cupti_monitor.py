@@ -573,7 +573,11 @@ class TestCuptiRecords(TestCase):
         }
         trace_window = {
             "columns": columns,
-            "user_annotations": {555: "all_reduce", 666: "matmul", 777: "reduce_scatter"},
+            "user_annotations": {
+                555: "all_reduce",
+                666: "matmul",
+                777: "reduce_scatter",
+            },
         }
         events = _gpu_user_annotation_events(trace_window, base_ns=0)
         by_name = {e["name"]: e for e in events}
