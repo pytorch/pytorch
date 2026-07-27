@@ -22,9 +22,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
+    ensure_diff_blob_local,
     get_current_version,
     LintMessage,
     LintSeverity,
+    merge_base_with_main,
 )
 
 
@@ -112,27 +114,11 @@ def _read_at_merge_base(filename: str) -> str | None:
     Return `filename` contents at the merge-base of HEAD with origin/main, or
     None if the file did not exist at that point. Raises if git operations fail.
     """
-    result = subprocess.run(
-        ["git", "fetch", "origin", "main"],
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to fetch origin. Error: {result.stderr.strip()}")
+    merge_base = merge_base_with_main()
 
-    result = subprocess.run(
-        ["git", "merge-base", "HEAD", "origin/main"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Failed to find merge-base with origin/main. "
-            f"Error: {result.stderr.strip()}"
-        )
-    merge_base = result.stdout.strip()
+    # Prefetch the merge-base blob so `git show` below stays fully local (CI uses
+    # a blobless partial clone; otherwise git lazily fetches it mid-command).
+    ensure_diff_blob_local(merge_base, filename)
 
     # `git show <ref>:<path>` requires <path> relative to the repo root;
     # lintrunner may pass `filename` as an absolute path.
