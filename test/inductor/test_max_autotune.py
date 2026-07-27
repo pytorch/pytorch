@@ -5976,8 +5976,11 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         return has_triton_amd_tdm_device("gfx1250")
 
+    @parametrize("dtype", ("fp16", "bf16", "fp32"))
     @parametrize("num_stages", (1, 2))
-    def test_tdm_descriptor_template_lowers_to_amdgcn_tdm(self, num_stages):
+    def test_tdm_descriptor_template_lowers_to_amdgcn_tdm(
+        self, dtype, num_stages
+    ):
         if not self._tdm_capable_triton():
             self.skipTest("Triton without gfx1250 TDM backend support")
 
@@ -6011,7 +6014,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
             src = triton.compiler.ASTSource(
                 fn=k,
-                signature={{"a_ptr": "*fp16", "b_ptr": "*fp16", "c_ptr": "*fp32",
+                signature={{"a_ptr": "*{dtype}", "b_ptr": "*{dtype}", "c_ptr": "*fp32",
                            "M": "i32", "N": "i32", "K": "i32",
                            "BLOCK_M": "constexpr", "BLOCK_N": "constexpr",
                            "BLOCK_K": "constexpr"}},
