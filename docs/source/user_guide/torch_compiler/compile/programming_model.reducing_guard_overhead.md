@@ -80,8 +80,9 @@ Other filters available in `torch.compiler` (all `_unsafe`, same caveats):
 - `skip_guard_on_globals_unsafe` — skip guards on globals.
 - `keep_tensor_guards_unsafe` — keep only tensor guards (optionally including
   parameters).
-- `keep_global_context_and_tensor_guards_unsafe` — keep only global-state and
-  (non-global) tensor guards.
+- `keep_portable_guards_unsafe` — keep only guards that are portable across
+  Python and non-Python environments (global-state, shape-env, and non-global
+  tensor guards).
 - `skip_all_guards_unsafe` — drop **all** guards; removes every safety guarantee,
   use with extreme caution.
 
