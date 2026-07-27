@@ -6,7 +6,7 @@ import os
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any
+from typing import Any, cast
 from typing_extensions import Self
 
 import sympy
@@ -26,6 +26,7 @@ from ..ir import (
     TMADescriptorStable,
 )
 from ..runtime.hints import (
+    InductorMeta,
     TRITON_DEFAULT_BLOCK_SIZES,
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
@@ -498,7 +499,9 @@ class DeferredTritonCallWrapper:
         else:
             from ..runtime.triton_heuristics import GridExpr
 
-            grid = GridExpr.from_meta_lazy(self.inductor_meta, kernel_name)
+            grid = GridExpr.from_meta_lazy(
+                cast("InductorMeta | None", self.inductor_meta), kernel_name
+            )
             for line in grid.prefix:
                 prefix.writeline(line)
 
@@ -818,7 +821,9 @@ class DeferredTritonCallWrapper:
     ):
         from ..runtime.triton_heuristics import GridExpr
 
-        grid = GridExpr.from_meta(inductor_meta, params["config"], mode="cpp")
+        grid = GridExpr.from_meta(
+            cast("InductorMeta", inductor_meta), params["config"], mode="cpp"
+        )
         for line in grid.prefix:
             prefix.writeline(line)
         prefix.splice(
@@ -1098,11 +1103,20 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def generate_debug_sync(self, buffer):
         if self.device == "cuda":
-            buffer.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+            # The fbcode JIT cpp_wrapper CUDA build links only the CUDA driver
+            # (libcuda), not libcudart, so the runtime cudaDeviceSynchronize symbol
+            # is undefined at dlopen -> use the driver-API cuCtxSynchronize there.
+            # On ROCm the driver-context sync hipCtxSynchronize returns
+            # hipErrorNotSupported at runtime, so keep the runtime cudaDeviceSynchronize
+            # (which hipifies to hipDeviceSynchronize and IS linked in the ROCm build).
+            if torch.version.hip is not None:
+                buffer.writeline(
+                    maybe_hipify_code_wrapper(
+                        "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+                    )
                 )
-            )
+            else:
+                buffer.writeline("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
             return
 
         raise NotImplementedError(
@@ -1131,6 +1145,13 @@ class CppWrapperGpu(CppWrapperCpu):
             # For a dual-wrapper-mode const graph, only the standalone JIT
             # output needs this header content. The AOTI const body is spliced
             # into the main AOTI source, which has its own kernel driver.
+            # super().write_header() early-returns for const graphs before it
+            # can call add_device_include, so emit the JIT device include here;
+            # otherwise the kernel driver's CUfunction/CUmodule/uint32_t types
+            # have no declaring header and fail to compile under -nostdinc.
+            for device in V.graph.device_types:
+                if device != "meta":
+                    self.header.splice_jit(self.get_device_include_path_jit(device))
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
@@ -1358,7 +1379,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     if ((reinterpret_cast<std::uintptr_t>({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
                         AOTI_TORCH_WARN("{warn_msg}");
                         AtenTensorHandle {input_name}_aligned;
-                        aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
+                        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned));
                         {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
                     }}
                     """

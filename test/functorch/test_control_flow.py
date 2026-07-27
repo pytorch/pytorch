@@ -1613,6 +1613,7 @@ def forward(self, pred_1, x_1):
             idx = torch.tensor([i])
             self.assertEqual(functional_f(idx, x), f(idx, x))
 
+    @skipIfTorchDynamo("don't test compile on compile")
     def test_switch_functionalized_input_mutation(self):
         def branch_mutating(inp_x):
             view_x = inp_x.view(inp_x.shape)
@@ -1626,13 +1627,54 @@ def forward(self, pred_1, x_1):
             return switch(idx, (branch_mutating, branch_clean), (inp_x,))
 
         x = torch.ones(4, 5)
-        # Tensor index -> tracing mode -> mutation check fires in switch_func.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "switch_branch0",
-        ):
-            make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
+
+        def g(idx, inp_x):
+            inp_x = inp_x.clone()
+            return switch(idx, (branch_mutating, branch_clean), (inp_x,))
+
+        from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
+
+        backend = AotEagerAndRecordGraphs()
+        torch._dynamo.reset()
+        with torch.no_grad():
+            result = torch.compile(g, backend=backend, fullgraph=True)(
                 torch.tensor([0]), x
+            )
+        expected = branch_mutating(x.clone())
+        self.assertEqual(result, expected)
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[4, 5]", arg1_1: "i64[1]"):
+        clone: "f32[4, 5]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        clamp: "i64[1]" = torch.ops.aten.clamp.default(arg1_1, 0, 1);  arg1_1 = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
+        return (getitem,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 5]"):
+            view: "f32[4, 5]" = torch.ops.aten.view.default(arg0_1, [4, 5])
+            add: "f32[4, 5]" = torch.ops.aten.add.Tensor(view, 1);  view = None
+            view_1: "f32[4, 5]" = torch.ops.aten.view.default(add, [4, 5]);  add = None
+            view_2: "f32[4, 5]" = torch.ops.aten.view.default(view_1, [4, 5])
+            sin: "f32[4, 5]" = torch.ops.aten.sin.default(view_2);  view_2 = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(sin);  sin = None
+            copy_: "f32[4, 5]" = torch.ops.aten.copy_.default(arg0_1, view_1);  arg0_1 = view_1 = copy_ = None
+            return (sum_1,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 5]"):
+            cos: "f32[4, 5]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(cos);  cos = None
+            return (sum_1,)
+""",
             )
 
     def test_switch_with_tensor_closure(self):
@@ -1849,6 +1891,37 @@ def forward(self, pred_1, x_1):
         # Clamped above-range index picks branch N-1.
         self.assertEqual(f_huge(x), branch2(x))
 
+    @skipIfTorchDynamo("mark_dynamic cannot be traced under dynamo_wrapped")
+    def test_switch_symint_index_clamped(self):
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(idx_carrier, inp_x):
+            idx = idx_carrier.shape[0] - 5
+            return switch(idx, branches, (inp_x,))
+
+        x = torch.randn(4)
+
+        # shape[0] - 5 is negative -> clamps to branch0.
+        idx_carrier = torch.zeros(2)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch0(x))
+
+        # shape[0] - 5 == 3 (above range) -> clamps to branch2.
+        torch._dynamo.reset()
+        idx_carrier = torch.zeros(8)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch2(x))
+
     def test_switch_nn_module_branches(self):
         # Each branch is a different nn.Module whose parameters are
         # captured as free variables. Dynamo must lift the parameters of
@@ -1939,6 +2012,365 @@ def forward(self, pred_1, x_1):
             result = switch(torch.tensor(idx), [branch0, branch1, branch2], operands)
             expected = fn(operands[0])
             self.assertEqual(result, expected)
+
+    @parametrize("idx", [0, 1, 2, -5, 99])
+    def test_switch_autograd_basic(self, idx):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return (x + 42).cos()
+
+        def branch2(x):
+            return (x * 3.14).tanh() + x
+
+        branches = (branch0, branch1, branch2)
+        expected_fn = branches[min(max(0, idx), len(branches) - 1)]
+
+        x = torch.randn(4, requires_grad=True)
+        result = switch(torch.tensor(idx), branches, (x,))
+        self.assertEqual(result, expected_fn(x))
+
+        grad_out = torch.ones_like(result)
+        grads = torch.autograd.grad(result, (x,), grad_out)
+        expected_grads = torch.autograd.grad(expected_fn(x), (x,), grad_out)
+        self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_make_fx_two_switches(self):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        branches = (branch0, branch1)
+
+        def f(idx, x):
+            result = switch(idx, branches, (x,))
+            grad_out = torch.ones_like(result)
+            return torch.autograd.grad(result, (x,), grad_out)
+
+        x = torch.randn(4, requires_grad=True)
+        gm = make_fx(f)(torch.tensor(1), x)
+        switch_calls = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is torch.ops.higher_order.switch
+        ]
+        self.assertEqual(len(switch_calls), 2)
+
+        grads = f(torch.tensor(1), x)
+        expected_grads = torch.autograd.grad(
+            branch1(x), (x,), torch.ones_like(branch1(x))
+        )
+        self.assertEqual(grads, expected_grads)
+
+    def test_switch_autograd_nested(self):
+        def true_fn(x):
+            def inner0(y):
+                return (y * 2).sin()
+
+            def inner1(y):
+                return (y + 1).cos()
+
+            def inner2(y):
+                return y.tanh()
+
+            return switch(torch.tensor(1), (inner0, inner1, inner2), (x,))
+
+        def mid_fn(x):
+            def inner0(y):
+                return (y + 3).sin()
+
+            def inner1(y):
+                return (y * 0.5).cos()
+
+            return switch(torch.tensor(0), (inner0, inner1), (x,))
+
+        def false_fn(x):
+            def inner0(y):
+                return y.relu()
+
+            def inner1(y):
+                return (y - 1).sigmoid()
+
+            def inner2(y):
+                return (y**2).cos()
+
+            return switch(torch.tensor(2), (inner0, inner1, inner2), (x,))
+
+        branches = (true_fn, mid_fn, false_fn)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = switch(torch.tensor(i), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_mixed_require_grad(self):
+        def branch0(x, y, z):
+            return x * y * z
+
+        def branch1(x, y, z):
+            return x + y + z
+
+        def branch2(x, y, z):
+            return (x - y) * z
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=False)
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            result = switch(torch.tensor(i), branches, (x, y, x))
+            self.assertEqual(result, fn(x, y, x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x, y, x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_pytree_input(self):
+        def branch0(x):
+            return x["t"][0] + x["t"][1]["b"] * x["t"][2][0]
+
+        def branch1(x):
+            return x["t"][0] * (x["t"][2][0] / x["t"][1]["b"])
+
+        def branch2(x):
+            return x["t"][0] - x["t"][1]["b"] + x["t"][2][0]
+
+        a = torch.randn(4, requires_grad=True)
+        b = torch.randn(4, requires_grad=True)
+        c = torch.randn(4, requires_grad=True)
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            operands = ({"t": [a, {"b": b}, (c,)]},)
+            result = switch(torch.tensor(i), branches, operands)
+            self.assertEqual(result, fn(operands[0]))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (a, b, c), grad_out)
+            expected_grads = torch.autograd.grad(fn(operands[0]), (a, b, c), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
+    def test_switch_autograd_pytree_not_all_inputs_used(self):
+        def branch0(x):
+            return x["t"][0] + x["t"][1]["b"]
+
+        def branch1(x):
+            return x["t"][0] * (x["t"][2][0] / x["t"][1]["b"])
+
+        def branch2(x):
+            return x["t"][2][0].clone()
+
+        a = torch.randn(4, requires_grad=True)
+        b = torch.randn(4, requires_grad=True)
+        c = torch.randn(4, requires_grad=True)
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            operands = ({"t": [a, {"b": b}, (c,)]},)
+            result = switch(torch.tensor(i), branches, operands)
+            self.assertEqual(result, fn(operands[0]))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (a, b, c), grad_out, allow_unused=True)
+            expected_grads = torch.autograd.grad(
+                fn(operands[0]),
+                (a, b, c),
+                grad_out,
+                allow_unused=True,
+                materialize_grads=True,
+            )
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_pytree_output(self):
+        def branch0(x):
+            return {"res": [x.sin(), (x.cos(),)]}
+
+        def branch1(x):
+            return {"res": [x.cos(), (x.tanh(),)]}
+
+        def branch2(x):
+            return {"res": [x.tanh(), (x.sin(),)]}
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = switch(torch.tensor(i), branches, (x,))
+            expected = fn(x)
+            self.assertEqual(result, expected)
+
+            result_flat, _ = pytree.tree_flatten(result)
+            expected_flat, _ = pytree.tree_flatten(expected)
+            grad_out = [torch.ones_like(g) for g in result_flat]
+            grads = torch.autograd.grad(result_flat, (x,), grad_out)
+            expected_grads = torch.autograd.grad(expected_flat, (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_grad_through_params(self):
+        nn_module = torch.nn.Linear(4, 4)
+
+        def branch0(x):
+            return nn_module(x)
+
+        def branch1(x):
+            return x * nn_module(x)
+
+        def branch2(x):
+            return nn_module(x).relu()
+
+        branches = (branch0, branch1, branch2)
+        x = torch.randn(4, requires_grad=True)
+        for i, fn in enumerate(branches):
+            result = switch(torch.tensor(i), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(
+                result, (nn_module.weight,), grad_out, retain_graph=True
+            )
+            expected_grads = torch.autograd.grad(
+                fn(x), (nn_module.weight,), grad_out, retain_graph=True
+            )
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_inner_tensor(self):
+        def branch0(x):
+            return torch.abs((x**2).sin())
+
+        def branch1(x):
+            y = torch.ones(4, requires_grad=False) * 42
+            return (x * y).cos()
+
+        def branch2(x):
+            z = torch.full((4,), 0.5, requires_grad=False)
+            return (x + z).tanh()
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = switch(torch.tensor(i), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_symint_index(self):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        def branch2(x):
+            return x.tanh()
+
+        branches = (branch0, branch1, branch2)
+
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(i, x):
+            index = torch.arange(i).size(0)
+            return switch(index, branches, (x,))
+
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = f(i, x)
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    @parametrize("aux", ["none", "int_equal", "int_divergent"])
+    def test_switch_autograd_non_tensor_output_leaves(self, aux):
+        if aux == "none":
+            aux_vals = (None, None, None)
+        elif aux == "int_equal":
+            aux_vals = (7, 7, 7)
+        else:  # int_divergent
+            aux_vals = (0, 1, 2)
+
+        def make_branch(op, a):
+            def branch(x):
+                return op(x), a
+
+            return branch
+
+        ops = (torch.sin, torch.cos, torch.tanh)
+        branches = tuple(make_branch(op, a) for op, a in zip(ops, aux_vals))
+
+        for i, (op, a) in enumerate(zip(ops, aux_vals)):
+            x = torch.randn(4, requires_grad=True)
+            t, n = switch(torch.tensor(i), branches, (x,))
+
+            expected_t = op(x)
+            self.assertEqual(t, expected_t)
+            if a is None:
+                self.assertIsNone(n)
+            else:
+                self.assertEqual(n, a)
+
+            grad_out = torch.ones_like(t)
+            grads = torch.autograd.grad(t, (x,), grad_out)
+            expected_grads = torch.autograd.grad(expected_t, (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_multiple_tensor_outputs(self):
+        def branch0(x):
+            return x.sin(), x.cos()
+
+        def branch1(x):
+            return x.tanh(), x.relu()
+
+        def branch2(x):
+            return x.sigmoid(), (x**2).sin()
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            outs = switch(torch.tensor(i), branches, (x,))
+            expected = fn(x)
+            self.assertEqual(outs, expected)
+
+            grad_outs = [torch.ones_like(o) for o in outs]
+            expected_grad_outs = [torch.ones_like(o) for o in expected]
+            grads = torch.autograd.grad(list(outs), (x,), grad_outs)
+            expected_grads = torch.autograd.grad(
+                list(expected), (x,), expected_grad_outs
+            )
+            self.assertEqual(expected_grads, grads)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_switch_autograd_gpu(self):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        def branch2(x):
+            return x.tanh()
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True, device="cuda")
+            result = switch(torch.tensor(i, device="cuda"), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
@@ -6158,10 +6590,11 @@ class TestControlFlowTraced(TestCase):
 def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor):
     l_inp_x_ = L_inp_x_
     l_idx_ = L_idx_
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
     switch_branch2_0 = self.switch_branch2_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_,));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_,));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6230,10 +6663,11 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_clos
     l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
     l_branch1_closure_0_cell_contents = L_branch1_closure_0_cell_contents
     l_branch2_closure_0_cell_contents = L_branch2_closure_0_cell_contents
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
     switch_branch2_0 = self.switch_branch2_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6262,6 +6696,85 @@ def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1
 def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
     l_inp_x__1 = l_inp_x_
     add = l_inp_x__1 + l_branch2_closure_0_cell_contents_branch2;  l_inp_x__1 = l_branch2_closure_0_cell_contents_branch2 = None
+    return (add,)""",
+        )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_lifted_args_dedup_check_graph(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+        c = torch.ones(2, 3) * 2
+
+        # branch0 closes over {a, b}, branch1 over {a, b, c}, branch2 over {c}.
+        # No leaf is in *all* three -> shared block is empty; `a` is lifted by
+        # branches 0+1, `b` by branches 0+1, `c` by branches 1+2.
+        def branch0(inp_x):
+            return inp_x + a + b
+
+        def branch1(inp_x):
+            return inp_x + a + b + c
+
+        def branch2(inp_x):
+            return inp_x + c
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend, fullgraph=True)(
+            torch.tensor([1]), torch.randn(2, 3)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        # The outer operand tuple lists `a`, `b`, `c` exactly once each, with
+        # no duplicates from the per-branch unique lists.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch0_closure_1_cell_contents : torch.Tensor, L_branch1_closure_2_cell_contents : torch.Tensor):
+    l_inp_x_ = L_inp_x_
+    l_idx_ = L_idx_
+    l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
+    l_branch0_closure_1_cell_contents = L_branch0_closure_1_cell_contents
+    l_branch1_closure_2_cell_contents = L_branch1_closure_2_cell_contents
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch_branch2_0 = self.switch_branch2_0
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch0_closure_1_cell_contents, l_branch1_closure_2_cell_contents));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch0_closure_1_cell_contents = l_branch1_closure_2_cell_contents = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Every branch submodule shares the same placeholder signature,
+        # listing each of {a, b, c} once. The "_branch0" / "_branch2" suffixes
+        # reflect which branch first lifted the leaf.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    return (add_1,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    add_2 = add_1 + l_branch1_closure_2_cell_contents_branch1;  add_1 = l_branch1_closure_2_cell_contents_branch1 = None
+    return (add_2,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch2_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch1_closure_2_cell_contents_branch1;  l_inp_x__1 = l_branch1_closure_2_cell_contents_branch1 = None
     return (add,)""",
         )
 
@@ -6399,9 +6912,10 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_linear0_para
     l_linear0_parameters_bias_ = L_linear0_parameters_bias_
     l_linear1_parameters_weight_ = L_linear1_parameters_weight_
     l_linear1_parameters_bias_ = L_linear1_parameters_bias_
+    index = l_idx_.clamp(0, 1);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0], (l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_));  l_idx_ = switch_branch0_0 = switch_branch1_0 = l_inp_x_ = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0], (l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_));  index = switch_branch0_0 = switch_branch1_0 = l_inp_x_ = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6610,6 +7124,197 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         for args in test_inputs:
             _check_compile_cudagraph_backend(self, f, args)
             _check_compile_many_backends_with_cudagraph(self, f, args)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_traced_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            return while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_graph_replay_uses_runtime_condition(self):
+        def cond_fn(acc, iteration, limit):
+            return iteration < limit
+
+        def body_fn(acc, iteration, limit):
+            return acc + 2, iteration + 1
+
+        def f(x, iteration, limit):
+            return torch.ops.higher_order.while_loop(
+                cond_fn, body_fn, (x, iteration), (limit,)
+            )
+
+        x = torch.ones(4, device="cuda")
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        limit = torch.tensor(3, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(x, iteration, limit)
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(x, iteration, limit)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        for num_iters in [3, 0, 5]:
+            x.fill_(1)
+            iteration.zero_()
+            limit.fill_(num_iters)
+            graph.replay()
+            torch.cuda.synchronize()
+
+            self.assertEqual(out[0], torch.full_like(x, 1 + 2 * num_iters))
+            self.assertEqual(
+                out[1], torch.tensor(num_iters, dtype=torch.int64, device="cuda")
+            )
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(iteration, torch.zeros_like(iteration))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_kwargs_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return (iteration + 1,)
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        args = (cond_fn, body_fn, (iteration,), ())
+        error = "CUDA graph conditional torch.while_loop does not support kwargs"
+
+        for mode_cls in (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+            ControlFlowOpWarmupDispatchMode,
+        ):
+            with (
+                self.subTest(mode=mode_cls.__name__),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                mode_cls().__torch_dispatch__(
+                    torch.ops.higher_order.while_loop,
+                    (),
+                    args,
+                    {"unexpected": True},
+                )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return {"iteration": iteration + 1}
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "body_fn should return the same pytree structure as carried_inputs",
+        ):
+            with (
+                torch.cuda.graph(graph),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.ops.higher_order.while_loop(cond_fn, body_fn, (iteration,), ())
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_inside_while_loop_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                pred = iteration % 2 == 0
+                acc = torch.cond(
+                    pred,
+                    lambda acc: acc + 3,
+                    lambda acc: acc - 1,
+                    [acc],
+                )
+                return acc, iteration + 1
+
+            return torch.while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(4, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_inside_cond_cudagraphs(self):
+        def add_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def sub_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc - 1, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def f(x, pred, limit):
+            return torch.cond(pred, add_loop, sub_loop, [x, limit])
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        for pred in [torch.tensor(True).cuda(), torch.tensor(False).cuda()]:
+            _check_compile_cudagraph_backend(self, f, [x, pred, limit])
+            _check_compile_many_backends_with_cudagraph(self, f, [x, pred, limit])
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
@@ -10630,6 +11335,37 @@ class GraphModule(torch.nn.Module):
         )(x, y)
         self.assertEqual(compiled_out, out)
 
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_branch_closure_over_int_args(self, backend):
+        def f(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(f, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 1000), f(5, 1000))
+
+        # differing sizes still fail on inductor (#189528), hence eager/aot_eager only
+        def g(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols + 1)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 7), g(5, 7))
+
 
 class TestAutoFunctionalizeControlFlow(TestCase):
     def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
@@ -10840,6 +11576,210 @@ class <lambda>(torch.nn.Module):
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[3, 3]" = auto_functionalized_v2[0]
+        getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
+        getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg2_1, getitem);  arg2_1 = getitem = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+        sum_3: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_3);  add_1 = sum_3 = None
+
+        copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        return (add_2,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(sin, arg0_1);  sin = arg0_1 = None
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return (mm,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]"):
+            add: "f32[4, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(sin, add);  sin = None
+            copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (mm,)
+""",
+            )
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_switch_auto_functionalize_input_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def branch_mut(x):
+                    x.add_(1)
+                    return x.sin()
+
+                x = x.clone()
+                idx = (x.sum() > 0).long()
+                ret = switch(idx, (branch_mut, branch_mut), (x,))
+                return y + ret
+
+        x, y = (
+            torch.randn(3, 4, requires_grad=False),
+            torch.randn(3, 4, requires_grad=False),
+        )
+        fw_gm = self._check_eager_and_aot_eager_only(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic:
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(gt, dtype = torch.int64);  gt = None
+
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[3, 4]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
+
+        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
+        return (add,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+""",
+            )
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_switch_auto_functionalize_buffer_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            def forward(self, p, x):
+                def branch_mut(x):
+                    x.add_(1)
+                    self.buf.add_(1)
+                    return x + self.buf
+
+                x = x.clone()
+                idx = p.long()
+                out = switch(idx, (branch_mut, branch_mut), (x,))
+                return x + self.buf + out
+
+        p, x = torch.tensor(True), torch.randn(1, requires_grad=False)
+        fw_gm = self._check_eager_and_aot_eager_only(M, (p, x), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic:
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[1]", arg1_1: "b8[]", arg2_1: "f32[8]"):
+        clone: "f32[1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.int64);  arg1_1 = None
+
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[8]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1]
+        getitem_2: "f32[1]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+
+        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem_2, getitem_1);  getitem_2 = None
+        add_1: "f32[8]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
+
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg2_1, getitem_1);  arg2_1 = getitem_1 = copy_ = None
+        return (add_1,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[1]"):
+            add: "f32[1]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add, add_1)
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add_1);  arg0_1 = add_1 = copy_ = None
+            copy__1: "f32[1]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy__1 = None
+            return (add_2,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[1]"):
+            add: "f32[1]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add, add_1)
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add_1);  arg0_1 = add_1 = copy_ = None
+            copy__1: "f32[1]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy__1 = None
+            return (add_2,)
+""",
+            )
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_switch_auto_functionalize_union_input_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 3, requires_grad=False))
+
+            def forward(self, x, y):
+                def branch0(x):
+                    x.add_(1)
+                    return x.sin() @ self.buf
+
+                def branch1(x):
+                    self.buf.add_(1)
+                    return x.sin() @ self.buf
+
+                x = x.clone()
+                idx = (x.sum() > 0).long()
+                ret = switch(idx, (branch0, branch1), (x,))
+                return y + ret + x.sum() + self.buf.sum()
+
+        x, y = (
+            torch.randn(3, 4, requires_grad=False),
+            torch.randn(1, requires_grad=False),
+        )
+        fw_gm = self._check_eager_and_aot_eager_only(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic:
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[4, 3]", arg2_1: "f32[1]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(gt, dtype = torch.int64);  gt = None
+
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[3, 3]" = auto_functionalized_v2[0]
         getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
         getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -11690,7 +12630,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, SymInt)""",
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, int)""",
         )
 
     def test_switch_gen_schema_matching_int_int_outputs(self):
