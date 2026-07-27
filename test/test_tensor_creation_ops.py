@@ -1083,6 +1083,16 @@ class TestTensorCreation(TestCase):
             if torch.version.hip:
                 # HIP min float -> int64 conversion is divergent
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+            elif dtype == torch.uint8:
+                # CUDA out-of-range float -> uint8 is divergent under clang-21:
+                # out-of-range float->int is UB and codegen differs from numpy's
+                # reference. Test only in-range values so torch and numpy agree
+                # deterministically.
+                vals = (0, .5, 1.5, 2)
+            elif dtype in (torch.int8, torch.int16):
+                # CUDA min float -> int8/int16 is divergent under clang-21
+                # (out-of-range float->int is UB). Drop the out-of-range extreme.
+                vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
             else:
                 vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
         elif dtype == torch.uint8:
@@ -1091,8 +1101,11 @@ class TestTensorCreation(TestCase):
             # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
             #       see https://github.com/pytorch/pytorch/issues/97794
             refs = (0, 254, 255, 0, 0, 0, 1, 2)
-        elif dtype == torch.int16:
-            # CPU min and max float -> int16 conversion is divergent.
+        elif dtype in (torch.int8, torch.int16):
+            # CPU min and max float -> int8/int16 conversion is divergent.
+            # (int8 also diverges under clang-21: out-of-range float->int is UB
+            # and codegen differs from numpy's reference.) Drop the out-of-range
+            # extremes.
             vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
@@ -3751,7 +3764,7 @@ class TestRandomTensorCreation(TestCase):
         expected_bin = shuffled_interval.shape[0] / 10
         expected_error = math.sqrt(expected_bin) / expected_bin * 3
         error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
+        self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA

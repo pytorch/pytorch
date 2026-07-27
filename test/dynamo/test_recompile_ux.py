@@ -153,7 +153,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(logs.records), 1)
         self.assertTrue(
             logs.records[0].getMessage().find(contains_str) > 0,
-            msg=f'Expected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
+            msg=lambda msg: f'{msg}\nExpected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
         )
 
     def test_verbose_tensor_check(self):
@@ -567,7 +567,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         @cache
         def factory(key):
-            @torch.compile(fullgraph=True, dynamic=False, isolate_recompiles=True)
+            @torch.compile(fullgraph=True, dynamic=False, isolate_recompiles=True)  # noqa: UNSPECIFIED_BACKEND
             def frontend(x, n):
                 return core(x) + n
 
@@ -1344,11 +1344,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_isolated(torch.randn(5))
 
         self.assertTrue(
-            region_fails, f"region entries' guard failures missing: {region_fails}"
+            region_fails,
+            lambda msg: f"{msg}\nregion entries' guard failures missing: {region_fails}",
         )
         self.assertTrue(
             default_fails,
-            f"default-bucket entries' guard failures dropped from "
+            lambda msg: f"{msg}\ndefault-bucket entries' guard failures dropped from "
             f"recompile reasons (bug): {default_fails}",
         )
         # Region and default are separate buckets: only shape-3 is in the
@@ -1378,7 +1379,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         opt(torch.randn(3))
         opt(torch.randn(4))
-        self.assertTrue(fails, f"no recompile reasons logged: {fails}")
+        self.assertTrue(
+            fails, lambda msg: f"{msg}\nno recompile reasons logged: {fails}"
+        )
 
     @torch._dynamo.config.patch(recompile_limit=8)
     def test_isolate_recompiles_reasons_include_all_default_entries(self):
@@ -1415,7 +1418,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(
             len(default_fails),
             2,
-            f"expected guard failures for both default entries, got {default_fails}",
+            lambda msg: f"{msg}\nexpected guard failures for both default entries, got {default_fails}",
         )
         # The two default entries (shapes 3, 4) stay in the default bucket; the
         # region's shape-5/6 entries live in its own bucket.

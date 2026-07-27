@@ -217,7 +217,8 @@ TensorCheck::TensorCheck(
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
   // In terms of a sparse_csr tensor, it does not support strides information
-  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
+  std::vector<SymInt> sym_strides_storage(v.ndimension(), -1);
+  c10::SymIntArrayRef sym_strides(sym_strides_storage);
   bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
       v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
       v.layout() == c10::kSparseBsr;
@@ -652,7 +653,7 @@ struct AutocastState {
     if (cache_enabled != o.cache_enabled) {
       os << "autocast_cache_enabled ";
     }
-    return os.str();
+    return std::move(os).str();
   }
 
   template <typename T>
@@ -745,7 +746,7 @@ struct GlobalStateGuard {
       os << "num_threads ";
     if (_default_dtype != at::get_default_dtype())
       os << "default_dtype ";
-    return os.str();
+    return std::move(os).str();
   }
 
   template <typename T>
