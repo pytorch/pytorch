@@ -75,8 +75,8 @@ class TORCH_API TensorRef {
 
 template <typename T>
 unsigned Tensor::register_hook(T&& hook) const {
-  using R = std::invoke_result_t<T, TensorBase>;
-  if constexpr (std::is_same_v<R, TensorBase>) {
+  using R = std::invoke_result_t<T, Tensor>;
+  if constexpr (std::is_same_v<R, Tensor>) {
     return _register_hook([fn = std::forward<T>(hook)](const TensorBase& grad_base) {
       TensorRef grad(grad_base);
       Tensor ret = fn(*grad);
