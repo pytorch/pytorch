@@ -2101,9 +2101,21 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_SORT_OPS", "0") == "1"
     )
 
-    # For small output size reductions uses cross thread-block synchronization to gain more parallelism
+    # For small output size reductions uses cross thread-block synchronization to gain
+    # more parallelism. The shape heuristic in
+    # InductorChoices.should_use_cooperative_reduction decides when this applies.
+    # Enable by default only on NVIDIA, where the runtime requests a cooperative-grid
+    # launch. Other backends can explicitly opt in.
     cooperative_reductions = (
-        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
+        os.environ.get(
+            "TORCHINDUCTOR_COOPERATIVE_REDUCTIONS",
+            (
+                "1"
+                if torch.version.cuda is not None and torch.version.hip is None
+                else "0"
+            ),
+        )
+        == "1"
     )
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions

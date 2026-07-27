@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import os
 from typing import Any
 
 import sympy
@@ -331,6 +332,46 @@ class CooperativeReductionTests(TestCase):
             torch.rand(20, 20, device=GPU_TYPE),
         ]
         self.run_and_check(fn, inps, expect_kernel_count=2)
+
+
+class CooperativeReductionDefaultTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+        torch._dynamo.reset()
+
+    def test_cooperative_reduction_backend_default(self):
+        if "TORCHINDUCTOR_COOPERATIVE_REDUCTIONS" in os.environ:
+            self.skipTest("cooperative reduction default overridden by environment")
+
+        is_nvidia_cuda = torch.version.cuda is not None and torch.version.hip is None
+        self.assertEqual(config.triton.cooperative_reductions, is_nvidia_cuda)
+
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.cooperative_reductions": True,
+            "triton.multi_kernel": 0,
+        }
+    )
+    def test_multi_scalar_reductions_use_one_cooperative_kernel(self):
+        is_nvidia_cuda = torch.version.cuda is not None and torch.version.hip is None
+        if not is_nvidia_cuda:
+            self.skipTest("requires NVIDIA cooperative-grid launch support")
+
+        def fn(x):
+            return x.abs().max(), x.abs().mean(), x.square().mean()
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE)
+        expected = fn(x)
+
+        result, (source_code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        for actual, expected_value in zip(result, expected, strict=True):
+            assert_close(actual, expected_value, rtol=1e-4, atol=1e-4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
+        self.assertEqual(source_code.count("tl.load(in_ptr0"), 1)
 
 
 @config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
