@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import hashlib
 import logging
 import os
@@ -185,11 +186,24 @@ class FlyDSLScheduling(BaseScheduling):
     @staticmethod
     def _build_flydsl_gpu_arch(device_index) -> str | None:
         """Best-effort ROCm arch string for FlyDSL worker precompilation."""
-        arch = os.environ.get("FLYDSL_GPU_ARCH")
+        return FlyDSLScheduling._build_flydsl_gpu_arch_cached(
+            device_index,
+            os.environ.get("FLYDSL_GPU_ARCH"),
+            os.environ.get("HSA_OVERRIDE_GFX_VERSION"),
+        )
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _build_flydsl_gpu_arch_cached(
+        device_index: int,
+        flydsl_arch: str | None,
+        hsa_arch: str | None,
+    ) -> str | None:
+        """Cache arch detection by device and explicit environment overrides."""
+        arch = flydsl_arch
         if arch:
             return arch.split(":", 1)[0]
 
-        hsa_arch = os.environ.get("HSA_OVERRIDE_GFX_VERSION")
         if hsa_arch:
             if hsa_arch.startswith("gfx"):
                 return hsa_arch
