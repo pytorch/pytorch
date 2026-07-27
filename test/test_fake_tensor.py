@@ -1580,6 +1580,20 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
+    @parametrize("bias", [False, True])
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_gru_cell(self, bias):
+        with FakeTensorMode(allow_fallback_kernels=False):
+            batch_size = 2
+            hidden_size = 4
+            cell = torch.nn.GRUCell(hidden_size, hidden_size, bias=bias, device="cuda")
+            hidden = torch.randn(batch_size, hidden_size, device="cuda")
+            inp = torch.randn(batch_size, hidden_size, device="cuda")
+            output = cell(inp, hidden)
+            output.sum().backward()
+
+            self.assertEqual(output.shape, hidden.shape)
+
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
