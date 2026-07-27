@@ -8,10 +8,12 @@ import torch.nn.functional as F
 import torch.utils.flop_counter
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_CUDNN_ATTENTION
 from torch.testing._internal.common_device_type import (
+    Capability,
     e4m3_type,
     instantiate_device_type_tests,
-    requires_capabilitys,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -42,6 +44,56 @@ def get_total_flops(mode):
 
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
+
+
+def _get_sdpa_flops(
+    device,
+    batch_size,
+    n_heads,
+    seq_len_q,
+    seq_len_k,
+    head_dim,
+    head_dim_v,
+    dtype,
+    sdpa_backend,
+    with_backward=False,
+):
+    query = torch.randn(
+        batch_size,
+        n_heads,
+        seq_len_q,
+        head_dim,
+        device=device,
+        dtype=dtype,
+        requires_grad=True,
+    )
+    key = torch.randn(
+        batch_size,
+        n_heads,
+        seq_len_k,
+        head_dim,
+        device=device,
+        dtype=dtype,
+        requires_grad=True,
+    )
+    value = torch.randn(
+        batch_size,
+        n_heads,
+        seq_len_k,
+        head_dim_v,
+        device=device,
+        dtype=dtype,
+        requires_grad=True,
+    )
+
+    mode = FlopCounterMode()
+    with sdpa_kernel([sdpa_backend]), mode:
+        out = F.scaled_dot_product_attention(
+            query, key, value, dropout_p=0, is_causal=True
+        )
+        if with_backward:
+            out.sum().backward()
+    return int(get_total_flops(mode))
 
 
 @unittest.skipIf(
@@ -537,10 +589,7 @@ class TestFlopCounter(TestCase):
 class TestFlopCounterDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilitys(
-        "feat.cudnn_attention", "feat.flash_attention", "feat.mem_efficient_attention"
-    )
-    def test_sdpa(self, device):
+    def test_sdpa_math(self, device):
         batch_size = 4
         n_heads = 8
         seq_len_q = 128
@@ -551,7 +600,28 @@ class TestFlopCounterDeviceType(TestCase):
 
         torch.manual_seed(0)
 
-        def get_flops(
+        # Sets seq_len_q == seq_len_k and dim_q == dim_v
+        run_uniform_flops = functools.partial(
+            _get_sdpa_flops,
+            device,
+            batch_size,
+            n_heads,
+            seq_len_q,
+            seq_len_q,
+            head_dim,
+            head_dim,
+            dtype,
+        )
+
+        flops_fw = run_uniform_flops(SDPBackend.MATH, with_backward=False)
+        self.assertExpectedInline(str(flops_fw), """134217728""")
+
+        flops_fw_bw = run_uniform_flops(SDPBackend.MATH, with_backward=True)
+        self.assertEqual(flops_fw * 3, flops_fw_bw)
+
+        run_nonuniform_flops = functools.partial(
+            _get_sdpa_flops,
+            device,
             batch_size,
             n_heads,
             seq_len_q,
@@ -559,58 +629,61 @@ class TestFlopCounterDeviceType(TestCase):
             head_dim,
             head_dim_v,
             dtype,
-            backend,
-            with_backward=False,
-        ):
-            query = torch.randn(
-                batch_size,
-                n_heads,
-                seq_len_q,
-                head_dim,
-                device=device,
-                dtype=dtype,
-                requires_grad=True,
-            )
-            key = torch.randn(
-                batch_size,
-                n_heads,
-                seq_len_k,
-                head_dim,
-                device=device,
-                dtype=dtype,
-                requires_grad=True,
-            )
-            value = torch.randn(
-                batch_size,
-                n_heads,
-                seq_len_k,
-                head_dim_v,
-                device=device,
-                dtype=dtype,
-                requires_grad=True,
-            )
+        )
 
-            if backend == "math":
-                backend = sdpa_kernel([SDPBackend.MATH])
-            elif backend == "flash":
-                backend = sdpa_kernel([SDPBackend.FLASH_ATTENTION])
-            elif backend == "mem_efficient":
-                backend = sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION])
-            elif backend == "cudnn":
-                backend = sdpa_kernel([SDPBackend.CUDNN_ATTENTION])
+        flops_fw_nu = run_nonuniform_flops(SDPBackend.MATH, with_backward=False)
+        self.assertExpectedInline(str(flops_fw_nu), """268435456""")
 
-            mode = FlopCounterMode()
-            with backend, mode:
-                out = F.scaled_dot_product_attention(
-                    query, key, value, dropout_p=0, is_causal=True
-                )
-                if with_backward:
-                    out.sum().backward()
-            return int(get_total_flops(mode))
+        flops_fw_bw_nu = run_nonuniform_flops(SDPBackend.MATH, with_backward=True)
+        self.assertExpectedInline(str(flops_fw_bw_nu), """805306368""")
+
+    @requires_capabilities(Capability.attention.flash_attention)
+    def test_sdpa_flash(self, device):
+        batch_size = 4
+        n_heads = 8
+        seq_len_q = 128
+        head_dim = 64
+        dtype = torch.float16
+
+        torch.manual_seed(0)
+
+        # Sets seq_len_q == seq_len_k and dim_q == dim_v
+        # Flash does not support non-uniform attention, i.e. seq_len_q != seq_len_k or dim_q != dim_v"
+        run_uniform_flops = functools.partial(
+            _get_sdpa_flops,
+            device,
+            batch_size,
+            n_heads,
+            seq_len_q,
+            seq_len_q,
+            head_dim,
+            head_dim,
+            dtype,
+        )
+
+        flops_fw_math = run_uniform_flops(SDPBackend.MATH, with_backward=False)
+        flops_fw_flash = run_uniform_flops(SDPBackend.FLASH_ATTENTION, with_backward=False)
+        self.assertEqual(flops_fw_math, flops_fw_flash)
+
+        flops_fw_bw_flash = run_uniform_flops(SDPBackend.FLASH_ATTENTION, with_backward=True)
+        self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
+
+    @requires_capabilities(Capability.attention.mem_efficient_attention)
+    def test_sdpa_mem_efficient(self, device):
+        batch_size = 4
+        n_heads = 8
+        seq_len_q = 128
+        seq_len_k = 256
+        head_dim = 64
+        head_dim_v = 64
+        dtype = torch.float16
+
+        torch.manual_seed(0)
 
         # Sets seq_len_q == seq_len_k and dim_q == dim_v
         run_uniform_flops = functools.partial(
-            get_flops,
+            _get_sdpa_flops,
+            device,
             batch_size,
             n_heads,
             seq_len_q,
@@ -620,34 +693,16 @@ class TestFlopCounterDeviceType(TestCase):
             dtype,
         )
 
-        flops = [
-            run_uniform_flops(backend, with_backward=False)
-            for backend in ["math", "flash", "mem_efficient", "cudnn"]
-        ]
-        flops_fw_math, flops_fw_flash, flops_fw_efficient, flops_fw_cudnn = flops
-        self.assertEqual(flops_fw_math, flops_fw_flash)
+        flops_fw_math = run_uniform_flops(SDPBackend.MATH, with_backward=False)
+        flops_fw_efficient = run_uniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=False)
         self.assertEqual(flops_fw_math, flops_fw_efficient)
-        self.assertEqual(flops_fw_math, flops_fw_cudnn)
 
-        self.assertExpectedInline(str(flops_fw_math), """134217728""")
-
-        flops = [
-            run_uniform_flops(backend, with_backward=True)
-            for backend in ["math", "flash", "mem_efficient", "cudnn"]
-        ]
-        (
-            flops_fw_bw_math,
-            flops_fw_bw_flash,
-            flops_fw_bw_efficient,
-            flops_fw_bw_cudnn,
-        ) = flops
-        self.assertEqual(flops_fw_math * 3, flops_fw_bw_math)
-        self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
-        self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
-        self.assertEqual(flops_fw_bw_flash, flops_fw_bw_cudnn)
+        flops_fw_bw_efficient = run_uniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=True)
+        self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_efficient)
 
         run_nonuniform_flops = functools.partial(
-            get_flops,
+            _get_sdpa_flops,
+            device,
             batch_size,
             n_heads,
             seq_len_q,
@@ -656,26 +711,15 @@ class TestFlopCounterDeviceType(TestCase):
             head_dim_v,
             dtype,
         )
-        # Flash does not support non-uniform attention, i.e. seq_len_q != seq_len_k or dim_q != dim_v"
-        non_uniform_backends = ["math", "mem_efficient"]
-        flops = [
-            run_nonuniform_flops(backend, with_backward=False)
-            for backend in non_uniform_backends
-        ]
-        flops_fw_math, flops_fw_efficient = flops
-        self.assertEqual(flops_fw_math, flops_fw_efficient)
 
-        self.assertExpectedInline(str(flops_fw_math), """268435456""")
+        flops_fw_nu_math = run_nonuniform_flops(SDPBackend.MATH, with_backward=False)
+        flops_fw_nu_efficient = run_nonuniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=False)
+        self.assertEqual(flops_fw_nu_math, flops_fw_nu_efficient)
 
-        flops = [
-            run_nonuniform_flops(backend, with_backward=True)
-            for backend in non_uniform_backends
-        ]
-        flops_fw_bw_math, flops_fw_bw_efficient = flops
-        self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
-        self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
+        flops_fw_bw_nu_efficient = run_nonuniform_flops(SDPBackend.EFFICIENT_ATTENTION, with_backward=True)
+        self.assertExpectedInline(str(flops_fw_bw_nu_efficient), """939524096""")
 
-    @requires_capabilitys("feat.flash_attention")
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_sdpa_gqa(self, device):
         """Test flop counting for grouped-query attention (GQA)."""
         batch_size = 2
@@ -735,7 +779,7 @@ class TestFlopCounterDeviceType(TestCase):
         self.assertEqual(gqa_flops, mha_flops)
         self.assertTrue(gqa_flops > 0)
 
-    @requires_capabilitys("feat.flash_attention", "feat.mem_efficient_attention")
+    @requires_capabilities(Capability.attention.flash_attention, Capability.attention.mem_efficient_attention)
     def test_sdpa_nested_tensor(self, device):
         def get_flops(q, k, v, backend, with_backward=False):
             mode = FlopCounterMode()
@@ -936,7 +980,7 @@ class TestFlopCounterDeviceType(TestCase):
             ),
         )
 
-    @requires_capabilitys("feat.flash_attention")
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_nested_attention_fake_tensors(self, device):
         x = torch.randn(123, 4, 16, device=device, dtype=torch.bfloat16)
         offsets = torch.tensor([0, 30, 60, 90, 123], device=device)
@@ -980,7 +1024,7 @@ class TestFlopCounterDeviceType(TestCase):
             int(get_total_flops(real_flop_counter_mode)),
         )
 
-    @requires_capabilitys("lib.triton")
+    @requires_capabilities(Capability.lib.triton)
     def test_flop_counter_custom_triton_manual_decomp(self, device):
         import triton
         import triton.language as tl
@@ -1030,7 +1074,7 @@ class TestFlopCounterDeviceType(TestCase):
             torch.ops.mylib.sin_op()
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
-    @requires_capabilitys("lib.triton")
+    @requires_capabilities(Capability.lib.triton)
     def test_flop_counter_custom_triton_op_two_kernels_manual_decomp(self, device):
         import triton
         import triton.language as tl
@@ -1104,7 +1148,7 @@ class TestFlopCounterDeviceType(TestCase):
             torch.ops.mylib.trig_op()
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
-    @requires_capabilitys("lib.triton")
+    @requires_capabilities(Capability.lib.triton)
     @torch._functorch.config.patch("activation_memory_budget", 0.1)
     @torch._functorch.config.patch("activation_memory_budget_solver", "dp")
     @torch._functorch.config.patch("is_non_builtin_to_include", True)
@@ -1200,7 +1244,7 @@ class TestFlopCounterDeviceType(TestCase):
             "Custom formula for cos_kernel not recorded during partitioning",
         )
 
-    @requires_capabilitys("dtype.fp8")
+    @requires_capabilities(Capability.dtype.fp8)
     def test_scaled_mm(self, device):
         dtype = e4m3_type
         with FlopCounterMode() as mode:
@@ -1214,7 +1258,7 @@ class TestFlopCounterDeviceType(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
-    @requires_capabilitys("feat.flash_attention")
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_varlen_attn(self, device):
         import torch.nn.attention.varlen
 
@@ -1472,6 +1516,44 @@ class TestFlexAttentionEstimationCUDA(TestCase):
 
         est_ms = estimate_roofline_runtime_ms(fwd)
         self.assertGreater(est_ms, 0.0)
+
+
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
+class TestFlopCounterCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN attention not supported")
+    def test_sdpa_cudnn(self):
+        device = "cuda"
+        batch_size = 4
+        n_heads = 8
+        seq_len_q = 128
+        head_dim = 64
+        dtype = torch.float16
+
+        torch.manual_seed(0)
+
+        # Sets seq_len_q == seq_len_k and dim_q == dim_v
+        run_uniform_flops = functools.partial(
+            _get_sdpa_flops,
+            device,
+            batch_size,
+            n_heads,
+            seq_len_q,
+            seq_len_q,
+            head_dim,
+            head_dim,
+            dtype,
+        )
+
+        flops_fw_math = run_uniform_flops(SDPBackend.MATH, with_backward=False)
+        flops_fw_cudnn = run_uniform_flops(SDPBackend.CUDNN_ATTENTION, with_backward=False)
+        self.assertEqual(flops_fw_math, flops_fw_cudnn)
+
+        flops_fw_bw_cudnn = run_uniform_flops(SDPBackend.CUDNN_ATTENTION, with_backward=True)
+        self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_cudnn)
 
 
 instantiate_device_type_tests(TestFlopCounterDeviceType, globals(), except_for=("cpu",))

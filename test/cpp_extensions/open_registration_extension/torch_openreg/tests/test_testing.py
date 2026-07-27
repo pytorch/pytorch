@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
+    Capability,
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
@@ -14,7 +15,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     precisionOverride,
     PrivateUse1TestBase,
-    requires_capabilitys,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
@@ -303,7 +304,7 @@ with _temp_test_configs(
 
 
 class TestCapabilityGating(TestCase):
-    """Verify that @requires_capabilitys gates tests on PrivateUse1 backends."""
+    """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
 
     executed_count = 0
 
@@ -318,33 +319,35 @@ class TestCapabilityGating(TestCase):
             )
         super().tearDownClass()
 
-    @requires_capabilitys("test.cap_supported")
+    @requires_capabilities(Capability.lib.triton)
     def test_capability_supported(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
-    @requires_capabilitys("test.cap_unsupported")
+    @requires_capabilities(Capability.dtype.bf16)
     def test_capability_unsupported(self, device):
         type(self).executed_count += 1
         self.fail("This test should be skipped")
 
-    @requires_capabilitys("test.cap_missing")
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_capability_missing(self, device):
         type(self).executed_count += 1
-        self.fail("This test should be skipped")
+        self.fail("This test should raise AssertionError")
 
-    @requires_capabilitys(
-        "test.cap_supported", "test.cap_unsupported", "test.cap_missing"
+    @requires_capabilities(
+        Capability.lib.triton,
+        Capability.dtype.bf16,
+        Capability.attention.flash_attention,
     )
     def test_capability_combined(self, device):
         type(self).executed_count += 1
-        self.fail("This test should be skipped")
+        self.fail("Combined caps: missing should raise AssertionError before skip")
 
 
 PrivateUse1TestBase._capabilities = classmethod(
     lambda cls: {
-        "test.cap_supported": lambda: True,
-        "test.cap_unsupported": lambda: False,
+        Capability.lib: {Capability.lib.triton: lambda: True},
+        Capability.dtype: {Capability.dtype.bf16: lambda: False},
     }
 )
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
