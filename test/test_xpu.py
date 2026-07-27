@@ -2282,6 +2282,41 @@ if __name__ == "__main__":
             torch.xpu.synchronize()
             torch.xpu.empty_cache()
 
+    @serialTest()
+    def test_graph_empty_cache_after_side_stream_free_during_capture(self):
+        # Freeing a block during capture must be deferred until capture ends:
+        # the block is used on a side stream that was forked into the capture,
+        # so an allocator barrier submitted there would become a graph node
+        # whose event only signals on replay, making the following
+        # empty_cache() block forever. This test checks only that the sequence
+        # completes: no hang and no exception. Numerics are not verified.
+        pool = torch.xpu.graph_pool_handle()
+        g = torch.xpu.XPUGraph()
+        capture_stream = torch.xpu.Stream()
+        side = torch.xpu.Stream()
+
+        try:
+            with torch.xpu.stream(capture_stream):
+                g.capture_begin(pool)
+                x = torch.ones(1024, device="xpu")
+                side.wait_stream(capture_stream)
+                with torch.xpu.stream(side):
+                    y = x + 1.0
+                    x.record_stream(side)
+                    del x
+                capture_stream.wait_stream(side)
+                del y
+                g.capture_end()
+            torch.xpu.current_stream().wait_stream(capture_stream)
+
+            torch.xpu.empty_cache()
+            g.replay()
+            torch.xpu.synchronize()
+        except Exception as e:
+            raise self.failureException(
+                f"capture with a side-stream free must complete without error, got {e!r}"
+            ) from e
+
     def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
         kSmallSize = 1048576
         kSmallBuffer = 2097152

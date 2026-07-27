@@ -1579,12 +1579,12 @@ class DeviceCachingAllocator {
     if (stream.queue() == *block->queue) {
       return;
     }
+    const bool inserted = block->stream_uses.insert(stream).second;
     if (C10_UNLIKELY(is_capture_context())) {
-      if (!block->stream_uses.contains(stream)) {
+      if (inserted) {
         block_to_xpugraph_stream_uses[block].insert(stream);
       }
     }
-    block->stream_uses.insert(stream);
   }
 
   void emptyCache(MempoolId_t mempool_id) {
