@@ -108,21 +108,45 @@ void MPSStream::commit() {
   }
 }
 
+// Surface GPU command-buffer faults that commitAndWait would otherwise swallow.
+// waitUntilCompleted returns even when the buffer aborted (e.g. a GPU interactivity/timeout
+// abort or a faulting encoder), and checkLastError() only inspects the in-kernel shared error
+// buffer (c10::metal::ErrorMessages), never MTLCommandBuffer.status/.error. Without this, a
+// faulted command buffer passes silently and downstream reads its uninitialized / incomplete
+// output as a garbage integer. Returns the fault message (empty if none); the message is read
+// while the buffer is still alive, and the CALLER must release/nil the buffer before throwing
+// so the stream isn't left holding an already-committed buffer (a re-commit aborts the process).
+static std::string commandBufferErrorMessage(id<MTLCommandBuffer> commandBuffer) {
+  if ([commandBuffer status] != MTLCommandBufferStatusError) {
+    return {};
+  }
+  NSError* error = [commandBuffer error];
+  std::string msg = "MPS command buffer execution failed (MTLCommandBufferStatusError, code ";
+  msg += std::to_string(error ? static_cast<long>([error code]) : -1L);
+  msg += "): ";
+  msg += error ? [[error localizedDescription] UTF8String] : "unknown error";
+  return msg;
+}
+
 void MPSStream::commitAndWait() {
   if (_prevCommandBuffer) {
     // the previous command buffer (if exists) has already been committed,
     // so we just wait until it's completed and then dispose it.
     [_prevCommandBuffer waitUntilCompleted];
+    std::string cbError = commandBufferErrorMessage(_prevCommandBuffer);
     [_prevCommandBuffer release];
     _prevCommandBuffer = nil;
+    TORCH_CHECK(cbError.empty(), cbError);
     checkLastError();
   }
 
   if (_commandBuffer) {
     [_commandBuffer commit];
     [_commandBuffer waitUntilCompleted];
+    std::string cbError = commandBufferErrorMessage(_commandBuffer);
     [_commandBuffer release];
     _commandBuffer = nil;
+    TORCH_CHECK(cbError.empty(), cbError);
     checkLastError();
   }
 }
