@@ -5954,6 +5954,33 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x.amax().cpu(), x.cpu().amax())
         self.assertEqual((-x).amin().cpu(), (-x).cpu().amin())
 
+    @parametrize("case", ["full_1d", "full_2d", "inner", "outer"])
+    def test_sum_integer_no_overflow(self, case):
+        # int sums must accumulate in int64: 2**30 overflows int32 after 4 adds
+        shape, dim = {"full_1d": ((1 << 20,), None), "full_2d": ((1024, 1024), None),
+                      "inner": ((131072, 16), 1), "outer": ((65536, 16), 0)}[case]
+        x = torch.full(shape, 2**30, dtype=torch.int32, device="mps")
+        args = () if dim is None else (dim,)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.int8, torch.uint8, torch.bool, torch.int16, torch.int32, torch.int64])
+    @parametrize("reduction", ["full", "outer", "inner"])
+    def test_sum_no_input_upcast(self, dtype, reduction):
+        # Skipping the input up-cast puts the (int8|uint8|bool|int16|int32, int64)
+        # kernels on the live path for the first time.
+        x = (torch.arange(1 << 20, device="mps") % 7).to(dtype)
+        dim = {"full": None, "outer": 0, "inner": 1}[reduction]
+        args = () if dim is None else (dim,)
+        if dim is not None:
+            x = x.view(1024, 1024)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_sum_lowp_no_input_upcast(self, dtype):
+        # (half|bfloat16, float32) kernels, likewise unreachable before.
+        x = ((torch.arange(1 << 20, device="mps") % 4) * 0.25).to(dtype)
+        self.assertEqual(x.sum(dtype=torch.float32).cpu(), x.cpu().sum(dtype=torch.float32))
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
