@@ -37,7 +37,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.2": "9",
 }
 
-ROCM_ARCHES = ["7.1", "7.2"]
+ROCM_ARCHES = ["7.2", "7.14"]
 
 XPU_ARCHES = ["xpu"]
 

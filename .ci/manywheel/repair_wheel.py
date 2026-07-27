@@ -101,6 +101,20 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
     )
 
 
+def rocm_rpaths() -> str:
+    """RPATH list for the TheRock wheel-based ROCm layout.
+
+    ROCm libs come from the `rocm` pip package, which unpacks under
+    <site-packages>/_rocm_sdk_core (a sibling of torch/), so point at it
+    $ORIGIN-relatively, mirroring cuda_rpaths(). No ROCm libs are bundled into
+    the wheel in this layout.
+    """
+    return (
+        "$ORIGIN/../../_rocm_sdk_core/lib"
+        ":$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib"
+    )
+
+
 def aarch64_extra_deps(use_cuda: bool) -> list[Path]:
     """Libraries to bundle into torch/lib/ on aarch64.
 
@@ -408,10 +422,21 @@ def main() -> None:
         force_rpath = True
     elif is_rocm:
         rocm_home = Path(os.environ.get("ROCM_HOME", "/opt/rocm"))
-        bundled_libs, aux_files = rocm_bundle(rocm_home)
-        c_so_rpath = "$ORIGIN:$ORIGIN/lib"
-        lib_so_rpath = "$ORIGIN"
-        force_rpath = True
+        if "_rocm_sdk" in str(rocm_home):
+            # TheRock wheel layout (rocm7.14): ROCm ships as the `rocm` pip
+            # package (_rocm_sdk_core, a sibling of torch/). Resolve libs via
+            # RPATH instead of bundling them, mirroring the CUDA/XPU wheels.
+            rpaths = rocm_rpaths()
+            c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
+            lib_so_rpath = f"{rpaths}:$ORIGIN"
+            force_rpath = True
+        else:
+            # Legacy OS/tarball layout (/opt/rocm, e.g. rocm7.2): bundle the
+            # ROCm libs into the wheel so it stays self-contained.
+            bundled_libs, aux_files = rocm_bundle(rocm_home)
+            c_so_rpath = "$ORIGIN:$ORIGIN/lib"
+            lib_so_rpath = "$ORIGIN"
+            force_rpath = True
     else:
         c_so_rpath = "$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = "$ORIGIN"
