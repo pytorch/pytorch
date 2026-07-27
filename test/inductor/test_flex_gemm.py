@@ -3255,6 +3255,35 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ).run(code)
         self.assertLocalReduceAuxCode(code, group)
 
+    def test_nvfp4_pack_matches_reference(self):
+        values = torch.tensor(
+            [
+                [-6.0, -5.0],
+                [-3.5, -2.5],
+                [-1.75, -1.25],
+                [-0.75, -0.25],
+                [0.25, 0.75],
+                [1.25, 1.75],
+                [2.5, 3.5],
+                [5.0, 6.0],
+            ],
+            dtype=torch.float32,
+        )
+        expected = pack_uint4(_f32_to_floatx_unpacked(values, 2, 1)).squeeze(-1)
+        self.assertEqual(nvfp4_pack(values), expected)
+
+    def test_quant_scale_fake_strides_match_eager(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        amax = torch.rand(2, 1).expand(2, 4)
+        ops = (mx_e8m0_scale, nvfp4_e4m3_scale)
+        eager_strides = tuple(op(amax).stride() for op in ops)
+        with FakeTensorMode() as mode:
+            fake_amax = mode.from_tensor(amax)
+            for op, eager_stride in zip(ops, eager_strides):
+                with self.subTest(op=op):
+                    self.assertEqual(op(fake_amax).stride(), eager_stride)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     def test_quant_scale_rounding_args(self):
         amax = torch.tensor(
