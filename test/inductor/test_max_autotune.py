@@ -5883,7 +5883,8 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         self.assertEqual(persistent_tdm_mm_template.name, "mm_persistent_tdm")
         self.assertEqual(
-            persistent_tdm_mm_template.source, persistent_tma_mm_template.source
+            persistent_tdm_mm_template.src_hash,
+            persistent_tma_mm_template.src_hash,
         )
         source = load_kernel_template("triton_persistent_tma_mm")
         self.assertIn("make_tensor_descriptor", source)
@@ -5898,7 +5899,11 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         heuristic_cls = ROCmPersistentTDMTemplateConfigHeuristic
         try:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            heuristic = heuristic_cls()
+            with mock.patch(
+                "torch._inductor.heuristics.template.triton.get_backend_num_stages",
+                return_value=2,
+            ):
+                heuristic = heuristic_cls()
             self.assertEqual(len(heuristic.mm_configs), 8)
             self.assertTrue(
                 all(config.num_stages == 1 for config in heuristic.mm_configs)
@@ -5915,9 +5920,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             )
             stages = {config.num_stages for config in configs}
             self.assertIn(1, stages)
-            self.assertIn(heuristic.default_num_stages, stages)
-            if torch.version.hip is not None:
-                self.assertEqual(heuristic.default_num_stages, 2)
+            self.assertIn(2, stages)
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
 
