@@ -4749,6 +4749,16 @@ def error_inputs_group_norm(opinfo, device, **kwargs):
     s2 = SampleInput(make_arg((2, 7, 4)), args=(2,))
     yield ErrorInput(s2, error_regex=err_msg2)
 
+    # check that channels are non-zero
+    err_msg3 = "Expected number of channels to be greater than 0, got "
+    s3 = SampleInput(make_arg((1, 0, 2)), args=(1,))
+    yield ErrorInput(s3, error_regex=err_msg3)
+
+    # check that HxW is non-zero
+    err_msg4 = "Expected HxW to be greater than 0, got "
+    s4 = SampleInput(make_arg((1, 2, 0)), args=(1,))
+    yield ErrorInput(s4, error_regex=err_msg4)
+
 def error_inputs_native_layer_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
     input_shape = (1, 2, 3)
@@ -11537,11 +11547,11 @@ def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weig
 
 
 def reference_native_group_norm(input: npt.NDArray, weight: npt.NDArray | None, bias: npt.NDArray | None, N: int, C: int, HxW: int, group: int, eps: float) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
-    if math.prod(input.shape) == 0:
+    if N == 0:
         return (
             np.empty_like(input),
-            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
-            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
+            np.empty((N, group), dtype=input.dtype),
+            np.empty((N, group), dtype=input.dtype),
         )
 
     input_view = input.reshape((N, group, C // group * HxW))
@@ -15327,14 +15337,8 @@ op_db: list[OpInfo] = [
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
         skips=(
-            # native_group_norm expects contiguous inputs
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
-            # native_group_norm expects contiguous inputs on CUDA
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides", device_type="cuda"),
         ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -25796,13 +25800,11 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.native_group_norm",
-        skips=(
-            # The torch implementation does not return a view, while the reference does
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
+        decorators=(
+            DecorateInfo(precisionOverride({torch.float32: 5e-5}), "TestCommon", "test_python_ref", device_type="mps"),
         ),
         torch_opinfo_name="native_group_norm",
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
