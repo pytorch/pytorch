@@ -20,10 +20,8 @@
 #include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
 
 namespace c10::xpu::XPUCachingAllocator {
-C10_DEFINE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback)
-}
 
-namespace c10::xpu::XPUCachingAllocator {
+C10_DEFINE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback)
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
@@ -988,9 +986,9 @@ class DeviceCachingAllocator {
   bool trigger_free_memory_callbacks(AllocParams& p) {
     (void)p;
     bool freed_memory = false;
-    for (const auto& name : c10::xpu::FreeXPUMemoryCallbacksRegistry()->Keys()) {
+    for (const auto& name : FreeXPUMemoryCallbacksRegistry()->Keys()) {
       freed_memory |=
-          c10::xpu::FreeXPUMemoryCallbacksRegistry()->Create(name)->Execute();
+          FreeXPUMemoryCallbacksRegistry()->Create(name)->Execute();
     }
     return freed_memory;
   }
