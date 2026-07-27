@@ -360,6 +360,7 @@ def checkpoint(
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     early_stop: bool = True,
+    respect_saved_tensors_hooks: bool | None = None,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model.
@@ -479,6 +480,19 @@ def checkpoint(
             argument is ignored if ``use_reentrant=True``. Can be overridden
             globally using :func:`set_checkpoint_early_stop` context manager.
             Default: ``True``.
+        respect_saved_tensors_hooks(bool, optional): Whether tensors that
+            selective activation checkpointing (SAC) saves are routed through
+            the surrounding user
+            :func:`torch.autograd.graph.saved_tensors_hooks` (e.g.
+            :func:`torch.autograd.graph.save_on_cpu`). Such tensors are held
+            outside the autograd graph, so historically these hooks did not see
+            them; a future release will make checkpoint honor the hooks by
+            default. Until then the default (``None``) keeps the legacy behavior
+            and emits a ``FutureWarning`` when a user hook is in scope; pass
+            ``True`` to opt in or ``False`` to keep the legacy behavior without
+            the warning. Has no effect without SAC (plain checkpoint recomputes
+            rather than saves) or when ``use_reentrant=True``. This argument is
+            only supported if ``use_reentrant=False``.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
@@ -503,15 +517,20 @@ def checkpoint(
         )
 
     if use_reentrant:
-        if context_fn is not noop_context_fn or debug is not False:
+        if (
+            context_fn is not noop_context_fn
+            or debug is not False
+            or respect_saved_tensors_hooks is not None
+        ):
             raise ValueError(
-                "Passing `context_fn` or `debug` is only supported when "
-                "use_reentrant=False."
+                "Passing `context_fn`, `debug`, or `respect_saved_tensors_hooks` "
+                "is only supported when use_reentrant=False."
             )
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         gen = _checkpoint_without_reentrant_generator(
-            function, preserve, context_fn, determinism_check, debug, early_stop, *args, **kwargs
+            function, preserve, context_fn, determinism_check, debug, early_stop,
+            *args, respect_saved_tensors_hooks=respect_saved_tensors_hooks, **kwargs
         )
         # Runs pre-forward logic
         next(gen)
@@ -1393,6 +1412,12 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.policy_fn = policy_fn
         self.storage = storage
         self.ac_graph_id = ac_graph_id
+        # Tri-state opt-in for routing SAC-cached tensors through the
+        # surrounding user saved_tensors_hooks, set by checkpoint() after this
+        # mode is constructed (like ac_graph_id). None: legacy behavior (hooks
+        # bypassed) plus a FutureWarning if user hooks are in scope; True/False:
+        # opt into the new/old behavior explicitly and silence the warning.
+        self.respect_saved_tensors_hooks: bool | None = None
         self.func_counter: Dict[Any, int] = defaultdict(int)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1439,7 +1464,29 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             # every tensor retained until backward, whether autograd or SAC
             # holds it. Skipped under compile, where storage is a tracing
             # artifact rather than a real cache.
+            #
+            # Honoring the hooks is a BC break, so it is gated behind the
+            # respect_saved_tensors_hooks opt-in on checkpoint(), which defaults
+            # to the legacy behavior (hooks bypassed). When a user hook is
+            # actually in scope we warn, since the default will flip.
             user_hooks = None if is_compiling else _current_user_saved_tensors_hooks()
+            if user_hooks is not None:
+                respects = self.respect_saved_tensors_hooks
+                if respects is None:
+                    warnings.warn(
+                        "A saved_tensors_hooks context (e.g. save_on_cpu) is "
+                        "active around a selective activation checkpoint region. "
+                        "Tensors that SAC saves currently bypass these hooks, but "
+                        "a future release will route them through the hooks like "
+                        "any other saved tensor. Silence this warning and choose "
+                        "the behavior explicitly by passing "
+                        "respect_saved_tensors_hooks=True|False to "
+                        "torch.utils.checkpoint.checkpoint.",
+                        FutureWarning,
+                        stacklevel=2,
+                    )
+                if not respects:
+                    user_hooks = None
 
             def wrap(x):
                 x = _detach_helper(x)
@@ -1608,6 +1655,7 @@ def _checkpoint_without_reentrant_generator(
     debug: bool = False,
     early_stop: bool = True,
     *args,
+    respect_saved_tensors_hooks: bool | None = None,
     **kwargs
 ):
     """Checkpointing without reentrant autograd.
@@ -1661,6 +1709,12 @@ def _checkpoint_without_reentrant_generator(
     device_type = _infer_device_type(*args)
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
+    # SAC caches some tensors outside the autograd graph; this tells its caching
+    # mode whether to route them through the user's saved_tensors_hooks. Set by
+    # attribute after construction, like ac_graph_id in the compile path. No-op
+    # for context_fns that are not SAC (e.g. the default), which cache nothing.
+    if isinstance(forward_context, _CachingTorchDispatchMode):
+        forward_context.respect_saved_tensors_hooks = respect_saved_tensors_hooks
     if _is_compiling(fn, args, kwargs) and context_fn is not noop_context_fn:
         if (
             not isinstance(forward_context, TorchDispatchMode)
