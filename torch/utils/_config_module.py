@@ -434,10 +434,9 @@ class ConfigModule(ModuleType):
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                # Only clear hide when it is actually set; an unconditional hide=False
-                # write adds 'hide' to the instance __dict__, which destabilizes dynamo
-                # guards for configs read inside compiled code (a guard built during
-                # tracing then fails once another pass patches the same config).
+                # Avoid a redundant instance-__dict__ write: hide defaults to False on
+                # the class and is only ever set True by __delattr__ (the mock.patch
+                # workaround), so only clear it when it is actually set.
                 if config.hide:
                     config.hide = False
 

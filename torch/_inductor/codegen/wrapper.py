@@ -1999,8 +1999,15 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
         name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
+            # compile-on-one-rank: resolve at runtime so the autotune block matches the
+            # rank-agnostic call() body (see codegen_device_guard_enter).
+            autotune_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device_idx
+            )
             self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({device_idx})"
+                f"{name} = get_raw_stream({autotune_idx})"
             )
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
@@ -2063,15 +2070,22 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             # mimic logic of EnterDeviceContextManagerLine.codegen for the autotune code block
             self.write_triton_header_once()
+            # compile-on-one-rank: resolve the device at runtime (like the call() body) so
+            # the autotune block is byte-identical across ranks, not baked to this rank's idx.
+            autotune_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device_idx
+            )
             self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(device_idx)}:"
+                f"with {V.graph.device_ops.device_guard(autotune_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
             self.kernel_autotune_calls.writeline(
-                f"{get_raw_stream_name(device_idx)} = get_raw_stream({device_idx})"
+                f"{get_raw_stream_name(device_idx)} = get_raw_stream({autotune_idx})"
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams

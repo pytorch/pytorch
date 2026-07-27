@@ -400,6 +400,17 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch(fx_wrapper=True)
+    def test_fx_wrapper_under_coor_rejected(self):
+        # fx_wrapper's device-context codegen is a no-op, so it would bake the compile-time
+        # device index like cpp_wrapper. Compile-on-one-rank must refuse it rather than
+        # silently emit a non-portable artifact.
+        with torch.cuda.device(0):
+            with self.assertRaisesRegex(Exception, "fx_wrapper|compile-on-one-rank"):
+                torch.compile(lambda x: x + 1)(torch.randn(8, device="cuda"))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_factory_without_matching_input_succeeds(self):
         # Unlike provenance-following, matching the current accelerator needs no input
         # on that device: a cuda factory in a cpu-input graph is now rewritten, not

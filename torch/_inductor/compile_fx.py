@@ -2948,15 +2948,18 @@ def compile_fx(
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
     if config.cpp_wrapper or config.fx_wrapper:
-        if config.cpp_wrapper:
-            from torch.fx.experimental.proxy_tensor import _coor_enabled
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
 
-            if _coor_enabled():
-                raise RuntimeError(
-                    "compile-on-one-rank (device-as-parameter) is not supported with "
-                    "cpp_wrapper/AOTInductor: the device guard bakes the compile-time "
-                    "device index, which is not rank-portable."
-                )
+        if _coor_enabled():
+            # cpp_wrapper/AOTInductor bakes the compile-time device index into the C++
+            # device guard, and fx_wrapper's device-context codegen is a no-op (see
+            # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
+            # emit a non-portable artifact.
+            raise RuntimeError(
+                "compile-on-one-rank (device-as-parameter) is not supported with "
+                "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "
+                "compile-time device index, which is not rank-portable."
+            )
         from torch._export.non_strict_utils import _fakify_script_objects
 
         cpp_wrapper_config = config.cpp_wrapper
