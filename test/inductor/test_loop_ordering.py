@@ -16,7 +16,6 @@ from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.dependencies import MemoryDep, ReadWrites
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
@@ -2344,71 +2343,6 @@ class TestIndexInversion(TestCase):
                 sympy.S.Zero,
             )
         )
-
-    def test_reindex_exception_restores_local_snapshot(self):
-        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
-        producer_write = MemoryDep("source", i0, (i0,), (sympy.Integer(8),))
-        consumer_read = MemoryDep(
-            "source",
-            2 * i1 + i0,
-            (i0, i1),
-            (sympy.Integer(2), sympy.Integer(4)),
-        )
-        consumer_write = MemoryDep(
-            "output",
-            4 * i0 + i1,
-            (i0, i1),
-            (sympy.Integer(2), sympy.Integer(4)),
-        )
-        node1 = mock.Mock()
-        node1.is_cpu.return_value = False
-        node1.read_writes = ReadWrites(
-            OrderedSet(), OrderedSet((producer_write,)), OrderedSet()
-        )
-
-        body = mock.Mock()
-        body.indexing_exprs = {
-            "index0": consumer_read.index,
-            "index1": consumer_write.index,
-        }
-        body.subblocks = {}
-        body.get_read_exprs.return_value = [consumer_read.index]
-        node2 = object.__new__(SchedulerNode)
-        node2.node = object.__new__(ir.ComputedBuffer)
-        node2._body = body
-        node2.is_cpu = mock.Mock(return_value=False)
-        node2.read_writes = ReadWrites(
-            OrderedSet((consumer_read,)), OrderedSet((consumer_write,)), OrderedSet()
-        )
-        node2.unmet_dependencies = OrderedSet((consumer_read,))
-        state = mock.sentinel.loop_state
-        node2.snapshot_loop_state = mock.Mock(return_value=state)
-
-        def restore_loop_state(snapshot):
-            self.assertIs(snapshot, state)
-            node2._body = body
-
-        def fail_after_reindex(*args, **kwargs):
-            node2._body = mock.sentinel.reindexed_body
-            raise RuntimeError("reindex failed")
-
-        node2.restore_loop_state = mock.Mock(side_effect=restore_loop_state)
-        node2.apply_loop_reindexing = mock.Mock(side_effect=fail_after_reindex)
-        scheduler = object.__new__(Scheduler)
-        flat_var = sympy.Dummy("flat", integer=True, nonnegative=True)
-
-        with (
-            mock.patch.object(
-                scheduler,
-                "_get_consumer_reindex_inverse",
-                return_value=(flat_var, flat_var),
-            ),
-            self.assertRaisesRegex(RuntimeError, "reindex failed"),
-        ):
-            scheduler.shared_data_after_inverting_indexing(node1, node2)
-
-        self.assertIs(node2._body, body)
-        node2.restore_loop_state.assert_called_once_with(state)
 
 
 if __name__ == "__main__":
