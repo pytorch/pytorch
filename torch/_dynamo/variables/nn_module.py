@@ -84,6 +84,65 @@ if TYPE_CHECKING:
     from .constant import ConstantVariable
 
 
+_UNSUPPORTED_HOOK_REGISTRATION_FUNCTIONS = {
+    torch.nn.Module.register_backward_hook,
+    torch.nn.Module.register_full_backward_hook,
+    torch.nn.Module.register_full_backward_pre_hook,
+}
+
+_FORWARD_HOOK_STATE_NAMES = (
+    "_forward_hooks",
+    "_forward_hooks_with_kwargs",
+    "_forward_hooks_always_called",
+)
+
+
+def _raise_if_unsupported_hook_registration(
+    tx: "InstructionTranslatorBase", module: VariableTracker, fn: Any
+) -> None:
+    if fn in _UNSUPPORTED_HOOK_REGISTRATION_FUNCTIONS:
+        unimplemented(
+            gb_type="unsupported nn.Module hook registration",
+            context=f"call_method: {module} {fn.__name__}",
+            explanation=(
+                "Dynamo cannot trace this nn.Module hook registration without "
+                "partially applying its side effects."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+
+def _raise_if_observing_pending_forward_hooks(
+    tx: "InstructionTranslatorBase", module: VariableTracker, name: str
+) -> None:
+    if name == "__dict__" and tx.f_code in (
+        torch.nn.Module.__getattr__.__code__,
+        torch.nn.Module.__setattr__.__code__,
+    ):
+        return
+    if name != "__dict__" and name not in _FORWARD_HOOK_STATE_NAMES:
+        return
+    if tx.output.side_effects.has_pending_module_hook(module):
+        unimplemented(
+            gb_type="pending module hook dictionary read",
+            context=f"getattro_impl: {module} {name}",
+            explanation=(
+                "Dynamo cannot read nn.Module hook state after deferring a hook "
+                "registration in the same forward."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    if not tx.output.side_effects.is_module_hook_state_access_suppressed():
+        if isinstance(module, NNModuleVariable):
+            module_value = tx.output.get_submodule(module.module_key)
+        else:
+            module_value = module.value  # type: ignore[attr-defined]
+        names = _FORWARD_HOOK_STATE_NAMES if name == "__dict__" else (name,)
+        tx.output.side_effects.accessed_module_hook_state_ids.update(
+            id(getattr(module_value, state_name)) for state_name in names
+        )
+
+
 def initialize_lazy_module(
     tx: "InstructionTranslatorBase",
     mod: torch.nn.Module,
@@ -97,7 +156,7 @@ def initialize_lazy_module(
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    if hasattr(mod, "_initialize_hook"):
+    if inspect.getattr_static(mod, "_initialize_hook", None) is not None:
 
         def convert_to_fake(x: Any) -> Any:
             if is_namedtuple(x):
@@ -452,6 +511,7 @@ class NNModuleVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        _raise_if_observing_pending_forward_hooks(tx, self, name)
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -1202,7 +1262,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.getattro_impl(tx, attr)
+                    with tx.output.side_effects.suppress_module_hook_state_access():
+                        vt = obj.getattro_impl(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1367,16 +1428,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        def track_hooks_dict(
-            hooks_dict: dict[Any, Any],
-            result: VariableTracker,
-        ) -> VariableTracker:
-            if hooks_dict in tx.output.side_effects:
-                return tx.output.side_effects[hooks_dict]
-            if result.source is None:
-                return result
-            return tx.output.side_effects.track_mutable(hooks_dict, result)
-
+        _raise_if_observing_pending_forward_hooks(tx, self, name)
         if (
             tx.output.side_effects.is_attribute_mutation(self)
             and name
@@ -1413,7 +1465,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
-                    hooks_source = None
                     if self.source:
                         hooks_source = AttrSource(self.source, name)
                         install_guard(
@@ -1422,14 +1473,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                             )
                         )
                     hooks_vt_cls = (
-                        variables.NNModuleHooksDictVariable
+                        variables.OrderedItemsDictVariable
                         if isinstance(hooks_dict, collections.OrderedDict)
                         else variables.ConstDictVariable
                     )
-                    return track_hooks_dict(
-                        hooks_dict,
-                        hooks_vt_cls({}, source=hooks_source),
-                    )
+                    return hooks_vt_cls({})
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
@@ -1470,10 +1518,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
-            return track_hooks_dict(
-                hooks_dict,
-                variables.NNModuleHooksDictVariable(result, source=hooks_dict_source),
-            )
+            return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
         return super().getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(

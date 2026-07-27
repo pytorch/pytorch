@@ -25,6 +25,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import gc
 import importlib.machinery
 import inspect
 import itertools
@@ -141,7 +142,6 @@ from ..source import (
     DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
-    GlobalSource,
     GradSource,
     is_constant_source,
     is_from_closure_source,
@@ -650,17 +650,6 @@ class _missing:
     pass
 
 
-def _is_torch_module_attr_source(source: Source) -> bool:
-    if not isinstance(source, ChainedSource):
-        return False
-    base_source = source.get_base()
-    return isinstance(base_source, GlobalSource) and (
-        base_source.global_name == "torch"
-        or base_source.global_name == "__import_torch"
-        or base_source.global_name.startswith("__import_torch_dot")
-    )
-
-
 @dataclasses.dataclass
 class GraphArg:
     source: Source | None
@@ -1008,6 +997,18 @@ class VariableBuilder:
         )
 
     def wrap_mapping_proxy(self, value: Any) -> VariableTracker:
+        mapping_referents = gc.get_referents(value)
+        handle_dict_referents = gc.get_referents(
+            torch.utils.hooks.RemovableHandle.__dict__
+        )
+        if (
+            len(mapping_referents) == 1
+            and len(handle_dict_referents) == 1
+            and mapping_referents[0] is handle_dict_referents[0]
+        ):
+            self.tx.output.side_effects.observe_removable_handle_state(
+                f"mappingproxy source={self.source}"
+            )
         self.install_guards(GuardBuilder.TYPE_MATCH)
         # This might be suboptimal compared to dict guards. But mappingproxy is
         # not very common, so its ok to guard on all keys.
@@ -1179,6 +1180,16 @@ class VariableBuilder:
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+            if self.tx.output.side_effects.is_pending_module_hook_state_object(value):
+                unimplemented(
+                    gb_type="pending module hook state alias read",
+                    context=f"source={self.source}",
+                    explanation=(
+                        "Dynamo cannot access an alias of nn.Module hook state after "
+                        "deferring a hook registration in the same forward."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value)
 
@@ -1956,6 +1967,7 @@ class VariableBuilder:
                 torch.utils.hooks.BackwardHook,
                 torch.nn.Parameter,
                 torch.nn.Buffer,
+                torch.backends.cuda.SDPAParams,
             ):
                 # TODO(jansel): combine this case with the one above
                 # type: ignore[attr-defined]
@@ -2622,13 +2634,13 @@ class VariableBuilder:
                 ],
             )
 
-        if getattr(value, "_is_fsdp_managed_module", False):
+        if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            if not getattr(value, "_fsdp_use_orig_params", False):
+            if not inspect.getattr_static(value, "_fsdp_use_orig_params", False):
                 unimplemented(
                     gb_type="FSDP with use_orig_params=False",
                     context="",
@@ -2808,21 +2820,12 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
-                    frame_state_entry = process_automatic_dynamic(
+                    process_automatic_dynamic(
                         self.tx,
                         self.source.name,
                         FrameStateSizeEntry.make_scalar(value),
                         is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
                     )
-                    if (
-                        config.automatic_dynamic_shapes
-                        and frame_state_entry.scalar is auto_dynamic
-                        and not self.source.guard_source.is_unspecialized_builtin_nn_module()
-                        and not _is_torch_module_attr_source(self.source)
-                    ):
-                        return self.wrap_symint(
-                            value, frame_state_entry=frame_state_entry
-                        )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
@@ -3314,7 +3317,6 @@ class VariableBuilder:
         value: int,
         dynamism: DimDynamic | None = None,
         context: SymIntSymbolicContext | None = None,
-        frame_state_entry: FrameStateSizeEntry | None = None,
     ) -> VariableTracker:
         if type(value) is not int:
             raise AssertionError(f"Expected exact int type, got {type(value)}")
@@ -3323,6 +3325,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         shape_env = self.tx.output.shape_env
+        frame_state_entry: FrameStateSizeEntry | None = None
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
@@ -3345,13 +3348,12 @@ class VariableBuilder:
 
             name = self.source.name
 
-            if frame_state_entry is None:
-                frame_state_entry = process_automatic_dynamic(
-                    self.tx,
-                    name,
-                    FrameStateSizeEntry.make_scalar(value),
-                    is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
-                )
+            frame_state_entry = process_automatic_dynamic(
+                self.tx,
+                name,
+                FrameStateSizeEntry.make_scalar(value),
+                is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
+            )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars

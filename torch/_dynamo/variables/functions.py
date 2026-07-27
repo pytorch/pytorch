@@ -88,6 +88,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    raise_args_mismatch,
     unpack_iterable,
 )
 from .base import (
@@ -1684,6 +1685,132 @@ class UserMethodVariable(UserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        is_nn_module = isinstance(
+            self.obj,
+            (
+                variables.NNModuleVariable,
+                variables.UnspecializedNNModuleVariable,
+            ),
+        ) or (
+            isinstance(self.obj, variables.UserDefinedObjectVariable)
+            and isinstance(self.obj.value, torch.nn.Module)
+        )
+        if is_nn_module:
+            if isinstance(self.obj, variables.NNModuleVariable):
+                module_value = tx.output.get_submodule(self.obj.module_key)
+            elif isinstance(self.obj, variables.UserDefinedObjectVariable):
+                module_value = self.obj.value
+            else:
+                raise AssertionError(f"Expected nn.Module variable, got {self.obj}")
+            module_forward = inspect.getattr_static(type(module_value), "forward", None)
+            first_arg_name = tx.f_code.co_varnames[0] if tx.f_code.co_varnames else None
+            is_compiled_module_forward = (
+                tx.f_code.co_name == "forward"
+                and isinstance(module_forward, types.FunctionType)
+                and module_forward.__code__ is tx.f_code
+                and self.obj.source is not None
+                and self.obj.source.name == f"L[{first_arg_name!r}]"
+            )
+            # OptimizedModule dispatches its own hooks outside Dynamo. Replaying
+            # registration at the forward suffix keeps it before that dispatch.
+            if (
+                self.fn is torch.nn.Module.register_forward_hook
+                and is_compiled_module_forward
+            ):
+                hook_state_names = (
+                    "_forward_hooks",
+                    "_forward_hooks_with_kwargs",
+                    "_forward_hooks_always_called",
+                )
+                hook_state_objects = tuple(
+                    getattr(module_value, name) for name in hook_state_names
+                )
+                has_pending_hook_state_mutation = any(
+                    tx.output.side_effects.has_pending_mutation_of_attr(self.obj, name)
+                    for name in hook_state_names
+                ) or any(
+                    hook_dict in tx.output.side_effects
+                    and tx.output.side_effects.is_modified(
+                        tx.output.side_effects[hook_dict]
+                    )
+                    for hook_dict in hook_state_objects
+                )
+                if has_pending_hook_state_mutation:
+                    unimplemented(
+                        gb_type="module hook registration after hook state mutation",
+                        context=f"module={self.obj}",
+                        explanation=(
+                            "Dynamo cannot defer module hook registration after "
+                            "mutating hook state in the same forward."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if any(
+                    id(hook_state_object)
+                    in tx.output.side_effects.accessed_module_hook_state_ids
+                    for hook_state_object in hook_state_objects
+                ) or any(
+                    hook_state_object in tx.output.side_effects
+                    for hook_state_object in hook_state_objects
+                ):
+                    unimplemented(
+                        gb_type="module hook registration after hook state access",
+                        context=f"module={self.obj}",
+                        explanation=(
+                            "Dynamo cannot defer module hook registration after "
+                            "reading hook state in the same forward."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if tx.output.side_effects.removable_handle_state_accessed:
+                    unimplemented(
+                        gb_type="module hook registration after handle state access",
+                        context="RemovableHandle state accessed before registration",
+                        explanation=(
+                            "Dynamo cannot defer module hook registration after "
+                            "RemovableHandle state was accessed in the same forward."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                options = dict(kwargs)
+                if len(args) == 1 and "hook" not in options:
+                    hook = args[0]
+                elif not args and "hook" in options:
+                    hook = options.pop("hook")
+                else:
+                    raise_args_mismatch(
+                        tx,
+                        self.fn.__name__,
+                        "one hook argument and keyword-only prepend, with_kwargs, or always_call",
+                        f"{len(args)} args and {len(kwargs)} kwargs",
+                    )
+                if any(
+                    key not in ("prepend", "with_kwargs", "always_call")
+                    for key in options
+                ):
+                    raise_args_mismatch(
+                        tx,
+                        self.fn.__name__,
+                        "one hook argument and keyword-only prepend, with_kwargs, or always_call",
+                        f"{len(args)} args and {len(kwargs)} kwargs",
+                    )
+                handle = variables.RemovableHandleVariable(
+                    mutation_type=ValueMutationNew()
+                )
+                tx.output.side_effects.register_module_hook(
+                    self.obj,
+                    hook,
+                    handle,
+                    self.fn.__name__,
+                    options,
+                    hook_state_objects,
+                )
+                return handle
+
+            from .nn_module import _raise_if_unsupported_hook_registration
+
+            _raise_if_unsupported_hook_registration(tx, self.obj, self.fn)
+
         # NOTE this is to handle methods annotated by `nonstrict_trace`.
         # a `nonstrict_trace`-ed function will be wrapped by
         # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
@@ -2305,7 +2432,9 @@ class SkipFunctionVariable(VariableTracker):
             guard_on_source = source
             guard_on_value = value
 
-            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
+            while inspect.getattr_static(
+                guard_on_value, "_torchdynamo_orig_callable", False
+            ):
                 guard_on_value = guard_on_value._torchdynamo_orig_callable
                 guard_on_source = AttrSource(
                     guard_on_source, "_torchdynamo_orig_callable"
@@ -2687,9 +2816,11 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
             self.attr_to_trace == "_torchdynamo_inline"
-            and getattr(self.wrapper_obj, "_is_torch_compile", False)
+            and inspect.getattr_static(self.wrapper_obj, "_is_torch_compile", False)
             and getattr(
-                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
+                inspect.getattr_static(
+                    self.wrapper_obj, "_torchdynamo_orig_callable", None
+                ),
                 "__code__",
                 None,
             )

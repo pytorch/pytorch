@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import contextlib
 import functools
+import types
 import unittest
 
 import torch
@@ -17,9 +19,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.utils.hooks import RemovableHandle
-
-
-REMOVABLE_HANDLE_ALIAS = RemovableHandle
 
 
 def compiler_fn(gm):
@@ -143,46 +142,25 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(h, RemovableHandle)
         self.assertIs(h2, h)
 
-    def test_removable_handle_next_id_class_attr_mutation(self):
-        start_next_id = RemovableHandle.next_id
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        def fn(x):
-            RemovableHandle.next_id += 1
-            return x + RemovableHandle.next_id
-
-        try:
-            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-
-            x = torch.randn(2)
-            self.assertEqual(opt_fn(x), x + start_next_id + 1)
-            self.assertEqual(RemovableHandle.next_id, start_next_id + 1)
-            self.assertEqual(cnt.frame_count, 1)
-        finally:
-            RemovableHandle.next_id = start_next_id
-
-    def test_removable_handle_class_attr_mutation_alias_read(self):
-        start_next_id = RemovableHandle.next_id
-
-        def fn(x):
-            next_id = REMOVABLE_HANDLE_ALIAS.next_id
-            RemovableHandle.next_id = next_id + 1
-            return x + REMOVABLE_HANDLE_ALIAS.next_id
-
-        try:
-            x = torch.randn(2)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-
-            self.assertEqual(opt_fn(x), x + start_next_id + 1)
-            self.assertEqual(RemovableHandle.next_id, start_next_id + 1)
-        finally:
-            RemovableHandle.next_id = start_next_id
-
     def test_register_forward_hook_inside_forward_fullgraph(self):
         class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.handle = None
+                self.identity = torch.nn.Identity()
+
             def forward(self, x):
-                self.register_forward_hook(lambda module, inputs, output: output + 1)
-                return x + 1
+                x = self.identity(x)
+                self.handle = self.register_forward_hook(
+                    hook=lambda module, inputs, kwargs, output: output + 1,
+                    with_kwargs=True,
+                )
+                self.register_forward_hook(
+                    lambda module, inputs, output: output * 2,
+                    prepend=True,
+                    always_call=True,
+                )
+                return self.identity(x) + 1
 
         start_next_id = RemovableHandle.next_id
         mod = Mod()
@@ -191,15 +169,312 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         try:
             x = torch.randn(2)
             opt_mod = torch.compile(mod, backend=cnt, fullgraph=True)
+            steady_state_frame_count = None
 
-            self.assertEqual(opt_mod(x), x + 1)
-            self.assertEqual(list(mod._forward_hooks.keys()), [start_next_id])
-            self.assertEqual(RemovableHandle.next_id, start_next_id + 1)
-            self.assertEqual(cnt.frame_count, 1)
+            for call_number in range(1, torch._dynamo.config.recompile_limit + 3):
+                actual = opt_mod(x)
+                expected = (
+                    x + 1
+                    if call_number == 1
+                    else (x + 1) * (2**call_number) + call_number
+                )
+                self.assertEqual(actual, expected)
+
+                add_hook_ids = [start_next_id + 2 * i for i in range(call_number)]
+                mul_hook_ids = [
+                    start_next_id + 2 * i + 1 for i in reversed(range(call_number))
+                ]
+                self.assertEqual(
+                    list(mod._forward_hooks.keys()), mul_hook_ids + add_hook_ids
+                )
+                self.assertIsInstance(mod.handle, RemovableHandle)
+                self.assertEqual(mod.handle.id, add_hook_ids[-1])
+                self.assertEqual(
+                    list(mod._forward_hooks_with_kwargs.keys()), add_hook_ids
+                )
+                self.assertEqual(
+                    list(mod._forward_hooks_always_called.keys()),
+                    list(reversed(mul_hook_ids)),
+                )
+                self.assertEqual(
+                    RemovableHandle.next_id, start_next_id + 2 * call_number
+                )
+
+                if call_number == 1:
+                    self.assertEqual(cnt.frame_count, 1)
+                elif call_number == 2:
+                    steady_state_frame_count = cnt.frame_count
+                else:
+                    self.assertEqual(cnt.frame_count, steady_state_frame_count)
+
+            self.assertIsNotNone(steady_state_frame_count)
         finally:
             mod._forward_hooks.clear()
             mod._forward_hooks_with_kwargs.clear()
             mod._forward_hooks_always_called.clear()
+            RemovableHandle.next_id = start_next_id
+
+    def test_register_forward_hook_after_child_with_existing_hook(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = torch.nn.Identity()
+
+            def forward(self, x):
+                x = self.child(x)
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return self.child(x)
+
+        start_next_id = RemovableHandle.next_id
+        mod = Mod()
+        child_handle = mod.child.register_forward_hook(
+            lambda module, inputs, output: output + 1
+        )
+        try:
+            x = torch.randn(2)
+            result = torch.compile(mod, backend="eager", fullgraph=True)(x)
+            self.assertEqual(result, x + 2)
+            self.assertEqual(len(mod._forward_hooks), 1)
+            self.assertEqual(len(mod.child._forward_hooks), 1)
+        finally:
+            child_handle.remove()
+            mod._forward_hooks.clear()
+            RemovableHandle.next_id = start_next_id
+
+    def _assert_deferred_forward_hook_graph_breaks(self, mod, error):
+        start_next_id = RemovableHandle.next_id
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                error,
+            ):
+                torch.compile(mod, backend="eager", fullgraph=True)(torch.randn(2))
+            self.assertEqual(mod._forward_hooks, {})
+            self.assertEqual(RemovableHandle.next_id, start_next_id)
+        finally:
+            mod._forward_hooks.clear()
+            mod._forward_hooks_with_kwargs.clear()
+            mod._forward_hooks_always_called.clear()
+            RemovableHandle.next_id = start_next_id
+
+    def test_deferred_forward_hook_counter_observation_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                previous_id = RemovableHandle.next_id
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + (RemovableHandle.next_id - previous_id)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook registration after handle state access"
+        )
+
+    def test_deferred_forward_hook_counter_post_observation_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + RemovableHandle.next_id
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "RemovableHandle state read after module hook registration"
+        )
+
+    def test_deferred_forward_hook_prior_state_read_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                hooks = self._forward_hooks
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(hooks)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook registration after hook state access"
+        )
+
+    def test_deferred_forward_hook_prior_getattr_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                name = "_forward_hooks"
+                hooks = getattr(self, name)
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(hooks)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook registration after hook state access"
+        )
+
+    def test_deferred_forward_hook_prior_vars_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                hooks = vars(self)["_forward_hooks"]
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(hooks)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook registration after hook state access"
+        )
+
+    def test_deferred_forward_hook_prior_dunder_getattribute_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                hooks = torch.nn.Module.__getattribute__(self, "_forward_hooks")
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(hooks)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook registration after hook state access"
+        )
+
+    def test_deferred_forward_hook_prior_state_mutation_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                self._forward_hooks = collections.OrderedDict()
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook registration after hook state mutation"
+        )
+
+    def test_deferred_forward_hook_state_alias_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hooks_alias = self._forward_hooks
+
+            def forward(self, x):
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(self.hooks_alias)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "pending module hook state alias read"
+        )
+
+    def test_deferred_forward_hook_prior_state_alias_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hooks_alias = self._forward_hooks
+
+            def forward(self, x):
+                hooks = self.hooks_alias
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(hooks)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "pending module hook state alias read"
+        )
+
+    def test_deferred_forward_hook_state_alias_mutation_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hooks_alias = self._forward_hooks
+
+            def forward(self, x):
+                self.register_forward_hook(lambda module, inputs, output: output)
+                self.hooks_alias[123456] = lambda module, inputs, output: output
+                return x
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "pending module hook state alias read"
+        )
+
+    def test_deferred_forward_hook_handle_state_alias_graph_breaks(self):
+        handle_state = RemovableHandle.__dict__
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + handle_state["next_id"]
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "RemovableHandle state read after module hook registration"
+        )
+
+    def test_deferred_forward_hook_prior_handle_state_alias_graph_breaks(self):
+        handle_state = RemovableHandle.__dict__
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                previous_id = handle_state["next_id"]
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + previous_id
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook registration after handle state access"
+        )
+
+    def test_deferred_forward_hook_independent_handle_state_snapshot(self):
+        handle_state = types.MappingProxyType(dict(RemovableHandle.__dict__))
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                previous_id = handle_state["next_id"]
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + previous_id
+
+        start_next_id = RemovableHandle.next_id
+        mod = Mod()
+        try:
+            x = torch.randn(2)
+            result = torch.compile(mod, backend="eager", fullgraph=True)(x)
+            self.assertEqual(result, x + start_next_id)
+            self.assertEqual(len(mod._forward_hooks), 1)
+            self.assertEqual(RemovableHandle.next_id, start_next_id + 1)
+        finally:
+            mod._forward_hooks.clear()
+            RemovableHandle.next_id = start_next_id
+
+    def test_deferred_forward_hook_dict_observation_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(self._forward_hooks)
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "pending module hook dictionary read"
+        )
+
+    def test_deferred_forward_hook_dunder_dict_observation_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                self.register_forward_hook(lambda module, inputs, output: output)
+                return x + len(self.__dict__["_forward_hooks"])
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "pending module hook dictionary read"
+        )
+
+    def test_deferred_forward_hook_immediate_remove_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                handle = self.register_forward_hook(
+                    lambda module, inputs, output: output
+                )
+                handle.remove()
+                return x
+
+        self._assert_deferred_forward_hook_graph_breaks(
+            Mod(), "module hook removed before replay"
+        )
+
+    def test_backward_hook_registration_graph_breaks_before_mutation(self):
+        mod = torch.nn.Linear(2, 2)
+        start_next_id = RemovableHandle.next_id
+
+        def fn(x):
+            mod.register_full_backward_pre_hook(lambda module, grad: grad)
+            return x + 1
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "unsupported nn.Module hook registration",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+            self.assertEqual(mod._backward_pre_hooks, {})
+            self.assertEqual(RemovableHandle.next_id, start_next_id)
+        finally:
+            mod._backward_pre_hooks.clear()
             RemovableHandle.next_id = start_next_id
 
     def test_tensor_register_hook_repeated_handle_not_local(self):

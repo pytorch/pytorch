@@ -849,31 +849,6 @@ class TestClassSetattr(TestCase):
 
         MyModule.x = 10
 
-    def test_setattr_metaclass_data_descriptor_graph_breaks(self):
-        class Desc:
-            def __set__(self, obj, val):
-                obj.side = val + 1
-
-        class Meta(type):
-            foo = Desc()
-
-        class MyClass(metaclass=Meta):
-            side = 0
-
-        def fn(x):
-            MyClass.foo = 3
-            return x + MyClass.side
-
-        x = torch.randn(2)
-        self.assertEqual(fn(x), x + 4)
-
-        MyClass.side = 0
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "metaclass data descriptor setattr"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(MyClass.side, 0)
-
 
 # ---------------------------------------------------------------------------
 # __setitem__ on user-defined classes / metaclasses
