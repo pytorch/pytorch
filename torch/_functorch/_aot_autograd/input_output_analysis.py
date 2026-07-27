@@ -102,6 +102,7 @@ def remove_dupe_metadata(
             for o in m.output_info
         ],
         num_intermediate_bases=m.num_intermediate_bases,
+        unsafe_view_intermediate_base_indices=m.unsafe_view_intermediate_base_indices,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
         traced_tangents_descs=traced_tangents_descs,
@@ -312,6 +313,9 @@ def create_synthetic_base_metadata(
             input_info=input_infos,
             output_info=output_info,
             num_intermediate_bases=m.num_intermediate_bases,
+            unsafe_view_intermediate_base_indices=(
+                m.unsafe_view_intermediate_base_indices
+            ),
             keep_input_mutations=m.keep_input_mutations,
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
