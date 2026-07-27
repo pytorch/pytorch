@@ -522,11 +522,13 @@ test_native_aot() {
   # build (tools/native_aot/build_stage2.py). First assert the wheel under
   # test actually carries them -- a silently artifact-free wheel would make
   # every routing test vacuously pass on the JIT/aten fallbacks.
-  python -c "
+  # (cd test: from the repo root the source torch/ dir would shadow the
+  # installed wheel, same as the ASAN smoke checks above)
+  (cd test && python -c "
 from torch._native import _native_aot_embedded
 assert _native_aot_embedded(), 'AOT kernels not embedded: stage 2 did not run in the build'
 print('native-AOT: embedded kernels detected')
-"
+")
   local native_aot_tests=()
   for f in test/python_native/test_*.py; do
     native_aot_tests+=("${f#test/}")
