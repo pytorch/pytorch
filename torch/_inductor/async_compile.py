@@ -756,11 +756,14 @@ class AsyncCompile:
         """
         Compile FlyDSL kernels.
 
-        FlyDSL generated source is written through PyCodeCache so the module can
-        be imported and its `{kernel_name}_main` entry point can be called
-        directly from the Inductor wrapper.
+        FlyDSL generated source is written through PyCodeCache and its
+        `{kernel_name}_main` entry point is exposed through the standard
+        kernel ``.run()`` interface.
         """
-        from torch._inductor.codegen.flydsl.flydsl_kernel import MAIN_SUFFIX
+        from torch._inductor.codegen.flydsl.flydsl_kernel import (
+            FlyDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
 
         kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
         _compile_start()
@@ -783,7 +786,7 @@ class AsyncCompile:
                 precompile_metadata,
             )
 
-            def get_result():
+            def get_result() -> FlyDSLKernelWrapper:
                 try:
                     key, path, elapsed_us = subprocess_task.result()
                 except SubprocException as e:
@@ -793,12 +796,16 @@ class AsyncCompile:
                     kernel_name,
                     elapsed_us,
                 )
-                return self._load_kernel_fn(kernel_name, MAIN_SUFFIX, key, path)
+                return self._load_kernel_wrapper(
+                    kernel_name, MAIN_SUFFIX, FlyDSLKernelWrapper, key, path
+                )
 
             return LambdaFuture(get_result, future=subprocess_task)
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            return self._load_kernel_fn(kernel_name, MAIN_SUFFIX, key, path)
+            return self._load_kernel_wrapper(
+                kernel_name, MAIN_SUFFIX, FlyDSLKernelWrapper, key, path
+            )
 
     def pallas(self, kernel_name: str, source_code: str):
         """
