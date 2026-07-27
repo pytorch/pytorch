@@ -320,8 +320,10 @@ def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
     """Quantize adjacent normalized values into packed E2M1 storage.
 
     Args:
-        input: Float32 values with an innermost pair dimension. Values are
-            rounded to nearest E2M1 and saturated to its finite range.
+        input: Float32 values with an innermost pair dimension. Finite values
+            are rounded to nearest E2M1, and infinities saturate to its finite
+            range. NaN encoding is unspecified, matching the floatx conversion
+            contract used by TorchAO.
 
     Returns:
         Contiguous Uint8 storage with the innermost pair dimension removed.
