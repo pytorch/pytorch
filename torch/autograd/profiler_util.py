@@ -146,7 +146,7 @@ class EventList(list):
         s1 and e1 would be start and end of the child event's interval. And
         s2 and e2 start and end of the parent event's interval
 
-        Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
+        Example: In event list [[0, 10], [1, 3], [3, 4]] would make [0, 10]
         be a parent of two other intervals.
 
         If for any reason two intervals intersect only partially, this function
