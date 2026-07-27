@@ -10,6 +10,10 @@ from torch._inductor.test_case import TestCase
 
 
 class TestFlyDSLTemplate(TestCase):
+    def setUp(self):
+        super().setUp()
+        FlyDSLScheduling._build_flydsl_gpu_arch_cached.cache_clear()
+
     def test_gen_imports(self):
         kernel = FlyDSLTemplateKernel(
             kernel_name="test_kernel",
@@ -114,6 +118,20 @@ class TestFlyDSLTemplate(TestCase):
         self.assertFalse(scheduling.can_fuse_vertical(node1, node2))
         self.assertFalse(scheduling.can_fuse_horizontal(node1, node2))
         self.assertEqual(scheduling.get_backend_features(device=None), set())
+
+    def test_scheduling_caches_device_arch(self):
+        props = mock.Mock(gcnArchName="gfx950:sramecc+:xnack-")
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"FLYDSL_GPU_ARCH": "", "HSA_OVERRIDE_GFX_VERSION": ""},
+            ),
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch.cuda.get_device_properties", return_value=props) as get,
+        ):
+            self.assertEqual(FlyDSLScheduling._build_flydsl_gpu_arch(0), "gfx950")
+            self.assertEqual(FlyDSLScheduling._build_flydsl_gpu_arch(0), "gfx950")
+            get.assert_called_once_with(0)
 
     def test_scheduling_uses_explicit_gpu_arch(self):
         with mock.patch.dict(

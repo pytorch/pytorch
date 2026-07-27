@@ -1347,6 +1347,8 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return run_kernel
 
 
+# TODO: Factor out a common DSL benchmark request base shared with
+# CuteDSLBenchmarkRequest.
 class FlyDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """Benchmark request for FlyDSL kernels."""
 
