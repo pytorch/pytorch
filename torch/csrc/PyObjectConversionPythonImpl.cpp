@@ -34,8 +34,8 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         PyGILState_Check(),
         "torch_tensor_to_pyobject requires the GIL to be held");
     // Guard before reinterpret_cast: THPVariable_Wrap calls type->tp_alloc, so
-    // a non-type py_type would dereference garbage. THPVariable_Wrap itself then
-    // checks it is actually a torch.Tensor subclass.
+    // a non-type py_type would dereference garbage. THPVariable_Wrap itself
+    // then checks it is actually a torch.Tensor subclass.
     TORCH_CHECK(
         py_type == nullptr || PyType_Check(py_type),
         "torch_tensor_to_pyobject: py_type must be a Python type object, got ",

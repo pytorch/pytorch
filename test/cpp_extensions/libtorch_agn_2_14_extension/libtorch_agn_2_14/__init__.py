@@ -14,8 +14,7 @@ if len(so_files) != 1:
 # other libtorch_agn extensions); importing _C additionally exposes its
 # PyMethodDef helpers, used by the PyObject interop tests.
 torch.ops.load_library(str(so_files[0]))
-from . import _C  # noqa: F401
-from . import ops
+from . import _C, ops
 
 
 __all__ = [
