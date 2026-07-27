@@ -4,10 +4,12 @@ import operator
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 from torch._guards import detect_fake_mode
+from torch._library.simple_registry import singleton as _simple_registry
+from torch.utils._python_dispatch import _disable_current_modes
 
 from ._compatibility import compatibility
 from ._symbolic_trace import symbolic_trace
@@ -19,7 +21,7 @@ from .operator_schemas import get_signature_for_torch_op
 
 
 if TYPE_CHECKING:
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import FakeTensorConverter, FakeTensorMode
 
     from .passes.utils.matcher_with_name_node_map_utils import InternalMatch
 
@@ -39,6 +41,7 @@ _SAFE_META_PROPAGATION_BUILTINS = (
 )
 _TORCH_BUILTIN_TYPE = type(torch.sin)
 _META_PROPAGATION_OPERATOR_EXCEPTIONS = (
+    AssertionError,
     ArithmeticError,
     LookupError,
     RuntimeError,
@@ -57,9 +60,6 @@ _SAFE_META_SCALAR_TYPES = (
     torch.dtype,
     torch.layout,
     torch.memory_format,
-    torch.SymBool,
-    torch.SymFloat,
-    torch.SymInt,
 )
 _MISSING = object()
 log = logging.getLogger(__name__)
@@ -189,11 +189,8 @@ def _is_torch_return_type(value: Any) -> bool:
 
 
 def _is_safe_tensor_meta_value(value: Any) -> bool:
-    value_type = type(value)
-    if value_type is torch.Tensor or value_type is torch.nn.Parameter:
-        return True
-    FakeTensor, _, _ = _fake_tensor_meta_helpers()
-    return value_type is FakeTensor
+    FakeTensor, _, _, _, _ = _fake_tensor_meta_helpers()
+    return _is_exact_type(type(value), (torch.Tensor, torch.nn.Parameter, FakeTensor))
 
 
 class _MetaValueAnalysis(NamedTuple):
@@ -209,6 +206,9 @@ def _analyze_meta_value(value: Any) -> _MetaValueAnalysis:
         current_type = type(current)
         if _is_safe_tensor_meta_value(current):
             return _MetaValueAnalysis(True, True)
+        if _is_exact_type(current_type, (torch.SymBool, torch.SymFloat, torch.SymInt)):
+            _, _, _, _, SymNode = _fake_tensor_meta_helpers()
+            return _MetaValueAnalysis(type(current.node) is SymNode, False)
         if (
             _is_exact_type(current_type, _SAFE_META_SCALAR_TYPES)
             or current_type is torch.Size
@@ -264,34 +264,25 @@ def _is_safe_meta_value(value: Any) -> bool:
 
 
 @cache
-def _fake_tensor_meta_helpers() -> tuple[type[Any], type[Any], Callable[..., Any]]:
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-    from torch.fx.experimental.proxy_tensor import snapshot_fake
-
-    return FakeTensor, FakeTensorMode, snapshot_fake
-
-
-@cache
-def _fake_tensor_propagation_exceptions() -> tuple[type[Exception], ...]:
+def _fake_tensor_meta_helpers() -> tuple[
+    type[Any], type[Any], type[Any], Callable[..., Any], type[Any]
+]:
     from torch._subclasses.fake_tensor import (
-        DataDependentOutputException,
-        DynamicOutputShapeException,
-        UnsupportedFakeTensorException,
-        UnsupportedOperatorException,
+        FakeTensor,
+        FakeTensorConverter,
+        FakeTensorMode,
     )
+    from torch.fx.experimental.proxy_tensor import snapshot_fake
+    from torch.fx.experimental.sym_node import SymNode
 
-    return (
-        DataDependentOutputException,
-        DynamicOutputShapeException,
-        UnsupportedFakeTensorException,
-        UnsupportedOperatorException,
-    )
+    return FakeTensor, FakeTensorConverter, FakeTensorMode, snapshot_fake, SymNode
 
 
 def _copy_meta_val(
     value: Any,
     fake_mode: "FakeTensorMode | None" = None,
     memo: dict[int, Any] | None = None,
+    tensor_converter: "FakeTensorConverter | None" = None,
 ) -> Any:
     if memo is None:
         memo = {}
@@ -299,24 +290,46 @@ def _copy_meta_val(
     value_id = id(value)
     if value_id in memo:
         return memo[value_id]
+    FakeTensor, _, FakeTensorMode, snapshot_fake, _ = _fake_tensor_meta_helpers()
     if value_type is torch.Tensor or value_type is torch.nn.Parameter:
-        _, FakeTensorMode, snapshot_fake = _fake_tensor_meta_helpers()
         if fake_mode is None:
             fake_mode = FakeTensorMode(allow_fallback_kernels=False)
-        with fake_mode:
-            result = snapshot_fake(fake_mode.from_tensor(value, static_shapes=True))
+        if tensor_converter is None:
+            with fake_mode:
+                result = snapshot_fake(fake_mode.from_tensor(value, static_shapes=True))
+        else:
+            with _disable_current_modes():
+                result = tensor_converter.from_real_tensor(
+                    fake_mode, value, shape_env=None
+                )
         memo[value_id] = result
         return result
-    if _is_safe_tensor_meta_value(value):
-        _, _, snapshot_fake = _fake_tensor_meta_helpers()
-        result = snapshot_fake(value)
+    if value_type is FakeTensor:
+        if tensor_converter is None:
+            result = snapshot_fake(value)
+        else:
+            with _disable_current_modes():
+                result = tensor_converter.from_real_tensor(
+                    value.fake_mode, value, shape_env=None
+                )
+        memo[value_id] = result
+        return result
+    if value_type is slice:
+        result = slice(
+            *(
+                _copy_meta_val(v, fake_mode, memo, tensor_converter)
+                for v in (value.start, value.stop, value.step)
+            )
+        )
         memo[value_id] = result
         return result
     if _is_exact_type(value_type, (list, immutable_list)):
         values: list[Any] = []
         if value_type is list:
             memo[value_id] = values
-        values.extend(_copy_meta_val(v, fake_mode, memo) for v in value)
+        values.extend(
+            _copy_meta_val(v, fake_mode, memo, tensor_converter) for v in value
+        )
         result = immutable_list(values) if value_type is immutable_list else values
         memo[value_id] = result
         return result
@@ -324,9 +337,13 @@ def _copy_meta_val(
         value_type is tuple or _is_torch_return_type(value)
     ):
         if _is_torch_return_type(value):
-            result = type(value)(*(_copy_meta_val(v, fake_mode, memo) for v in value))
+            result = type(value)(
+                *(_copy_meta_val(v, fake_mode, memo, tensor_converter) for v in value)
+            )
         else:
-            result = tuple(_copy_meta_val(v, fake_mode, memo) for v in value)
+            result = tuple(
+                _copy_meta_val(v, fake_mode, memo, tensor_converter) for v in value
+            )
         memo[value_id] = result
         return result
     if _is_exact_type(value_type, (dict, immutable_dict)):
@@ -334,8 +351,8 @@ def _copy_meta_val(
         if value_type is dict:
             memo[value_id] = values_dict
         for key, item in value.items():
-            values_dict[_copy_meta_val(key, fake_mode, memo)] = _copy_meta_val(
-                item, fake_mode, memo
+            values_dict[_copy_meta_val(key, fake_mode, memo, tensor_converter)] = (
+                _copy_meta_val(item, fake_mode, memo, tensor_converter)
             )
         result = (
             immutable_dict(values_dict) if value_type is immutable_dict else values_dict
@@ -349,11 +366,12 @@ def _try_copy_meta_val(
     value: Any,
     fake_mode: "FakeTensorMode | None",
     memo: dict[int, Any] | None = None,
+    tensor_converter: "FakeTensorConverter | None" = None,
 ) -> Any:
     copy_memo = {} if memo is None else memo.copy()
     try:
-        result = _copy_meta_val(value, fake_mode, copy_memo)
-    except _fake_tensor_propagation_exceptions():
+        result = _copy_meta_val(value, fake_mode, copy_memo, tensor_converter)
+    except _META_PROPAGATION_OPERATOR_EXCEPTIONS:
         return _MISSING
     if memo is not None:
         memo.update(copy_memo)
@@ -368,7 +386,7 @@ def _detect_fake_mode_from_values(values: list[Any]) -> "FakeTensorMode | None":
         # Returning None makes propagation copy inputs but skip operator execution.
         return None
     if fake_mode is None and any(_contains_tensor(value) for value in values):
-        _, FakeTensorMode, _ = _fake_tensor_meta_helpers()
+        _, _, FakeTensorMode, _, _ = _fake_tensor_meta_helpers()
         fake_mode = FakeTensorMode(allow_fallback_kernels=False)
     return fake_mode
 
@@ -415,14 +433,52 @@ def _is_trusted_torch_builtin(target: Any) -> bool:
     )
 
 
+def _is_trusted_meta_overload(target: Any) -> bool:
+    if target.namespace == "aten":
+        return (
+            not target._defined_in_python
+            and _simple_registry.find(target.name()).fake_impl.kernel is None
+        )
+    if target.namespace != "prims":
+        return False
+
+    # Import lazily because FX is imported while torch itself is initializing.
+    from torch import _prims
+
+    name = target._schema.name.partition("::")[2]
+    return (
+        not _has_registered_aten_fake_impl()
+        and name in _prims.__all__
+        and getattr(_prims, name, None) is target
+    )
+
+
+def _has_registered_aten_fake_impl() -> bool:
+    return any(
+        qualname.startswith("aten::") and entry.fake_impl.kernel is not None
+        for qualname, entry in _simple_registry._data.items()
+    )
+
+
+def _run_meta_overload(
+    target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
+    if type(target) is torch._ops.OpOverload and target.namespace == "prims":
+        return cast(Any, target).prim_meta_impl(*args, **kwargs)
+    if type(target) is torch._ops.OpOverloadPacket:
+        overloads = [getattr(target, name) for name in target.overloads()]
+        if overloads and overloads[0].namespace == "prims":
+            return cast(Any, overloads[0]).prim_meta_impl(*args, **kwargs)
+    return target(*args, **kwargs)
+
+
 def _is_safe_meta_propagation_target(
     target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> bool:
     has_tensor_input = _contains_tensor((args, kwargs))
     if type(target) is torch._ops.OpOverload:
         return (
-            target.namespace == "aten"
-            and not target._defined_in_python
+            _is_trusted_meta_overload(target)
             and bool(target._schema.returns)
             and has_tensor_input
         )
@@ -430,24 +486,18 @@ def _is_safe_meta_propagation_target(
         overloads = [getattr(target, name) for name in target.overloads()]
         return (
             bool(overloads)
-            and all(
-                overload.namespace == "aten" and not overload._defined_in_python
-                for overload in overloads
-            )
+            and all(_is_trusted_meta_overload(overload) for overload in overloads)
             and any(overload._schema.returns for overload in overloads)
             and has_tensor_input
         )
-    return any(target is builtin for builtin in _SAFE_META_PROPAGATION_BUILTINS) or (
-        has_tensor_input
-        and _is_trusted_torch_builtin(target)
-        and _has_value_returning_torch_schema(target)
+    return not _has_registered_aten_fake_impl() and (
+        any(target is builtin for builtin in _SAFE_META_PROPAGATION_BUILTINS)
+        or (
+            has_tensor_input
+            and _is_trusted_torch_builtin(target)
+            and _has_value_returning_torch_schema(target)
+        )
     )
-
-
-def _is_safe_meta_propagation_method(target: str) -> bool:
-    if type(target) is not str:
-        return False
-    return _is_safe_meta_propagation_method_name(target)
 
 
 @cache
@@ -518,15 +568,13 @@ def _propagate_replacement_meta(
 
     env: dict[Node, Any] = {}
     source_copy_memo: dict[int, Any] = {}
+    _, FakeTensorConverter, _, _, _ = _fake_tensor_meta_helpers()
+    source_copy_converter = FakeTensorConverter()
 
     def load_arg(arg_node: Node) -> Any:
         if arg_node not in env:
             raise KeyError(arg_node)
         return env[arg_node]
-
-    def use_preannotated_meta(node: Node, meta_val: Any) -> None:
-        if meta_val is not _MISSING:
-            env[node] = meta_val
 
     for node in replacement_graph.nodes:
         if node.op == "output":
@@ -544,13 +592,16 @@ def _propagate_replacement_meta(
                     meta_val = _meta_val_if_safe(copied_node)
                     if meta_val is not _MISSING:
                         preannotated_meta_val = _try_copy_meta_val(
-                            meta_val, fake_mode, source_copy_memo
+                            meta_val,
+                            fake_mode,
+                            source_copy_memo,
+                            source_copy_converter,
                         )
             else:
                 meta_val = _meta_val_if_safe(copied_node)
                 if meta_val is not _MISSING:
                     copied_meta_val = _try_copy_meta_val(
-                        meta_val, fake_mode, source_copy_memo
+                        meta_val, fake_mode, source_copy_memo, source_copy_converter
                     )
                     if copied_meta_val is _MISSING:
                         continue
@@ -559,20 +610,20 @@ def _propagate_replacement_meta(
                 if copied_node.meta.get("val") is not None:
                     continue
 
+        if preannotated_meta_val is not _MISSING:
+            env[node] = preannotated_meta_val
+
         if node.op == "get_attr":
             attr_value = resolved_attrs[node]
             if attr_value is _MISSING or not _is_safe_meta_value(attr_value):
-                use_preannotated_meta(node, preannotated_meta_val)
                 continue
             copied_attr_value = _try_copy_meta_val(
-                attr_value, fake_mode, source_copy_memo
+                attr_value, fake_mode, source_copy_memo, source_copy_converter
             )
             if copied_attr_value is _MISSING:
-                use_preannotated_meta(node, preannotated_meta_val)
                 continue
             recorded_attr_value = _try_copy_meta_val(copied_attr_value, fake_mode)
             if recorded_attr_value is _MISSING:
-                use_preannotated_meta(node, preannotated_meta_val)
                 continue
             env[node] = copied_attr_value
             if isinstance(copied_node, Node) and copied_node in replacement_node_set:
@@ -580,17 +631,9 @@ def _propagate_replacement_meta(
             continue
 
         if node.op == "placeholder":
-            if isinstance(copied_node, Node):
-                meta_val = _meta_val_if_safe(copied_node)
-                if meta_val is not _MISSING:
-                    copied_meta_val = _try_copy_meta_val(
-                        meta_val, fake_mode, source_copy_memo
-                    )
-                    if copied_meta_val is not _MISSING:
-                        env[node] = copied_meta_val
-            elif _is_safe_meta_value(copied_node):
+            if not isinstance(copied_node, Node) and _is_safe_meta_value(copied_node):
                 copied_meta_val = _try_copy_meta_val(
-                    copied_node, fake_mode, source_copy_memo
+                    copied_node, fake_mode, source_copy_memo, source_copy_converter
                 )
                 if copied_meta_val is not _MISSING:
                     env[node] = copied_meta_val
@@ -605,7 +648,6 @@ def _propagate_replacement_meta(
         if fake_mode is None:
             # Never execute operators without a detected or freshly created mode.
             # None also covers metadata containing incompatible fake modes.
-            use_preannotated_meta(node, preannotated_meta_val)
             continue
 
         try:
@@ -613,29 +655,26 @@ def _propagate_replacement_meta(
             kwargs = map_arg(node.kwargs, load_arg)
         except KeyError:
             # A predecessor could not be propagated, so its dependents cannot run.
-            use_preannotated_meta(node, preannotated_meta_val)
             continue
         if not _is_safe_meta_value((args, kwargs)):
-            use_preannotated_meta(node, preannotated_meta_val)
             continue
 
         try:
             if node.op == "call_function":
                 if not _is_safe_meta_propagation_target(node.target, args, kwargs):
-                    use_preannotated_meta(node, preannotated_meta_val)
                     continue
-                with fake_mode:
-                    result = node.target(*args, **kwargs)
+                with _disable_current_modes(), fake_mode:
+                    result = _run_meta_overload(node.target, args, kwargs)
             else:
                 if not (
                     type(node.target) is str
-                    and _is_safe_meta_propagation_method(node.target)
+                    and not _has_registered_aten_fake_impl()
+                    and _is_safe_meta_propagation_method_name(node.target)
                     and len(args) > 0
                     and isinstance(args[0], torch.Tensor)
                 ):
-                    use_preannotated_meta(node, preannotated_meta_val)
                     continue
-                with fake_mode:
+                with _disable_current_modes(), fake_mode:
                     result = getattr(args[0], node.target)(*args[1:], **kwargs)
         except _META_PROPAGATION_OPERATOR_EXCEPTIONS:
             # Invalid metadata inputs and unsupported fake implementations must
@@ -643,18 +682,14 @@ def _propagate_replacement_meta(
             log.debug(
                 "Could not propagate replacement metadata for %s", node, exc_info=True
             )
-            use_preannotated_meta(node, preannotated_meta_val)
             continue
         if not _is_safe_meta_value(result):
-            use_preannotated_meta(node, preannotated_meta_val)
             continue
         copied_result = _try_copy_meta_val(result, fake_mode)
         if copied_result is _MISSING:
-            use_preannotated_meta(node, preannotated_meta_val)
             continue
         recorded_result = _try_copy_meta_val(copied_result, fake_mode)
         if recorded_result is _MISSING:
-            use_preannotated_meta(node, preannotated_meta_val)
             continue
         env[node] = copied_result
         copied_node.meta["val"] = recorded_result
