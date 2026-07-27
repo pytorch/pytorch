@@ -277,9 +277,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
   float x_min = 0;
   float x_max = 0;
   if (input.numel() > 0) {
-    auto [x_min_t, x_max_t] = at::aminmax(input_contig);
-    x_min = x_min_t.item<float>();
-    x_max = x_max_t.item<float>();
+    x_min = input_contig.min().item<float>();
+    x_max = input_contig.max().item<float>();
   } else {
     // On empty input, no output data will be generated,
     // so use arbitrary qparams.
@@ -444,7 +443,27 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Add bias term
   if (bias_.has_value()) {
     TORCH_CHECK(bias_->dim() == 1);
-    output.add_(*bias_);
+    const auto& bias = *bias_;
+    // Fast path for a contiguous float32 bias vector of length N: add it
+    // directly over the row-major output. Otherwise fall back to add_, which
+    // handles dtype promotion and size-1 broadcasting.
+    if (bias.scalar_type() == at::kFloat && bias.numel() == N &&
+        bias.is_contiguous()) {
+      const float* bias_data = bias.const_data_ptr<float>();
+      constexpr int64_t kGrainElems = 32768;
+      const int64_t grain_size =
+          std::max<int64_t>(1, kGrainElems / std::max<int64_t>(1, N));
+      at::parallel_for(0, M, grain_size, [&](int64_t begin, int64_t end) {
+        for (const auto row : c10::irange(begin, end)) {
+          float* out_row = output_data + row * N;
+          for (const auto col : c10::irange(N)) {
+            out_row[col] += bias_data[col];
+          }
+        }
+      });
+    } else {
+      output.add_(bias);
+    }
   }
 
   return output;
@@ -921,7 +940,7 @@ class QLinearUnpackedDynamicFp16 final {
 
     auto out_channel = weight.sym_sizes().vec()[0];
     auto out_sizes = input.sym_sizes().vec();
-    out_sizes[out_sizes.size() - 1] = out_channel;
+    out_sizes[out_sizes.size() - 1] = std::move(out_channel);
 
     return at::empty_symint(out_sizes, input.options());
   }

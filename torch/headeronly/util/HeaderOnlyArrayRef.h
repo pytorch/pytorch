@@ -54,22 +54,27 @@ class HeaderOnlyArrayRef {
 
   /// Construct a HeaderOnlyArrayRef from a single element.
   // TODO Make this explicit
-  constexpr HeaderOnlyArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
+  constexpr HeaderOnlyArrayRef(const T& OneElt C10_LIFETIMEBOUND)
+      : Data(&OneElt), Length(1) {}
 
   /// Construct a HeaderOnlyArrayRef from a pointer and length.
-  constexpr HeaderOnlyArrayRef(const T* data, size_t length)
+  constexpr HeaderOnlyArrayRef(const T* data C10_LIFETIMEBOUND, size_t length)
       : Data(data), Length(length) {}
 
   /// Construct a HeaderOnlyArrayRef from a range.
-  constexpr HeaderOnlyArrayRef(const T* begin, const T* end)
+  constexpr HeaderOnlyArrayRef(
+      const T* begin C10_LIFETIMEBOUND,
+      const T* end C10_LIFETIMEBOUND)
       : Data(begin), Length(end - begin) {}
 
   template <
       typename Container,
       typename U = decltype(std::declval<Container>().data()),
+      // NOLINTNEXTLINE(modernize-use-constraints)
       typename = std::enable_if_t<
           (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
-  /* implicit */ HeaderOnlyArrayRef(const Container& container)
+  /* implicit */ HeaderOnlyArrayRef(
+      const Container& container C10_LIFETIMEBOUND)
       : Data(container.data()), Length(container.size()) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::vector.
@@ -77,7 +82,8 @@ class HeaderOnlyArrayRef {
   // std::vector<bool>, because ArrayRef can't work on a std::vector<bool>
   // bitfield.
   template <typename A>
-  /* implicit */ HeaderOnlyArrayRef(const std::vector<T, A>& Vec)
+  /* implicit */ HeaderOnlyArrayRef(
+      const std::vector<T, A>& Vec C10_LIFETIMEBOUND)
       : Data(Vec.data()), Length(Vec.size()) {
     static_assert(
         !std::is_same_v<T, bool>,
@@ -86,18 +92,20 @@ class HeaderOnlyArrayRef {
 
   /// Construct a HeaderOnlyArrayRef from a std::array
   template <size_t N>
-  /* implicit */ constexpr HeaderOnlyArrayRef(const std::array<T, N>& Arr)
+  /* implicit */ constexpr HeaderOnlyArrayRef(
+      const std::array<T, N>& Arr C10_LIFETIMEBOUND)
       : Data(Arr.data()), Length(N) {}
 
   /// Construct a HeaderOnlyArrayRef from a C array.
   template <size_t N>
-  // NOLINTNEXTLINE(*c-arrays*)
-  /* implicit */ constexpr HeaderOnlyArrayRef(const T (&Arr)[N])
+  /* implicit */ constexpr HeaderOnlyArrayRef(
+      // NOLINTNEXTLINE(*c-arrays*)
+      const T (&Arr C10_LIFETIMEBOUND)[N])
       : Data(Arr), Length(N) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::initializer_list.
   /* implicit */ constexpr HeaderOnlyArrayRef(
-      const std::initializer_list<T>& Vec)
+      const std::initializer_list<T>& Vec C10_LIFETIMEBOUND)
       : Data(
             std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
                                              : std::begin(Vec)),
@@ -218,6 +226,7 @@ class HeaderOnlyArrayRef {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
+  // NOLINTNEXTLINE(modernize-use-constraints)
   std::enable_if_t<std::is_same_v<U, T>, HeaderOnlyArrayRef<T>>& operator=(
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       U&& Temporary) = delete;
@@ -227,6 +236,7 @@ class HeaderOnlyArrayRef {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
+  // NOLINTNEXTLINE(modernize-use-constraints)
   std::enable_if_t<std::is_same_v<U, T>, HeaderOnlyArrayRef<T>>& operator=(
       std::initializer_list<U>) = delete;
 
@@ -234,9 +244,26 @@ class HeaderOnlyArrayRef {
   /// @name Expensive Operations
   /// @{
   std::vector<T> vec() const {
+    if (this->empty()) {
+      return {};
+    }
     return std::vector<T>(this->Data, this->Data + this->Length);
   }
 
+  /// @}
+  /// @name Equality operators
+  /// @{
+  ///
+  /// When migrating these over from ArrayRef.h, we changed these from
+  /// free functions outside the class to be hidden friends which is the
+  /// modern C++ recommendation for various reasons including being more
+  /// precisely scoped and being non-templates after class instantiation.
+  friend bool operator==(HeaderOnlyArrayRef a1, HeaderOnlyArrayRef a2) {
+    return a1.equals(a2);
+  }
+  friend bool operator!=(HeaderOnlyArrayRef a1, HeaderOnlyArrayRef a2) {
+    return !a1.equals(a2);
+  }
   /// @}
 };
 
@@ -246,3 +273,15 @@ namespace torch::headeronly {
 using c10::HeaderOnlyArrayRef;
 using IntHeaderOnlyArrayRef = HeaderOnlyArrayRef<int64_t>;
 } // namespace torch::headeronly
+
+#if __cplusplus >= 202002L
+#include <ranges>
+// HeaderOnlyArrayRef is a non-owning view; iterators remain valid after the
+// HeaderOnlyArrayRef is destroyed. Opt in to the ranges borrowed-range
+// contract so that algorithms like std::ranges::find return real iterators
+// rather than std::ranges::dangling for temporary HeaderOnlyArrayRefs.
+namespace std::ranges {
+template <typename T>
+inline constexpr bool enable_borrowed_range<c10::HeaderOnlyArrayRef<T>> = true;
+} // namespace std::ranges
+#endif
