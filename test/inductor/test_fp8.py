@@ -2285,9 +2285,12 @@ class TestTDMScaled(TestCase):
         heuristic_cls = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic
         try:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            with mock.patch(
-                "torch._inductor.heuristics.template.triton.get_backend_num_stages",
-                return_value=2,
+            with (
+                config.patch({"enable_tdm": True}),
+                mock.patch(
+                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
+                    return_value=2,
+                ),
             ):
                 heuristic = heuristic_cls()
             self.assertEqual(len(heuristic.mm_configs), 4)
@@ -2296,6 +2299,34 @@ class TestTDMScaled(TestCase):
             )
             self.assertTrue(
                 all(config.block_k % 128 == 0 for config in heuristic.mm_configs)
+            )
+        finally:
+            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+
+    def test_tdm_scaled_config_policy_respects_enable_tdm(self):
+        from torch._inductor.heuristics.template.triton import (
+            BaseHeuristicSingleton,
+            ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic,
+        )
+
+        heuristic_cls = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic
+        try:
+            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+            with (
+                config.patch({"enable_tdm": False}),
+                mock.patch(
+                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
+                    return_value=2,
+                ),
+            ):
+                heuristic = heuristic_cls()
+            self.assertFalse(heuristic.uses_tdm_configs)
+            self.assertNotEqual(
+                heuristic.mm_configs, heuristic.tdm_scaled_persistent_mm_configs
+            )
+            self.assertGreater(len(heuristic.mm_configs), 4)
+            self.assertTrue(
+                all(config.num_stages == 2 for config in heuristic.mm_configs)
             )
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
