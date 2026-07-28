@@ -150,7 +150,10 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             "device_capacity_override=device_capacity_override, "
             "quack_cache_dir=quack_cache_dir"
         )
-        call_kwargs += f", config_key={config.quack_config_key!r}"
+        call_kwargs += (
+            f", config_key={config.quack_config_key!r}, "
+            "config_is_lowering_validated=True"
+        )
 
         output_name = self.get_output()
 

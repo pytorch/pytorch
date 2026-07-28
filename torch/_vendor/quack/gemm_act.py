@@ -148,13 +148,20 @@ def validate_grouped_n_contract_device(
     """Validate grouped-main support at the public dispatch boundary."""
     if group is None:
         return
-    if device_capacity[0] == 12:
+    major = device_capacity[0]
+    if major == 12:
         raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
-    if device_capacity[0] not in (10, 11):
+    if major not in (10, 11):
         raise NotImplementedError(
             "grouped_n_contract is currently validated only on "
             "SM100 and SM110"
         )
+    if group == 2 or (group == 4 and major == 10):
+        return
+    raise NotImplementedError(
+        "grouped_n_contract supports group 2 on SM100 and SM110, "
+        "plus group 4 on SM100"
+    )
 
 
 def normalize_local_reduce_output_layout(

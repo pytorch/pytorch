@@ -7,6 +7,10 @@ from typing import Any, Final
 
 import sympy
 
+from torch._inductor.kernel.flex_gemm.output_layout import (
+    FlexGemmOutputStorageLayout,
+    output_layout_supports_config,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     statically_known_true as fx_statically_known_true,
@@ -140,6 +144,10 @@ FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
 FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR = (
     "FlexGEMM concat-layout grouped main outputs do not compose with grouped "
     "reductions because concat layout permutes accumulator columns"
+)
+FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
+    "FlexGEMM concat-layout grouped-N outputs require B's output dimension to "
+    "be non-contiguous, as in linear weight.t()"
 )
 FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: grouped main output shape must equal the "
@@ -372,9 +380,7 @@ def validate_flex_gemm_local_reduce_config(
         axis = 1 - axis
     tile = config.tile_m if axis == 0 else config.tile_n
     is_sm100 = config.device_capacity == 10
-    if not is_sm100 and (
-        swapped or config.tile_n < 128 or config.tile_n % 64 != 0
-    ):
+    if not is_sm100 and (swapped or config.tile_n < 128 or config.tile_n % 64 != 0):
         return False
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
@@ -451,7 +457,12 @@ def flex_gemm_local_reduce_config_error(
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmGroupedMainOutputTransform:
-    """Contract groups on the innermost GEMM output dimension."""
+    """Describe contraction of the innermost GEMM output dimension.
+
+    Attributes:
+        group: Number of physical N values contracted into each logical output.
+        chunked: Whether lanes are contiguous N chunks rather than interleaved.
+    """
 
     group: int
     chunked: bool = False
@@ -487,17 +498,18 @@ class FlexGemmGroupedMainOutputTransform:
 def grouped_main_output_config_supported(config: Any, n: Any) -> bool:
     """Return whether a config has validated grouped-N store ownership.
 
-    Keep one CTA per cluster along N, require the physical N tile not to exceed
-    the problem, and admit only M-cluster families whose row ownership has been
-    validated: a single M CTA or the wide-M two-CTA layout. Multiple N tiles and
-    partial final tiles are supported by the ordinary tile scheduler and store
-    predicates.
+    Keep the physical M/N orientation, one CTA per cluster along N, and require
+    the physical N tile not to exceed the problem. Admit only M-cluster families
+    whose row ownership has been validated: a single M CTA or the wide-M two-CTA
+    layout. Multiple N tiles and partial final tiles are supported by the ordinary
+    tile scheduler and store predicates.
     """
     supported_m_cluster = config.cluster_m == 1 or (
         config.tile_m == 256 and config.cluster_m == 2
     )
     return (
-        supported_m_cluster
+        not config.swap_ab
+        and supported_m_cluster
         and config.cluster_n == 1
         and statically_known(config.tile_n <= n)
     )
@@ -569,6 +581,32 @@ class FlexGemmLocalReduceGeometry:
     @property
     def needs_physical_callbacks(self) -> bool:
         return local_reduce_needs_physical_callbacks(self.tensorssa_axis, self.group)
+
+
+def flex_gemm_output_config_supported(
+    config: Any,
+    n: Any,
+    local_reduce_geometries: Sequence[FlexGemmLocalReduceGeometry],
+    main_transform: FlexGemmGroupedMainOutputTransform | None,
+    output_layout: FlexGemmOutputStorageLayout | None,
+    output_layout_geometry: FlexGemmLocalReduceGeometry | None,
+    *,
+    allow_local_reduce_swap_ab: bool = False,
+) -> bool:
+    """Return whether one config satisfies the complete output-plan contract."""
+    return (
+        (main_transform is None or grouped_main_output_config_supported(config, n))
+        and all(
+            validate_flex_gemm_local_reduce_config(
+                config,
+                geometry.group,
+                geometry.axis,
+                allow_swap_ab=allow_local_reduce_swap_ab,
+            )
+            for geometry in local_reduce_geometries
+        )
+        and output_layout_supports_config(output_layout, config, output_layout_geometry)
+    )
 
 
 @dataclasses.dataclass(frozen=True)
