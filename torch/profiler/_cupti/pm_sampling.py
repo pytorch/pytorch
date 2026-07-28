@@ -429,20 +429,24 @@ class PmSampler:
                 "PM sampling decoded the maximum %d samples; some were dropped.",
                 self._max_samples,
             )
-        ts = np.empty(n, dtype=np.int64)
+        # start_timestamp is a C uint64; read it unsigned so a garbage sample
+        # carrying a full-uint64 value can't overflow the int64 assignment.
+        raw_ts = np.empty(n, dtype=np.uint64)
         vals = np.empty((n, len(self._metric_names)), dtype=np.float64)
         for i, s in enumerate(cd):
-            ts[i] = s.start_timestamp
+            raw_ts[i] = s.start_timestamp
             vals[i] = s.metric_values
-        # Drop an unset interval-start (0) or a stale small value from a
-        # different clock domain (observed ~7.5e13 vs the real ~1.78e18).
-        # Real samples fall within the look-back of the newest.
-        keep = ts > 0
+        # Drop an unset interval-start (0), a stale small value from a different
+        # clock domain (observed ~7.5e13 vs the real ~1.78e18), or a garbage
+        # sample whose timestamp overflows int64. Real samples fall within the
+        # look-back of the newest.
+        keep = (raw_ts > 0) & (raw_ts <= np.uint64(np.iinfo(np.int64).max))
         if keep.any():
-            keep &= ts >= int(ts[keep].max()) - self._lookback_window_ns
+            newest = int(raw_ts[keep].max())
+            keep &= raw_ts >= np.uint64(max(0, newest - self._lookback_window_ns))
         if not keep.any():
             return
-        ts = ts[keep]
+        ts = raw_ts[keep].astype(np.int64)
         vals = vals[keep]
         if self._retained_ts.size:
             self._retained_ts = np.concatenate([self._retained_ts, ts])
