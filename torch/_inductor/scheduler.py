@@ -10016,6 +10016,13 @@ class Scheduler:
         # Deferred to just before the first kernel that reads each input.
         V.graph.wrapper_code.register_alignment_check_inputs()
 
+        try:
+            self._codegen_loop(nodes)
+        finally:
+            self.previous_node = None
+        self.flush()
+        
+    def _codegen_loop(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
@@ -10192,8 +10199,6 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
-        self.previous_node = None
-        self.flush()
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results
