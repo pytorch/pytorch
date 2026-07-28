@@ -339,7 +339,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       ? (*source_indices_hash_opt).contiguous()
       : at::empty({0}, probably_coalesced._indices().options().dtype(kLong));
     const auto* RESTRICT hash_ptr = source_indices_hash_opt.has_value()
-      ? hash.data_ptr<int64_t>()
+      ? hash.const_data_ptr<int64_t>()
       : nullptr;
 
     auto iter = TensorIteratorConfig()
@@ -352,8 +352,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       const auto* RESTRICT ptr_indices = source_indices.const_data_ptr<index_t>();
       const auto* RESTRICT ptr_sorted_hash = sorted_hash.const_data_ptr<int64_t>();
       const auto sorted_hash_len = sorted_hash.numel();
-      auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<int64_t>();
-      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_count = intersection_count.mutable_data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.mutable_data_ptr<int64_t>();
 
       // Fusing hash computation with hash intersection.
       KernelLauncher::launch(iter,
