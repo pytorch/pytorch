@@ -136,9 +136,7 @@ def mx_e8m0_scale_intrinsic(
     max_power = math.floor(math.log2(max_value))
     scaled = source / max_value if rounding == "rceil" else source * 2.0**-max_power
     floor_inf_value = (
-        2.0 ** (128 - max_power)
-        if rounding == "floor" and max_power > 0
-        else None
+        2.0 ** (128 - max_power) if rounding == "floor" and max_power > 0 else None
     )
 
     if isinstance(scaled, cute.TensorSSA):
