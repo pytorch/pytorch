@@ -34,10 +34,17 @@ Generator createMKLGenerator(uint64_t seed_val) {
  */
 MKLGeneratorImpl::MKLGeneratorImpl(uint64_t seed_in)
   : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
+    stream_(nullptr),
     seed_(seed_in),
     offset_(0) {
     vslNewStream(&stream_, VSL_BRNG_PHILOX4X32X10, seed_);
   }
+
+MKLGeneratorImpl::~MKLGeneratorImpl() {
+  if (stream_) {
+    vslDeleteStream(&stream_);
+  }
+}
 
 /**
  * Manually seeds the engine with the seed input
@@ -102,7 +109,8 @@ void MKLGeneratorImpl::skip_ahead(uint64_t n) {
  * See Note [Acquire lock when using random generators]
  */
 MKLGeneratorImpl* MKLGeneratorImpl::clone_impl() const {
-  auto gen = new MKLGeneratorImpl();
+  auto gen = new MKLGeneratorImpl(seed_);
+  gen->skip_ahead(offset_);
   return gen;
 }
 
