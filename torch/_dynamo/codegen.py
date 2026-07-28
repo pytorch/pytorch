@@ -47,7 +47,7 @@ from .variables.functions import (
     LocalGeneratorObjectVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.script_object import TorchScriptObjectVariable
+from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -349,7 +349,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)

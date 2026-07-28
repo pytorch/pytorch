@@ -39,7 +39,7 @@ from torch.profiler._cupti.records import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
@@ -101,6 +101,10 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy.SRC_KIND,
         Memcpy.DST_KIND,
         Memcpy.FLAGS,
+        # Copies run on their own channel (CUPTI_CHANNEL_TYPE_ASYNC_MEMCPY), distinct from the
+        # compute channel kernels use -- select it like the kernel path does.
+        Memcpy.CHANNEL_ID,
+        Memcpy.CHANNEL_TYPE,
     },
     # Peer-to-peer / cross-device copies (e.g. tensor.to(other_gpu), pipeline sends). CUPTI
     # records these under MEMCPY2, NOT MEMCPY, so without this they never appear as GPU spans
@@ -120,6 +124,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy2.SRC_KIND,
         Memcpy2.DST_KIND,
         Memcpy2.FLAGS,
+        Memcpy2.CHANNEL_ID,
+        Memcpy2.CHANNEL_TYPE,
     },
     ActivityKind.MEMSET: {
         Memset.START,
@@ -134,6 +140,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memset.VALUE,
         Memset.MEMORY_KIND,
         Memset.FLAGS,
+        Memset.CHANNEL_ID,
+        Memset.CHANNEL_TYPE,
     },
     ActivityKind.RUNTIME: {
         Api.CBID,
@@ -201,6 +209,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         metadata_resolver: Callable[[int], str | None] | None = None,
         enable_cuda_sync: bool = False,
         defer_export: bool = True,
+        enable_pm_sampling: bool = False,
+        pm_metrics: Iterable[str] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         # Decoded activity kept COLUMNAR (frames of named numpy columns, not per-record
@@ -244,11 +254,28 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 thread_name="cupti-profiler-export",
                 auto_start_poller=defer_export,
             )
+        # Opt-in PM sampling (true SM-active % + DRAM-throughput %) is a feature of the CUPTI
+        # monitor: it registers us as a consumer (with our metrics) of the current device's shared
+        # session, delivering decoded frames to on_pm_samples (they render as GPU counter tracks).
+        # Off by default; also a no-op when no metrics are configured (pm_metrics).
+        self._pm_metrics = list(pm_metrics or [])
+        self._pm_enabled = (
+            enable_pm_sampling
+            and bool(self._pm_metrics)
+            and self.available
+            and torch.cuda.is_available()
+        )
+        # PM samples are timestamped, so they bucket into windows exactly like the activity
+        # records (via _timed_frames); no separate buffer. Per-device max start_ns delivered:
+        # a monotonic guard so each sample is enqueued at most once.
+        self._pm_last_ns: dict[int, int] = {}
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
         # is monotonic, so the comparison stays order-equivalent).
-        return self.convert_time(self.now_native_ns())
+        return self.convert_time(self.now_record_ns())
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
         # Worker thread: build a named-column frame per kind (convert/demangle/resolve while
@@ -268,9 +295,20 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if spec is None:
                 continue
             kind_str, builder, is_timed = spec
-            frame = builder(cols, convert, self._resolver)
+            frame = builder(cols, convert, self._annotation_resolver)
             if frame is None or _named_len(frame) == 0:
                 continue
+            # Pluggable graphed-op lane assignment: attach (logical_lane, lane_name) columns
+            # for work kinds so the trace builder can reassign graphed ops onto a dedicated
+            # lane. No-op when no resolver is installed.
+            if (
+                self._lane_resolver is not None
+                and "graph_node_id" in frame
+                and "stream_id" in frame
+            ):
+                frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
+                    self._lane_resolver, frame
+                )
             (timed if is_timed else ext).append((kind_str, frame))
         if not timed and not ext:
             return
@@ -318,6 +356,28 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             self._thread_resource_map.setdefault(pid, {})[opaque_tid] = sys_tid
 
     # --- async window API (the cupti_monitor profiler backend drives these) ----
+
+    def on_pm_samples(self, frame: dict[str, Any]) -> None:
+        # Monitor flush-thread hook: enqueue the frame as a timed frame so each finalized window
+        # slices its [start, boundary) samples (a frame spanning a boundary is split like any other
+        # timed frame -- see _finalize_window). Keep only samples newer than the last per device:
+        # decode drains (each delivered once, in increasing start_ns), so this is a cheap monotonic
+        # guard against any duplicate or out-of-order delivery.
+        ts = frame.get("start_ns")
+        if ts is None or not len(ts):
+            return
+        dev = frame["device_id"]
+        with self._lock:
+            keep = np.zeros(len(ts), dtype=bool)
+            for d in np.unique(dev):
+                keep |= (dev == d) & (ts > self._pm_last_ns.get(int(d), -1))
+            if not keep.any():
+                return
+            kept = _slice_frame(frame, keep)
+            kts, kdev = kept["start_ns"], kept["device_id"]
+            for d in np.unique(kdev):
+                self._pm_last_ns[int(d)] = int(kts[kdev == d].max())
+            self._timed_frames.append(("pm_sampling", kept))
 
     def open_window(self) -> None:
         """Start a trace window; records before this are excluded (no prepare-phase leak)."""
@@ -374,6 +434,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         (default) sync-flushes the tail, for use on the training thread. ``force=False`` (an
         off-thread finalize) must NOT flush, so it waits up to ``timeout_s`` for the poller to
         cover the windows, force-draining only if it stalls."""
+        # Release PM sampling first: its final tail decode must land in _timed_frames BEFORE the
+        # windows finalize, so those samples can be sliced into the closing window.
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.release_pm_sampling(self.on_pm_samples)
         if getattr(self, "_boundaries", None) is not None:
             sync = force
             if not force:
@@ -473,9 +537,6 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 # resolution -- on the worker thread while the active-id chain is live.
 
 
-_ANNOTATION_MISS = object()
-
-
 def _named_len(frame: dict[str, Any]) -> int:
     for col in frame.values():
         return len(col)
@@ -560,20 +621,39 @@ def _demangle_column(names: Any) -> Any:
 
 
 def _resolve_annotation_column(resolver, gnid: Any) -> Any:
-    """Per-row graph annotation as an object column, memoized over distinct graph_node_ids.
-    None resolver -> all-None column, no calls."""
+    """Per-row graph annotation as an object column. None resolver -> all-None column, no
+    calls. The resolver is memoized per graph_node_id by the observer (see
+    CuptiMonitorObserver._annotation_resolver), so distinct nodes resolve once for its
+    lifetime."""
     n = len(gnid)
     out = np.empty(n, dtype=object)
     if resolver is None:
         out[:] = None
         return out
-    cache: dict[int, Any] = {}
     for i, g in enumerate(gnid.tolist()):
-        val = cache.get(g, _ANNOTATION_MISS)
-        if val is _ANNOTATION_MISS:
-            val = cache[g] = resolver(g)
-        out[i] = val
+        out[i] = resolver(g)
     return out
+
+
+def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
+    """Per-row (logical_lane, lane_name) for graphed ops. Graphed rows (graph_node_id != 0)
+    get the resolver's (lane, name), or keep their CUDA stream when it returns None; eager rows
+    keep their CUDA stream and no name (the monitor names those "stream N"). The resolver is
+    keyed and memoized on graph_node_id by the observer (see CuptiMonitorObserver._lane_resolver),
+    so distinct nodes resolve once for its lifetime."""
+    gnid = frame["graph_node_id"]
+    n = len(gnid)
+    logical = np.array(
+        frame["stream_id"], dtype=np.int64
+    )  # default: the op's CUDA stream
+    names = np.full(n, None, dtype=object)
+    for i, g in enumerate(gnid.tolist()):
+        if not g:
+            continue
+        res = lane_resolver(g)
+        if res is not None:
+            logical[i], names[i] = res
+    return logical, names
 
 
 def _kernel_columns(cols, convert, resolver):
@@ -624,6 +704,8 @@ def _memcpy_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -649,6 +731,8 @@ def _memcpy2_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy2.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy2.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy2.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy2.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy2.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -669,6 +753,8 @@ def _memset_columns(cols, convert, resolver):
         "value": cols[Memset.VALUE.id].astype(np.int64),
         "memory_kind": cols[Memset.MEMORY_KIND.id].astype(np.int64),
         "flags": cols[Memset.FLAGS.id].astype(np.int64),
+        "channel": cols[Memset.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memset.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 

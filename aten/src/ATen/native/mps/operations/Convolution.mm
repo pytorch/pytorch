@@ -1,7 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Convolution.h>
 #include <ATen/ops/_mps_convolution_native.h>
 #include <ATen/ops/_mps_convolution_transpose_native.h>
 #include <ATen/ops/mps_convolution_backward_native.h>
@@ -9,6 +11,12 @@
 #include <fmt/format.h>
 
 namespace at::native {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Convolution_metallib.h>
+#endif
 
 // `memory_format` selects NDHWC vs NCDHW; `use_dhwio` selects DHWIO vs OIDHW
 // (caller must insert the matching in-graph weight transpose).
@@ -144,6 +152,66 @@ static void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
+// Forward-only Metal conv for filter dims >= 256 (MPSGraph miscomputes those); backward is unaffected.
+static Tensor mps_convolution_2d_large_kernel(const Tensor& input_t,
+                                              const Tensor& weight_t,
+                                              const std::optional<Tensor>& bias_opt,
+                                              IntArrayRef padding,
+                                              IntArrayRef stride,
+                                              IntArrayRef dilation,
+                                              int64_t groups) {
+  using namespace mps;
+  const auto input = input_t.contiguous();
+  const auto weight = weight_t.contiguous();
+  const bool has_bias = bias_opt && bias_opt->defined();
+  const auto bias = has_bias ? bias_opt->contiguous() : Tensor();
+
+  auto output = at::empty(conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation), input.options());
+  if (output.numel() == 0) {
+    return output;
+  }
+
+  Conv2DParams params;
+  params.N = static_cast<int32_t>(input.size(0));
+  params.C_in = static_cast<int32_t>(input.size(1));
+  params.C_out = static_cast<int32_t>(weight.size(0));
+  params.H = static_cast<int32_t>(input.size(2));
+  params.W = static_cast<int32_t>(input.size(3));
+  params.outH = static_cast<int32_t>(output.size(2));
+  params.outW = static_cast<int32_t>(output.size(3));
+  params.kH = static_cast<int32_t>(weight.size(2));
+  params.kW = static_cast<int32_t>(weight.size(3));
+  params.sH = static_cast<int32_t>(stride[0]);
+  params.sW = static_cast<int32_t>(stride[1]);
+  params.padH = static_cast<int32_t>(padding[0]);
+  params.padW = static_cast<int32_t>(padding[1]);
+  params.dH = static_cast<int32_t>(dilation[0]);
+  params.dW = static_cast<int32_t>(dilation[1]);
+  params.C_in_per_group = static_cast<int32_t>(weight.size(1));
+  params.C_out_per_group = params.C_out / static_cast<int32_t>(groups);
+  params.has_bias = has_bias;
+
+  // ow-blocking quarters the thread count; only use it when the grid still saturates the GPU.
+  const auto outRows = output.numel() / output.size(3);
+  const auto blockedThreads = outRows * ((output.size(3) + 3) / 4);
+  const bool blocked = blockedThreads >= 32768;
+  const auto nThreads = blocked ? blockedThreads : output.numel();
+  const bool i32 = canUse32BitIndexMath(input) && canUse32BitIndexMath(weight) && canUse32BitIndexMath(output);
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto PSO = lib.getPipelineStateForFunc(
+          fmt::format("conv2d_r{}_{}_{}", blocked ? 4 : 1, i32 ? "i32" : "i64", scalarToMetalTypeString(input)));
+      [computeEncoder setComputePipelineState:PSO];
+      mtl_setArgs(computeEncoder, input, weight, has_bias ? std::optional<Tensor>(bias) : std::nullopt, output, params);
+      mtl_dispatch1DJob(computeEncoder, PSO, nThreads);
+    }
+  });
+  return output;
+}
+
 static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     const Tensor& weight_t,
                                     const std::optional<Tensor>& bias_opt,
@@ -152,6 +220,15 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     IntArrayRef dilation,
                                     int64_t groups,
                                     std::optional<IntArrayRef> input_shape) {
+  // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
+  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256)) {
+    const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
+    const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
+    // Degenerate shapes fall through to the normal path's shape check.
+    if (outH >= 1 && outW >= 1) {
+      return mps_convolution_2d_large_kernel(input_t, weight_t, bias_opt, padding, stride, dilation, groups);
+    }
+  }
   constexpr auto kChannelsLast = MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = MemoryFormat::Contiguous;
