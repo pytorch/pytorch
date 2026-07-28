@@ -5160,6 +5160,10 @@ exit(2)
         or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
         "CUDA >= 12.4 required for conditional graph nodes",
     )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "segmented capture requires the native caching allocator",
+    )
     def test_cuda_graph_many_if_nodes_across_graphs(self):
         pred = torch.zeros((), device="cuda", dtype=torch.bool)
         x = torch.zeros((), device="cuda")
@@ -5179,6 +5183,10 @@ exit(2)
         or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
         "CUDA >= 12.4 required for conditional graph nodes",
     )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "segmented capture requires the native caching allocator",
+    )
     def test_cuda_graph_many_if_nodes_in_one_graph(self):
         pred = torch.zeros((), device="cuda", dtype=torch.bool)
         x = torch.zeros((), device="cuda")
@@ -5188,6 +5196,187 @@ exit(2)
                 g.begin_capture_to_if_node(pred)
                 x.add_(1.0)
                 g.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "segmented capture requires the native caching allocator",
+    )
+    def test_cuda_graph_segmented_if_nodes_use_root_stream(self):
+        predicates = [
+            torch.zeros((), device="cuda", dtype=torch.bool) for _ in range(4)
+        ]
+        result = torch.zeros(1024 * 1024, device="cuda")
+        pointers = []
+
+        def add_temporary(value):
+            temporary = torch.empty_like(result)
+            pointers.append(temporary.data_ptr())
+            temporary.fill_(value)
+            result.add_(temporary)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            add_temporary(1)
+            graph.begin_capture_to_if_node(predicates[0])
+            self.assertTrue(torch.cuda.is_current_stream_capturing())
+            add_temporary(2)
+            graph.begin_capture_to_if_node(predicates[1])
+            add_temporary(4)
+            graph.end_capture_to_conditional_node()
+            add_temporary(8)
+            graph.end_capture_to_conditional_node()
+            graph.begin_capture_to_if_node(predicates[2])
+            add_temporary(16)
+            graph.begin_capture_to_if_node(predicates[3])
+            add_temporary(32)
+            graph.end_capture_to_conditional_node()
+            add_temporary(64)
+            graph.end_capture_to_conditional_node()
+            add_temporary(128)
+
+        self.assertEqual(len(set(pointers)), 1)
+        self.assertEqual(len(get_cudagraph_segments(graph.pool())), 1)
+
+        for values, expected in (
+            ((False, False, False, False), 129),
+            ((True, False, False, False), 139),
+            ((True, True, True, True), 255),
+        ):
+            result.zero_()
+            for predicate, value in zip(predicates, values):
+                predicate.fill_(value)
+            graph.replay()
+            self.assertEqual(result, torch.full_like(result, expected))
+
+        pool = graph.pool()
+        del graph
+        gc.collect()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        self.assertEqual(get_cudagraph_segments(pool), [])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "segmented capture requires the native caching allocator",
+    )
+    def test_cuda_graph_segmented_capture_rejects_rng(self):
+        predicate = torch.ones((), device="cuda", dtype=torch.bool)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            torch.rand((), device="cuda")
+            with self.assertRaisesRegex(
+                RuntimeError, "RNG within a segmented CUDA graph capture"
+            ):
+                graph.begin_capture_to_if_node(predicate)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            graph.begin_capture_to_if_node(predicate)
+            with self.assertRaisesRegex(
+                RuntimeError, "RNG within a segmented CUDA graph capture"
+            ):
+                torch.rand((), device="cuda")
+            graph.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "segmented capture requires the native caching allocator",
+    )
+    def test_cuda_graph_segmented_capture_unjoined_stream_cleanup(self):
+        predicate = torch.ones((), device="cuda", dtype=torch.bool)
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        reserved_before = torch.cuda.memory_reserved()
+
+        root_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+        root_stream.wait_stream(torch.cuda.current_stream())
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(root_stream):
+            graph.capture_begin()
+            temporary = torch.empty(8 * 1024 * 1024, device="cuda")
+            side_stream.wait_stream(root_stream)
+            with torch.cuda.stream(side_stream):
+                temporary.add_(1)
+            with self.assertRaisesRegex(RuntimeError, "unjoined|Unjoined"):
+                graph.begin_capture_to_if_node(predicate)
+
+        del temporary, graph
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        self.assertEqual(torch.cuda.memory_reserved(), reserved_before)
+
+        recovered = torch.cuda.CUDAGraph()
+        output = torch.zeros((), device="cuda")
+        with torch.cuda.graph(recovered):
+            output.add_(1)
+        recovered.replay()
+        self.assertEqual(output, torch.ones_like(output))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "segmented capture requires the native caching allocator",
+    )
+    def test_cuda_graph_segmented_capture_joined_stream(self):
+        predicate = torch.ones((), device="cuda", dtype=torch.bool)
+        output = torch.zeros((), device="cuda")
+        root_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+        root_stream.wait_stream(torch.cuda.current_stream())
+        graph = torch.cuda.CUDAGraph()
+
+        with torch.cuda.stream(root_stream):
+            graph.capture_begin()
+            output.add_(1)
+            side_stream.wait_stream(root_stream)
+            with torch.cuda.stream(side_stream):
+                output.add_(2)
+            root_stream.wait_stream(side_stream)
+            graph.begin_capture_to_if_node(predicate)
+            output.add_(4)
+            graph.end_capture_to_conditional_node()
+            graph.capture_end()
+
+        output.zero_()
+        graph.replay()
+        self.assertEqual(output, torch.full_like(output, 7))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
