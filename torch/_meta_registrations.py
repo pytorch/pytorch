@@ -4641,7 +4641,7 @@ def meta_median_dim(input, dim=-1, keepdim=False):
     if device_hint(input) == "cuda":
         utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
-    if not input.dtype.is_floating_point:
+    if input.dim() > 0 and not input.dtype.is_floating_point:
         torch._check_index(
             input.shape[dim[0]] != 0,
             lambda: f"median(): Expected reduction dim {dim[0]} to have non-zero size.",
