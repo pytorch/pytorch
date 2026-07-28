@@ -400,6 +400,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
         # Intel GPU enables TMA by default
         cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        cur_kernel_options["USE_TDM"] = False
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
@@ -420,8 +421,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
                     ),
                 ],
             )
-        else:
-            cur_kernel_options["USE_TDM"] = False
 
         # Add ROCm-specific parameters if they exist in the config
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:

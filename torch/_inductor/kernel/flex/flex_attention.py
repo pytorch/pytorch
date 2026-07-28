@@ -483,6 +483,7 @@ def flex_attention(
 
         # Intel GPU enables TMA by default
         cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        cur_kernel_options["USE_TDM"] = False
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
@@ -508,8 +509,6 @@ def flex_attention(
                     ),
                 ],
             )
-        else:
-            cur_kernel_options["USE_TDM"] = False
 
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
