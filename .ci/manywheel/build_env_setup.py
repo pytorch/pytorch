@@ -84,14 +84,35 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, dict[str, set[int]]] = {
     },
 }
 
-# Architectures we additionally emit PTX for (forward-compat for newer GPUs).
+# Architectures we additionally emit PTX for on nightly/dev builds
+# (forward-compat for newer GPUs). Release/RC wheels ship SASS-only to keep
+# libtorch_cuda.so size down; see _ptx_arches().
 _PTX_ARCHES: set[int] = {120}
+
+
+def _is_release_build() -> bool:
+    """True for release / RC binary builds (vs nightly / dev builds).
+
+    Binary builds off a git tag (releases and RCs, e.g. v2.13.0 / v2.13.0-rc1)
+    get a ``PYTORCH_BUILD_VERSION`` with no ``.dev<date>`` suffix, while
+    nightlies do -- see .ci/pytorch/binary_populate_env.sh, which relies on the
+    same ``dev`` check for Triton pinning. A missing/empty version (local or
+    non-binary builds) is treated as non-release, so PTX is kept.
+    """
+    version = os.environ.get("PYTORCH_BUILD_VERSION", "")
+    return bool(version) and "dev" not in version
+
+
+def _ptx_arches() -> set[int]:
+    """PTX arches for this build: empty on release/RC, forward-compat set otherwise."""
+    return set() if _is_release_build() else _PTX_ARCHES
 
 
 def torch_cuda_arch_list(cuda_version: str, arch: str) -> str:
     """Format TORCH_CUDA_ARCH_LIST for the wheel build (";"-separated).
 
-    Returns e.g. "8.0;9.0;10.0;11.0;12.0+PTX" for cuda 13.x aarch64.
+    Returns e.g. "8.0;9.0;10.0;11.0;12.0+PTX" for cuda 13.x aarch64 on
+    nightly builds; release/RC builds omit the +PTX suffix (see _ptx_arches()).
 
     CUDA 13.x dropped sm_50/60/70, so we must NOT leave this empty --
     CMake's defaults still include compute_50 which nvcc 13 rejects with
@@ -102,8 +123,9 @@ def torch_cuda_arch_list(cuda_version: str, arch: str) -> str:
     archs = TORCH_CUDA_ARCH_LIST_TABLE[cuda_version].get(arch)
     if not archs:
         raise SystemExit(f"no TORCH_CUDA_ARCH_LIST for cuda {cuda_version} on {arch}")
+    ptx_arches = _ptx_arches()
     return ";".join(
-        f"{cc // 10}.{cc % 10}" + ("+PTX" if cc in _PTX_ARCHES else "")
+        f"{cc // 10}.{cc % 10}" + ("+PTX" if cc in ptx_arches else "")
         for cc in sorted(archs)
     )
 

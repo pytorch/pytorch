@@ -1244,9 +1244,6 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
   }
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {
-} // NCCL just starts sequence numbers at 0.
-
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seqCollective_;
 }
@@ -1296,10 +1293,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //      same order and hence no deadlocks.
   while (true) {
     {
-      std::lock(workMetaListMutex_, completedWorkListMutex_);
-      std::lock_guard<std::mutex> lockWork(workMetaListMutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> lockHook(
-          completedWorkListMutex_, std::adopt_lock);
+      std::scoped_lock lock(workMetaListMutex_, completedWorkListMutex_);
 
       if (workMetaList_.empty() && completedWorkList_.empty()) {
         return;
@@ -2086,7 +2080,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
   if (!terminateHeartbeatMonitorThread_.load()) {
-    // Create a error message reported from MonitorThread, so
+    // Create an error message reported from MonitorThread, so
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
@@ -2354,7 +2348,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // In that window, timeout checks can report false positives for
       // otherwise-complete work, so we defer timeout enforcement.
       // TODO: Remove once all supported HIP runtimes include:
-      // https://github.com/ROCm/clr/pull/3176
+      // https://github.com/ROCm/rocm-systems/pull/3176
       if (!at::cuda::is_graph_capture_active()) {
         timedout = !work.exception() && work.checkTimeout();
       }
@@ -3990,6 +3984,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     syncStream(device, ncclEvents_[key], ncclStream);
   }
 
+  // When nested in a coalescing manager, this per-call Work is discarded:
+  // endCoalescing returns the single Work the user tracks/waits and that owns
+  // the stash, so neither record nor enqueue this one. Mirrors collective().
+  bool enqueue =
+      !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
   auto work = initWork(
       device,
       rank_,
@@ -3998,7 +3997,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
       profilingTitle,
       inputs,
       outputs,
-      /*record=*/true);
+      /*record=*/enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -4007,8 +4006,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashed_for_allocator_safety_->stash(inputs);
-    work->stashed_for_allocator_safety_->stash(outputs);
+    // Stash onto coalescedTensors_ when nested in a coalescing manager, so the
+    // endCoalescing Work owns it and frees it on wait(); otherwise onto `work`.
+    if (coalescing_state_) {
+      coalescedTensors_.stash(inputs);
+      coalescedTensors_.stash(outputs);
+    } else {
+      work->stashed_for_allocator_safety_->stash(inputs);
+      work->stashed_for_allocator_safety_->stash(outputs);
+    }
   }
 
   // Start event should only be recorded before the ncclGroupStart() (which
@@ -4091,7 +4097,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   any FR events during cudagraph capture? if so, they won't be safe to poll for
   completion status.
   */
-  if (capture_status == c10::cuda::CaptureStatus::None) {
+  if (enqueue) {
     workEnqueue(work);
   }
   // TODO(whc) if the work isn't enqueued, I don't feel great about returning
@@ -4966,7 +4972,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_coalesced(
       "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
@@ -5116,7 +5122,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   }
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
@@ -5196,7 +5202,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       "nccl:_reduce_scatter_base");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
@@ -5353,7 +5359,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   return nullptr;
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -5665,7 +5671,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     // if not in the root rank, initialize outputs as empty list
     assertEmptyOutputTensorList(invalidArgument, outputTensors);
     outputs = {};
-    // append a empty tensor to the list, we don't use it but the
+    // append an empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
     outputs.emplace_back();
   }
@@ -5714,6 +5720,96 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       "nccl:gather");
 }
 
+c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const GatherOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_into_tensor: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  check_gpu_single_tensor(inputTensor);
+
+  const bool isRoot = getRank() == opts.rootRank;
+  if (isRoot) {
+    check_gpu_single_tensor(outputTensor);
+    if (inputTensor.dtype() != outputTensor.dtype()) {
+      invalidArgument("output tensor must have the same type as input tensor");
+    }
+    if (inputTensor.numel() * size_ != outputTensor.numel()) {
+      invalidArgument(
+          "output tensor size must be equal to world_size times input tensor size");
+    }
+  }
+
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      inputTensor, // inputTensors
+      outputTensor, // outputTensors
+      opts.rootRank, // root rank
+      "gather_into_tensor", // collective name
+      inputTensor.numel(), // inNelems
+      inputTensor.numel() * this->getSize(), // outNelems
+      inputTensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSize
+      globalRankStart_, // globalRankStart_
+      globalRankStride_, // globalRankStride_
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
+
+  return collective(
+      inputTensor,
+      outputTensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = static_cast<int>(opts.rootRank);
+        const auto count = input.numel();
+#if defined(NCCL_VERSION_CODE) && (NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3))
+        // ncclGather (added in NCCL 2.28.3) writes each rank's contribution
+        // directly into the flat output buffer on the root, so no per-rank
+        // copy is needed.
+        void* recvbuff = isRoot ? output.data_ptr() : nullptr;
+        return ncclGather(
+            input.data_ptr(),
+            recvbuff,
+            count,
+            getNcclDataType(input.scalar_type()),
+            root,
+            comm,
+            stream.stream());
+#else
+        // Fallback for NCCL < 2.28.3 (e.g. RCCL, which lacks ncclGather):
+        // reuse the shared send/recv gather helper, pointing its per-rank
+        // outputs at contiguous slices of the flat output buffer so there is
+        // still no extra copy. The helper's group-end check is
+        // non-blocking-communicator aware. Flatten the input so the helper's
+        // root self-copy (outputs[root].copy_(input)) is a flat-to-flat copy
+        // and does not try to broadcast a multi-dim input onto a 1-D slice.
+        auto flatInput = input.view(-1);
+        std::vector<at::Tensor> outputViews;
+        if (isRoot) {
+          auto flat = output.view(-1);
+          outputViews.reserve(size_);
+          for (const auto r : c10::irange(size_)) {
+            outputViews.push_back(flat.narrow(0, r * count, count));
+          }
+        }
+        torch::cuda::nccl::gather(flatInput, outputViews, comm, stream, root);
+        return ncclSuccess;
+#endif
+      },
+      OpType::GATHER,
+      opts.asyncOp,
+      "nccl:gather_into_tensor");
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -5741,7 +5837,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     // with an empty list
     assertEmptyInputTensorList(invalidArgument, inputTensors);
     inputs = {};
-    // append a empty tensor to the list, we don't use it but the
+    // append an empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
     inputs.emplace_back();
   }
@@ -5799,7 +5895,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
       NotImplementedError, "ProcessGroupNCCL does not support recvAnysource");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts) {

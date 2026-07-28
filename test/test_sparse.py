@@ -4286,8 +4286,8 @@ class TestSparse(TestSparseBase):
             else:
                 ex_layout = layout
             out_dense = out.to_dense()
-            self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
-            self.assertEqual(out_dense, ref_out, f"Result:\n{out_dense} does not match reference:\n{ref_out}")
+            self.assertTrue(out.layout == ex_layout, lambda msg: f"{msg}\nOutput layout {out.layout} expected {ex_layout}")
+            self.assertEqual(out_dense, ref_out, lambda msg: f"{msg}\nResult:\n{out_dense} does not match reference:\n{ref_out}")
 
         def check_invalid(args, error):
             with self.assertRaisesRegex(RuntimeError, error):

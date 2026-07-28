@@ -81,6 +81,7 @@ runner_mapping:
   linux.arm64.m8g.4xlarge: l-arm64g4-16-62                       # m8g.4xlarge
   linux.arm64.r7g.12xlarge.memory: l-arm64g3-61-463              # r7g.12xlarge
   linux.arm64.m7g.metal: l-barm64g3-62-226                       # m7g.metal
+  linux.arm64.m8g.metal-24xl: l-barm64g4-94-344                  # m8g.24xlarge (dedicated)
 
 
   # ---- x86 GPU — A100 (p4de family) ----
@@ -99,10 +100,32 @@ runner_mapping:
 
   # ---- Partner hardwares ----
 
+  # 8-GPU B200 has OSDC runners, but not enough capacity there yet, so keep it as
+  # a passthrough for now: OSDC builds can run while tests stay on the existing
+  # linux.dgx.b200.8 runner until OSDC capacity is available.
+  linux.dgx.b200.8: linux.dgx.b200.8
   linux.idc.xpu: linux.idc.xpu
+  linux.client.xpu: linux.client.xpu
   linux.google.tpuv7x.1: linux.google.tpuv7x.1
   linux.rocm.gpu.2: linux.rocm.gpu.2
   linux.rocm.gpu.mi210.1: linux.rocm.gpu.mi210.1
   linux.rocm.gpu.mi210.2: linux.rocm.gpu.mi210.2
+  linux.rocm.gpu.gfx942.1: linux.rocm.gpu.gfx942.1
+  linux.rocm.gpu.gfx942.4: linux.rocm.gpu.gfx942.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
+  linux.rocm.gpu.gfx1100: linux.rocm.gpu.gfx1100
+  # amd-do experiment routes mi350 tests to AMD's dedicated runners via this
+  # prefix; kept as passthrough so the OSDC build's runner mapping preserves it.
+  amd-do-linux.rocm.gpu.gfx950.1: amd-do-linux.rocm.gpu.gfx950.1
+  amd-do-linux.rocm.gpu.gfx950.2: amd-do-linux.rocm.gpu.gfx950.2
+
+# Runners whose hardware exists only on the Meta fleet (no LF / no AWS EC2
+# equivalent). The mapper forces the 'mt-' prefix on these regardless of which
+# experiment drives the build runner. When adding a new H100/B200 (or similar
+# Meta-only) variant to runner_mapping above, also add it here.
+meta_only_runners:
+  - linux.aws.h100
+  - linux.aws.h100.4
+  - linux.aws.h100.8
+  - linux.dgx.b200
