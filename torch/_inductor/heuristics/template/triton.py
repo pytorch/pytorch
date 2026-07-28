@@ -3332,10 +3332,17 @@ class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
         op_name: str,
         **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
+        mat_a, mat_b = kernel_inputs.mat1mat2()
+        a_row_major = tdm_descriptor_row_major(mat_a)
+        b_row_major = tdm_descriptor_row_major(mat_b)
+        if a_row_major is None or b_row_major is None:
+            raise AssertionError("TDM operand orientation must be unambiguous")
         kwargs = {
             **kwargs,
-            "tdm_a_row_major": True,
-            "tdm_b_row_major": False,
+            "tdm_a_row_major": a_row_major,
+            "tdm_b_row_major": b_row_major,
         }
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs

@@ -2331,6 +2331,55 @@ class TestTDMScaled(TestCase):
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
 
+    def test_tdm_scaled_config_uses_operand_orientation_probe(self):
+        from torch._inductor.heuristics.template.triton import (
+            BaseHeuristicSingleton,
+            BaseScaledMMConfigMixin,
+            ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic,
+        )
+        from torch._inductor.kernel_inputs import MMKernelInputs
+
+        mat_a, mat_b = mock.Mock(), mock.Mock()
+        scale_a, scale_b = mock.Mock(), mock.Mock()
+        kernel_inputs = MMKernelInputs(
+            [mat_a, mat_b, scale_a, scale_b], mat1_idx=0, mat2_idx=1
+        )
+
+        heuristic_cls = ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic
+        try:
+            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+            with (
+                config.patch({"enable_tdm": True}),
+                mock.patch(
+                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
+                    return_value=2,
+                ),
+                mock.patch(
+                    "torch._inductor.heuristics.template.triton.tdm_descriptor_row_major",
+                    side_effect=[True, False],
+                ),
+                mock.patch(
+                    "torch._inductor.heuristics.template.triton.get_num_sms",
+                    return_value=1,
+                ),
+                mock.patch.object(
+                    BaseScaledMMConfigMixin,
+                    "_get_template_configs_impl",
+                    return_value=iter([{}]),
+                ) as base_impl,
+            ):
+                heuristic = heuristic_cls()
+                [options] = heuristic._get_template_configs_impl(
+                    kernel_inputs, "scaled_mm"
+                )
+        finally:
+            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+
+        self.assertEqual(options["NUM_SMS"], 1)
+        self.assertFalse(options["TMA_EXPERIMENTAL_API"])
+        self.assertEqual(base_impl.call_args.kwargs["tdm_a_row_major"], True)
+        self.assertEqual(base_impl.call_args.kwargs["tdm_b_row_major"], False)
+
     def test_tdm_main_loop_supplies_required_tile_options(self):
         from torch._inductor.heuristics.template.triton import (
             BaseHeuristicSingleton,
