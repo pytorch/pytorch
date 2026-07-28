@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import math
 import operator
+import struct
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -24,14 +24,17 @@ aten = torch.ops.aten
 
 
 def _normalize_cse_arg(val: Any) -> Any:
-    """Replace NaN float values with a sign-preserving sentinel that compares equal to itself.
+    """Key floats and complex by IEEE 754 bit pattern for consistent hashing.
 
-    IEEE 754 NaN values do not compare equal (nan != nan), which prevents CSE from
-    deduplicating identical NaN-filled tensors. Replace NaN floats with a sign-preserving
-    sentinel so the token equality check passes.
+    Python float hash/eq is not value-identity: nan != nan (and hash(nan)
+    is id-based), while -0.0 == 0.0 and hashes equal.  Key by bit pattern
+    so truly identical values deduplicate, while values that differ only in
+    the sign bit (nan vs -nan, 0.0 vs -0.0) do not merge.
     """
-    if isinstance(val, float) and math.isnan(val):
-        return ("__CSE_NAN__", math.copysign(1.0, val))
+    if isinstance(val, float):
+        return ("__CSE_FLOAT__", struct.pack(">d", val))
+    if isinstance(val, complex):
+        return ("__CSE_COMPLEX__", struct.pack(">dd", val.real, val.imag))
     return val
 
 
@@ -209,6 +212,7 @@ def fx_graph_cse(
                         arg_list[i] = env[v]
                     if isinstance(v, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                         arg_list[i] = v.node
+                    arg_list[i] = _normalize_cse_arg(arg_list[i])
                 return tuple(arg_list), spec
 
             args, args_spec = substitute(n.args)
@@ -220,9 +224,9 @@ def fx_graph_cse(
             token = {
                 "target": n.target,
                 "extra_key": extra_key,
-                "args": tuple(_normalize_cse_arg(a) for a in args),
+                "args": args,
                 "args_spec": args_spec,
-                "kwargs": tuple(_normalize_cse_arg(a) for a in kwargs),
+                "kwargs": kwargs,
                 "kwargs_spec": kwargs_spec,
                 "custom_context": custom_context_key(n),
             }
@@ -230,12 +234,10 @@ def fx_graph_cse(
             # hash substituted args to a number, do not hash specs because specs are not hashable
             # We need to add type into hash to avoid situations like:
             # hash((primals_2, 1.0)) == hash((primals_2, 1))
-            # Normalize args with _normalize_cse_arg to ensure NaN values hash consistently --
-            # different float('nan') instances have different hashes in CPython.
             hash_arg = hash(
                 (
-                    tuple((_normalize_cse_arg(a), type(a)) for a in args),
-                    tuple((_normalize_cse_arg(a), type(a)) for a in kwargs),
+                    tuple((a, type(a)) for a in args),
+                    tuple((a, type(a)) for a in kwargs),
                 )
             )
             hash_val = (n.target, extra_key, hash_arg)

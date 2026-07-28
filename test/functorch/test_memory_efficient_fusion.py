@@ -424,6 +424,33 @@ class ReduceTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 0, check_val=False)
 
+    def test_neg_zero_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, 0.0)
+            b = torch.full_like(x, -0.0)
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
+    def test_nan_dedup_non_factory_op(self):
+        def f(x):
+            a = x.clamp(min=float("nan"))
+            b = x.clamp(min=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_nan_dedup_list_arg(self):
+        def f(x):
+            a = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            b = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
 
 class RandomOpTestCase(TestCase):
     def test_random(self):
