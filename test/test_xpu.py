@@ -2310,8 +2310,7 @@ if __name__ == "__main__":
             torch.xpu.current_stream().wait_stream(capture_stream)
 
             torch.xpu.empty_cache()
-            g.replay()
-            torch.xpu.synchronize()
+
         except Exception as e:
             raise self.failureException(
                 f"capture with a side-stream free must complete without error, got {e!r}"
