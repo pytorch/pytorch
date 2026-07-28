@@ -3429,6 +3429,29 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_gloo_rank_membership(self):
         self._test_rank_membership(backend="gloo")
 
+    @requires_gloo()
+    def test_new_group_rank_normalization(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+
+        ranks = torch.arange(self.world_size)
+        group = c10d.new_group(ranks=ranks)
+        self.assertEqual(
+            c10d.get_process_group_ranks(group), list(range(self.world_size))
+        )
+
+        tensor = torch.tensor([self.rank])
+        c10d.broadcast(tensor, src=0, group=group)
+        self.assertEqual(tensor, torch.tensor([0]))
+
+        with self.assertRaisesRegex(TypeError, "ranks must be a sequence of integers"):
+            c10d.new_group(ranks=torch.arange(self.world_size, dtype=torch.float))
+
+        with self.assertRaisesRegex(ValueError, "must not contain duplicate entries"):
+            c10d.new_group(ranks=[0, torch.tensor(0)])
+
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_tensor_dtype_mismatch(self):
