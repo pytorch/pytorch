@@ -37,14 +37,10 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         # Set after super().setUp(): MultiProcessTestCase.setUp() resets the
         # dict, and the parent only consults it when joining the children.
         if self.device_type == "cuda" and self._testMethodName in DETECTING_TESTS:
-            # The CUDA checker traps on the device rather than raising a
-            # catchable error, so the process dies instead; see
-            # test_c10d_nccl.py's test_nan_assert. ROCm's assert(0) surfaces as
-            # a signal rather than a clean exit code.
+            # CUDA and ROCm can report the device trap as a runtime exception.
+            # _assert_nan_detected normalizes that path with os._exit(SIGABRT).
             self.special_return_code_checks = {
-                getattr(self, self._testMethodName).__wrapped__: (
-                    -signal.SIGABRT if torch.version.hip else signal.SIGABRT
-                )
+                getattr(self, self._testMethodName).__wrapped__: signal.SIGABRT
             }
 
     def _assert_nan_detected(self, tensor):
