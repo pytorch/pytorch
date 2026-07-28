@@ -21,7 +21,6 @@ from torch.profiler._cupti.monitor_trace import merge_trace_window_into_chrome_t
 from torch.profiler._cupti.observers.base import (
     CuptiMonitorObserver,
     default_graph_annotation_resolver,
-    default_graph_dependency_resolver,
     ObserverAnnotationSettings,
 )
 from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
@@ -212,6 +211,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         defer_export: bool = True,
         enable_pm_sampling: bool = False,
         pm_metrics: Iterable[str] | None = None,
+        enable_graph_dependencies: bool = False,
     ) -> None:
         self._lock = threading.Lock()
         # Decoded activity kept COLUMNAR (frames of named numpy columns, not per-record
@@ -245,7 +245,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             selection,
             annotations=ObserverAnnotationSettings(
                 graph_annotation_resolver=default_graph_annotation_resolver,
-                graph_dependency_resolver=default_graph_dependency_resolver,
+                # Node->node dependency arrows are opt-in at the monitor level (extra work at
+                # graph instantiate + arrow rendering): the observer records the topology into
+                # its own map and draws the arrows only when this is set.
+                record_graph_dependencies=enable_graph_dependencies,
             ),
         )
         if self.available:

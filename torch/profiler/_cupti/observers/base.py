@@ -21,6 +21,8 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from torch.utils.hooks import RemovableHandle
+
 
 # graph_node_id -> annotation name (or None). The graph naming mechanism shared by
 # observers: map a CUDA-graph node id to its registered region name (survives graph
@@ -38,9 +40,9 @@ GraphAnnotationResolver = Callable[[int], "Any | None"]
 LaneResolver = Callable[[int], "tuple[int, str] | None"]
 
 # graph_node_id -> predecessor graph_node_ids (or None when the node has no recorded
-# dependencies): the CUDA-graph node->node edges the pftrace export draws as dependency arrows,
-# read from the recorded dependency registry (survives replay, keyed on graph_node_id like the
-# annotation resolver). Pluggable; see ObserverAnnotationSettings.graph_dependency_resolver.
+# dependencies): the CUDA-graph node->node edges the export draws as dependency arrows, read
+# from the observer's own dependency map (recorded at graph instantiate, keyed on graph_node_id
+# like the annotation resolver). See ObserverAnnotationSettings.record_graph_dependencies.
 GraphDependencyResolver = Callable[[int], "list[int] | None"]
 
 
@@ -56,20 +58,6 @@ def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     except Exception:
         return None
     return annotations.get(graph_node_id)
-
-
-def default_graph_dependency_resolver(graph_node_id: int) -> list[int] | None:
-    """Default resolver: map a CUDA-graph node id to its recorded predecessor graph_node_ids,
-    or None when it has none."""
-    if graph_node_id == 0:
-        return None
-    try:
-        from torch.cuda._graph_annotations import get_graph_dependencies
-
-        dependencies = get_graph_dependencies()
-    except Exception:
-        return None
-    return dependencies.get(graph_node_id)
 
 
 @dataclass(frozen=True)
@@ -92,10 +80,11 @@ class ObserverAnnotationSettings:
     # CUDA stream lane (no reassignment). Independent of graph_annotation_resolver, though a
     # consumer's implementation typically maps the node's annotation to a lane.
     graph_lane_resolver: LaneResolver | None = None
-    # Pluggable graph node->node dependency lookup (see GraphDependencyResolver). None -> no
-    # dependency arrows. Keyed on graph_node_id like graph_annotation_resolver; pass
-    # default_graph_dependency_resolver to enable.
-    graph_dependency_resolver: GraphDependencyResolver | None = None
+    # Record each graph's node->node dependency topology at instantiate into the observer's own
+    # map (the source for dependency arrows). Off by default (extra work at graph instantiate +
+    # arrow rendering); the observer registers an instantiate hook + a resolver over its map
+    # only when this is set.
+    record_graph_dependencies: bool = False
 
 
 class CuptiMonitorObserver:
@@ -153,6 +142,12 @@ class CuptiMonitorObserver:
         *,
         annotations: ObserverAnnotationSettings | None = None,
     ) -> None:
+        # Observer-owned graph node->node dependency map (graph_node_id -> predecessor
+        # graph_node_ids): populated at graph instantiate by our instantiate hook and read by
+        # our dependency resolver. Stays empty unless record_graph_dependencies is set.
+        self._graph_dependencies: dict[int, list[int]] = {}
+        self._instantiate_hook_handles: list[RemovableHandle] = []
+        record_deps = annotations is not None and annotations.record_graph_dependencies
         # Region naming (see ObserverAnnotationSettings): an enabled source folds its
         # required fields into the selection (graph: just graph_node_id; eager: extra kinds).
         if annotations is None:
@@ -163,7 +158,9 @@ class CuptiMonitorObserver:
         else:
             self._annotation_resolver = annotations.graph_annotation_resolver
             self._lane_resolver = annotations.graph_lane_resolver
-            self._dependency_resolver = annotations.graph_dependency_resolver
+            self._dependency_resolver = (
+                self._make_dependency_resolver() if record_deps else None
+            )
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
             activities = self._with_graph_fields(activities)
@@ -187,6 +184,52 @@ class CuptiMonitorObserver:
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
+        # Own the dependency map: record each graph's topology at instantiate into it. Only
+        # while we registered with the monitor (nothing consumes the map otherwise). Removed in
+        # close() so nothing leaks this observer.
+        if record_deps and self.available:
+            self._register_graph_instantiate_hook()
+
+    def _make_dependency_resolver(self) -> GraphDependencyResolver:
+        """A resolver over this observer's own dependency map: graph_node_id -> predecessor
+        graph_node_ids (None when the node has none). Captures the map, not self, so the
+        cached resolver never pins the observer."""
+        deps = self._graph_dependencies
+
+        def resolve(graph_node_id: int) -> list[int] | None:
+            if graph_node_id == 0:
+                return None
+            return deps.get(graph_node_id)
+
+        return resolve
+
+    def _register_graph_instantiate_hook(self) -> None:
+        """Register an instantiate hook that reads each graph's node dependency topology
+        into this observer's map. We hold the live graph here, so get_graph_data() works (it
+        needs keep_graph=True + an instantiated graph, and raises otherwise -- naturally
+        skipping keep_graph=False graphs). Edges are keyed by tools_id (== the CUPTI
+        graph_node_id, joining to profiler kernel records). The handler captures only the map
+        (never self), so the global registry cannot pin this observer; the handle is removed in
+        close()."""
+        from torch.cuda.graphs import register_graph_instantiate_hook
+
+        deps = self._graph_dependencies
+
+        def handler(torch_cuda_graph: Any) -> None:
+            try:
+                nodes = torch_cuda_graph.get_graph_data()["nodes"]
+            except (RuntimeError, AttributeError, KeyError):
+                return
+            tid_by_index = [n["tools_id"] for n in nodes]
+            deps.update(
+                {
+                    n["tools_id"]: [tid_by_index[i] for i in n["dependencies"]]
+                    for n in nodes
+                    if n["dependencies"]
+                }
+            )
+
+        self._instantiate_hook_handles.append(register_graph_instantiate_hook(handler))
 
     @property
     def available(self) -> bool:
@@ -298,6 +341,9 @@ class CuptiMonitorObserver:
 
     def close(self) -> None:
         """Unregister from the monitor. Idempotent."""
+        for handle in self._instantiate_hook_handles:
+            handle.remove()
+        self._instantiate_hook_handles.clear()
         if self._obs is not None and self._monitor is not None:
             self._monitor.unregister(self._obs)
             self._obs = None
