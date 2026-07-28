@@ -131,6 +131,10 @@ FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
     "FlexGEMM grouped main outputs do not compose with aux outputs, local "
     "reductions, captured tensors, C, alpha/beta, or batched GEMMs yet"
 )
+FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
+    "FlexGEMM concat-layout grouped-N outputs require B's output dimension to "
+    "be non-contiguous, as in linear weight.t()"
+)
 FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: grouped main output shape must equal the "
     "physical GEMM output shape with N divided by the transform group"
@@ -423,7 +427,12 @@ def flex_gemm_local_reduce_config_error(
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmGroupedMainOutputTransform:
-    """Contract groups on the innermost GEMM output dimension."""
+    """Describe contraction of the innermost GEMM output dimension.
+
+    Attributes:
+        group: Number of physical N values contracted into each logical output.
+        chunked: Whether lanes are contiguous N chunks rather than interleaved.
+    """
 
     group: int
     chunked: bool = False
@@ -459,17 +468,18 @@ class FlexGemmGroupedMainOutputTransform:
 def grouped_main_output_config_supported(config: Any, n: Any) -> bool:
     """Return whether a config has validated grouped-N store ownership.
 
-    Keep one CTA per cluster along N, require the physical N tile not to exceed
-    the problem, and admit only M-cluster families whose row ownership has been
-    validated: a single M CTA or the wide-M two-CTA layout. Multiple N tiles and
-    partial final tiles are supported by the ordinary tile scheduler and store
-    predicates.
+    Keep the physical M/N orientation, one CTA per cluster along N, and require
+    the physical N tile not to exceed the problem. Admit only M-cluster families
+    whose row ownership has been validated: a single M CTA or the wide-M two-CTA
+    layout. Multiple N tiles and partial final tiles are supported by the ordinary
+    tile scheduler and store predicates.
     """
     supported_m_cluster = config.cluster_m == 1 or (
         config.tile_m == 256 and config.cluster_m == 2
     )
     return (
-        supported_m_cluster
+        not config.swap_ab
+        and supported_m_cluster
         and config.cluster_n == 1
         and statically_known(config.tile_n <= n)
     )

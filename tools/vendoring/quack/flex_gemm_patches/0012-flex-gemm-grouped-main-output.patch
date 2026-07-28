@@ -2,20 +2,27 @@ diff --git a/gemm_act.py b/gemm_act.py
 index f6bbf7f..0fc8cc0 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
-@@ -119,0 +120,15 @@ def register_local_reduce_fns(
+@@ -119,0 +120,22 @@ def register_local_reduce_fns(
 +def validate_grouped_n_contract_device(
 +    group: int | None, device_capacity: tuple[int, int]
 +) -> None:
 +    """Validate grouped-main support at the public dispatch boundary."""
 +    if group is None:
 +        return
-+    if device_capacity[0] == 12:
++    major = device_capacity[0]
++    if major == 12:
 +        raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
-+    if device_capacity[0] not in (10, 11):
++    if major not in (10, 11):
 +        raise NotImplementedError(
 +            "grouped_n_contract is currently validated only on "
 +            "SM100 and SM110"
 +        )
++    if group == 2 or (group == 4 and major == 10):
++        return
++    raise NotImplementedError(
++        "grouped_n_contract supports group 2 on SM100 and SM110, "
++        "plus group 4 on SM100"
++    )
 +
 +
 @@ -120,0 +136 @@ class GemmActMixin(ComposableEpiMixin):
