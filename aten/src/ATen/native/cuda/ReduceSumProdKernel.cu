@@ -95,6 +95,19 @@ struct prod_functor {
   // Ref: https://github.com/pytorch/pytorch/issues/77305
   #if AT_USE_JITERATOR() && !defined(_MSC_VER)
   void operator()(TensorIterator& iter) {
+    // The jiterated reduction path overflows 32-bit indexing for 16-bit dtypes
+    // on tensors with more than 2^31 elements (see
+    // https://github.com/pytorch/pytorch/issues/190964). Route 16-bit types
+    // through the vectorized gpu_reduce_kernel path (as sum_functor does),
+    // which splits large reductions into 32-bit-indexable sub-iterations.
+    constexpr bool is_16_bits = sizeof(scalar_t) == 2;
+    if constexpr (is_16_bits) {
+      gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/4, /*input_vec_size=*/8>(
+          iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+            return a * b;
+          }), 1.);
+      return;
+    }
     std::string func = jiterator_stringify(
     arg_t combine(arg_t a, arg_t b) {
       return a * b;

@@ -436,6 +436,22 @@ class TestReductions(TestCase):
         """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
         self._test_ref(op, make_tensor((275000000,), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True))
 
+    @onlyCUDA
+    @largeTensorTest("10GB")
+    def test_prod_large_input_16bit(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190964:
+        # prod over a reduced dim of a >2**31-element 16-bit tensor triggered an
+        # illegal memory access due to 32-bit indexing overflow in the jiterated
+        # reduction path.
+        for dtype in (torch.float16, torch.bfloat16):
+            x = torch.ones((2, 2**31 // 2 + 1024), device=device, dtype=dtype)
+            self.assertEqual(
+                torch.prod(x, dim=0),
+                torch.ones(x.size(1), device=device, dtype=dtype),
+            )
+            del x
+            torch.cuda.empty_cache()
+
     @skipIfMPS
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
