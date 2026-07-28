@@ -44,7 +44,8 @@ control (e.g. resolving once before remapping several graphs).
 from __future__ import annotations
 
 import importlib.metadata
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from logging import getLogger
 from typing import Any, TYPE_CHECKING, TypeAlias
@@ -54,6 +55,11 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 import torch
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+
 from torch.cuda._utils import (
     _check_cuda_bindings,
     _check_cuda_bindings_driver,
@@ -572,6 +578,116 @@ def clear_kernel_annotations() -> None:
     """
     _kernel_annotations.clear()
     _pending_scopes.clear()
+
+
+# tools_id -> list of predecessor tools_ids, keyed by exec-graph tools_id (which equals the
+# CUPTI graph_node_id), so it joins to profiler kernel records directly. Independent of
+# _kernel_annotations: recorded even without mark_kernels, so the profiler's graph node->node
+# dependency arrows work without any annotation scopes.
+_graph_dependencies: dict[int, list[int]] = {}
+
+
+def record_graph_dependencies(torch_cuda_graph: torch.cuda.CUDAGraph) -> int | None:
+    """Record the exec graph's node dependency edges keyed by tools_id.
+
+    Reads the topology from ``get_graph_data()`` (needs ``keep_graph=True`` and an instantiated
+    graph -- it raises otherwise, so this naturally no-ops for keep_graph=False). Stores, for
+    each node with predecessors, ``tools_id -> [predecessor tools_ids]``. Idempotent: re-recording
+    the same exec graph overwrites the same tools_ids. Returns the exec graph id the edges were
+    recorded under (``tools_id >> 32``), or None if nothing was recorded, so the caller can track
+    it for cleanup on graph destroy."""
+    if _is_tools_id_unavailable():
+        return None
+    try:
+        nodes = torch_cuda_graph.get_graph_data()["nodes"]
+        tid_by_index = [n["tools_id"] for n in nodes]
+        exec_graph_id = None
+        for n in nodes:
+            deps = n["dependencies"]
+            if deps:
+                _graph_dependencies[n["tools_id"]] = [tid_by_index[i] for i in deps]
+                exec_graph_id = n["tools_id"] >> 32
+        return exec_graph_id
+    except (RuntimeError, AttributeError, KeyError):
+        return None
+
+
+def get_graph_dependencies() -> dict[int, list[int]]:
+    """Return the graph dependency map (tools_id -> predecessor tools_ids)."""
+    return _graph_dependencies
+
+
+def clear_graph_dependencies() -> None:
+    """Clear all recorded graph dependencies."""
+    _graph_dependencies.clear()
+
+
+def remove_kernel_annotations(exec_graph_ids: Iterable[int]) -> None:
+    """Drop kernel-annotation entries whose exec graph id (tools_id >> 32) is in
+    exec_graph_ids, so the map does not grow across the run. Run by the annotation
+    resolver's graph-destroy handler."""
+    ids = set(exec_graph_ids)
+    if not ids:
+        return
+    for key in [k for k in _kernel_annotations if k >> 32 in ids]:
+        del _kernel_annotations[key]
+
+
+def remove_graph_dependencies(exec_graph_ids: Iterable[int]) -> None:
+    """Drop dependency entries whose exec graph id (tools_id >> 32) is in
+    exec_graph_ids, so the map does not grow across the run. Run by the dependency
+    resolver's graph-destroy handler."""
+    ids = set(exec_graph_ids)
+    if not ids:
+        return
+    for key in [k for k in _graph_dependencies if k >> 32 in ids]:
+        del _graph_dependencies[key]
+
+
+def remove_graph_data(exec_graph_ids: Iterable[int]) -> None:
+    """Drop all annotation + dependency entries for the given exec graph ids;
+    convenience over remove_kernel_annotations + remove_graph_dependencies."""
+    remove_kernel_annotations(exec_graph_ids)
+    remove_graph_dependencies(exec_graph_ids)
+
+
+# Consumer-registered cleanup handlers invoked when a CUDA graph is destroyed, each
+# handed the destroyed graph's exec ids (tools_id >> 32). A consumer (e.g. a
+# profiler observer) registers one per graph-node resolver it installs, so the CUDA
+# graph code stays free of profiler-registry knowledge; graphs.py arms its destroy
+# callback only while a handler is registered. Keyed by RemovableHandle id, mirroring
+# graphs.py's register_*_hook pattern.
+_graph_destroy_handlers: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
+
+
+def register_graph_destroy_handler(fn: Callable[[set[int]], None]) -> RemovableHandle:
+    """Register ``fn(exec_ids)`` to run when a CUDA graph is destroyed, so a
+    consumer can purge its per-graph state. Returns a handle whose ``remove()``
+    unregisters it."""
+    from torch.utils.hooks import RemovableHandle
+
+    handle = RemovableHandle(_graph_destroy_handlers)
+    _graph_destroy_handlers[handle.id] = fn
+    return handle
+
+
+def graph_destroy_handlers_active() -> bool:
+    """True when any graph-destroy handler is registered (i.e. a consumer wants
+    destroy cleanup). The "monitor active" gate graphs.py checks before arming its
+    destroy callback."""
+    return bool(_graph_destroy_handlers)
+
+
+def run_graph_destroy_handlers(exec_graph_ids: set[int]) -> None:
+    """Invoke every registered handler with the destroyed exec graph ids, swallowing
+    per-handler errors so one failure does not abort the rest (matching the graph
+    destroy-callback fire semantics). The single entry point a graph's destroy
+    callback calls; it fans out to the registry."""
+    for fn in list(_graph_destroy_handlers.values()):
+        try:
+            fn(exec_graph_ids)
+        except Exception:
+            logger.exception("graph destroy handler failed")
 
 
 # Counter-based stream ID registry. IDs start at 60 (above the highest
