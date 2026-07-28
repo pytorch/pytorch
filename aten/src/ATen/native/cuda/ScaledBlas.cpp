@@ -464,6 +464,10 @@ _scaled_rowwise_rowwise(
           bool /*use_fast_accum*/,
           Tensor& /*out*/);
 
+// Defined as part of the _v2 code below; forward-declared so the v1 path can
+// share the same architecture/cuBLASLt-version support check.
+void _check_deepseek_support();
+
 } // namespace
 
 
@@ -669,6 +673,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
 #endif
 #endif
+  }
+  else if ((scaling_choice_a == ScalingType::BlockWise1x128 || scaling_choice_a == ScalingType::BlockWise128x128) &&
+           (scaling_choice_b == ScalingType::BlockWise1x128 || scaling_choice_b == ScalingType::BlockWise128x128)) {
+    _check_deepseek_support();
   }
 
   return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out, scale_result);
