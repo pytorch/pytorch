@@ -4,7 +4,6 @@
 import functools
 import hashlib
 import inspect
-from collections.abc import Callable
 
 import cutlass
 import cutlass.cute as cute
@@ -47,15 +46,6 @@ def blocked_128x4_output_tensor(tensor: cute.Tensor) -> cute.Tensor:
 def blocked_128x4_transposed_output_tensor(tensor: cute.Tensor) -> cute.Tensor:
     """Expose blocked storage in the swapped GEMM output orientation."""
     return blocked_128x4_output_tensor_impl(tensor, True)
-
-
-def blocked_128x4_output_tensor_for_orientation(transposed: bool) -> Callable:
-    """Return the callback specialized for one physical GEMM orientation."""
-    return (
-        blocked_128x4_transposed_output_tensor
-        if transposed
-        else blocked_128x4_output_tensor
-    )
 
 
 @functools.cache

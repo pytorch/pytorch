@@ -486,7 +486,7 @@ class GemmActMixin(ComposableEpiMixin):
                 tRS_rEpilogueIn.load(), *tuple(epilogue_aux_values)
             )
             if const_expr(params.tensor_epilogue_returns_aux):
-                tRS_rD.store(epilogue_result[0].to(self.acc_dtype))
+                tRS_rD.store(epilogue_result[0])
                 aux_results = []
                 for i, _ in enumerate(params.mAuxOut):
                     aux_result = epilogue_result[i + 1]
@@ -511,10 +511,11 @@ class GemmActMixin(ComposableEpiMixin):
                     tDrLocalReduce.store(epilogue_result[1])
                     main_result = epilogue_result[0]
                     if const_expr(self.grouped_n_contract_group == 1):
-                        tRS_rD.store(main_result.to(self.acc_dtype))
-                tRS_rAuxOut = cute.make_rmem_tensor(
-                    main_result.shape, main_result.element_type
-                )
+                        tRS_rD.store(main_result)
+                result_dtype = self.acc_dtype
+                if const_expr(self.grouped_n_contract_group != 1):
+                    result_dtype = main_result.element_type
+                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
                 tRS_rAuxOut.store(main_result)
         elif const_expr(params.act_fn is not None):
             tRS_rAuxOut = cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
