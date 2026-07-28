@@ -5055,7 +5055,7 @@ class AlgorithmSelectorCache(PersistentCache):
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
-        current_out_size = out_base.untyped_storage().size() // out_base.element_size()
+        current_out_size = out_base.storage().size()
 
         if needed_out_size > current_out_size:
             # Create a new base tensor with sufficient storage
