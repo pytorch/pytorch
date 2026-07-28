@@ -1,7 +1,11 @@
 import functools
 import hashlib
+import logging
 import os
 from typing import Any
+
+
+log = logging.getLogger(__name__)
 
 
 _FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT = "failed to map segment from shared object"
@@ -154,9 +158,13 @@ def has_triton_tma_device() -> bool:
     return False
 
 
-@functools.cache
 def has_triton_amd_tdm_device(arch: str) -> bool:
     """Return whether Triton exposes AMD TDM lowering for the given GCN arch."""
+    return _has_triton_amd_tdm_device(arch.split(":", 1)[0])
+
+
+@functools.cache
+def _has_triton_amd_tdm_device(arch: str) -> bool:
     if not has_triton_package():
         return False
 
@@ -168,8 +176,13 @@ def has_triton_amd_tdm_device(arch: str) -> bool:
     try:
         from triton._C.libtriton import amd
 
-        return bool(amd.supports_tdm(arch.split(":", 1)[0]))
+        return bool(amd.supports_tdm(arch))
     except Exception:
+        log.debug(
+            "Failed to query Triton AMD TDM support for %s",
+            arch,
+            exc_info=True,
+        )
         return False
 
 
