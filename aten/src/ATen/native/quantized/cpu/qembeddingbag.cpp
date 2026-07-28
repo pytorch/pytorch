@@ -48,7 +48,7 @@ at::Tensor& embedding_lookup_fallback_impl(
     const int64_t output_size,
     bool include_last_offset,
     bool pruned) {
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const auto weight_data = weight.const_data_ptr<uint8_t>();
   const auto indices_data = indices.const_data_ptr<IndexType>();
   const int32_t* compressed_indices_mapping_data = nullptr;
@@ -288,7 +288,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     const int64_t block_size,
     const int64_t output_size,
     bool include_last_offset) {
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const auto weight_data = weight.const_data_ptr<uint8_t>();
   const auto indices_data = indices.const_data_ptr<IndexType>();
   const auto weight_sizes = weight.sizes();
@@ -641,7 +641,7 @@ at::Tensor& embedding_bag_nbit_impl(
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
 
-  auto offsets_data = offsets.data_ptr<OffsetType>();
+  auto offsets_data = offsets.mutable_data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights op.
   const int32_t* compressed_indices_mapping_data = nullptr;
@@ -702,7 +702,7 @@ at::Tensor& embedding_bag_nbit_impl(
 #ifdef USE_FBGEMM
   const auto indices_data = indices.const_data_ptr<IndexType>();
   const auto weight_data = weight.const_data_ptr<uint8_t>();
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const int64_t N = weight_sizes[0];
 
   const int64_t block_size = D;
@@ -812,7 +812,7 @@ at::Tensor& embedding_bag_byte_impl(
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
-  auto offsets_data = offsets.data_ptr<OffsetType>();
+  auto offsets_data = offsets.mutable_data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights.
   const int32_t* compressed_indices_mapping_data = nullptr;
@@ -872,7 +872,7 @@ at::Tensor& embedding_bag_byte_impl(
   const int64_t N = weight_sizes[0];
   const auto weight_data = weight.const_data_ptr<uint8_t>();
   const auto indices_data = indices.const_data_ptr<IndexType>();
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const int index_size = indices.numel();
 
   if (!pruned_weights || fallback_to_no_sparse) {

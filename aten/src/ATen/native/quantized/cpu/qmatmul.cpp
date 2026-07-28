@@ -96,7 +96,7 @@ Tensor qmatmul(
     const underlying_t* qb_data = reinterpret_cast<const underlying_t*>(
         qb_contig.const_data_ptr<scalar_t>());
     underlying_t* out_data =
-        reinterpret_cast<underlying_t*>(out.data_ptr<scalar_t>());
+        reinterpret_cast<underlying_t*>(out.mutable_data_ptr<scalar_t>());
 
     const size_t qa_stride = m * k;
     const size_t qb_stride = k * n;
