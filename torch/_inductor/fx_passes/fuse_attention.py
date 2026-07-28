@@ -2,7 +2,6 @@
 import functools
 import inspect
 import logging
-import warnings
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -17,6 +16,7 @@ from ..pattern_matcher import (
 
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
@@ -936,7 +936,7 @@ def _warn_tf32_disabled() -> None:
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
-        warnings.warn(
+        perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -944,7 +944,8 @@ def _warn_tf32_disabled() -> None:
 
 
 def _sfdp_params_check(match):
-    assert all(k in match.kwargs for k in ("query", "key", "value"))
+    if not all(k in match.kwargs for k in ("query", "key", "value")):
+        raise AssertionError("expected query, key, value in match.kwargs")
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
@@ -1430,7 +1431,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
-            assert isinstance(workaround, dict)
+            if not isinstance(workaround, dict):
+                raise AssertionError(
+                    f"expected workaround to be a dict, got {type(workaround)}"
+                )
             name = pattern.__name__
             pattern_name = name
 
@@ -1461,7 +1465,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 )
             inference_workaround = {}
             if workaround:
-                assert len(workaround) <= 2
+                if len(workaround) > 2:
+                    raise AssertionError(
+                        f"expected len(workaround) <= 2, got {len(workaround)}"
+                    )
                 if "inv_scale" in workaround:
                     inference_workaround["inv_scale"] = workaround["inv_scale"]
                 if "dropout_p" in workaround:

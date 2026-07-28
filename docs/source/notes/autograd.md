@@ -295,7 +295,7 @@ mode. If you cannot avoid such use in your case, you can always switch back
 to no-grad mode.
 
 For details on inference mode please see
-[Inference Mode](https://pytorch.org/cppdocs/notes/inference_mode.html).
+[Inference Mode](https://docs.pytorch.org/docs/2.9/notes/autograd.html#inference-mode).
 
 For implementation details of inference mode see
 [RFC-0011-InferenceMode](https://github.com/pytorch/rfcs/pull/17).
@@ -820,6 +820,29 @@ Alternatively, you can use the context-manager
 {class}`~torch.autograd.graph.saved_tensors_hooks` to register a pair of
 hooks which will be applied to *all* saved tensors that are created in
 that context.
+
+```{note}
+ With this context manager the input to ``pack_hook`` is a live tensor that
+ still carries its ``grad_fn`` (unlike per-tensor
+ {meth}`~torch.autograd.SavedTensor.register_hooks` above, which receives an
+ already-detached tensor). If you keep that live tensor in the object you
+ return and the saved tensor is a graph output, you form a reference cycle: the
+ output's ``grad_fn`` owns the saved tensor, which then owns a tensor referring
+ back to that same ``grad_fn``. This does not produce wrong results. Running
+ backward with ``retain_graph=False`` releases the saved tensor and breaks the
+ cycle, so memory is freed as usual; but if you build the graph without ever
+ running backward -- or use ``retain_graph=True`` -- the cycle keeps the tensor
+ alive, and because PyTorch does not expose the autograd graph to Python's
+ cyclic garbage collector (pytorch/pytorch#7343) it cannot be reclaimed even by
+ an explicit ``gc.collect()``. Calling ``.detach()`` on the input before
+ keeping it breaks the cycle, which is why the examples below do so. Detaching
+ is lossless: as noted above, PyTorch stashes the autograd metadata separately
+ and restores ``grad_fn`` on unpack, so gradients are unaffected. Hooks that
+ instead return a freshly computed tensor are unaffected -- pack hooks run with
+ gradient tracking disabled, so a tensor computed inside the hook (for example
+ moving a CUDA tensor to CPU) carries no ``grad_fn``, and the original input is
+ not retained.
+```
 
 Example:
 

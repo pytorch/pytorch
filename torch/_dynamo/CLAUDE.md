@@ -36,7 +36,7 @@ The compilation pipeline, in execution order:
 
 Every Python value encountered during tracing is wrapped in a `VariableTracker`
 subclass. Key interface: `as_python_constant()`, `as_proxy()`,
-`call_function()`, `call_method()`, `var_getattr()`, `reconstruct()`.
+`call_function()`, `call_method()`, `getattro_impl()`, `reconstruct()`.
 
 Key fields: `source` (where the value came from, for guards) and
 `mutation_type` (whether/how mutations are tracked).
@@ -187,6 +187,24 @@ TORCH_LOGS="graph_code" python script.py         # see captured FX graph code
 TORCH_LOGS="+dynamo" python script.py            # full debug logging
 TORCH_LOGS="bytecode" python script.py           # see bytecode transformations
 ```
+
+### Reproducing crashes
+
+When writing a minimal repro for a Dynamo crash:
+
+1. **Capture `TORCH_LOGS="+dynamo"` for the known-failing case.** Look for
+   the frame ID (e.g. `[3/0_1]`), INLINING/FAILED/COMPILING/Restart events,
+   speculation behavior, and graph break reasons.
+2. **Capture the same logs for your repro attempt** and diff against the
+   failing case. The divergence point tells you what condition you're missing.
+3. **Match each condition from the crash traceback:**
+   - Does the code need a speculation checkpoint? Add tensor ops before the
+     failing code so `compile_subgraph` creates one.
+   - Does the function need to be inlined on retry (not skipped)? The graph
+     break type matters — `step_unsupported` keeps inlining on retry while
+     `unimplemented` may skip the function.
+   - Does the crash happen in a resume function? Add a `graph_break()` earlier
+     so PEP 523 compiles the resume as a fresh frame.
 
 ### Structured tracing (for production)
 
