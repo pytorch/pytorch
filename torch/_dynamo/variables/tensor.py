@@ -638,10 +638,6 @@ class TensorVariable(VariableTracker):
     ) -> ConstantVariable:
         from . import GetAttrVariable
 
-        # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, getattro_impl returns GetAttrVariable for both non-existent
-        # attributes and existing attributes. This is a bug and requires more
-        # deep dive.
         if name in all_tensor_attrs:
             return ConstantVariable.create(True)
 
@@ -649,9 +645,58 @@ class TensorVariable(VariableTracker):
             var = VariableTracker.build(tx, getattr).call_function(
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
-            # in the event that TensorVariable returns NotImplemented
-            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
-            ret_val = not isinstance(var, GetAttrVariable)
+            # getattro_impl returns GetAttrVariable as a fallback for both
+            # non-existent and existing-but-unhandled attributes (the root
+            # ambiguity still lives in getattro_impl and needs a deeper fix).
+            # When that happens, disambiguate by checking the fake tensor
+            # directly. Restricted to wrapper subclasses: a plain FakeTensor
+            # would leak FakeTensor-internal attributes (e.g. fake_device).
+            if isinstance(var, GetAttrVariable):
+                fake_val = self.as_proxy().node.meta.get("example_value")
+                if fake_val is not None and is_traceable_wrapper_subclass(fake_val):
+                    # hasattr returns False for a missing attr; it only
+                    # propagates a non-AttributeError raised by a descriptor
+                    # getter. The fake tensor may raise where the real one
+                    # would not, so graph-break and let eager decide on the
+                    # real object rather than fabricating a result.
+                    try:
+                        fake_has = hasattr(fake_val, name)
+                    except Exception:
+                        unimplemented(
+                            gb_type="hasattr on wrapper subclass raised in fake probe",
+                            context=f"hasattr({self}, {name})",
+                            explanation="Probing hasattr on the fake wrapper subclass "
+                            f"for attribute '{name}' raised a non-AttributeError exception.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    # A True result is only trustworthy when the attribute
+                    # resolves without invoking __getattr__ (present on the
+                    # type MRO or in the instance __dict__): such attributes
+                    # are structural to the subclass and shared by the fake
+                    # and real objects. If the fake only reports it via
+                    # __getattr__ delegation to its inner tensor, the inner
+                    # FakeTensor exposes attributes a real inner tensor would
+                    # not (e.g. fake_device, constant), so fake and real can
+                    # disagree; graph-break and let eager decide.
+                    inst_dict = getattr(fake_val, "__dict__", None)
+                    resolvable = any(
+                        name in klass.__dict__ for klass in type(fake_val).__mro__
+                    ) or (inst_dict is not None and name in inst_dict)
+                    if fake_has and not resolvable:
+                        unimplemented(
+                            gb_type="hasattr on wrapper subclass resolved via __getattr__",
+                            context=f"hasattr({self}, {name})",
+                            explanation=f"Attribute '{name}' on the wrapper subclass "
+                            "is only reachable via __getattr__ delegation to its inner "
+                            "tensor, whose fake and real values can expose different "
+                            "attributes.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    ret_val = fake_has
+                else:
+                    ret_val = False
+            else:
+                ret_val = True
         except (AttributeError, ObservedAttributeError):
             ret_val = False
 

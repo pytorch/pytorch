@@ -158,6 +158,16 @@
       ]
     }
   ],
+  "GB5086": [
+    {
+      "Gb_type": "hasattr on wrapper subclass resolved via __getattr__",
+      "Context": "hasattr({self}, {name})",
+      "Explanation": "Attribute '{name}' on the wrapper subclass is only reachable via __getattr__ delegation to its inner tensor, whose fake and real values can expose different attributes.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0871": [
     {
       "Gb_type": "Non-constant __hash__ return",
@@ -4529,6 +4539,16 @@
       "Gb_type": "call to a callable object with no traceable __call__",
       "Context": "object={self.value}",
       "Explanation": "Dynamo could not trace a Python `__call__` method on this object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4532": [
+    {
+      "Gb_type": "hasattr on wrapper subclass raised in fake probe",
+      "Context": "hasattr({self}, {name})",
+      "Explanation": "Probing hasattr on the fake wrapper subclass for attribute '{name}' raised a non-AttributeError exception.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

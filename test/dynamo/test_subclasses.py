@@ -2544,6 +2544,130 @@ class GraphModule(torch.nn.Module):
         out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(out_ref, out_test)
 
+    def test_wrapper_subclass_hasattr_tensor_flatten(self):
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            if is_traceable_wrapper_subclass(x):
+                return torch.add(x, 1)
+            return torch.mul(x, 2)
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        result = f(x)
+        expected = torch.add(x, 1)
+        self.assertEqual(result._data, expected._data)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_wrapper_subclass_hasattr(self):
+        # Exercise TensorVariable.call_obj_hasattr for a wrapper subclass:
+        # an existing dunder (__tensor_flatten__, previously wrongly False),
+        # an existing instance attr, and a genuinely-absent attr (must be
+        # False, not True). Compare against eager hasattr.
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return (
+                hasattr(x, "__tensor_flatten__"),
+                hasattr(x, "_data"),
+                hasattr(x, "definitely_not_an_attr"),
+            )
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        self.assertEqual(f(x), (True, True, False))
+
+    def _make_delegating_subclass(self, getattr_impl=None):
+        # Wrapper subclass whose __getattr__ delegates unknown attributes to
+        # its inner tensor. Under tracing the inner is a FakeTensor, which
+        # exposes attributes (fake_device, constant, ...) a real inner tensor
+        # would not -- the case that used to fabricate a wrong hasattr result.
+        class DelegatingTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    a.shape,
+                    strides=a.stride(),
+                    storage_offset=a.storage_offset(),
+                    dtype=a.dtype,
+                    layout=a.layout,
+                    device=a.device,
+                    requires_grad=a.requires_grad,
+                )
+
+            def __init__(self, a):
+                self.a = a
+
+            def __getattr__(self, name):
+                if getattr_impl is not None:
+                    return getattr_impl(self, name)
+                return getattr(self.__dict__["a"], name)
+
+            def __tensor_flatten__(self):
+                return ["a"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner, meta, outer_size, outer_stride):
+                return DelegatingTensor(inner["a"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                unwrap = lambda t: t.a  # noqa: E731
+                a = torch.utils._pytree.tree_map_only(DelegatingTensor, unwrap, args)
+                k = torch.utils._pytree.tree_map_only(DelegatingTensor, unwrap, kwargs)
+                return torch.utils._pytree.tree_map_only(
+                    torch.Tensor, lambda t: DelegatingTensor(t), func(*a, **k)
+                )
+
+        return DelegatingTensor
+
+    def test_wrapper_subclass_hasattr_getattr_delegation(self):
+        # For a subclass whose __getattr__ delegates to the inner tensor, a
+        # FakeTensor-internal attribute (fake_device/constant) must NOT be
+        # fabricated as True: the fake inner exposes it but the real inner
+        # (a plain tensor) does not. call_obj_hasattr graph-breaks for such
+        # __getattr__-only attributes, so eager decides on the real object.
+        DelegatingTensor = self._make_delegating_subclass()
+        x = DelegatingTensor(torch.randn(4))
+
+        def f(t):
+            return (
+                hasattr(t, "fake_device"),  # fake-inner-only -> break -> eager False
+                hasattr(t, "constant"),  # fake-inner-only -> break -> eager False
+                hasattr(t, "a"),  # real instance attr -> True
+                hasattr(t, "__tensor_flatten__"),  # class method -> True
+                hasattr(t, "definitely_not_an_attr"),  # absent -> False
+            )
+
+        eager = f(x)
+        compiled = torch.compile(f, backend="eager")(x)
+        self.assertEqual(compiled, eager)
+        self.assertEqual(compiled, (False, False, True, True, False))
+
+    def test_wrapper_subclass_hasattr_probe_raises(self):
+        # If probing hasattr on the fake wrapper subclass raises a
+        # non-AttributeError, call_obj_hasattr graph-breaks rather than
+        # guessing (the fake may raise where the real object would not).
+        def raising_getattr(self, name):
+            if name == "boom":
+                raise RuntimeError("boom probe")
+            return getattr(self.__dict__["a"], name)
+
+        DelegatingTensor = self._make_delegating_subclass(raising_getattr)
+        x = DelegatingTensor(torch.randn(4))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t):
+            return hasattr(t, "boom")
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "raised in fake probe"
+        ):
+            f(x)
+
     def test_support_bases(self):
         import torch.fx._symbolic_trace
 
