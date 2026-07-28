@@ -224,7 +224,14 @@ def _graph_dependency_flow_events(
     export. ``node_rows`` is (correlation_id, graph_node_id, device, tid, start_ns, end_ns) per
     graphed op as displayed (tid is the resolver lane). Dependencies (graph_deps: node_id ->
     predecessor node_ids) are resolved within the same replay (correlation_id) so arrows never
-    cross replays; each edge is one flow (pred end -> successor start). Empty without deps."""
+    cross replays; each edge is one flow from the predecessor's end to the successor's start.
+    Empty without deps.
+
+    NOTE: under cross-stream clock skew the recorded predecessor end can land after the successor
+    start, and chrome/Perfetto JSON flows cannot render backwards in time, so such an arrow may
+    misrender (or bind to the wrong slice when spans overlap on one lane). The .pftrace export
+    encodes the same edges as native render-stage waits (GpuRenderStageEvent.event_wait_ids) and
+    renders them correctly regardless -- prefer it when dependency arrows matter."""
     if not graph_deps:
         return []
     by_corr: dict[int, dict[int, tuple[int, int, int, int]]] = {}
@@ -239,15 +246,9 @@ def _graph_dependency_flow_events(
                 if p is None:
                     continue
                 pdev, ptid, _pstart_ns, pend_ns = p
-                # Clock skew across streams can put the predecessor's end after the successor's
-                # start, which would render the arrow backwards. Clamp the successor's landing
-                # (flow finish) up to the predecessor's end so it points forward -- but only for
-                # a small skew (<= 25% of the successor's execution); a larger skew is left
-                # unclamped rather than distort the arrow that much.
-                skew_ns = pend_ns - start_ns
-                finish_ns = start_ns
-                if 0 < skew_ns and skew_ns * 4 <= end_ns - start_ns:
-                    finish_ns = pend_ns
+                # Arrow from the predecessor's end to the successor's start (the dependency
+                # handoff). See the NOTE in the docstring: this can render backwards under clock
+                # skew in the JSON export; the .pftrace export does not have that limitation.
                 events.append(
                     {
                         "ph": "s",
@@ -265,7 +266,7 @@ def _graph_dependency_flow_events(
                         "id": fid,
                         "pid": dev,
                         "tid": tid,
-                        "ts": max((finish_ns - base_ns) / 1000.0, 0.0),
+                        "ts": max((start_ns - base_ns) / 1000.0, 0.0),
                         "cat": _FLOW_CATEGORY,
                         "name": _FLOW_CATEGORY,
                         "bp": "e",
@@ -554,6 +555,15 @@ def _trace_window_entries(
                         )
                     )
         trace_events.extend(events)
+        # CPU-launch -> GPU-op flow (the terminating end of the host launch's correlation).
+        # When graph node->node arrows are drawn (graph_deps present), a graphed op that has a
+        # predecessor in the graph gets its incoming edge from that arrow, so drop this launch
+        # flow for it: only root graph nodes (and eager ops) keep it, so a cudaGraphLaunch links
+        # to the graph's roots instead of fanning out to every replayed kernel. A graph_deps key
+        # is a node with predecessors; 0 (eager) and root node ids are absent -> kept.
+        drop_launch_flow = (
+            [g in graph_deps for g in gnid.tolist()] if graph_deps else None
+        )
         trace_events.extend(
             {
                 "ph": "f",
@@ -566,7 +576,7 @@ def _trace_window_entries(
                 "bp": "e",
             }
             for i in range(n)
-            if corr_l[i]
+            if corr_l[i] and not (drop_launch_flow and drop_launch_flow[i])
         )
         seen_streams.update(zip(dev_l, str_l))
         for dev, s in zip(dev_l, start_l):
