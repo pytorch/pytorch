@@ -2058,7 +2058,7 @@ class SIMDScheduling(BaseScheduling):
 
     def get_tiling_and_memory_scores(
         self, nodes: Sequence[scheduler.BaseSchedulerNode]
-    ) -> scheduler.TilingAndMemoryScores | None:
+    ) -> scheduler.TilingAndMemoryMetrics | None:
         from torch._inductor.tiling_utils import analyze_memory_coalescing_for_nodes
 
         if (
@@ -2068,13 +2068,14 @@ class SIMDScheduling(BaseScheduling):
         ):
             return None
 
-        nodes = [subnode for node in nodes for subnode in node.get_nodes()]
-        if not all(isinstance(node, scheduler.SchedulerNode) for node in nodes):
+        snodes = [subnode for node in nodes for subnode in node.get_nodes()]
+        if not all(isinstance(node, scheduler.SchedulerNode) for node in snodes):
             return None
 
-        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
-        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-        analysis = analyze_memory_coalescing_for_nodes(nodes)
+        reduction = max(snodes, key=lambda node: int(node.is_reduction()))
+        _, (numel, rnumel) = reduction.group
+        node_schedule = self.generate_node_schedule(snodes, numel, rnumel)
+        analysis = analyze_memory_coalescing_for_nodes(snodes)
         if analysis is None:
             return None
 
@@ -2084,18 +2085,18 @@ class SIMDScheduling(BaseScheduling):
         if tiling_scores is None:
             return None
 
-        total_score = sum(analysis.coalesced_by_var.values()) + sum(
+        total_cost = sum(analysis.coalesced_by_var.values()) + sum(
             analysis.uncoalesced_addrs.values()
         )
-        selected_score = V.graph.sizevars.optimization_hint(
+        coalesced_cost = V.graph.sizevars.optimization_hint(
             sum(tiling_scores.get(name, 0) for name in selected_tiling),
             fallback=0,
         )
-        return scheduler.TilingAndMemoryScores(
+        return scheduler.TilingAndMemoryMetrics(
             selected_tiling=selected_tiling,
             tiling_scores=tiling_scores,
-            coalesced_memory_score=selected_score,
-            uncoalesced_memory_score=max(total_score - selected_score, 0),
+            coalesced_memory_cost=coalesced_cost,
+            uncoalesced_memory_cost=max(total_cost - coalesced_cost, 0),
         )
 
     def group_fn(self, sizes):
