@@ -27,7 +27,6 @@ self-hosted-runner:
     - linux.aws.h100
     - linux.aws.h100.4
     - linux.aws.h100.8
-    - linux.aws.h100.fab.2
     - linux.g5.4xlarge.nvidia.gpu
     - linux.c7i.2xlarge
     # Pytorch/pytorch AWS Linux Runners on Linux Foundation account
