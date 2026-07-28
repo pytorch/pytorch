@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
+import io
+import json
 import unittest.mock
 from collections.abc import Callable
 from typing import Any
@@ -124,6 +126,31 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertIsInstance(out, ShapeAsConstantBuffer)
         self.assertEqual(out.expr, sympy.Integer(2048))
+
+    def test_autotune_choices_stats_omits_descriptions_from_stderr(self):
+        choice = select_algorithm.ChoiceCaller(
+            "best_kernel", [], None, "generated kernel source"
+        )
+        event_logger = unittest.mock.Mock()
+        stderr = io.StringIO()
+
+        with (
+            patch.object(
+                select_algorithm,
+                "get_chromium_event_logger",
+                return_value=event_logger,
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            select_algorithm._log_autotune_choices_stats("autotune", {choice: 1.25})
+
+        console_stats = json.loads(stderr.getvalue().splitlines()[1])
+        self.assertEqual(console_stats["best_kernel"], "best_kernel")
+        self.assertNotIn("best_kernel_desc", console_stats)
+        event_stats = json.loads(
+            event_logger.add_event_data.call_args.kwargs["autotune_choices_stats"]
+        )
+        self.assertEqual(event_stats["best_kernel_desc"], "generated kernel source")
 
 
 class TestSelectAlgorithm(TestCase):
