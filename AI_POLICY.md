@@ -7,7 +7,8 @@ contained* (e.g. using a code block or a quote block). AI-generated content must
 be accompanied by human commentary explaining its relevance. For example:
 "Codex produced the following analysis: `<insert codex output here>`, so I
 believe that \<insert human analysis here\>". The only exceptions to this rule
-are the pytorchbot automations.
+are the pytorchbot automations and the draft pull request workflow described
+below.
 
 *Please do not respond to comments+questions by pasting raw or lightly reviewed
 AI-generated text.* Other users' comments+questions are requests for your
@@ -21,8 +22,11 @@ implementation is something you understand, that the important ideas are clear,
 and that the code is high quality. AI-generated code can sometimes be overly
 complex, indirect, inconsistent, or include artifacts that obscure the main idea.
 Before submitting, simplify where possible and make sure the core change is easy
-for maintainers to review. If your PR is not ready for review, please use the
-GitHub draft PR feature.
+for maintainers to review. An AI tool may create and update a draft PR before
+the human has read every change. It may also make small fixes for CI, test, or
+lint failures on any open PR, including one already reviewed. An unreviewed
+agent-created PR must disclose this and remain a draft, and all follow-up fixes
+must be reviewed before merging.
 
 All contributions should involve a human who understands and can take
 responsibility for the work produced with AI assistance. *We do not accept
