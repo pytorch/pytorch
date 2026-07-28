@@ -298,8 +298,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self.ban_mutation = False
 
     def get_value_for_setattr(self) -> object | None:
-        if self.ban_mutation:
-            return None
         mod = getattr(self.value, "__module__", None) or ""
         if mod == "torch" or mod.startswith(("torch.", "torch_")):
             return None
