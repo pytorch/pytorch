@@ -3792,6 +3792,16 @@
       ]
     }
   ],
+  "GB3069": [
+    {
+      "Gb_type": "Custom op missing fake impl during tracing",
+      "Context": "{node.target}",
+      "Explanation": "A custom operator was defined and register_fake'd inside the compiled function, then called before the register_fake side effect was applied.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0249": [
     {
       "Gb_type": "bad device argument to torch.accelerator.current_stream",
