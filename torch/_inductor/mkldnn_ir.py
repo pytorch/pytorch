@@ -192,7 +192,7 @@ def _prepare_convolution_fusion_create(
         output_stride: StrideType = FlexibleLayout.contiguous_strides(output_size)
     # Currently we don't support channel last for the situation that stride of input's batch dim is 0,
     # eg. input_size = (1, 1280, 64, 64), but input_stride=(0, 1, 81920, 1280).
-    # So we use NCHW hear instead.
+    # So we use NCHW here instead.
     # Different with cpu, cpu conv always use channels_last for convolution when weight is prepacked,
     # but xpu does not do the prepack, so the problem exposed here is only for xpu.
     # TODO support channels_last for such zero stride input.
@@ -457,7 +457,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
-        # Due to constrain of op.call, other (Tensor&) should be at input[0]
+        # Due to constraint of op.call, other (Tensor&) should be at input[0]
         self.device_type = get_device_type(inputs[0])
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
 
