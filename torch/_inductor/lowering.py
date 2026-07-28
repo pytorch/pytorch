@@ -1535,8 +1535,11 @@ def repeat(x, repeats):
 @register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
-def view(x: TensorBox, sizes: Sequence[sympy.Expr]) -> TensorBox:
-    return TensorBox(View.create(x.data, sizes))
+def view(x: ir.IRNode, sizes: Sequence[sympy.Expr]) -> TensorBox:
+    # post-mm_args operands are raw ReinterpretView/StorageBox nodes, and taking
+    # .data on those would drop the view itself
+    data = x.data if isinstance(x, TensorBox) else x
+    return TensorBox(View.create(data, sizes))
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)
