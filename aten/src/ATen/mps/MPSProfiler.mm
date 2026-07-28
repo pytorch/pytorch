@@ -812,9 +812,13 @@ void MPSProfiler::startCapture(const std::string& name, MPSStream* stream) {
 }
 
 void MPSProfiler::stopCapture(MPSStream* stream) {
-  if (stream) {
-    stream->synchronize(SyncType::COMMIT);
+  // Drain all in-flight GPU work before stopping the capture, otherwise
+  // stopCapture races with command buffers still executing on the captured
+  // device/queue while Metal serializes the trace, which can crash natively
+  if (!stream) {
+    stream = getDefaultMPSStream();
   }
+  stream->synchronize(SyncType::COMMIT_AND_WAIT);
   [captureManager stopCapture];
 }
 
