@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import unittest
 import weakref
 from types import SimpleNamespace
 from unittest import mock
@@ -31,6 +32,7 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.utils._triton import has_triton_tma_device
 
 
 if HAS_XPU_AND_TRITON:
@@ -691,6 +693,42 @@ class TestStaticTritonCompileResult(TestCase):
         y = torch.rand(20, device=GPU_TYPE)
         result = foo(x, y)
         self.assertEqual(result, torch.cat(((x * 4), y + 10)))
+
+    @unittest.skipUnless(has_triton_tma_device(), "Requires device-side TMA (sm90+)")
+    @torch._inductor.config.patch(
+        {
+            # Surface CannotStaticallyLaunchKernel in-process (strict raises).
+            "compile_threads": 1,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+            # The persistent-TMA template rarely wins autotuning, so force it to
+            # be the only GEMM choice.
+            "test_configs.autotune_choice_name_regex": "persistent_tma",
+        }
+    )
+    def test_device_tma_matmul_static_launch(self):
+        # Device-side TMA GEMM kernels (tl.make_tensor_descriptor) need a global
+        # scratch workspace. Under strict_static_triton_launcher a kernel that
+        # can't be statically launched raises CannotStaticallyLaunchKernel, so a
+        # clean run proves the TMA kernel was statically launched *and* that the
+        # allocated scratch makes it produce correct results.
+        #
+        # We launch repeatedly: the _FastCudaLauncher is built after the first
+        # launch and used for subsequent ones. It pre-zeros scratch slots and
+        # never fills them, so it must NOT be used for kernels that need a real
+        # global-scratch workspace -- otherwise later launches get a null TMA
+        # workspace (illegal memory access / wrong results).
+        # Regression test for https://github.com/pytorch/pytorch/issues/191124.
+        @torch.compile
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        expected = a @ b
+        for _ in range(3):
+            self.assertEqual(mm(a, b), expected)
 
     def test_any(self):
         def fn(x):

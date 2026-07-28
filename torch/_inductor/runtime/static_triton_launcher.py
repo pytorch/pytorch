@@ -50,6 +50,13 @@ class StaticallyLaunchedTritonKernel:
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
+    # Whether run() can allocate a real device-side global-scratch workspace for
+    # kernels that need one (e.g. device-side TMA / tl.make_tensor_descriptor).
+    # When False, such kernels bail out of static launch. Overridden per-backend.
+    supports_global_scratch: bool = False
+    # torch device type used to allocate that workspace.
+    scratch_device_type: str = "cuda"
+
     @cached_property
     def C_impl(self):
         raise NotImplementedError
@@ -104,23 +111,30 @@ class StaticallyLaunchedTritonKernel:
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
 
-        def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
-            # pyrefly: ignore [missing-attribute]
-            if hasattr(kernel.metadata, param_name):
-                # pyrefly: ignore [missing-attribute]
-                if getattr(kernel.metadata, param_name) > 0:
-                    raise NotImplementedError(
-                        f"{scratch_name} scratch not yet supported"
-                    )
-                return True
-            return False
+        # Newer triton versions pass extra scratch parameters (global, then
+        # profile) after the kernel's declared args. A parameter is present in
+        # the compiled kernel's ABI iff the corresponding metadata field exists;
+        # at launch we pass either a real workspace pointer or a nullptr (None).
+        # pyrefly: ignore [missing-attribute]
+        metadata = kernel.metadata
 
-        # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
-        # Inductor never uses this field or enables it, but we still have to pass
-        # an extra None into the set of params if its enabled
-        self.has_global_scratch = needs_scratch_arg("Global", "global_scratch_size")
-        # same situation for profile scratch - triton-lang/triton#7258
-        self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
+        def scratch_size(param_name: str) -> int:
+            return getattr(metadata, param_name, 0) or 0
+
+        self.has_global_scratch = hasattr(metadata, "global_scratch_size")
+        self.global_scratch_size = scratch_size("global_scratch_size")
+        self.global_scratch_align = getattr(metadata, "global_scratch_align", 1) or 1
+        self.has_profile_scratch = hasattr(metadata, "profile_scratch_size")
+
+        # A non-empty global scratch workspace (e.g. device-side TMA descriptor
+        # kernels) is allocated at launch time in run(); only CUDA supports this.
+        # Otherwise bail so the kernel falls back to the normal launch path.
+        if self.global_scratch_size > 0 and not self.supports_global_scratch:
+            raise NotImplementedError("Global scratch not yet supported")
+        # Profiling instrumentation scratch (triton-lang/triton#7258) is never
+        # enabled by inductor.
+        if scratch_size("profile_scratch_size") > 0:
+            raise NotImplementedError("Profile scratch not yet supported")
 
         # pyrefly: ignore [missing-attribute]
         self.tensordesc_meta = getattr(kernel.metadata, "tensordesc_meta", None)
@@ -129,6 +143,7 @@ class StaticallyLaunchedTritonKernel:
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
         self.module: int | None = None  # Owns the HIP/CUDA module loaded for function
+        self.device: int = 0  # Set by load_kernel; used to allocate global scratch
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -139,6 +154,7 @@ class StaticallyLaunchedTritonKernel:
             raise NotImplementedError(
                 "Static cuda launcher only supports num_ctas == 1"
             )
+        self.num_ctas = num_ctas
 
     def reload_cubin_from_raw(self, filepath: str) -> str:
         """
@@ -155,6 +171,7 @@ class StaticallyLaunchedTritonKernel:
         return self.cubin_path
 
     def load_kernel(self, device: int) -> None:
+        self.device = device
         if self.function is not None:
             return
 
@@ -325,6 +342,24 @@ class StaticallyLaunchedTritonKernel:
                 out.append(arg)
         return tuple(out)
 
+    def _allocate_global_scratch(self, grid_x: int, grid_y: int, grid_z: int):
+        """Allocate the device-side global-scratch workspace some kernels need
+        (e.g. device-side TMA descriptor kernels). Mirrors triton's
+        CudaLauncher.allocate_scratch: one ``global_scratch_size``-byte slot per
+        program. Returns None when no workspace is required."""
+        if self.global_scratch_size <= 0:
+            return None
+        import torch
+
+        n = grid_x * grid_y * grid_z * self.num_ctas * self.global_scratch_size
+        # The caching allocator returns >=512B-aligned storage, which covers
+        # global_scratch_align (128 for TMA descriptors).
+        return torch.empty(
+            n,
+            dtype=torch.uint8,
+            device=torch.device(self.scratch_device_type, self.device),
+        )
+
     def run(
         self,
         grid_x: int,
@@ -379,10 +414,20 @@ class StaticallyLaunchedTritonKernel:
             args = (*args, None, None)
 
         else:
-            for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
-                if has_scratch:
-                    arg_tys = arg_tys + "O"
-                    args = (*args, None)
+            if self.has_global_scratch:
+                arg_tys = arg_tys + "O"
+                # Device-side TMA descriptor kernels need a real workspace; keep
+                # the tensor alive (via `global_scratch`) until after the launch
+                # below -- the caching allocator's stream ordering then makes it
+                # safe to free.
+                global_scratch = self._allocate_global_scratch(grid_x, grid_y, grid_z)
+                args = (
+                    *args,
+                    global_scratch.data_ptr() if global_scratch is not None else None,
+                )
+            if self.has_profile_scratch:
+                arg_tys = arg_tys + "O"
+                args = (*args, None)
         # pyrefly: ignore [bad-argument-type]
         if len(args) != len(arg_tys):
             raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
@@ -403,6 +448,12 @@ class StaticallyLaunchedTritonKernel:
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
+    # A non-empty global-scratch workspace comes from device-side TMA, which is
+    # NVIDIA-only; Triton's AMD backend has no global_scratch in its launch ABI,
+    # so it can't arise on ROCm. Keep the conservative bail there rather than
+    # shipping an untested, unreachable allocation path.
+    supports_global_scratch: bool = not is_rocm()
+
     @cached_property
     def C_impl(self):
         from torch._C import _StaticCudaLauncher
