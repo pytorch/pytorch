@@ -113,6 +113,7 @@
 #include <ATen/ops/special_chebyshev_polynomial_v_native.h>
 #include <ATen/ops/special_chebyshev_polynomial_w.h>
 #include <ATen/ops/special_chebyshev_polynomial_w_native.h>
+#include <ATen/ops/special_exp2.h>
 #include <ATen/ops/special_gammainc_native.h>
 #include <ATen/ops/special_gammaincc_native.h>
 #include <ATen/ops/special_hermite_polynomial_h.h>
@@ -1563,7 +1564,7 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   const auto self_dtype = self.scalar_type();
   // All integral types are promoted to float32
   if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
-      return at::pow(2.0, other);
+      return at::special_exp2(other);
   }
   // For double and reduced floating types do regular type promotion
   return at::full({}, 2.0, self.options()).pow(other);
