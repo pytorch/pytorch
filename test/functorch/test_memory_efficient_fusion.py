@@ -431,7 +431,7 @@ class ReduceTestCase(TestCase):
             return a + b
 
         t = torch.randn(2, 2)
-        check(f, t, 0, check_val=False)
+        check(f, t, 0)
 
     def test_nan_dedup_non_factory_op(self):
         def f(x):
@@ -442,7 +442,7 @@ class ReduceTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 1, check_val=False)
 
-    def test_nan_dedup_list_arg(self):
+    def test_nan_dedup_constant_pad(self):
         def f(x):
             a = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
             b = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
