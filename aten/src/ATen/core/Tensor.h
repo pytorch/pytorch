@@ -83,7 +83,7 @@ unsigned Tensor::register_hook(T&& hook) const {
       return TensorBase(std::move(ret));
     });
   } else {
-    static_assert(std::is_void_v<R>);
+    static_assert(std::is_void_v<R>, "hook must return Tensor or void");
     return _register_hook([fn = std::forward<T>(hook)](const TensorBase& grad_base) {
       TensorRef grad(grad_base);
       fn(*grad);
