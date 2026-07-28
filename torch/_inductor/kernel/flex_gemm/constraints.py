@@ -145,6 +145,10 @@ FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: grouped main output shape must equal the "
     "physical GEMM output shape with N divided by the transform group"
 )
+FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: main output shape must equal the physical "
+    "GEMM output shape"
+)
 
 
 def statically_known(expr: Any) -> bool:
