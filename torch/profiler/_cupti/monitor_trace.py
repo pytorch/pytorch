@@ -233,12 +233,21 @@ def _graph_dependency_flow_events(
     events: list[dict[str, object]] = []
     fid = _GRAPH_DEP_FLOW_ID_BASE
     for node_map in by_corr.values():
-        for gnid, (dev, tid, start_ns, _end_ns) in node_map.items():
+        for gnid, (dev, tid, start_ns, end_ns) in node_map.items():
             for pred in graph_deps.get(gnid, ()):
                 p = node_map.get(pred)
                 if p is None:
                     continue
                 pdev, ptid, _pstart_ns, pend_ns = p
+                # Clock skew across streams can put the predecessor's end after the successor's
+                # start, which would render the arrow backwards. Clamp the successor's landing
+                # (flow finish) up to the predecessor's end so it points forward -- but only for
+                # a small skew (<= 25% of the successor's execution); a larger skew is left
+                # unclamped rather than distort the arrow that much.
+                skew_ns = pend_ns - start_ns
+                finish_ns = start_ns
+                if 0 < skew_ns and skew_ns * 4 <= end_ns - start_ns:
+                    finish_ns = pend_ns
                 events.append(
                     {
                         "ph": "s",
@@ -256,7 +265,7 @@ def _graph_dependency_flow_events(
                         "id": fid,
                         "pid": dev,
                         "tid": tid,
-                        "ts": max((start_ns - base_ns) / 1000.0, 0.0),
+                        "ts": max((finish_ns - base_ns) / 1000.0, 0.0),
                         "cat": _FLOW_CATEGORY,
                         "name": _FLOW_CATEGORY,
                         "bp": "e",
