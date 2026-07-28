@@ -62,7 +62,7 @@ struct MagmaInitializer {
 
 namespace at::native {
 
-void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos);
+void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots);
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
@@ -884,7 +884,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
         lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
         break;
       case SolverBackend::CUSTOM:
-        ::at::native::lu_batched_blas3_kernel(input, pivots, infos);
+        ::at::native::lu_batched_blas3_kernel(input, pivots, infos, compute_pivots);
         break;
     }
 #endif

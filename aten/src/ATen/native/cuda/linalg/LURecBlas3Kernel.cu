@@ -750,7 +750,7 @@ void lu_batched_panel_recursive(
 
 } // anonymous namespace
 
-void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos) {
+void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   const auto tuning = get_tuning();
   int batch_count = cuda_int_cast(batchCount(input), "batchCount");
   int m = cuda_int_cast(input.size(-2), "input.size(-2)");
