@@ -32,6 +32,7 @@
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <libshm.h>
@@ -2407,6 +2408,11 @@ void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
 
+#ifdef USE_MPS
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+void THPMPSStream_init(PyObject* module);
+#endif
+
 static std::vector<PyMethodDef> methods;
 
 static void LogAPIUsageMetadataFromPython(
@@ -2604,6 +2610,7 @@ PyObject* initModule() {
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
+  THPMPSStream_init(module);
 #endif
 #ifdef USE_XPU
   torch::xpu::initModule(module);
@@ -2694,6 +2701,19 @@ PyObject* initModule() {
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
 
+  // Serialized access to the process environment. Prefer these over Python's
+  // os.environ/os.getenv when torch is loaded: they share c10's env mutex, so
+  // reads and writes are consistent with C++ code that also goes through
+  // c10::utils::{get,set}_env.
+  py_module.def("_getenv", &c10::utils::get_env);
+  py_module.def(
+      "_setenv",
+      &c10::utils::set_env,
+      py::arg("name"),
+      py::arg("value"),
+      py::arg("overwrite") = true);
+  py_module.def("_unsetenv", &c10::utils::unset_env);
+
   {
     using at::impl::FakeDispatchCategory;
     auto add_for = [](FakeDispatchCategory category) {
@@ -2759,6 +2779,35 @@ Call this whenever a new thread is created in order to propagate values from
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
+
+  py_module.def(
+      "_storage_throw_on_immutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_immutable_data_ptr();
+      });
+
+  py_module.def(
+      "_storage_throw_on_mutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_mutable_data_ptr();
+      });
+
+  py_module.def(
+      "_set_storage_data_ptr_access_error_msg",
+      [](size_t storage_impl_ptr, std::string s) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
+      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->clear_data_ptr_access_error_msg_();
+      });
 
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));

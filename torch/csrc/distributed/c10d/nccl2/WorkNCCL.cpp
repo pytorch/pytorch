@@ -7,6 +7,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -120,8 +122,6 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
 
   if (end_completed) {
     setStatus(WorkStatus::COMPLETED);
-    inputTensors_.clear();
-    inputTensor_.reset();
   } else {
     auto current_time = std::chrono::steady_clock::now();
     auto elapsed_milliseconds =
@@ -164,6 +164,20 @@ void WorkNCCL::synchronizeInternal() {
   auto current_stream =
       at::cuda::getCurrentCUDAStream(comm_->getDevice().index());
   end_event_->block(current_stream);
+
+  // For a synchronous barrier, mirror stock ProcessGroupNCCL by host-blocking
+  // the CPU thread until prior current-stream work has completed, not just
+  // stream-ordering it. Callers rely on this to flush async device work before
+  // proceeding (e.g. the flashinfer trtllm one-shot Lamport all_reduce clears
+  // its IPC buffers on the stream, then issues a synchronous barrier before the
+  // first all_reduce; a stream-order-only barrier lets the all_reduce race the
+  // clear and both ranks spin forever). Skip while the stream is capturing a
+  // CUDA graph: cudaStreamSynchronize is illegal during capture and the
+  // captured work is replayed on-device where a host sync is meaningless.
+  if (hostBlocking_ &&
+      !c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
+    C10_CUDA_CHECK(cudaStreamSynchronize(current_stream));
+  }
 
   // Release tensor references. The CUDA caching allocator manages stream
   // semantics and will not reclaim memory until the stream operations complete.

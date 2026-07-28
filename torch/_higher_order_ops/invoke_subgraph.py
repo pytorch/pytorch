@@ -7,7 +7,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -77,6 +77,17 @@ class NestedCompileRegionOptions:
     # Otherwise, the nested region will use this decompositions.
     decompositions: dict[str, Any] | None = None
 
+    # Inductor config patches to apply while compiling this nested region through
+    # Inductor's normal invoke_subgraph lowering path. Also used for the backward
+    # unless bw_inductor_config_patches replaces it.
+    inductor_config_patches: dict[str, Any] | None = None
+
+    # If set, the full inductor config for the backward subgraph, used instead of
+    # inductor_config_patches (a replacement, not merged with it), mirroring
+    # aot_autograd's separate fw_compiler/bw_compiler. If None, the backward
+    # reuses the forward config.
+    bw_inductor_config_patches: dict[str, Any] | None = None
+
 
 def _extract_nested_region_config(fn):
     """
@@ -98,6 +109,28 @@ def _extract_nested_region_config(fn):
         ):
             return gm_to_compile.meta["nested_region_config"].decompositions
     return None
+
+
+def get_backward_nested_region_config(
+    fw_config: NestedCompileRegionOptions | None,
+) -> NestedCompileRegionOptions | None:
+    """Region config for compiling the backward subgraph.
+
+    When the region sets bw_inductor_config_patches, the backward compiles under
+    it (a replacement for inductor_config_patches, not merged with it). Otherwise
+    the forward config is reused unchanged, so the returned object is identical
+    (callers rely on this identity to detect a distinct backward config).
+    """
+    if (
+        isinstance(fw_config, NestedCompileRegionOptions)
+        and fw_config.bw_inductor_config_patches is not None
+    ):
+        return replace(
+            fw_config,
+            inductor_config_patches=fw_config.bw_inductor_config_patches,
+            bw_inductor_config_patches=None,
+        )
+    return fw_config
 
 
 # Per-call id used by downstream graph passes to pair fw and bw
@@ -779,7 +812,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._identifier = identifier
         ctx._output_metadata = output_metadata
         ctx._call_id = _next_invoke_subgraph_call_id()
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -1339,31 +1372,48 @@ def invoke_subgraph_inductor_compile(
 
 
 def get_invoke_subgraph_compile_options(
-    inductor_config_patches=None,
+    fw_inductor_config_patches=None,
     decompositions=None,
     partitioner="min_cut_rematerialization_partition",
+    *,
+    bw_inductor_config_patches=None,
 ):
-    if inductor_config_patches is None:
-        inductor_config_patches = {"triton.autotune_at_compile_time": True}
-    inductor_compile = functools.partial(
-        invoke_subgraph_inductor_compile,
-        inductor_config_patches=inductor_config_patches,
+    if fw_inductor_config_patches is None:
+        fw_inductor_config_patches = {"triton.autotune_at_compile_time": True}
+
+    # The backward uses bw_inductor_config_patches when set (independently of the
+    # forward), otherwise it reuses the forward config.
+    bw_patches = (
+        bw_inductor_config_patches
+        if bw_inductor_config_patches is not None
+        else fw_inductor_config_patches
     )
 
-    if inductor_config_patches:
-        from torch._inductor import config as inductor_config
+    from torch._inductor import config as inductor_config
 
-        # Validate that all config keys exist
-        for key in inductor_config_patches:
+    # Validate that all config keys exist
+    for patches in (fw_inductor_config_patches, bw_inductor_config_patches):
+        for key in patches or {}:
             if not hasattr(inductor_config, key):
                 raise ValueError(
                     f"Invalid inductor config key '{key}' in get_invoke_subgraph_compile_options. "
                     f"Available config keys can be found in torch._inductor.config"
                 )
 
+    fw_compiler = functools.partial(
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=fw_inductor_config_patches,
+    )
+    bw_compiler = functools.partial(
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=bw_patches,
+    )
+
     return NestedCompileRegionOptions(
-        fw_compiler=inductor_compile,
-        bw_compiler=inductor_compile,
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
         partitioner=partitioner,
         decompositions=decompositions,
+        inductor_config_patches=fw_inductor_config_patches,
+        bw_inductor_config_patches=bw_inductor_config_patches,
     )
