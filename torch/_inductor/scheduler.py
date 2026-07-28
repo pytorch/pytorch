@@ -4186,6 +4186,17 @@ class _LoopMutationTracker:
         self.state.restore()
 
 
+def _uncoalesced_memory_score(nodes: Sequence[BaseSchedulerNode]) -> int | None:
+    # None means the analysis was unavailable, which is distinct from a score of 0
+    total = 0
+    for node in nodes:
+        coalesce_analysis = node.get_coalesce_analysis()
+        if coalesce_analysis is None:
+            return None
+        total += sum(coalesce_analysis.uncoalesced_addrs.values())
+    return total
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -7520,6 +7531,7 @@ class Scheduler:
         # failed reindex attempt returns -1 and the caller may keep evaluating
         # fusion within the same can_fuse() call.
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
+        uncoalesced_before = _uncoalesced_memory_score(snodes)
 
         for sn in snodes:
             sn.apply_loop_reindexing([red_numel, red_rnumel])
@@ -7541,6 +7553,24 @@ class Scheduler:
         if not has_benefit:
             rollback_snapshot.restore()
             return False
+
+        # score_fusion_memory() intersects deps exactly, so it is 0 when the deps
+        # only match after normalization, making this zero-tolerance for that case
+        # and proportional elsewhere. uncoalesced_addrs weights writes 2x, so the
+        # comparison errs toward rolling back.
+        uncoalesced_after = _uncoalesced_memory_score(snodes)
+        if uncoalesced_before is not None and uncoalesced_after is not None:
+            uncoalesced_added = uncoalesced_after - uncoalesced_before
+            shared_bytes = self.score_fusion_memory(node1, node2)
+            if uncoalesced_added > shared_bytes:
+                loop_ordering_log.debug(
+                    "rolling back reindex of %s: uncoalesced +%d > shared %d",
+                    pw_node.get_name(),
+                    uncoalesced_added,
+                    shared_bytes,
+                )
+                rollback_snapshot.restore()
+                return False
 
         # When loop ordering is disabled, re-extract deps with
         # normalize=True so variable names are canonical. This is
