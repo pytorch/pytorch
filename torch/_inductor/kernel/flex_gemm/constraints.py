@@ -474,11 +474,13 @@ class FlexGemmGroupedMainOutputTransform:
                 "FlexGEMM grouped main outputs are currently validated only on "
                 "SM100 and SM110"
             )
-        if self.group == 2 or (self.group == 4 and not self.chunked):
+        if self.group == 2 or (
+            self.group == 4 and not self.chunked and device_capacity == 10
+        ):
             return
         raise NotImplementedError(
-            "FlexGEMM grouped main-output stores support group 2, plus "
-            "interleaved group 4 on SM100 and SM110"
+            "FlexGEMM grouped main-output stores support group 2 on SM100 and "
+            "SM110, plus interleaved group 4 on SM100"
         )
 
 
