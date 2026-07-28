@@ -106,13 +106,13 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
-    isRocmArchAnyOf,
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_LINUX,
     IS_MACOS,
     IS_X86,
+    isRocmArchAnyOf,
     MACOS_VERSION,
     NAVI_ARCH,
     parametrize,
@@ -6209,7 +6209,9 @@ for dtype in (torch.int32, torch.int64):
             # Greatest relative difference: 0.007547957822680473 at index (92, 109, 0, 0) (up to 0.001 allowed)
             atol = 3e-4
 
-        weight = torch.randn([out_channels, in_channels // groups, kernel, kernel], dtype=dtype)
+        weight = torch.randn(
+            [out_channels, in_channels // groups, kernel, kernel], dtype=dtype
+        )
         if nhwc:
             weight = weight.to(memory_format=torch.channels_last)
         self.common(
