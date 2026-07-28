@@ -1490,11 +1490,13 @@ InsertObserversHelper::insertObserversFor(
           }
         }
         auto* subblock = g->block();
-        auto info_from_callee = insertObserversFor(
-            subblock, m, callee_observed_inputs, false, is_udf_for_subblock);
-        auto input_observers = std::get<0>(info_from_callee);
-        auto output_observers = std::get<1>(info_from_callee);
-        auto callee_observed_outputs = std::get<2>(info_from_callee);
+        auto [input_observers, output_observers, callee_observed_outputs] =
+            insertObserversFor(
+                subblock,
+                m,
+                callee_observed_inputs,
+                false,
+                is_udf_for_subblock);
         for (auto idx : callee_observed_outputs) {
           block_observed_values.insert(n->outputs()[idx]);
         }
@@ -1531,8 +1533,9 @@ InsertObserversHelper::insertObserversFor(
           auto info_from_subblock =
               insertObserversFor(subblock, module, block_observed_values);
           // subblock for prim::If doesn't have inputs
-          auto output_observers = std::get<1>(info_from_subblock);
-          auto subblock_observed_outputs = std::get<2>(info_from_subblock);
+          auto output_observers = std::move(std::get<1>(info_from_subblock));
+          auto subblock_observed_outputs =
+              std::move(std::get<2>(info_from_subblock));
 
           // We'll insert output observer for each subblock, and in the end
           // we will check if output of subblocks are quantized consistently

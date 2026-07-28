@@ -40,6 +40,33 @@ def _register_enum_pickling() -> None:
 _register_enum_pickling()
 
 
+def _rebuild_scaled_operand_constraints(
+    quantized: Any, scale: Any, mode: Any, swizzle: Any
+) -> Any:
+    from cutlass.operators.metadata import ScaledOperandConstraints
+
+    return ScaledOperandConstraints(quantized, scale, mode, swizzle)
+
+
+def _register_scaled_operand_constraints_pickling() -> None:
+    """Avoid CUTLASS's recursive ``__getattr__`` during unpickling."""
+    try:
+        from cutlass.operators.metadata import ScaledOperandConstraints
+    except ImportError:
+        return
+
+    copyreg.pickle(
+        ScaledOperandConstraints,
+        lambda value: (
+            _rebuild_scaled_operand_constraints,
+            (value.quantized, value.scale, value.mode, value.swizzle),
+        ),
+    )
+
+
+_register_scaled_operand_constraints_pickling()
+
+
 def to_cutlass_scale_mode(
     scale_type: Any, swizzle_type: Any
 ) -> tuple[Any | None, Any | None]:
