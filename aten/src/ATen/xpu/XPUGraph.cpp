@@ -101,9 +101,11 @@ void XPUGraphImpl::capture_begin(
         return filter(XPUStream(XPUStream::UNCHECKED, stream));
       });
 
-// Enable sycl graph native recording mode for sycl compiler version >= 2026.1.0.
+// Enable sycl graph native recording mode for sycl compiler version >=
+// 2026.1.0.
 #if SYCL_COMPILER_VERSION >= 20260100
-  auto sycl_property = sycl::property_list{property::graph::enable_native_recording{}};
+  auto sycl_property =
+      sycl::property_list{property::graph::enable_native_recording{}};
 #else
   TORCH_CHECK(
       false,
@@ -111,8 +113,7 @@ void XPUGraphImpl::capture_begin(
   auto sycl_property = sycl::property_list{};
 #endif
 
-  auto graph_impl = xpuGraph_t(
-      capture_stream_.queue(), sycl_property);
+  auto graph_impl = xpuGraph_t(capture_stream_.queue(), sycl_property);
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
   graph_->begin_recording(capture_stream_.queue());
 
