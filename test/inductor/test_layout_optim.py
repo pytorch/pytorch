@@ -340,15 +340,14 @@ class TestLayoutOptim(TestCase):
         ref = model(x, targets)
         self.assertTrue(torch.allclose(ref, loss))
 
-
     def test_decide_layout_opt_backward_graph(self):
         from torch._inductor.graph import GraphLowering
 
         g = torch.fx.Graph()
         with torch._subclasses.FakeTensorMode():
-            grad = torch.empty(1, 128, 32, 32, device="cuda")
-            inp = torch.empty(1, 64, 32, 32, device="cuda")
-            weight = torch.empty(128, 64, 3, 3, device="cuda")
+            grad = torch.empty(1, 128, 32, 32, device=GPU_TYPE)
+            inp = torch.empty(1, 64, 32, 32, device=GPU_TYPE)
+            weight = torch.empty(128, 64, 3, 3, device=GPU_TYPE)
             a = g.placeholder("grad_output")
             a.meta["val"] = grad
             b = g.placeholder("input")
@@ -359,7 +358,9 @@ class TestLayoutOptim(TestCase):
             conv_backward = g.call_function(
                 torch.ops.aten.convolution_backward.default,
                 (
-                    a, b, c,
+                    a,
+                    b,
+                    c,
                     None,
                     [1, 1],
                     [0, 0],
@@ -385,9 +386,9 @@ class TestLayoutOptim(TestCase):
 
         g = torch.fx.Graph()
         with torch._subclasses.FakeTensorMode():
-            x = torch.empty(1, 128, 32, 32, device="cuda")
-            w = torch.empty(256, 128, 3, 3, device="cuda")
-            b = torch.empty(256, device="cuda")
+            x = torch.empty(1, 128, 32, 32, device=GPU_TYPE)
+            w = torch.empty(256, 128, 3, 3, device=GPU_TYPE)
+            b = torch.empty(256, device=GPU_TYPE)
             a = g.placeholder("x")
             a.meta["val"] = x
             w_node = g.placeholder("w")
@@ -396,7 +397,9 @@ class TestLayoutOptim(TestCase):
             conv = g.call_function(
                 torch.ops.aten.convolution.default,
                 (
-                    a, w_node, b,
+                    a,
+                    w_node,
+                    b,
                     [1, 1],
                     [0, 0],
                     [1, 1],
