@@ -282,6 +282,13 @@ class TestValueRanges(TestCase):
     def test_pow_half(self):
         ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
 
+    def test_bound_sympy_negative_pow(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+
+        self.assertEqual(
+            bound_sympy(x**-1, {x: ValueRanges(3, 4)}), ValueRanges.unknown()
+        )
+
     @parametrize("fn", BINARY_OPS)
     @parametrize("dtype", ("int", "float"))
     def test_binary_ref(self, fn, dtype):

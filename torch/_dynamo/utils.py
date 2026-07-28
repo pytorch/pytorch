@@ -2976,11 +2976,10 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
 def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
-    from .variables.lazy import ComputedLazyConstantVariable
 
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized() and not isinstance(arg, ComputedLazyConstantVariable):
+        if not arg.is_realized():
             # Find if the arg would be realized as SymNodeVariable later on. If yes,
             # realize it and specialize. Else return the arg.
 
