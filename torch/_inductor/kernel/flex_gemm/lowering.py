@@ -12,12 +12,12 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor import config
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
 )
+from torch._inductor import config
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir

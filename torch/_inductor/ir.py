@@ -6578,7 +6578,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
-        local_reduce: tuple[str, int, int, str, str] | None = None,
+        local_reduce: tuple[str, int, int, str, str, str] | None = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
