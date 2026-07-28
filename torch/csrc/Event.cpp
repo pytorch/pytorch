@@ -56,7 +56,7 @@ static PyObject* THPEvent_pynew(
   new (&self->event) c10::Event(
       device->type(),
       // See note [Flags defining the behavior of events]
-      // BACKEND_DEFAULT is a enable-timing flag, and
+      // BACKEND_DEFAULT is an enable-timing flag, and
       // PYTORCH_DEFAULT is a disable-timing flag.
       (enable_timing ? c10::EventFlag::BACKEND_DEFAULT
                      : c10::EventFlag::PYTORCH_DEFAULT));

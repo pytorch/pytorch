@@ -10,7 +10,6 @@
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
 #include <memory>
-#include <utility>
 
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/device_struct.h>
@@ -306,7 +305,8 @@ class Tensor {
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
     STD_TORCH_CHECK(
-        std::in_range<int8_t>(device_index),
+        device_index >= std::numeric_limits<int8_t>::min() &&
+            device_index <= std::numeric_limits<int8_t>::max(),
         "Device index is out of range of return type int8_t, please use get_device_index() instead.");
     return static_cast<int8_t>(device_index);
   }
@@ -384,6 +384,24 @@ class Tensor {
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
   }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+  /**
+   * @brief Checks whether the tensor has an associated storage.
+   *
+   * Returns false for undefined tensors and for tensors that do not own a
+   * storage (e.g. sparse tensors).
+   *
+   * @return true if the tensor has a storage, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.14.
+   */
+  bool has_storage() const {
+    bool has_storage = false;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_has_storage(ath_.get(), &has_storage));
+    return has_storage;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
   /**
    * @brief Returns the storage offset of the tensor.
