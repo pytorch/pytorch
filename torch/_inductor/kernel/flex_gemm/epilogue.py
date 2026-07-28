@@ -27,6 +27,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
+    FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmGroupedMainOutputTransform,
@@ -1055,7 +1056,7 @@ class FlexGemmEpilogueAnalysis:
                 or gemm_shape is None
                 or not statically_known_shape_equal(main_shape, gemm_shape)
             ):
-                raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
+                raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
         return cls(outputs, local_reduce)
 
     @property
