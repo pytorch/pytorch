@@ -1659,9 +1659,10 @@ class TestCuptiRecords(TestCase):
 
     def test_pftrace_graph_node_dependency_arrows(self):
         # A CUDA-graph replay's node dependency DAG becomes GpuRenderStageEvent.event_wait_ids
-        # (node->node flow arrows) and the cudaGraphLaunch's GpuCorrelation lists ALL its
-        # replay's node event_ids. Two graphed kernels share one correlation (one replay) with
-        # distinct graph_node_ids; B depends on A. Runs the REAL native encoder end-to-end,
+        # (node->node flow arrows) and the cudaGraphLaunch's GpuCorrelation lists only its
+        # replay's ROOT node event_ids (the rest are reached through the node->node arrows). Two
+        # graphed kernels share one correlation (one replay) with distinct graph_node_ids; B
+        # depends on A, so only A (the root) is linked. Runs the REAL native encoder end-to-end,
         # gunzips, and decodes the protobuf with a minimal hand-rolled scanner (the perfetto
         # python lib is not installed). No CUDA. Field numbers verified against perfetto.h:
         # TracePacket.gpu_render_stage_event=53, .track_event=11; GpuRenderStageEvent.event_id=1,
@@ -1718,7 +1719,7 @@ class TestCuptiRecords(TestCase):
                 "channel_type": i64(0, 0),
             },
             # One cudaGraphLaunch record sharing the replay's correlation -> its GpuCorrelation
-            # fans out to both node event_ids.
+            # links only to the root node A (B is reached via the node->node dependency arrow).
             "cuda_runtime": {
                 "start_ns": i64(500),
                 "end_ns": i64(600),
@@ -1804,7 +1805,8 @@ class TestCuptiRecords(TestCase):
         self.assertNotEqual(node_a_event_id, node_b_event_id)
 
         # The cudaGraphLaunch track_event (field 11) carries a GpuCorrelation (nested field
-        # 3000) listing BOTH node event_ids (render_stage_submission_event_ids at field 1).
+        # 3000) listing only the ROOT node event_id -- node A (render_stage_submission_event_ids
+        # at field 1). Node B is not linked from the launch; it is reached via its wait arrow.
         submission_id_sets = []
         for pkt in packets:
             for fn, _wt, v in flds(pkt):
@@ -1815,7 +1817,7 @@ class TestCuptiRecords(TestCase):
                         ids = [gv for gfn, _gwt, gv in flds(sv) if gfn == 1]
                         submission_id_sets.append(set(ids))
         self.assertEqual(len(submission_id_sets), 1)
-        self.assertEqual(submission_id_sets[0], {node_a_event_id, node_b_event_id})
+        self.assertEqual(submission_id_sets[0], {node_a_event_id})
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")

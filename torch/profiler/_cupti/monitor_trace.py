@@ -1167,7 +1167,9 @@ def _assign_render_event_ids(render_columns: dict, graph_deps: dict) -> tuple | 
 
     - ``event_id``: uint64 arange(n) + 1 (0 stays reserved for "none").
     - ``corr_to_event_ids``: correlation_id -> [event_id, ...] grouping, for the CPU launch
-      slice's gpu_correlation (an eager launch -> 1 id, a graph replay -> all its node ids).
+      slice's gpu_correlation (an eager launch -> 1 id, a graph replay -> its ROOT node ids).
+      When graph deps are known the launch links only to the graph's roots (nodes with no
+      recorded predecessor); the rest are reached through the node->node dependency arrows.
     - ``(wait_offsets, wait_ids)``: the event_wait_ids CSR. Each graphed row (graph_node_id != 0)
       resolves ``graph_deps[graph_node_id]`` predecessor tools_ids to the event_ids of the nodes
       in the SAME replay (grouped by correlation_id), skipping predecessors absent from it.
@@ -1186,10 +1188,19 @@ def _assign_render_event_ids(render_columns: dict, graph_deps: dict) -> tuple | 
     event_id = np.arange(n, dtype=np.uint64) + np.uint64(1)
     # correlation_id -> event_ids, grouped vectorized (event_id[i] == i + 1). A launch's
     # gpu_correlation reads this: eager -> one id, a graph replay (one shared correlation) ->
-    # all of its node ids.
-    order = np.argsort(corr, kind="stable")
-    uniq_corr, starts = np.unique(corr[order], return_index=True)
-    groups = np.split(event_id[order], starts[1:])
+    # its root node ids. When graph deps are known, drop non-root graphed nodes (those present
+    # as a graph_deps key, i.e. with a recorded predecessor) so the launch links only to the
+    # roots; the rest are reached through the node->node dependency arrows. Eager kernels
+    # (graph_node_id 0) are never a graph_deps key, so they always link.
+    if graph_deps:
+        dep_keys = np.fromiter(graph_deps.keys(), dtype=np.int64, count=len(graph_deps))
+        link = ~np.isin(gnid, dep_keys)
+        corr_l, eid_l = corr[link], event_id[link]
+    else:
+        corr_l, eid_l = corr, event_id
+    order = np.argsort(corr_l, kind="stable")
+    uniq_corr, starts = np.unique(corr_l[order], return_index=True)
+    groups = np.split(eid_l[order], starts[1:])
     corr_to_event_ids = dict(zip(uniq_corr.tolist(), groups))
     # event_wait_ids: only graphed replays carry node dependencies, so build the per-row CSR
     # only when deps exist; otherwise every render stage waits on nothing.
@@ -1997,9 +2008,9 @@ def _window_to_pftrace(
             c["process_id"][keep], tid, "process {}", "thread {}", is_gpu=False
         )
         names = [names_u[i] for i in inv[keep].tolist()]
-        # Per launch slice, the render-stage event_ids it launched (a graph launch -> all its
-        # replay's node event_ids, an eager launch -> the one kernel's). Non-launch slices get
-        # an empty list. Links the CPU launch to its GPU render stages via gpu_correlation.
+        # Per launch slice, the render-stage event_ids it links to (a graph launch -> its
+        # replay's ROOT node event_ids, an eager launch -> the one kernel's). Non-launch slices
+        # get an empty list. Links the CPU launch to its GPU render stages via gpu_correlation.
         launch_mask = corr_u[inv[keep]].tolist()
         gpu_corr = [
             corr_to_event_ids.get(int(cc), []) if lm else []
