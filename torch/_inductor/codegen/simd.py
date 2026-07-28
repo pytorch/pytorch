@@ -2590,9 +2590,7 @@ class SIMDScheduling(BaseScheduling):
         reduction_node = node1 if node1.is_reduction() else node2
         _, (numel, rnumel) = reduction_node.group
         nodes = [*node1.get_nodes(), *node2.get_nodes()]
-        plan = self._sub_parent_epilogue_plan(
-            nodes, numel, rnumel, check_leaves=False
-        )
+        plan = self._sub_parent_epilogue_plan(nodes, numel, rnumel, check_leaves=False)
         if plan is None:
             return False
         epilogue_nodes = plan.epilogue_nodes
