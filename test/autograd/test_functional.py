@@ -6,7 +6,10 @@ import warnings
 
 import torch
 import torch.autograd.functional as autogradF
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
@@ -1723,22 +1726,22 @@ class TestAutogradFunctional(_AutogradFunctionalHelpers, TestCase):
 
 
 class TestAutogradFunctionalDevice(_AutogradFunctionalHelpers, TestCase):
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @onlyAccelerator
     @base_and_logging_tensor
-    def test_construct_standard_basis_for_cuda(self, ctors):
+    def test_construct_standard_basis(self, device, ctors):
         test_cases = [
-            (ctors.randn(2), ctors.randn(3, device="cuda")),
-            (ctors.randn(3, device="cuda"), ctors.randn(2)),
+            (ctors.randn(2), ctors.randn(3, device=device)),
+            (ctors.randn(3, device=device), ctors.randn(2)),
         ]
 
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @onlyAccelerator
     @base_and_logging_tensor
-    def test_jacobian_vectorize_correctness_different_devices(self, ctors):
+    def test_jacobian_vectorize_correctness_different_devices(self, device, ctors):
         def f(x, y):
-            return x * y, (x * y).cuda()
+            return x * y, (x * y).to(device)
 
         x = ctors.randn(3)
         y = ctors.randn(3)
@@ -1746,7 +1749,7 @@ class TestAutogradFunctionalDevice(_AutogradFunctionalHelpers, TestCase):
 
 
 instantiate_parametrized_tests(TestAutogradFunctional)
-instantiate_parametrized_tests(TestAutogradFunctionalDevice)
+instantiate_device_type_tests(TestAutogradFunctionalDevice, globals())
 
 
 if __name__ == "__main__":
