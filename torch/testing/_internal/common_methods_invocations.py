@@ -784,6 +784,27 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
+
+def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+
+    if dtype.is_floating_point or dtype.is_complex:
+        x = make_tensor(
+            (5,),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        exponent = torch.tensor(
+            [-2, -1, 0, 1, 3],
+            device=device,
+            dtype=torch.int32,
+        )
+        yield SampleInput(x, args=(exponent,))
+
+
 def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzero')
     yield ErrorInput(SampleInput(0, args=(-3, 2)), error_type=RuntimeError,
@@ -14226,6 +14247,7 @@ op_db: list[OpInfo] = [
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
     BinaryUfuncInfo('ldexp',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_ldexp,
                     # Runs very slowly on slow gradcheck - alternatively reduce input sizes
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -18909,11 +18931,11 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('angle',
                    ref=np.angle,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.chalf),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
