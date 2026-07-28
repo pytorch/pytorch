@@ -4451,13 +4451,68 @@ class ShapeEnv:
                 f"Expected orig_s to have free unbacked symbols: {orig_s}"
             )
         dest = self.replacements.get(orig_s)
-        if dest is not None:
-            if free_unbacked_symbols(dest):
-                raise AssertionError(f"{orig_s} -> {dest}")
+        if dest is not None and free_unbacked_symbols(dest):
+            # Re-exporting or re-lowering can register the same data-dependent binding
+            # twice, e.g. aten._unique2 through ExportedProgram.module() and
+            # PropagateUnbackedSymInts. Therefore orig_s, new_s, and dest are equal.
+            signpost_event(
+                "dynamic",
+                "rename_unbacked_to_unify",
+                {"orig_s": str(orig_s), "new_s": str(new_s), "dest": str(dest)},
+            )
+            log.info(
+                "rename_unbacked_to: unifying %s -> %s (existing dest %s)",
+                orig_s,
+                new_s,
+                dest,
+            )
         self._set_replacement(orig_s, new_s, "rename_unbacked_to")
         self.unbacked_renamings[orig_s] = new_s
         if dest is not None:
-            self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
+            self._unify_unbacked_aliases(new_s, dest)
+
+    def _unify_unbacked_aliases(self, new_s: sympy.Symbol, dest: sympy.Expr) -> None:
+        """Unify unbacked aliases under one terminal, preferring a backed one.
+
+        When this function is called, ``new_s``, ``dest``, and the expression
+        ``new_s`` resolves to are known to be equal. A backed terminal is preferred
+        because it has a usable hint.
+        """
+        # Resolve new_s transitively (not a one-hop replacements lookup) so a
+        # chain like new_s -> unbacked -> backed contributes the backed terminal
+        # here rather than the intermediate unbacked symbol.
+        existing = self._find(new_s)
+        aliases = list(
+            dict.fromkeys(a for a in (new_s, dest, existing) if a is not None)
+        )
+        backed_aliases = [a for a in aliases if not free_unbacked_symbols(a)]
+        terminal = backed_aliases[0] if backed_aliases else dest
+
+        for alias in aliases:
+            # Redirect only unbacked symbols: the terminal needs no redirect, a
+            # replacement key must be a bare Symbol, and backed symbols are roots
+            # that must never be repointed.
+            if (
+                alias == terminal
+                or not isinstance(alias, sympy.Symbol)
+                or not free_unbacked_symbols(alias)
+            ):
+                continue
+            self._set_replacement(alias, terminal, "rename_unbacked_to_dest")
+            if self.replacements.get(alias) != terminal:
+                # _set_replacement declined the substitution (e.g. the target
+                # range is not a subset), leaving alias unreconciled rather than
+                # unified -- surface it instead of failing silently.
+                signpost_event(
+                    "dynamic",
+                    "rename_unbacked_to_unify_skipped",
+                    {"alias": str(alias), "terminal": str(terminal)},
+                )
+                log.info(
+                    "rename_unbacked_to: could not unify %s -> %s",
+                    alias,
+                    terminal,
+                )
 
     @record_shapeenv_event()
     def _constrain_is_bounded(self, a: sympy.Symbol, upper_bound: int) -> None:
@@ -5811,7 +5866,7 @@ class ShapeEnv:
             # value before, we also create a new symbol
             symbol_id = self._generate_unique_id(source.name)
             if type(val) is int or is_nested_int(val):
-                if positive and do_not_specialize_zero_one:
+                if positive and skip_zero_one_guard_specialization:
                     sympy_expr = make_symbol(
                         SymT.SIZE, symbol_id, nonnegative=True, integer=True
                     )
@@ -5852,7 +5907,7 @@ class ShapeEnv:
             if isinstance(val, int):
                 if positive:
                     # Add assertions for the newly created symbols
-                    if do_not_specialize_zero_one:
+                    if skip_zero_one_guard_specialization:
                         self._add_assertion(sympy.Ge(sympy_expr, 0, evaluate=False))
                     else:
                         self._add_assertion(sympy_expr > 1)
@@ -8113,6 +8168,9 @@ class ShapeEnv:
                 self.log.debug("SPECIALIZATION", stack_info=True)
         log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
         self.replacements[a] = tgt
+        if a in self.do_not_specialize_zero_one_symbols:
+            # Preserve the opt-out provenance after expressions are rewritten.
+            self.do_not_specialize_zero_one_symbols.update(tgt.free_symbols)
         # NB: the replacement may get refined, but the user will find the
         # FIRST one most useful (TODO: Maybe we could consider tracking all of
         # them)

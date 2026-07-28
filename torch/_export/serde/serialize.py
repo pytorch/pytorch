@@ -2418,6 +2418,14 @@ class GraphModuleDeserializer(metaclass=Final):
                 # ShapeEnv meta
                 if isinstance(sym, sympy.Symbol):
                     self.shape_env.var_to_stack[sym] = CapturedTraceback.extract(skip=1)
+                    if (
+                        symbolic_shapes.symbol_is_type(sym, SymT.SIZE)
+                        and sym.is_nonnegative
+                        and sym.is_positive is None
+                    ):
+                        # Nonnegative size symbols represent declared dimensions
+                        # whose 0/1 specialization was explicitly disabled.
+                        self.shape_env.do_not_specialize_zero_one_symbols.add(sym)
             return sym
 
         expr = sympy.sympify(

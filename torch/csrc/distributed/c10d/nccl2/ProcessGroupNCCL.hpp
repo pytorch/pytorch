@@ -234,7 +234,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
   // current communicator generation (if any) and bootstraps a fresh ncclComm
   // over the surviving/new members. Implemented in
-  // ProcessGroupNCCLReconfigure.cpp.
+  // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
     return true;
   }
@@ -255,7 +255,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const std::optional<at::Tensor>& tensor = std::nullopt) override;
 
   // Caching-allocator segment registration (called by
-  // NcclCachingAllocatorHook, potentially from allocator threads).
+  // NCCLCachingAllocatorHook, potentially from allocator threads).
   void register_address(void* addr, size_t len);
   void deregister_address(void* addr);
   // Returns {window handle, byte offset of ptr within the segment}, or
@@ -477,6 +477,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   void attachMemoryHook();
   void detachMemoryHook();
+
+  // Publish/retire nccl_comm_ to the symmetric-memory registry via the NCCL
+  // comm-registration hook (NCCLCommRegistrationHook.hpp), so this class does
+  // not depend on the symm_mem DevCommManager header. Fired from
+  // initNcclResources() and the comm-teardown paths, respectively.
+  void publishComm();
+  void retireComm();
 
   // Member variables (port of TorchCommNCCL).
   ncclComm_t nccl_comm_{};
