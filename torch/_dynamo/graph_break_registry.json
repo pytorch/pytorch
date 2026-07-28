@@ -504,16 +504,6 @@
       ]
     }
   ],
-  "GB2444": [
-    {
-      "Gb_type": "MAKE_CELL on a free variable name",
-      "Context": "MAKE_CELL {inst.argval}",
-      "Explanation": "An inlined comprehension creates a cell whose name `{inst.argval}` is also a free variable of the enclosing function.",
-      "Hints": [
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
-      ]
-    }
-  ],
   "GB0037": [
     {
       "Gb_type": "Dynamic shape operator (no meta kernel)",

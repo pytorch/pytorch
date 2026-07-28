@@ -89,7 +89,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
-    xfailIf,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -4280,7 +4279,6 @@ class TestAutograd(TestCase):
         # graph was freed, causing a RuntimeError here.
         self.assertEqual(saved_ctx[0].saved_tensors, (p,))
 
-    @xfailIf(TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 13))
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting
         # and different test case worth enshrining.  mult1 is not testing
