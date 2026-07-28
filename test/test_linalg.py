@@ -5874,7 +5874,6 @@ class TestLinalg(TestCase):
 
             # see test_linalg_batched_lu_stability_large_inputs
             K = 1.0
-            print(i, scaled_residual)
             self.assertTrue((scaled_residual < K).all())
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})

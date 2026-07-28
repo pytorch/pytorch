@@ -574,6 +574,7 @@ batched_panel_register_resident_nopiv_fused_kernel(
         rA[j] -= rA[i] * spivrow[j];
       }
     }
+    __syncthreads();
   }
 
   // Write info
