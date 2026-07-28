@@ -88,6 +88,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     TMA_ALIGNMENT,
+    TRITON_FLOAT8_DTYPES,
     triton_type,
     triton_version_uses_attrs_dict,
     upcast_compute_type,
@@ -6156,8 +6157,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reshape_shape: Sequence[sympy.Expr | int | str],
         part_names: Sequence[str],
     ) -> None:
-        reshaped = self._reshape_expr(value, reshape_shape)
-        self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
+        dtype = value.dtype
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
+        value_expr = str(value)
+        if is_float8:
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        reshaped = self._reshape_expr(value, reshape_shape, value_expr=value_expr)
+        if not is_float8:
+            self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
+            return
+        raw_part_names = [f"{name}_uint8" for name in part_names]
+        self.compute.writeline(f"{', '.join(raw_part_names)} = tl.split({reshaped})")
+        for raw_name, part_name in zip(raw_part_names, part_names):
+            self.compute.writeline(
+                f"{part_name} = {raw_name}.to({triton_type(dtype)}, bitcast=True)"
+            )
 
     def emit_broadcast_via_reshape(
         self,
@@ -6173,15 +6187,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Used for nested-reduction broadcasts that lift a reduced-resolution
         value (one element per group) to full or half resolution.
         """
-        reshaped = self._reshape_expr(value, pre_broadcast_shape)
-        is_float8 = dtype in (
-            torch.float8_e4m3fn,
-            torch.float8_e5m2,
-            torch.float8_e4m3fnuz,
-            torch.float8_e5m2fnuz,
-        )
+        value_expr = str(value)
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
         if is_float8:
-            reshaped = f"{reshaped}.to(tl.uint8, bitcast=True)"
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        reshaped = self._reshape_expr(
+            value, pre_broadcast_shape, value_expr=value_expr
+        )
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
@@ -6199,11 +6211,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _reshape_expr(
         value: CSEVariable,
         shape: Sequence[sympy.Expr | int | str],
+        *,
+        value_expr: str | None = None,
     ) -> str:
+        if value_expr is None:
+            value_expr = str(value)
         old_shape = getattr(value, "shape", None)
         if old_shape is None:
-            return f"tl.reshape({value}, {triton_shape_str(shape)})"
-        return triton_reshape(str(value), list(old_shape), list(shape))
+            return f"tl.reshape({value_expr}, {triton_shape_str(shape)})"
+        return triton_reshape(value_expr, list(old_shape), list(shape))
 
     def _lift_helper(
         self, fn, values: tuple[CSEVariable, ...], dtypes: tuple[torch.dtype, ...]
