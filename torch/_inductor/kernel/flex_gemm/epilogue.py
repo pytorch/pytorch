@@ -913,17 +913,6 @@ def grouped_main_output_transform(
         selected_indices.add(index % group)
         return True
 
-    def bind_all_lanes(
-        source: torch.fx.Node,
-        shape: tuple[Any, ...],
-        group: int,
-        chunked: bool,
-    ) -> bool:
-        """Bind a transform that consumes every lane without explicit selects."""
-        return all(
-            bind_lane(source, shape, group, chunked, index) for index in range(group)
-        )
-
     def visit(node: Any) -> bool:
         if not isinstance(node, torch.fx.Node) or node in seen:
             return True
@@ -950,7 +939,12 @@ def grouped_main_output_transform(
                     gemm_shape,
                 )
                 and local_reduce.graph.depends_on(grouped_args[0], gemm)
-                and bind_all_lanes(grouped_args[0], grouped_shape, layout.group, False)
+                and all(
+                    bind_lane(
+                        grouped_args[0], grouped_shape, layout.group, False, index
+                    )
+                    for index in range(layout.group)
+                )
             ):
                 pending_grouped[grouped] = layout
                 return True
