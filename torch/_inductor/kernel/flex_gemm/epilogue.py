@@ -850,7 +850,7 @@ def tuple_output_plan(
         raise NotImplementedError(FLEX_GEMM_OUTPUT_TENSOR_ERROR)
     feed_match = analysis.common_feed_main_match((output, *aux_outputs))
     compressed_aux_plans = tuple(
-        (index, plan.match, plan)
+        (index, plan)
         for index, aux_output in enumerate(aux_outputs)
         if (
             plan := analysis.compressed_aux_plan(
@@ -862,14 +862,12 @@ def tuple_output_plan(
     if len(compressed_aux_plans) > 1:
         raise NotImplementedError(LOCAL_REDUCE_MIXED_MATCH_ERROR)
     if compressed_aux_plans:
-        local_reduce_index, compressed_match, compressed_aux_plan = (
-            compressed_aux_plans[0]
-        )
+        local_reduce_index, compressed_aux_plan = compressed_aux_plans[0]
         compressed_store = compressed_aux_plan.store
         if compressed_store is None:
             raise AssertionError("compressed aux plans require an output store")
         if feed_match is not None:
-            if feed_match.value_node is not compressed_match.value_node:
+            if feed_match.value_node is not compressed_aux_plan.match.value_node:
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             compressed_aux_plan = feed_match.to_plan(
                 store=compressed_store,
@@ -931,22 +929,16 @@ def output_plan(
                 raise NotImplementedError(
                     "FlexGEMM generated epilogues require GEMM output metadata"
                 )
-            plan = tuple_output_plan(
+            return tuple_output_plan(
                 output,
                 tuple(aux_outputs),
                 local_reduce,
                 physical_output_shape,
             )
-            validate_output_layout_transforms(graph_module, plan)
-            return plan
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
     feed_main_plan = local_reduce.feed_main_output_plan(output_value)
-    plan = (
-        FlexGemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
-    )
-    validate_output_layout_transforms(graph_module, plan)
-    return plan
+    return FlexGemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
 
 
 def grouped_main_output_transform(
@@ -991,17 +983,6 @@ def grouped_main_output_transform(
         selected_indices.add(index % group)
         return True
 
-    def bind_all_lanes(
-        source: torch.fx.Node,
-        shape: tuple[Any, ...],
-        group: int,
-        chunked: bool,
-    ) -> bool:
-        """Bind a transform that consumes every lane without explicit selects."""
-        return all(
-            bind_lane(source, shape, group, chunked, index) for index in range(group)
-        )
-
     def visit(node: Any) -> bool:
         if not isinstance(node, torch.fx.Node) or node in seen:
             return True
@@ -1028,7 +1009,12 @@ def grouped_main_output_transform(
                     gemm_shape,
                 )
                 and local_reduce.graph.depends_on(grouped_args[0], gemm)
-                and bind_all_lanes(grouped_args[0], grouped_shape, layout.group, False)
+                and all(
+                    bind_lane(
+                        grouped_args[0], grouped_shape, layout.group, False, index
+                    )
+                    for index in range(layout.group)
+                )
             ):
                 pending_grouped[grouped] = layout
                 return True
@@ -1158,6 +1144,7 @@ class FlexGemmEpilogueAnalysis:
         """Analyze grouped values and classify logical output consumers."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
         outputs = output_plan(graph_module, local_reduce, gemm)
+        validate_output_layout_transforms(graph_module, outputs)
         transform = grouped_main_output_transform(outputs.main, gemm, local_reduce)
         if transform is not None:
             if outputs.aux_outputs:
