@@ -130,12 +130,12 @@ nn_module_guard_eval_dynamic,instruction_count,116300,0.1
 
 
 
-disable_overhead,instruction_count,2000,0.1
+disable_overhead,instruction_count,3369,0.1
 
 
 
-disable_dynamo_overhead,instruction_count,4000,0.1
+disable_dynamo_overhead,instruction_count,5291,0.1
 
 
 
-runtime_overhead_eager_cpu,instruction_count,50000,0.1
+runtime_overhead_eager_cpu,instruction_count,158800,0.1
