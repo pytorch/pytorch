@@ -605,7 +605,10 @@ class NestedReduction:
         outer_numel: sympy.Expr,
         outer_rnumel: sympy.Expr,
     ) -> tuple[sympy.Expr, ...] | None:
-        if grouped_axis is not cls.GroupedAxis.R or group_size % cls.PARENT_HALF_FACTOR != 0:
+        if (
+            grouped_axis is not cls.GroupedAxis.R
+            or group_size % cls.PARENT_HALF_FACTOR != 0
+        ):
             return None
         return (outer_numel, FloorDiv(outer_rnumel, cls.PARENT_HALF_FACTOR))
 
@@ -626,6 +629,11 @@ class NestedReduction:
         *,
         check_leaves: bool = True,
     ) -> SubParentEpiloguePlan | None:
+        r"""Return a fusion plan for compatible sub-parent reduction epilogues.
+
+        When ``check_leaves`` is false, skip source-load and leaf constraints
+        used only to reject additional fusions.
+        """
         parent_rnumel = cls._sub_parent_epilogue_parent_rnumel(rnumel)
         if parent_rnumel is None:
             return None
