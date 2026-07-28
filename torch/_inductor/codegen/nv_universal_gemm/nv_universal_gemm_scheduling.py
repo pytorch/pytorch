@@ -414,7 +414,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         store = GemmEpilogueIRAnalysis.store_from_buffer(node)
         classified = (
-            grouped_reduction_ir(store, gemm_node.get_name(), group)
+            grouped_reduction_ir(
+                store, gemm_node.get_name(), group, gemm_node.get_dtype()
+            )
             if store is not None
             else None
         )
