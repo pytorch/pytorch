@@ -131,6 +131,7 @@ from .triton_utils import (
     select_tile_hint,
     should_unwrap_unspec_arg,
     signature_to_meta,
+    use_block_ptr_enabled,
     use_uint8_triton_storage_for_cuda_float8_e4m3fn,
 )
 from .wrapper import SymbolicCallArg
@@ -405,7 +406,8 @@ class IndexingOptions:
 class BlockDescriptorOptions:
     """
     This is a base class that describes a block descriptor used in Triton kernels.
-    It is used to create a tensor descriptor (with TensorDescriptorOptions).
+    It can be used to create either a tensor descriptor (with TensorDescriptorOptions)
+    or a block pointer (with BlockPtrOptions).
     """
 
     params: BlockParameters
@@ -766,8 +768,7 @@ class TensorDescriptorOptions(BlockDescriptorOptions):
 
         Args:
             name: variable name for pointer
-            roffset: unused, retained for signature compatibility with the
-                BlockDescriptorOptions.format() interface
+            roffset: unused, but kept for compatibility with BlockPtrOptions.format()
 
         Returns:
             "tl.make_tensor_descriptor(...)"
@@ -786,6 +787,71 @@ class TensorDescriptorOptions(BlockDescriptorOptions):
         ]
 
         return f"tl.make_tensor_descriptor({', '.join(args)})"
+
+
+@dataclasses.dataclass
+class BlockPtrOptions(BlockDescriptorOptions):
+    def replace_offset(
+        self, expr: sympy.Expr, replacement: sympy.Expr, symt: SymT
+    ) -> sympy.Expr:
+        """
+        Replaces instances of {symt}_offset with the new expression.
+        """
+        roffset = TritonSymbols.block_offsets[symt]
+        return sympy_subs(expr, {roffset: replacement})
+
+    def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
+        for symt in TritonSymbols.reduction_types:
+            expr = self.replace_offset(expr, sympy.Integer(0), symt)
+        return expr
+
+    def format(self, name: str, roffset=True) -> str:
+        """
+        Codegen a call to tl.make_block_ptr()
+
+        Args:
+            name: variable name for pointer
+            roffset: should rn_offset be included in offsets=..., for use with tl.advance()
+
+        Returns:
+            "tl.make_block_ptr(...)"
+        """
+        f = V.kernel.index_to_str
+        offsets = [*self.offsets]
+        if not roffset:
+            offsets = [self.remove_roffsets(offset) for offset in offsets]
+        args = [
+            (
+                f"{name} + ({f(self.constant_offset)})"
+                if self.constant_offset != 0
+                else name
+            ),
+            f"shape={f(self.shape)}",
+            f"strides={f(self.strides)}",
+            f"block_shape={f(self.block_shape)}",
+            f"order={f(self.order)}",
+            f"offsets={f(offsets)}",
+        ]
+        return f"tl.make_block_ptr({', '.join(args)})"
+
+    def advance_roffset(self, symt: SymT) -> sympy.Expr:
+        """
+        Codegen string to pass to tl.advance(name, ...).
+
+        Advance is the difference between offsets in each loop iteration.
+        To compute it, we replace rN_offset with multiples of RN_BLOCK.
+        Since we expect rN_offset to vary in range(0, rN_numel, RN_BLOCK), the first
+        iteration has rN_offset=0, while the second has rN_offset=RN_BLOCK.
+        """
+        rblock = TritonSymbols.block_sizes[symt]
+        advance = [
+            (
+                self.replace_offset(offset, rblock, symt)
+                - self.replace_offset(offset, sympy.S.Zero, symt)
+            )
+            for offset in self.offsets
+        ]
+        return advance
 
 
 def triton_shape_dims(shape: Sequence[sympy.Expr | int | str]) -> list[str]:
@@ -3195,6 +3261,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
+    block_ptr_options_cls: type[BlockPtrOptions] = BlockPtrOptions
     tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
         TensorDescriptorOptions
     )
@@ -3746,7 +3813,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dense_mask_vars.add(tree.mask_name())
 
         if (
-            (tma_compatibility_checker and tma_compatibility_checker.can_use_tma())
+            (
+                (block_ptr and self.allow_block_ptr and use_block_ptr_enabled())
+                or (
+                    tma_compatibility_checker
+                    and tma_compatibility_checker.can_use_tma()
+                )
+            )
             and not override_mask
             and not self._load_mask
             and len(mask_vars - dense_mask_vars) == 0
@@ -3957,34 +4030,45 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # Form the block pointer or TMA descriptor.
                 self.filter_masks(mask_vars)
 
-                options_class = self.tensor_descriptor_options_cls
+                options_class = (
+                    self.block_ptr_options_cls
+                    if use_block_ptr_enabled()
+                    else self.tensor_descriptor_options_cls
+                )
                 nonlocal tma_compatibility_checker
                 stride_sorter_cls: type[BlockParameters.StrideSorter]
-                tma_compatibility_checker = cast(
-                    TMACompatibilityChecker, tma_compatibility_checker
-                )
-                can_lift = tma_compatibility_checker.can_lift()
-
-                if self.transpose_discontiguous_tensor_descriptors_override is not None:
-                    transpose_contiguous = (
-                        self.transpose_discontiguous_tensor_descriptors_override
-                    )
+                if use_block_ptr_enabled():
+                    can_lift = False
+                    stride_sorter_cls = BlockParameters.IdentityStrideSorter
                 else:
-                    transpose_contiguous = (
-                        config.triton.transpose_discontiguous_tensor_descriptor
+                    tma_compatibility_checker = cast(
+                        TMACompatibilityChecker, tma_compatibility_checker
                     )
+                    can_lift = tma_compatibility_checker.can_lift()
 
-                # For templates:
-                # Only try transpose if we know the output shape
-                # in case we need to transpose the data.
-                if hasattr(self, "template_out_shape"):
-                    transpose_contiguous &= copy_shape is not None
+                    if (
+                        self.transpose_discontiguous_tensor_descriptors_override
+                        is not None
+                    ):
+                        transpose_contiguous = (
+                            self.transpose_discontiguous_tensor_descriptors_override
+                        )
+                    else:
+                        transpose_contiguous = (
+                            config.triton.transpose_discontiguous_tensor_descriptor
+                        )
 
-                stride_sorter_cls = (
-                    BlockParameters.TensorDecriptorStrideSorter
-                    if transpose_contiguous
-                    else BlockParameters.IdentityStrideSorter
-                )
+                    # For templates:
+                    # Only try transpose if we know the output shape
+                    # in case we need to transpose the data.
+                    if hasattr(self, "template_out_shape"):
+                        transpose_contiguous &= copy_shape is not None
+
+                    stride_sorter_cls = (
+                        BlockParameters.TensorDecriptorStrideSorter
+                        if transpose_contiguous
+                        else BlockParameters.IdentityStrideSorter
+                    )
 
                 options = options_class.create(
                     params=block_params,
@@ -4156,7 +4240,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self,
         name: str,
         var: str,
-        indexing: TensorDescriptorOptions,
+        indexing: BlockPtrOptions | TensorDescriptorOptions,
         other="",
     ) -> tuple[str, str]:
         """Generate a block pointer or tensor descriptor for Triton kernel operations.
@@ -4216,6 +4300,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # above (which returned) -- emit an in-kernel tl.make_tensor_descriptor.
             self._emitted_device_tma = True
 
+        else:
+            if not check:
+                # workaround https://github.com/triton-lang/triton/issues/2813
+                other = ""
+            elif other:
+                if other != ", other=0.0":
+                    raise AssertionError(f"expected ', other=0.0', got {other!r}")
+                other = f", boundary_check={check!r}, padding_option='zero'"
+            else:
+                other = f", boundary_check={check!r}"
+
         if (
             self.inside_reduction
             and self.range_trees[-1].is_loop
@@ -4234,7 +4329,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     return str(block_var), other
 
                 block_descriptor_id = next(self.block_ptr_id)
-                block_descriptor = f"tma_descriptor{block_descriptor_id}"
+                if isinstance(indexing, BlockPtrOptions):
+                    block_descriptor = f"block_ptr{block_descriptor_id}"
+                else:
+                    block_descriptor = f"tma_descriptor{block_descriptor_id}"
                 named_var = self.cse.namedvar(
                     block_descriptor, dtype=torch.uint64, shape=[]
                 )
@@ -4247,6 +4345,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.prologue_cache[var] = block_descriptor
                 else:
                     self.body.writeline(line_body)
+
+                if isinstance(indexing, BlockPtrOptions):
+                    # Store for later use. If the buffer is removed the below advancements
+                    # are no longer necessary
+                    self.block_ptr_to_buffer[block_descriptor] = name
+
+                    # Generate block pointer advancements, for later use.
+                    # We record the entry for every level, even when the
+                    # per-level offset is zero. The outer-loop suffix computes
+                    # a rewind as `outer_step - inner_step * inner_num_iter`;
+                    # if a pointer's outer entry is absent, no rewind is
+                    # emitted and its SSA value (in scf.for-based backends
+                    # such as Triton-MTIA) retains the accumulated inner
+                    # advances across outer iterations, silently loading
+                    # out-of-bounds. The emit site below drops pure no-op
+                    # advances so this does not add codegen noise for
+                    # pointers that are truly constant across all levels.
+                    for symt in TritonSymbols.reduction_types:
+                        advance_offsets = indexing.advance_roffset(symt)
+
+                        advancements = self.pointer_advancements[symt]
+                        if block_descriptor in advancements:
+                            raise AssertionError(
+                                f"duplicate advancement for pointer '{block_descriptor}' at type '{symt}'"
+                            )
+                        advancements[block_descriptor] = advance_offsets
         else:
             block_descriptor = indexing.format(var)
         return block_descriptor, other
@@ -4298,6 +4422,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if not isinstance(buf, RemovedArg):
                 store_dtype = V.graph.get_dtype(buf.other_names[0])
         value = f"{value}.to({triton_store_type(store_dtype)})"
+        if isinstance(indexing, BlockPtrOptions):
+            return f"tl.store({block_ptr}, {value}{other})"
         return self.codegen_descriptor_store_line(block_ptr, indexing, value)
 
     def codegen_descriptor_load_line(self, block_descriptor, indexing):
@@ -4732,11 +4858,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape = ()
 
         else:
-            if isinstance(indexing, TensorDescriptorOptions):
+            if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
                 block_descriptor, other = self.codegen_block_ptr(
                     name, var, indexing, other
                 )
-                line = self.codegen_descriptor_load_line(block_descriptor, indexing)
+                if isinstance(indexing, BlockPtrOptions):
+                    line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
+                else:
+                    line = self.codegen_descriptor_load_line(block_descriptor, indexing)
                 line, shape = indexing.codegen_broadcast_and_reshape(
                     line,
                     indexing.block_shape,
@@ -4871,7 +5000,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if is_inplace and is_broadcasted:
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
-        if isinstance(indexing, TensorDescriptorOptions):
+        if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
             # block_ptr / tma descriptor stores don't do implicit casting
             line = self.codegen_block_ptr_store_line(
@@ -5931,7 +6060,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._handle_pdl_before_access(self.post_loop_store, var)
 
-        if isinstance(indexing, TensorDescriptorOptions):
+        if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
