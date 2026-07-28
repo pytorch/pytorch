@@ -21,6 +21,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
+    gradcheck, gradgradcheck,
     skipIfMPS,
     skipIfTorchDynamo,
     IS_WINDOWS)
@@ -114,7 +115,7 @@ class TestReductions(TestCase):
         result = op(t, *args, **dim_keepdim, **kwargs)
         empty_dim_as_none = (op.name == "linalg.vector_norm" or op.name == "_refs.linalg.vector_norm")
         expected_shape = _reduced_shape(shape, empty_dim_as_none, **dim_keepdim)
-        self.assertEqual(result.shape, expected_shape, f"""
+        self.assertEqual(result.shape, expected_shape, lambda msg: f"""{msg}\n
         expected output shape to be {expected_shape} but got {list(result.shape)}
         for input shape {shape} and {dim_keepdim}
         """)
@@ -2180,9 +2181,9 @@ class TestReductions(TestCase):
             a[2, 2] = nan
             actual = f(a.to(device)).cpu()
             expected = f(a).cpu()
-            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=f'nans for {name}')
+            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=lambda msg: f'{msg}\nnans for {name}')
             self.assertEqual(actual[~torch.isnan(actual)],
-                             expected[~torch.isnan(expected)], msg=f'nans for {name}')
+                             expected[~torch.isnan(expected)], msg=lambda msg: f'{msg}\nnans for {name}')
 
     # TODO: make this test generic using OpInfos
     @onlyOn(["cuda", "xpu"])
@@ -2440,16 +2441,16 @@ class TestReductions(TestCase):
             fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
             values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
             self.assertEqual(values[:, 1], values_expected,
-                             msg=f'{fn_name} values with out= kwarg')
+                             msg=lambda msg: f'{msg}\n{fn_name} values with out= kwarg')
             self.assertEqual(indices[:, 1], indices_expected,
-                             msg=f'{fn_name} indices with out= kwarg')
+                             msg=lambda msg: f'{msg}\n{fn_name} indices with out= kwarg')
             return
 
         x = torch.randn(5, 3, device=device)
         y = torch.randn(5, 3, device=device)
         fn(y, 1, keepdim=False, out=x[:, 1])
         expected = fn(y, 1, keepdim=False)
-        self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
+        self.assertEqual(x[:, 1], expected, msg=lambda msg: f'{msg}\n{fn_name} with out= kwarg')
 
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest('10GB')
@@ -2822,6 +2823,171 @@ class TestReductions(TestCase):
             with self.assertRaisesRegex(
                     RuntimeError, r'quantile\(\) out tensor must be on the same device as the input tensor'):
                 torch.quantile(torch.randn(1, device=device), 0.5, out=torch.scalar_tensor(1))
+
+    @skipIfMPS  # MPS caps float32 at 2^24 and has no float64, so >2^24 can't run there
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    def test_quantile_large_input(self, device, dtype):
+        # gh-64947: quantile must stay correct past the old 2^24 cap. float32
+        # works because ranks are computed in float64; float64 reaches 2^53.
+        # Oracle is numpy in float64 (the true value) for both, all modes + nan.
+        n = 17_000_000
+        torch.manual_seed(0)
+        a = torch.randn(n, dtype=dtype, device=device)
+        a_nan = a.clone()
+        a_nan[torch.randint(n, (32,), device=device)] = float('nan')
+        q = torch.tensor([0.0, 0.1, 0.5, 0.9, 1.0], dtype=dtype, device=device)
+        a_np = a.double().cpu().numpy()
+        a_nan_np = a_nan.double().cpu().numpy()
+        q_np = q.double().cpu().numpy()
+        for interpolation in ('linear', 'lower', 'higher', 'midpoint', 'nearest'):
+            res = torch.quantile(a, q, interpolation=interpolation)
+            expected = np.quantile(a_np, q_np, method=interpolation)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.asarray(expected)).to(res))
+
+            res_nan = torch.nanquantile(a_nan, q, interpolation=interpolation)
+            expected_nan = np.nanquantile(a_nan_np, q_np, method=interpolation)
+            self.assertEqual(res_nan.cpu(), torch.from_numpy(np.asarray(expected_nan)).to(res_nan))
+
+    @onlyNativeDeviceTypes
+    def test_quantile_size_limit(self, device):
+        # float32 ranks are exact only to 2^24; computing them in float64 lifts
+        # the limit to 2^53. MPS has no float64, so it keeps the 2^24 cap and
+        # raises past it, while CPU/CUDA support larger float32 inputs.
+        over_cap = (1 << 24) + 1
+        if self.device_type == "mps":
+            torch.quantile(torch.empty(1 << 24, dtype=torch.float32, device=device), 0.5)
+            with self.assertRaisesRegex(RuntimeError, r'quantile\(\) input tensor is too large'):
+                torch.quantile(torch.empty(over_cap, dtype=torch.float32, device=device), 0.5)
+        else:
+            torch.quantile(torch.empty(over_cap, dtype=torch.float32, device=device), 0.5)
+
+    @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)  # no float64 on MPS; exercises the sort fallback
+    def test_quantile_partial_selection(self, device, dtype):
+        # Stresses the CPU shared-pass selection (and the sort fallback on CUDA):
+        # many quantiles (deep recursion), adversarial value layouts, and batched
+        # ragged nan counts. Oracle is numpy.
+        torch.manual_seed(0)
+        np.random.seed(0)
+        all_interps = ('linear', 'lower', 'higher', 'midpoint', 'nearest')
+
+        def check(a, q, dim, keepdim, op='quantile', interps=all_interps):
+            tq, nq = getattr(torch, op), getattr(np, op)
+            qt = torch.tensor(q, dtype=dtype, device=device)
+            for interp in interps:
+                r = tq(a, qt, dim=dim, keepdim=keepdim, interpolation=interp)
+                e = nq(a.cpu().numpy(), np.asarray(q), dim, method=interp, keepdims=keepdim)
+                self.assertEqual(r.cpu(), torch.from_numpy(np.asarray(e)).to(r.dtype))
+
+        # Many quantiles exercise the recursion depth (K under the rank cap on long
+        # rows so the selection runs). The non-interpolating modes round q * (L - 1) in
+        # the input dtype, which can straddle an integer differently from numpy's
+        # float64 for arbitrary q, so the recursion is checked with 'linear' (the value
+        # is continuous in the rank there); the rounding modes are covered below on
+        # integer ranks.
+        qmany = sorted(np.random.rand(50).tolist())
+        for shape, dim in [((16384,), None), ((16384,), 0), ((8, 16384), 1), ((4, 4, 16384), 2)]:
+            a = torch.randn(*shape, dtype=dtype, device=device)
+            check(a, qmany, dim, False, interps=('linear',))
+            check(a, [0.0, 1.0], dim, True)
+        # Past the cap (and on short rows) the sort fallback must still match numpy.
+        check(torch.randn(500, dtype=dtype, device=device), qmany + qmany, 0, False, interps=('linear',))
+        check(torch.randn(40, 30, dtype=dtype, device=device), qmany, 1, False, interps=('linear',))
+
+        # Adversarial value layouts (n - 1 divisible by 4 keeps the ranks integral).
+        base = torch.randn(257, dtype=dtype, device=device)
+        for a in (torch.randint(0, 5, (257,), device=device).to(dtype),
+                  base.sort().values, base.sort(descending=True).values,
+                  torch.zeros(257, dtype=dtype, device=device)):
+            check(a, [0.0, 0.25, 0.5, 0.75, 1.0], 0, False)
+
+        # Batched ragged nan: every row a different valid-count, plus an all-nan row.
+        a = torch.randn(12, 401, dtype=dtype, device=device)
+        for i in range(12):
+            a[i, :i * 33] = float('nan')
+        a[0] = float('nan')
+        check(a, [0.0, 0.25, 0.5, 0.75, 1.0], 1, False, op='nanquantile')
+        check(a, [0.0, 0.25, 0.5, 0.75, 1.0], 1, True, op='nanquantile')
+
+        # A single valid element per row.
+        a = torch.full((4, 5), float('nan'), dtype=dtype, device=device)
+        a[:, 2] = torch.randn(4, dtype=dtype, device=device)
+        check(a, [0.0, 0.5, 1.0], 1, False, op='nanquantile')
+
+    # gradcheck's undefined-grad probe feeds None grads that compiled autograd
+    # cannot add; this is an eager-only autograd correctness check.
+    @skipIfTorchDynamo("gradcheck undefined-grad is unsupported under compiled autograd")
+    @skipIfMPS  # MPS has no float64; gradcheck requires double
+    @dtypes(torch.double)
+    def test_quantile_partial_selection_autograd(self, device, dtype):
+        # The CPU fast path computes order-statistic indices and gathers them, so the
+        # gradient flows through the same gather as the sort path. Inputs are sized to
+        # trip the fast path (num_ranks^2 <= reduction_len, num_ranks <= 100, where
+        # num_ranks = (2 if interpolating else 1) * num_q); the same cases exercise the
+        # sort fallback on CUDA. Values are distinct and >=~0.75 apart so the selected
+        # rank is stable under gradcheck's perturbation (the quantile gradient is
+        # ill-defined at ties regardless of which path runs).
+        gen = torch.Generator(device=device).manual_seed(0)
+
+        def separated(*shape):
+            n = int(np.prod(shape))
+            perm = torch.randperm(n, generator=gen, device=device).to(dtype)
+            noise = 0.25 * torch.rand(n, generator=gen, device=device, dtype=dtype)
+            return (perm + noise).reshape(shape)
+
+        def sort_ref(a, q, interpolation, ignore_nan):
+            # The pre-change algorithm for 1D input: full sort (NaN last), gather at the
+            # integer ranks, lerp. Same ranks and weights as quantile_compute, so for
+            # distinct values it must match the fast path bit for bit.
+            s = a.sort().values
+            last = (~a.isnan()).sum() - 1 if ignore_nan else a.numel() - 1
+            ranks = q * last
+            if interpolation == 'lower':
+                return s.gather(0, ranks.floor().long())
+            if interpolation == 'higher':
+                return s.gather(0, ranks.ceil().long())
+            if interpolation == 'nearest':
+                return s.gather(0, ranks.round().long())
+            below = ranks.floor()
+            vb = s.gather(0, below.long())
+            va = s.gather(0, ranks.ceil().long())
+            w = torch.full_like(ranks, 0.5) if interpolation == 'midpoint' else ranks - below
+            return torch.lerp(vb, va, w)
+
+        interps = ('linear', 'lower', 'higher', 'midpoint', 'nearest')
+
+        # 1D: forward and gradient must match the sort reference exactly (distinct
+        # values mean the fast path and the sort select the same elements).
+        for L, qv in [(64, [0.2, 0.5, 0.8]), (100, [0.1, 0.3, 0.5, 0.7, 0.9])]:
+            q = torch.tensor(qv, device=device, dtype=dtype)
+            for op, ignore_nan in (('quantile', False), ('nanquantile', True)):
+                base = separated(L)
+                if ignore_nan:
+                    base[:7] = float('nan')  # some (not all) NaN: ragged valid count
+                for interp in interps:
+                    x1 = base.clone().requires_grad_(True)
+                    x2 = base.clone().requires_grad_(True)
+                    out = getattr(torch, op)(x1, q, interpolation=interp)
+                    ref = sort_ref(x2, q, interp, ignore_nan)
+                    self.assertEqual(out, ref, atol=0, rtol=0)
+                    go = torch.randn(out.shape, generator=gen, device=device, dtype=dtype)
+                    out.backward(go)
+                    ref.backward(go)
+                    self.assertEqual(x1.grad, x2.grad, atol=0, rtol=0)
+
+        # Batched / multi-dim: numerical gradcheck, plus one double-backward check.
+        for shape, dim, qv, interp in [
+            ((4, 96), 1, [0.25, 0.75], 'linear'),
+            ((3, 64), 1, [0.2, 0.5, 0.8], 'midpoint'),
+            ((2, 3, 100), 2, [0.1, 0.9], 'lower'),
+        ]:
+            q = torch.tensor(qv, device=device, dtype=dtype)
+            x = separated(*shape).requires_grad_(True)
+            self.assertTrue(gradcheck(lambda t: torch.quantile(t, q, dim=dim, interpolation=interp), (x,)))
+        x = separated(4, 96).requires_grad_(True)
+        q = torch.tensor([0.25, 0.75], device=device, dtype=dtype)
+        self.assertTrue(gradgradcheck(lambda t: torch.quantile(t, q, dim=1, interpolation='linear'), (x,)))
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
