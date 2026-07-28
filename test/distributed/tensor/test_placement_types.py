@@ -24,11 +24,17 @@ from torch.fx.experimental.symbolic_shapes import (
     optimization_hint,
     ShapeEnv,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_type_identification(self):
         shard = Shard(3)
         strided_shard = _StridedShard(dim=3, split_factor=7)
