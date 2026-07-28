@@ -2569,6 +2569,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, XPU: exp2_out
+    CompositeExplicitAutograd: exp2_out_default
   tags: pointwise
 
 - func: expm1(Tensor self) -> Tensor

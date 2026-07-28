@@ -43,6 +43,7 @@
 #include <ATen/ops/divide_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq_native.h>
+#include <ATen/ops/exp2.h>
 #include <ATen/ops/floor_divide.h>
 #include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/fmax_native.h>
@@ -99,7 +100,6 @@
 #include <ATen/ops/nextafter_native.h>
 #include <ATen/ops/not_equal_native.h>
 #include <ATen/ops/or_native.h>
-#include <ATen/ops/pow.h>
 #include <ATen/ops/remainder.h>
 #include <ATen/ops/remainder_native.h>
 #include <ATen/ops/rshift_native.h>
@@ -113,7 +113,6 @@
 #include <ATen/ops/special_chebyshev_polynomial_v_native.h>
 #include <ATen/ops/special_chebyshev_polynomial_w.h>
 #include <ATen/ops/special_chebyshev_polynomial_w_native.h>
-#include <ATen/ops/special_exp2.h>
 #include <ATen/ops/special_gammainc_native.h>
 #include <ATen/ops/special_gammaincc_native.h>
 #include <ATen/ops/special_hermite_polynomial_h.h>
@@ -1560,16 +1559,6 @@ TORCH_IMPL_FUNC(heaviside_out) (
   heaviside_stub(device_type(), *this);
 }
 
-static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
-  const auto self_dtype = self.scalar_type();
-  // All integral types are promoted to float32
-  if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
-      return at::special_exp2(other);
-  }
-  // For double and reduced floating types do regular type promotion
-  return at::full({}, 2.0, self.options()).pow(other);
-}
-
 // This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
 // Both of these require floating types for 'self' and integer types for 'other'.
 static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -1595,7 +1584,7 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
     return _ldexp_int_exponent(self, other, result);
   }
 
-  return at::mul_out(result, self, _pow2(self, other));
+  return at::mul_out(result, self, at::exp2(other));
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
@@ -1606,7 +1595,7 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
     return _ldexp_int_exponent(self, other, result);
   }
 
-  return at::mul(self, _pow2(self, other));
+  return at::mul(self, at::exp2(other));
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
