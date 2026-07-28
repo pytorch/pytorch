@@ -384,6 +384,22 @@ def gen_alias_from_base(
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
     storage_offset = target_meta_tensor.storage_offset()
+    # If the target lives on a different storage than the aliased base
+    # (e.g. because inductor's copy_misaligned_inputs cloned the input to
+    # obtain an aligned buffer), ``target.storage_offset()`` is expressed in
+    # the cloned storage and would pick the wrong slice when applied via
+    # ``as_strided()`` on the original aliased base tensor. Translate the
+    # offset: the traced FakeTensor's storage_offset equals the trace-time
+    # RELATIVE offset from the input, so add back the runtime input's
+    # ``storage_offset`` to keep the alias anchored to the correct slice.
+    # Compare storages via ``_cdata`` (raw c10::Storage handle) rather than
+    # ``.data_ptr()`` so this is safe on fake/meta storages that would raise
+    # from ``.data_ptr()`` during AOT tracing.
+    if (
+        aliased_base_tensor.untyped_storage()._cdata
+        != target_meta_tensor.untyped_storage()._cdata
+    ):
+        storage_offset = aliased_base_tensor.storage_offset() + storage_offset
     if aliased_base_tensor.is_complex() and not target_meta_tensor.is_complex():
         aliased_out = torch.view_as_real(aliased_base_tensor).as_strided(
             size, stride, storage_offset

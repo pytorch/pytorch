@@ -176,8 +176,9 @@ def _build_p2p_direction_groups(
     upstream = dist.split_group(
         parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_upstream"
     )
-    # All parent ranks are members of the single split, so neither is None.
-    assert downstream is not None and upstream is not None  # noqa: S101
+    # All parent ranks are members of the single split.
+    assert isinstance(downstream, dist.ProcessGroup)  # noqa: S101
+    assert isinstance(upstream, dist.ProcessGroup)  # noqa: S101
     logger.info("Pipeline P2P: using per-direction (downstream/upstream) communicators")
     _PP_DIRECTION_GROUP_CACHE[parent] = (downstream, upstream)
     return downstream, upstream
