@@ -788,6 +788,8 @@ class _NestedReductionBase:
         w0 = torch.randn(D, device=GPU_TYPE)
         w1 = torch.randn(D, device=GPU_TYPE)
         self.check_nested_matches_unnested(f, (x0, w0, x1, w1))
+        # This guards that enabling combo kernels does not break the nested
+        # reduction kernels; it does not require combo grouping to fire.
         self.assertEqual(metrics.codegen_nested_reduction, 2)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
