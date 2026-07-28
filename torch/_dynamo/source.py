@@ -17,6 +17,7 @@ guard generation, and in code reconstruction by providing methods to rebuild
 the code needed to recreate values.
 """
 
+import contextvars
 import dataclasses
 import enum
 import functools
@@ -42,6 +43,23 @@ from .bytecode_transformation import (
 
 if TYPE_CHECKING:
     from .codegen import PyCodegen
+
+
+_CONTEXTVAR_EXPLICIT_STATE_SENTINEL = object()
+
+
+def _contextvar_has_explicit_binding(cv: contextvars.ContextVar[Any]) -> bool:
+    return (
+        contextvars.copy_context().get(cv, _CONTEXTVAR_EXPLICIT_STATE_SENTINEL)
+        is not _CONTEXTVAR_EXPLICIT_STATE_SENTINEL
+    )
+
+
+def _contextvar_get_explicit_value_or_missing(
+    cv: contextvars.ContextVar[Any],
+) -> Any:
+    return contextvars.copy_context().get(cv, contextvars.Token.MISSING)
+
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
 # so those cases are omitted intentionally
@@ -1242,6 +1260,38 @@ class ContextVarGetSource(ChainedSource):
         if self.has_default:
             return f"{{0}}.get({_esc_str(self.default_value, apply_repr=True)})"
         return "{0}.get()"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ContextVarExplicitValueSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.source", "_contextvar_get_explicit_value_or_missing"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "__import__('torch._dynamo.source', fromlist=['_contextvar_get_explicit_value_or_missing'])._contextvar_get_explicit_value_or_missing({0})"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ContextVarExplicitStateSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.source", "_contextvar_has_explicit_binding"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "__import__('torch._dynamo.source', fromlist=['_contextvar_has_explicit_binding'])._contextvar_has_explicit_binding({0})"
 
 
 # This is a synthetic source that is associated with the singleton
