@@ -27,7 +27,6 @@ from .sm90_utils import partition_for_epilogue
 from . import utils
 from . import copy_utils
 from . import layout_utils
-from .reduction_utils import get_lane_warp_layouts
 
 
 class EpiContext:
@@ -85,6 +84,52 @@ class EpiContext:
             tidx=tidx,
             reference_src=tiled_copy_t2r is None,
         )
+
+
+def _get_lane_warp_layouts(tiled_copy, reference_src=True):
+    """Derive lane and warp layouts along M and N from the epilogue tiled_copy.
+
+    Follows the CUTLASS Sm90RowReduction / Sm90ColReduction pattern.
+    Uses layout_src_tv_tiled (SM90, reference_src=True) or
+    layout_dst_tv_tiled (SM100, reference_src=False), matching the C++ impl's
+    get_layoutS_TV / get_layoutD_TV selection.
+
+    Returns (lane_layout_MN, warp_layout_MN) where each is a 2D layout (M, N):
+      lane_layout_MN[0] = lane_M: (lanes_in_M):(lane_stride_M) — e.g. 8:4
+      lane_layout_MN[1] = lane_N: (lanes_in_N):(lane_stride_N) — e.g. 4:1
+      warp_layout_MN[0] = warp_M: (warps_in_M):(warp_stride_M) — e.g. 4:1
+      warp_layout_MN[1] = warp_N: (warps_in_N):(warp_stride_N) — e.g. 1:0
+
+    For RowVecReduce (reduce along M): shuffle across lane_M, smem reduce across warp_M.
+    For ColVecReduce (reduce along N): shuffle across lane_N, direct write (warps_in_N == 1).
+    """
+    # right_inverse of the TV layout gives tile_element_idx -> tv_idx.
+    # SM90: use src (register) layout; SM100: use dst (smem) layout.
+    layout_tv = tiled_copy.layout_src_tv_tiled if reference_src else tiled_copy.layout_dst_tv_tiled
+    ref_layout = cute.right_inverse(layout_tv)
+    tile_M_size, tile_N_size = cute.size(tiled_copy.tiler_mn[0]), cute.size(tiled_copy.tiler_mn[1])
+    ref_layout_MN = cute.composition(
+        ref_layout, cute.make_layout((tile_M_size, tile_N_size))
+    )  # (tile_M, tile_N) -> tv_idx
+
+    num_warps = cute.size(tiled_copy) // cute.arch.WARP_SIZE
+
+    # tv2lane: tv_idx -> lane_idx  (lane = tv_idx % 32)
+    tv2lane = cute.make_layout((cute.arch.WARP_SIZE, num_warps, 1), stride=(1, 0, 0))
+    ref2lane = cute.composition(tv2lane, ref_layout_MN)  # (tile_M, tile_N) -> lane_idx
+    # select mode [0] = M part, [1] = N part; filter removes stride-0
+    lane_M = cute.filter(cute.select(ref2lane, [0]))  # lane_m -> lane_idx
+    lane_N = cute.filter(cute.select(ref2lane, [1]))  # lane_n -> lane_idx
+    lane_layout_MN = layout_utils.concat_layout(lane_M, lane_N)  # (lane_M, lane_N) -> lane_idx
+
+    # tv2warp: tv_idx -> warp_idx  (warp = tv_idx / 32)
+    tv2warp = cute.make_layout((cute.arch.WARP_SIZE, num_warps, 1), stride=(0, 1, 0))
+    ref2warp = cute.composition(tv2warp, ref_layout_MN)  # (tile_M, tile_N) -> warp_idx
+    warp_M = cute.filter(cute.select(ref2warp, [0]))  # warp_m -> warp_idx
+    warp_N = cute.filter(cute.select(ref2warp, [1]))  # warp_n -> warp_idx
+    warp_layout_MN = layout_utils.concat_layout(warp_M, warp_N)  # (warp_M, warp_N) -> warp_idx
+
+    return lane_layout_MN, warp_layout_MN
 
 
 class EpiSmemBytes(NamedTuple):
@@ -1230,7 +1275,7 @@ class GroupedLocalReduce(VecReduce):
                 else ctx.tiled_copy_r2s
             )
             if const_expr(gemm.arch == 100 and axis == 1 and group == tile_N):
-                _, warp_layout_MN = get_lane_warp_layouts(
+                _, warp_layout_MN = _get_lane_warp_layouts(
                     tiled_copy, ctx.tiled_copy_t2r is None
                 )
                 warps_in_N = const_expr(cute.size(warp_layout_MN, mode=[1]))
@@ -1239,7 +1284,7 @@ class GroupedLocalReduce(VecReduce):
                 )
             if const_expr(param.feeds_main):
                 assert axis == 0
-                lane_layout_MN, _ = get_lane_warp_layouts(
+                lane_layout_MN, _ = _get_lane_warp_layouts(
                     tiled_copy, ctx.tiled_copy_t2r is None
                 )
                 local_reduce = None
@@ -1381,7 +1426,7 @@ class GroupedLocalReduce(VecReduce):
             if const_expr(axis == 0):
                 assert combine_fn is not None
                 assert finalize_fn is not None
-                lane_layout_MN, warp_layout_MN = get_lane_warp_layouts(
+                lane_layout_MN, warp_layout_MN = _get_lane_warp_layouts(
                     tiled_copy, tiled_copy_t2r is None
                 )
                 lanes_in_M = cute.size(lane_layout_MN, mode=[0])
@@ -1616,7 +1661,7 @@ class ColVecReduce(VecReduce):
             reference_src = tiled_copy_t2r is None
 
             # ── Derive lane layout from tiled_copy ──
-            lane_layout_MN, warp_layout_MN = get_lane_warp_layouts(tiled_copy, reference_src)
+            lane_layout_MN, warp_layout_MN = _get_lane_warp_layouts(tiled_copy, reference_src)
             # For ColVecReduce: reduce across N lanes (lanes_in_N threads share same M row)
             lanes_in_N = cute.size(lane_layout_MN, mode=[1])
             is_lane_n_leader = cute.arch.lane_idx() % lanes_in_N == 0
@@ -1730,7 +1775,7 @@ class RowVecReduce(VecReduce):
             reference_src = tiled_copy_t2r is None
 
             # ── Derive lane layout from tiled_copy ──
-            lane_layout_MN, warp_layout_MN = get_lane_warp_layouts(tiled_copy, reference_src)
+            lane_layout_MN, warp_layout_MN = _get_lane_warp_layouts(tiled_copy, reference_src)
             # For RowVecReduce: reduce across M lanes (lanes_in_M threads share same N col)
             lanes_in_M = cute.size(lane_layout_MN, mode=[0])
             lanes_in_N = cute.size(lane_layout_MN, mode=[1])
