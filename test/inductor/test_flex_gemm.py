@@ -272,6 +272,27 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             )
         )
 
+    def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
+        from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
+        from torch._inductor.fx_passes.post_grad import is_valid_addmm_fusion
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        graph_module = make_fx(lambda a, b, bias: torch.mm(a, b) + bias)(
+            torch.randn(4, 8), torch.randn(8, 16), torch.randn(16)
+        )
+        placeholders = [
+            node for node in graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        match = SimpleNamespace(
+            args=tuple(placeholders[:2]),
+            kwargs={"inp": placeholders[2]},
+            nodes=list(graph_module.graph.nodes),
+        )
+        self.assertTrue(is_valid_addmm_fusion(match))
+
+        mark_flex_gemm_body_gemm_node(graph_module, torch.ops.aten.mm.default)
+        self.assertFalse(is_valid_addmm_fusion(match))
+
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,

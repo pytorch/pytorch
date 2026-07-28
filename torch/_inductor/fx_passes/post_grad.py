@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -1953,6 +1954,12 @@ def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, be
 
 
 def is_valid_addmm_fusion(match):
+    if any(
+        node.target is aten.mm.default and node.meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP)
+        for node in match.nodes
+    ):
+        return False
+
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
