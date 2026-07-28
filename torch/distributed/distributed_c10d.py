@@ -51,6 +51,7 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     GatherOptions,
     get_debug_level,
+    NanCheckHook,
     PrefixStore,
     ProcessGroup,
     ReconfigureOptions,
@@ -2866,6 +2867,12 @@ def _new_process_group_helper(
         raise AssertionError("group_desc must not be None")
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
+
+    # Backend-agnostic NaN checking, for backends without a native checker
+    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself). The group owns the
+    # hook, so there is no handle to keep alive here.
+    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
+        NanCheckHook.attach(pg)
 
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
