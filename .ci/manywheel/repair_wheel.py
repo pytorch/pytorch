@@ -101,22 +101,19 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
     )
 
 
-def arch_extra_deps(arch: str, use_cuda: bool) -> list[Path]:
+def aarch64_extra_deps(use_cuda: bool) -> list[Path]:
     """Libraries to bundle into torch/lib/ on aarch64.
 
-    CPU builds link against OpenBLAS + libgfortran
-    CUDA builds link against NVPL.
+    CPU builds link against OpenBLAS + libgfortran; CUDA builds link against
+    NVPL. Both pick up ARM Compute Library (ACL) for oneDNN acceleration.
     """
+    deps: list[Path] = []
     candidates: list[Path] = [Path("/usr/lib64/libgfortran.so.5")]
-    if arch == "aarch64":
-        # Both CPU and CUDA builds pick up ARM Compute Library (ACL) for
-        # oneDNN acceleration on AArch64.
-        if Path("/acl/build").is_dir():
-            candidates += [
-                Path("/acl/build/libarm_compute.so"),
-                Path("/acl/build/libarm_compute_graph.so"),
-            ]
-
+    if Path("/acl/build").is_dir():
+        candidates += [
+            Path("/acl/build/libarm_compute.so"),
+            Path("/acl/build/libarm_compute_graph.so"),
+        ]
     if use_cuda:
         candidates += [
             Path(f"/usr/local/lib/{name}")
@@ -129,8 +126,7 @@ def arch_extra_deps(arch: str, use_cuda: bool) -> list[Path]:
         ]
     else:
         candidates.append(Path("/opt/OpenBLAS/lib/libopenblas.so.0"))
-
-    deps: list[Path] = [p for p in candidates if p.is_file()]
+    deps = [p for p in candidates if p.is_file()]
     return deps
 
 
@@ -304,7 +300,7 @@ def repair_wheel(
     output_dir: Path,
     platform_tag: str,
     libgomp_path: Path,
-    arch_deps: list[Path],
+    aarch64_deps: list[Path],
     bundled_libs: list[BundledLib],
     aux_files: list[AuxFile],
     c_so_rpath: str,
@@ -331,7 +327,7 @@ def repair_wheel(
                 )
 
         # Bundle aarch64 BLAS/LAPACK/ACL dependencies (no-op on x86)
-        for dep in arch_deps:
+        for dep in aarch64_deps:
             shutil.copy(dep, torch_lib / dep.name)
 
         # TODO: Remove when switching to ROCm wheels
@@ -421,7 +417,7 @@ def main() -> None:
         lib_so_rpath = "$ORIGIN"
         force_rpath = False
 
-    arch_deps = arch_extra_deps(arch, use_cuda)
+    aarch64_deps = aarch64_extra_deps(use_cuda) if arch == "aarch64" else []
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     wheels = sorted(args.input_dir.glob("*.whl"))
@@ -435,7 +431,7 @@ def main() -> None:
             args.output_dir,
             platform_tag,
             libgomp_path,
-            arch_deps,
+            aarch64_deps,
             bundled_libs,
             aux_files,
             c_so_rpath,
