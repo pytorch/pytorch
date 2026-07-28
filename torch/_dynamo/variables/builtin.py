@@ -1468,7 +1468,8 @@ class BuiltinVariable(BaseBuiltinVariable):
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
         from .builder import VariableBuilder
 
-        frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
+        cell_and_freevars = set(tx.cell_and_freevars())
+        frame_local_names = set(tx.f_code.co_varnames) | cell_and_freevars
         frame_locals = {}
         # symbolic_cellvars registers all of the frame's cells; listing it
         # second makes cell contents take precedence over a (shadowing)
