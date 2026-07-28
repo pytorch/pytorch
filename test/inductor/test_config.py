@@ -62,6 +62,42 @@ class TestInductorConfig(TestCase):
         self.assertEqual(config.max_fusion_size, 321)
         self.assertEqual(config.triton.cudagraphs, False)
 
+    def test_use_block_ptr_deprecation_warns_on_write(self):
+        # Explicit user assignment of the deprecated flag must warn.
+        entry = config._config["triton.use_block_ptr"]
+        prior_warned = entry._deprecation_warned
+        entry._deprecation_warned = False
+        try:
+            with self.assertWarns(FutureWarning):
+                config.triton.use_block_ptr = True
+        finally:
+            entry._deprecation_warned = prior_warned
+
+    def test_use_block_ptr_internal_read_does_not_warn(self):
+        # Internal reads go through get_value_no_warn so the hot path does not
+        # spam a FutureWarning on every compile.
+        import warnings
+
+        entry = config._config["triton.use_block_ptr"]
+        prior_warned = entry._deprecation_warned
+        entry._deprecation_warned = False
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", FutureWarning)
+                config.get_value_no_warn("triton.use_block_ptr")
+        finally:
+            entry._deprecation_warned = prior_warned
+
+    def test_use_block_ptr_enabled_respects_capability(self):
+        from torch._inductor.codegen.triton_utils import use_block_ptr_enabled
+        from torch.utils._triton import has_triton_block_ptr
+
+        with config.patch("triton.use_block_ptr", False):
+            self.assertFalse(use_block_ptr_enabled())
+        with config.patch("triton.use_block_ptr", True):
+            # Effective only where the Triton block-pointer API still exists.
+            self.assertEqual(use_block_ptr_enabled(), has_triton_block_ptr())
+
     def test_hasattr(self):
         self.assertTrue(hasattr(config, "max_fusion_size"))
         self.assertFalse(hasattr(config, "missing_name"))

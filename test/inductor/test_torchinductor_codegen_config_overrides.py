@@ -2,7 +2,7 @@
 import importlib
 from collections.abc import Callable
 from typing import Any
-from unittest import skipIf
+from unittest import skipIf, skipUnless
 
 import torch
 import torch.utils._pytree as pytree
@@ -19,9 +19,17 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     requires_gpu,
 )
+from torch.utils._triton import has_triton_block_ptr
 
 
 importlib.import_module("filelock")
+
+
+# Tests that assert block-pointer codegen only run on Triton builds that still
+# provide the block-pointer frontend API (removed in triton-lang/triton#10833).
+requires_block_ptr = skipUnless(
+    has_triton_block_ptr(), "requires Triton block-pointer API"
+)
 
 
 @instantiate_parametrized_tests
@@ -90,6 +98,35 @@ class CodegenInductorTest(InductorTestCase):
             self.count_code(reinterpret_call, code, 0)
         else:
             self.count_code(reinterpret_call, code, 2)
+
+    @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    @requires_block_ptr
+    def test_cse_make_block_ptr_reduction(self):
+        def func(a, b):
+            tmp0 = a * b
+            tmp1 = a + b
+            c = tmp0 + tmp1
+            return c.sum(dim=0)
+
+        config_patches = {
+            "triton.use_block_ptr": True,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": True,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+        a = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        b = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        _, code = self.run_and_compare(
+            func,
+            a,
+            b,
+            config_patches=config_patches,
+            atol=1e-4,
+        )
+        self.count_code("= tl.make_block_ptr(in_ptr", code, 2)
+        self.count_code("= tl.load(block_ptr", code, 2)
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
