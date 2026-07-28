@@ -8,7 +8,7 @@ is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -42,6 +42,10 @@ from .constraints import (
     validate_flex_gemm_local_reduce_config,
 )
 from .output_layout import FlexGemmOutputStorageLayout, output_layout_supports_config
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 
 def flex_gemm_tensor_placeholders(
@@ -210,6 +214,23 @@ def explicit_config_swaps_ab(explicit_config: dict[str, Any] | None) -> bool:
     return explicit_config is not None and explicit_config.get("swap_ab") is True
 
 
+def filter_gemm_configs(
+    configs: Sequence[Any],
+    predicate: Callable[[Any], bool],
+    *,
+    explicit_config: dict[str, Any] | None,
+    explicit_error: str,
+    inferred_error: str,
+) -> tuple[Any, ...]:
+    """Filter configs while preserving explicit and inferred failure diagnostics."""
+    supported = tuple(config for config in configs if predicate(config))
+    if supported:
+        return supported
+    raise NotImplementedError(
+        explicit_error if explicit_config is not None else inferred_error
+    )
+
+
 def flex_gemm_config_keys(
     device,
     m: int,
@@ -318,48 +339,41 @@ def flex_gemm_config_keys(
         ):
             return (default_key,)
 
-    if main_transform is None:
-        configs = candidate_configs
-    else:
-        configs = tuple(
-            config
-            for config in candidate_configs
-            if grouped_main_output_config_supported(config, n)
-        )
-        if not configs:
-            if explicit_config is not None:
-                raise NotImplementedError(
-                    "FlexGEMM explicit QUACK config constraints are incompatible "
-                    "with grouped main output"
-                )
-            raise NotImplementedError(
+    configs = candidate_configs
+    if main_transform is not None:
+        configs = filter_gemm_configs(
+            configs,
+            lambda config: grouped_main_output_config_supported(config, n),
+            explicit_config=explicit_config,
+            explicit_error=(
+                "FlexGEMM explicit QUACK config constraints are incompatible with "
+                "grouped main output"
+            ),
+            inferred_error=(
                 "FlexGEMM grouped main output physical N is smaller than every "
                 "validated QuACK tile_n"
-            )
+            ),
+        )
     for geometry in local_reduce_geometries:
-        configs = tuple(
-            config
-            for config in configs
-            if validate_flex_gemm_local_reduce_config(
+        configs = filter_gemm_configs(
+            configs,
+            lambda config: validate_flex_gemm_local_reduce_config(
                 config,
                 geometry.group,
                 geometry.axis,
                 allow_swap_ab=allow_local_reduce_swap_ab,
-            )
+            ),
+            explicit_config=explicit_config,
+            explicit_error=(
+                "FlexGEMM explicit QUACK config constraints are incompatible with "
+                f"local reduction group={geometry.group}, axis={geometry.axis}"
+            ),
+            inferred_error=flex_gemm_local_reduce_config_error(
+                candidate_configs,
+                geometry.group,
+                geometry.axis,
+            ),
         )
-        if not configs:
-            if explicit_config is not None:
-                raise NotImplementedError(
-                    "FlexGEMM explicit QUACK config constraints are incompatible "
-                    f"with local reduction group={geometry.group}, axis={geometry.axis}"
-                )
-            raise NotImplementedError(
-                flex_gemm_local_reduce_config_error(
-                    candidate_configs,
-                    geometry.group,
-                    geometry.axis,
-                )
-            )
     if tuned:
         return tuple(gemm_config_key(config) for config in configs)
     return (gemm_config_key(configs[0]),)
