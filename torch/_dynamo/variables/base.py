@@ -331,21 +331,6 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
-def maybe_get_python_type(obj: VariableTracker) -> type:
-    try:
-        return obj.python_type()
-    except NotImplementedError:
-        unimplemented(
-            gb_type="Unsupported python_type() call",
-            context=f"{obj} does not implement python_type()",
-            explanation="This VariableTracker does not implement python_type(), "
-            "which is required for object protocol operations.",
-            hints=[
-                *graph_break_hints.DYNAMO_BUG,
-            ],
-        )
-
-
 # CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
 # deliberately mirrors the low four so the mapping is near-identity.
 _METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
@@ -441,6 +426,20 @@ def getset_build(
 ) -> Callable[..., VariableTracker]:
     """Getter that builds a VT from the raw value returned by `accessor`."""
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
+
+
+def unsupported_attr(name: str) -> Callable[..., VariableTracker | None]:
+    def graph_break(
+        vt: VariableTracker, tx: InstructionTranslatorBase
+    ) -> VariableTracker | None:
+        unimplemented(
+            gb_type="Unsupported attribute",
+            context=f"attr_unsupported {vt} {name}",
+            explanation=f"{type(vt).__name__} does not support attribute '{name}'",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
+    return graph_break
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
