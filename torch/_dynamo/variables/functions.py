@@ -529,6 +529,26 @@ class BaseUserFunctionVariable(VariableTracker):
         "__closure__": Member(_get_closure),
     }
 
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # Arbitrary attributes set on a function object live in its __dict__
+        # (tp_dictoffset). Resolve them at the instance-dict step so getattr
+        # finds them before call_getattr_fallback (which raises). Known dunder
+        # slots are handled earlier via tp_getset/tp_members and never reach here.
+        try:
+            fn = self.get_function()
+        except NotImplementedError:
+            return None
+        fn_dict = getattr(fn, "__dict__", None)
+        if not fn_dict or name not in fn_dict:
+            return None
+        source = self.get_source()
+        source = AttrSource(source, name) if source is not None else None
+        if source is not None:
+            return variables.LazyVariableTracker.create(fn_dict[name], source, tx=tx)
+        return VariableTracker.build(tx, fn_dict[name])
+
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
