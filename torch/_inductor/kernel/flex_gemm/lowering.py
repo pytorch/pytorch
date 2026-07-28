@@ -251,14 +251,11 @@ def flex_gemm_config_keys(
         else explicit_gemm_configs_for_device(explicit_config, device)
     )
     swap_ab_aligned = statically_known_multiple(n, swap_ab_alignment)
-    requires_swap_ab = explicit_config_swaps_ab(explicit_config) or (
-        bool(candidate_configs) and all(config.swap_ab for config in candidate_configs)
-    )
+    requires_swap_ab = all(config.swap_ab for config in candidate_configs)
     if (
         not swap_ab_aligned
         and requires_swap_ab
-        and isinstance(n, sympy.Expr)
-        and n.free_symbols
+        and has_free_symbols((n,))
     ):
         swap_ab_aligned = V.graph.sizevars.guard_or_false(
             sympy.Eq(n % swap_ab_alignment, 0)
@@ -279,15 +276,14 @@ def flex_gemm_config_keys(
             raise NotImplementedError(
                 "FlexGEMM grouped main outputs do not support swap_ab configs"
             )
-    candidate_configs = tuple(
-        config
-        for config in candidate_configs
-        if not local_reduce_feeds_main or not config.swap_ab
-    )
-    if not candidate_configs:
-        raise NotImplementedError(
-            "FlexGEMM feed-main local reductions do not support swap_ab configs"
+    if local_reduce_feeds_main:
+        candidate_configs = tuple(
+            config for config in candidate_configs if not config.swap_ab
         )
+        if not candidate_configs:
+            raise NotImplementedError(
+                "FlexGEMM feed-main local reductions do not support swap_ab configs"
+            )
     allow_local_reduce_swap_ab = explicit_config_swaps_ab(explicit_config)
     if not tuned:
         default_key = default_gemm_config_key(device, m, n, candidate_configs)

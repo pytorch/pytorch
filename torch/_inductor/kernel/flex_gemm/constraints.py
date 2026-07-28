@@ -355,32 +355,17 @@ def validate_flex_gemm_local_reduce_config(
         return False
     swapped = config.swap_ab
     if swapped:
-        if not allow_swap_ab or (group <= LOCAL_REDUCE_FRAGMENT_WIDTH and axis != 1):
+        if not allow_swap_ab or not local_reduce_needs_physical_callbacks(
+            1 - axis, group
+        ):
             return False
         axis = 1 - axis
     tile = config.tile_m if axis == 0 else config.tile_n
-    if config.device_capacity != 10:
-        if swapped or config.tile_n < 128 or config.tile_n % 64 != 0:
-            return False
-        if tile % group != 0:
-            return False
-        fragment_width = LOCAL_REDUCE_FRAGMENT_WIDTH
-        if (
-            axis == 1
-            and config.tile_m == 128
-            and config.tile_n == 128
-            and config.cluster_m > 1
-        ):
-            fragment_width //= 2
-        if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
-            return fragment_width % group == 0 and group < tile
-        return (
-            group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
-            and group <= tile
-            and config.tile_m == 128
-            and config.cluster_m == 1
-            and config.cluster_n == 1
-        )
+    is_sm100 = config.device_capacity == 10
+    if not is_sm100 and (
+        swapped or config.tile_n < 128 or config.tile_n % 64 != 0
+    ):
+        return False
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
 
@@ -400,6 +385,8 @@ def validate_flex_gemm_local_reduce_config(
         return False
 
     is_single_cta_layout = config.tile_m == 128 and config.cluster_m == 1
+    if not is_sm100:
+        return is_single_cta_layout
     is_wide_m_two_cta_layout = config.tile_m == 256 and config.cluster_m == 2
     is_split_n_warp_two_cta_layout = (
         axis == 1
