@@ -6159,6 +6159,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         part_names: Sequence[str],
     ) -> None:
         dtype = value.dtype
+        assert dtype is not None  # noqa: S101
         is_float8 = dtype in TRITON_FLOAT8_DTYPES
         value_expr = str(value)
         if is_float8:
@@ -6192,9 +6193,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         is_float8 = dtype in TRITON_FLOAT8_DTYPES
         if is_float8:
             value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
-        reshaped = self._reshape_expr(
-            value, pre_broadcast_shape, value_expr=value_expr
-        )
+        reshaped = self._reshape_expr(value, pre_broadcast_shape, value_expr=value_expr)
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
@@ -7780,7 +7779,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         existing = self._named_constants.get(name)
         if existing is not None:
             if existing != value:
-                raise AssertionError(f"conflicting definitions for named constant {sym}")
+                raise AssertionError(
+                    f"conflicting definitions for named constant {sym}"
+                )
             return
         self._named_constants[name] = value
         annotation = ": tl.constexpr" if constexpr else ""
