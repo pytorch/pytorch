@@ -8,6 +8,8 @@
 #include <c10/util/irange.h>
 #include <cuda.h>
 
+#include <string>
+
 // Note [CHECK macro]
 // ~~~~~~~~~~~~~~~~~~
 // This is a macro so that AT_ERROR can get accurate __LINE__
@@ -24,16 +26,32 @@ class C10_CUDA_API CUDAError : public c10::Error {
 };
 } // namespace c10
 
-#define C10_CUDA_CHECK(EXPR)                                        \
-  do {                                                              \
-    const cudaError_t __err = EXPR;                                 \
-    c10::cuda::c10_cuda_check_implementation(                       \
-        static_cast<int32_t>(__err),                                \
-        __FILE__,                                                   \
-        __func__, /* Line number data type not well-defined between \
-                      compilers, so we perform an explicit cast */  \
-        static_cast<uint32_t>(__LINE__),                            \
-        true);                                                      \
+namespace c10::cuda {
+
+class C10_CUDA_API CUDAErrorLogCapture {
+ public:
+  CUDAErrorLogCapture() noexcept;
+  std::string get_error_log_suffix();
+
+ private:
+  uint32_t iterator_{0};
+  bool enabled_{false};
+};
+
+} // namespace c10::cuda
+
+#define C10_CUDA_CHECK(EXPR)                                         \
+  do {                                                               \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                 \
+    const cudaError_t __err = EXPR;                                  \
+    c10::cuda::c10_cuda_check_implementation(                        \
+        static_cast<int32_t>(__err),                                 \
+        __FILE__,                                                    \
+        __func__, /* Line number data type not well-defined between  \
+                      compilers, so we perform an explicit cast */   \
+        static_cast<uint32_t>(__LINE__),                             \
+        true,                                                        \
+        __cuda_error_log);                                           \
   } while (0)
 // backwards compat due to hipify v2 changes, for extension projects
 #define C10_HIP_CHECK C10_CUDA_CHECK
@@ -95,5 +113,13 @@ C10_CUDA_API void c10_cuda_check_implementation(
     const char* function_name,
     const uint32_t line_number,
     const bool include_device_assertions);
+
+C10_CUDA_API void c10_cuda_check_implementation(
+    const int32_t err,
+    const char* filename,
+    const char* function_name,
+    const uint32_t line_number,
+    const bool include_device_assertions,
+    CUDAErrorLogCapture& error_log);
 
 } // namespace c10::cuda

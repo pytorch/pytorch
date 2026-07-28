@@ -56,9 +56,8 @@ DriverAPI create_driver_api() {
   C10_LIBCUDA_DRIVER_API_REQUIRED(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED)
 #undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED
 
-// Users running drivers between 12.0 and 12.3 will not have these symbols,
-// they would be resolved into nullptr, but we guard their usage at runtime
-// to ensure safe fallback behavior.
+// Older drivers will not have all optional symbols. They resolve to nullptr,
+// and callers guard their usage to ensure safe fallback behavior.
 #define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL(name, version) \
   r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version));
   C10_LIBCUDA_DRIVER_API_OPTIONAL(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL)
@@ -78,6 +77,18 @@ DriverAPI create_driver_api() {
     C10_NVML_DRIVER_API_OPTIONAL(LOOKUP_NVML_ENTRY_OPTIONAL)
 #undef LOOKUP_NVML_ENTRY_OPTIONAL
   }
+  return r;
+}
+
+CUDAErrorLogAPI create_cuda_error_log_api() {
+  CUDAErrorLogAPI r{};
+
+#define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL(name, version) \
+  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version));
+  C10_LIBCUDA_DRIVER_LOG_API_OPTIONAL(
+      LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL)
+#undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL
+
   return r;
 }
 
@@ -122,6 +133,11 @@ void* DriverAPI::get_nvml_handle() {
 
 C10_EXPORT DriverAPI* DriverAPI::get() {
   static DriverAPI singleton = create_driver_api();
+  return &singleton;
+}
+
+C10_EXPORT CUDAErrorLogAPI* CUDAErrorLogAPI::get() {
+  static CUDAErrorLogAPI singleton = create_cuda_error_log_api();
   return &singleton;
 }
 
