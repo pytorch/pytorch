@@ -1145,6 +1145,13 @@ class CppWrapperGpu(CppWrapperCpu):
             # For a dual-wrapper-mode const graph, only the standalone JIT
             # output needs this header content. The AOTI const body is spliced
             # into the main AOTI source, which has its own kernel driver.
+            # super().write_header() early-returns for const graphs before it
+            # can call add_device_include, so emit the JIT device include here;
+            # otherwise the kernel driver's CUfunction/CUmodule/uint32_t types
+            # have no declaring header and fail to compile under -nostdinc.
+            for device in V.graph.device_types:
+                if device != "meta":
+                    self.header.splice_jit(self.get_device_include_path_jit(device))
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
