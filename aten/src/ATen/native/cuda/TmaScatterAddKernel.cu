@@ -10,7 +10,37 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+#include <cuda.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/cuda/detail/LazyNVRTC.h>
+#endif
+
 namespace at::native {
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+
+template <typename scalar_t>
+struct TmaDataType;
+
+template <>
+struct TmaDataType<float> {
+    static constexpr CUtensorMapDataType value = CU_TENSOR_MAP_DATA_TYPE_FLOAT32;
+};
+template <>
+struct TmaDataType<double> {
+    static constexpr CUtensorMapDataType value = CU_TENSOR_MAP_DATA_TYPE_FLOAT64;
+};
+template <>
+struct TmaDataType<c10::Half> {
+    static constexpr CUtensorMapDataType value = CU_TENSOR_MAP_DATA_TYPE_FLOAT16;
+};
+template <>
+struct TmaDataType<c10::BFloat16> {
+    static constexpr CUtensorMapDataType value = CU_TENSOR_MAP_DATA_TYPE_BFLOAT16;
+};
+
+#endif
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
     defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
@@ -92,12 +122,34 @@ __device__ __forceinline__ void commit_group() {
     asm volatile("cp.async.bulk.commit_group;" ::: "memory");
 }
 
+template <int N>
+__device__ __forceinline__ void wait_group_lt() {
+    asm volatile("cp.async.bulk.wait_group %0;" :: "n"(N) : "memory");
+}
+
 __device__ __forceinline__ void wait_group_lt1() {
-    asm volatile("cp.async.bulk.wait_group 1;" ::: "memory");
+    wait_group_lt<1>();
 }
 
 __device__ __forceinline__ void wait_group_lt0() {
-    asm volatile("cp.async.bulk.wait_group 0;" ::: "memory");
+    wait_group_lt<0>();
+}
+
+__device__ __forceinline__ void bulk_tensor_load_2d(
+    void* smem_dst, const void* tensor_map,
+    int32_t col_coord, int32_t row_coord, uint64_t* mbar) {
+    uint64_t dst_addr, mbar_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;"
+        : "=l"(dst_addr) : "l"(reinterpret_cast<uint64_t>(smem_dst)));
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;"
+        : "=l"(mbar_addr) : "l"(reinterpret_cast<uint64_t>(mbar)));
+    asm volatile(
+        "cp.async.bulk.tensor.2d.shared::cta.global.tile"
+        ".mbarrier::complete_tx::bytes [%0], [%1, {%2, %3}], [%4];"
+        : : "r"(static_cast<uint32_t>(dst_addr)),
+            "l"(tensor_map),
+            "r"(col_coord), "r"(row_coord),
+            "r"(static_cast<uint32_t>(mbar_addr)) : "memory");
 }
 
 } // namespace tma
@@ -190,6 +242,88 @@ __global__ void tma_scatter_add_kernel(
 #endif
 }
 
+// 2D TMA tile kernel for small-N (num_chunks == 1).
+// Each warp processes one tile of K rows: load via cp.async.bulk.tensor.2d,
+// then K separate cp.reduce.async.bulk adds to scattered destinations.
+// No software pipelining — each tile is fully loaded, reduced, and waited on
+// before the next. One tile per warp with a full grid means more total CTAs
+// (more waves), hiding memory latency through wave-level parallelism rather
+// than per-warp pipeline depth.
+template <typename scalar_t, typename index_t>
+__global__ void tma_scatter_add_kernel_2d(
+    scalar_t* __restrict__ self_data,
+    const index_t* __restrict__ idx,
+    int num_ind, int D, int64_t self_dim_size,
+    int64_t self_stride,
+    const __grid_constant__ CUtensorMap tma_desc) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+
+    constexpr int K = 8;
+
+    extern __shared__ char smem_raw[];
+
+    int warp_id = threadIdx.x / C10_WARP_SIZE;
+    int lane_id = threadIdx.x % C10_WARP_SIZE;
+    int warps_per_block = blockDim.x / C10_WARP_SIZE;
+
+    int tile_elems = K * D;
+    int data_region_bytes = warps_per_block * tile_elems * static_cast<int>(sizeof(scalar_t));
+    int mbar_offset = (data_region_bytes + 7) & ~7;
+
+    scalar_t* my_buf = reinterpret_cast<scalar_t*>(smem_raw) + warp_id * tile_elems;
+    uint64_t* mbar = reinterpret_cast<uint64_t*>(smem_raw + mbar_offset) + warp_id;
+
+    if (lane_id == 0) {
+        tma::mbar_init(mbar, 1u);
+    }
+    __syncwarp();
+
+    uint32_t tile_bytes = K * D * sizeof(scalar_t);
+    int n_tiles = at::ceil_div(num_ind, K);
+    int tile = blockIdx.x * warps_per_block + warp_id;
+
+    if (tile >= n_tiles) {
+        return;
+    }
+
+    if (lane_id == 0) {
+        tma::mbar_expect_tx(mbar, tile_bytes);
+        tma::bulk_tensor_load_2d(
+            my_buf, &tma_desc,
+            0, static_cast<int32_t>(tile * K), mbar);
+    }
+
+    while (!tma::mbar_try_wait_parity(
+        mbar, static_cast<uint32_t>(0))) {}
+
+    if (lane_id == 0) {
+        int base_row = tile * K;
+        for (int k = 0; k < K; k++) {
+            int row = base_row + k;
+            if (row < num_ind) {
+                int64_t ind = idx[row];
+                CUDA_KERNEL_ASSERT_VERBOSE(
+                    ind >= 0 && ind < self_dim_size &&
+                    "tma scatter add index out of bounds",
+                    "Expected 0 <= index < self_dim_size(%ld), "
+                    "but got index = %ld", self_dim_size, ind);
+                scalar_t* dst_row = self_data + ind * self_stride;
+                tma::bulk_reduce_add<scalar_t>(
+                    dst_row, my_buf + k * D,
+                    D * sizeof(scalar_t));
+            }
+        }
+        tma::commit_group();
+        tma::wait_group_lt0();
+    }
+    __syncwarp();
+
+#else
+    CUDA_KERNEL_ASSERT(false && "tma_scatter_add_kernel_2d requires sm_90+");
+#endif
+}
+
 template <typename scalar_t, typename index_t>
 void tma_scatter_add_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
@@ -203,29 +337,83 @@ void tma_scatter_add_kernel_launch(
     int num_chunks = at::ceil_div(D, chunk_elems);
 
     int entries_per_block = max_threads / threads_per_entry;
-    int grid_x = at::ceil_div(num_ind, entries_per_block);
-    // Spread chunks across grid.y but keep at least 4 per block for pipeline benefit
-    constexpr int min_chunks_per_block = 4;
-    uint32_t grid_y = std::min(
-        static_cast<uint32_t>(std::max(1, num_chunks / min_chunks_per_block)),
-        static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1]));
-    int block_size = entries_per_block * threads_per_entry;
-
-    int buf_elems = 2 * chunk_elems;
-    int data_region_bytes = entries_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
-    int mbar_offset = (data_region_bytes + 7) & ~7;
-    int smem = mbar_offset + entries_per_block * 2 * static_cast<int>(sizeof(uint64_t));
 
     int64_t self_stride = self_stride_bytes / sizeof(scalar_t);
     int64_t src_stride = src_stride_bytes / sizeof(scalar_t);
 
-    dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
+    if (num_chunks == 1) {
+        constexpr int K = 8;
+        int tile_elems = K * D;
+        int data_region_bytes = entries_per_block * tile_elems *
+            static_cast<int>(sizeof(scalar_t));
+        int mbar_offset = (data_region_bytes + 7) & ~7;
+        int smem = mbar_offset + entries_per_block *
+            static_cast<int>(sizeof(uint64_t));
 
-    tma_scatter_add_kernel<scalar_t, index_t>
-        <<<grid, block_size, smem, at::cuda::getCurrentCUDAStream()>>>(
-        self_data, src_data, idx, num_ind, D, self_dim_size,
-        self_stride, src_stride,
-        entries_per_block, chunk_elems);
+        int n_tiles = at::ceil_div(num_ind, K);
+        int grid_x = at::ceil_div(n_tiles, entries_per_block);
+
+        alignas(128) CUtensorMap desc;
+        cuuint64_t globalDims[2] = {
+            static_cast<cuuint64_t>(D),
+            static_cast<cuuint64_t>(num_ind)};
+        cuuint64_t globalStrides[1] = {
+            static_cast<cuuint64_t>(src_stride_bytes)};
+        cuuint32_t boxDims[2] = {
+            static_cast<cuuint32_t>(D),
+            static_cast<cuuint32_t>(K)};
+        cuuint32_t elemStrides[2] = {1, 1};
+
+        CUresult res = at::cuda::detail::lazyNVRTC.cuTensorMapEncodeTiled(
+            &desc,
+            TmaDataType<scalar_t>::value,
+            2,
+            const_cast<scalar_t*>(src_data),
+            globalDims,
+            globalStrides,
+            boxDims,
+            elemStrides,
+            CU_TENSOR_MAP_INTERLEAVE_NONE,
+            CU_TENSOR_MAP_SWIZZLE_NONE,
+            CU_TENSOR_MAP_L2_PROMOTION_NONE,
+            CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA);
+        TORCH_INTERNAL_ASSERT(res == CUDA_SUCCESS,
+            "cuTensorMapEncodeTiled failed: ", static_cast<int>(res));
+
+        dim3 grid = {static_cast<uint32_t>(grid_x), 1, 1};
+        int block_size = entries_per_block * threads_per_entry;
+
+        auto kernel = tma_scatter_add_kernel_2d<scalar_t, index_t>;
+        if (smem > static_cast<int>(at::cuda::getCurrentDeviceProperties()
+                ->sharedMemPerBlock)) {
+            C10_CUDA_CHECK(cudaFuncSetAttribute(
+                kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem));
+        }
+        kernel<<<grid, block_size, smem, at::cuda::getCurrentCUDAStream()>>>(
+            self_data, idx, num_ind, D, self_dim_size,
+            self_stride, desc);
+    } else {
+        int grid_x = at::ceil_div(num_ind, entries_per_block);
+        // Spread chunks across grid.y but keep at least 4 per block for pipeline benefit
+        constexpr int min_chunks_per_block = 4;
+        uint32_t grid_y = std::min(
+            static_cast<uint32_t>(std::max(1, num_chunks / min_chunks_per_block)),
+            static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1]));
+        int block_size = entries_per_block * threads_per_entry;
+
+        int buf_elems = 2 * chunk_elems;
+        int data_region_bytes = entries_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
+        int mbar_offset = (data_region_bytes + 7) & ~7;
+        int smem = mbar_offset + entries_per_block * 2 * static_cast<int>(sizeof(uint64_t));
+
+        dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
+
+        tma_scatter_add_kernel<scalar_t, index_t>
+            <<<grid, block_size, smem, at::cuda::getCurrentCUDAStream()>>>(
+            self_data, src_data, idx, num_ind, D, self_dim_size,
+            self_stride, src_stride,
+            entries_per_block, chunk_elems);
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
     TORCH_CHECK(false, "TMA scatter_add requires CUDA 12.8+ and NVIDIA GPU");
