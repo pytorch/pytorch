@@ -812,13 +812,16 @@ void MPSProfiler::startCapture(const std::string& name, MPSStream* stream) {
 }
 
 void MPSProfiler::stopCapture(MPSStream* stream) {
-  // Drain all in-flight GPU work before stopping the capture, otherwise
-  // stopCapture races with command buffers still executing on the captured
-  // device/queue while Metal serializes the trace, which can crash natively
-  if (!stream) {
-    stream = getDefaultMPSStream();
+  // Drain in-flight GPU work before stopping the capture, otherwise
+  // stopCapture can race with command buffers still executing on the captured
+  // object while Metal serializes the trace, which can crash natively.
+  // A null stream means the capture was started on the whole device (see
+  // startCapture), so drain every stream created so far.
+  if (stream) {
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
+  } else {
+    synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
   }
-  stream->synchronize(SyncType::COMMIT_AND_WAIT);
   [captureManager stopCapture];
 }
 

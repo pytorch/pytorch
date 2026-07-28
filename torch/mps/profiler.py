@@ -95,6 +95,6 @@ def metal_capture(fname: str) -> Iterator[None]:
         torch._C._mps_startCapture(fname)  # type: ignore[attr-defined]
         yield
     finally:
-        # _mps_stopCapture drains all work enqueued during the context call
-        # before stopping the capture, even if the body raised
+        # _mps_stopCapture waits for work enqueued on MPS streams before
+        # stopping the capture, even if the body raised
         torch._C._mps_stopCapture()  # type: ignore[attr-defined]
