@@ -5856,10 +5856,9 @@ class TestLinalg(TestCase):
         r = 32  # testing shapes n + i such that n == i (mod r)
         buffer = make_input(b, n + r, n + r)
         if not pivot:
-            #buffer = buffer.tril()
-            diag = buffer.abs().sum(-1, keepdim=True)
-            buffer.div_(diag)
-            #buffer.diagonal(dim1=-2, dim2=-1).copy_(diag)
+            # strictly diagonally dominant systems for stability
+            diag = buffer.abs().sum(-2)
+            buffer.diagonal(dim1=-2, dim2=-1).copy_(diag)
 
         #torch.backends.cuda.preferred_linalg_library("magma")
         for i in range(1, r):
