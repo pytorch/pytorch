@@ -847,6 +847,28 @@ class TestGraphInstantiateHooks(TestCase):
         cg.run_graph_instantiate_hooks(graph)  # first raises, second still runs
         self.assertEqual(seen, [graph])
 
+    @requires_cuda
+    def test_fires_once_on_real_graph_instantiate(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+        handle = cg.register_graph_instantiate_hook(lambda gr: seen.append(gr))
+        self.addCleanup(handle.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+
+        # instantiate() ran once at capture_end and fired the hook with this graph.
+        self.assertEqual(seen, [g])
+        for _ in range(3):
+            g.replay()
+        torch.cuda.synchronize()
+        # replay does not re-instantiate, so the hook is not called again.
+        self.assertEqual(seen, [g])
+        g.reset()
+
 
 # Host-side test of the graph-destroy hook registry: consumers register per-resolver
 # cleanup hooks that a CUDAGraph invokes (gated on graph_destroy_hooks_active) via
@@ -893,6 +915,35 @@ class TestGraphDestroyHooks(TestCase):
         cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
         cg.run_graph_destroy_hooks({1})  # first raises, second still runs
         self.assertEqual(seen, [{1}])
+
+    @requires_cuda
+    def test_fires_with_recorded_exec_ids_on_teardown(self):
+        import torch.cuda.graphs as cg
+
+        exec_id = 0xABCD
+        seen = []
+        # Stand in for a consumer that records per-graph state at instantiate: stamp a
+        # known exec id onto the graph so teardown has something to hand the destroy hook.
+        inst = cg.register_graph_instantiate_hook(
+            lambda gr: gr._recorded_exec_ids.add(exec_id)
+        )
+        dh = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
+        self.addCleanup(inst.remove)
+        self.addCleanup(dh.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+        for _ in range(3):
+            g.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(seen, [])  # not torn down yet
+        # reset() tears down this capture cycle and fires the armed destroy callback,
+        # handing the destroy hook the exec ids recorded on the graph.
+        g.reset()
+        self.assertEqual(seen, [{exec_id}])
 
 
 # Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
