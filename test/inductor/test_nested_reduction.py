@@ -788,6 +788,8 @@ class _NestedReductionBase:
         w0 = torch.randn(D, device=GPU_TYPE)
         w1 = torch.randn(D, device=GPU_TYPE)
         self.check_nested_matches_unnested(f, (x0, w0, x1, w1))
+        # This guards that enabling combo kernels does not break the nested
+        # reduction kernels; it does not require combo grouping to fire.
         self.assertEqual(metrics.codegen_nested_reduction, 2)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
@@ -1004,7 +1006,19 @@ class _NestedReductionBase:
         residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_nested_matches_unnested(f, (x, residual, weight))
-        self.assertGreater(metrics.generated_kernel_count, 1)
+        self.check_fusion(expected_kernels=2)
+
+    def test_reduced_epilogue_uses_generic_fusion(self):
+        B, D = 32, 8
+
+        def f(x):
+            reduced = x.sum(dim=-1)
+            adjusted = reduced + 1
+            return x * adjusted[:, None], adjusted
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x,))
+        self.assertEqual(metrics.generated_kernel_count, 1)
 
     def test_producer_consumer_rejects_shifted_contiguous_sub_parent_source(self):
         import torch.nn.functional as F
