@@ -4,8 +4,8 @@
 #include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
-#include <c10/util/Array.h>
 #include <torch/library.h>
+#include <array>
 #include <utility>
 
 namespace {
@@ -53,21 +53,22 @@ bool check_no_grad(sdp::sdp_params const& params, bool debug) {
 }
 
 bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
-  constexpr auto supported_dtypes = c10::array_of<at::ScalarType>(
-      at::kFloat, at::kBFloat16, at::kHalf); // double is not supported
+  constexpr auto supported_dtypes = std::to_array<at::ScalarType>(
+      {at::kFloat, at::kBFloat16, at::kHalf}); // double is not supported
 
   // Define gate functions that determine if a flash kernel can be run
-  constexpr auto constraints = c10::array_of<bool (*)(
-      sdp::sdp_params const&, bool)>(
-      sdp::check_nested_tensor,
-      sdp::check_for_dropout,
-      sdp::check_tensor_shapes,
-      sdp::check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
-      sdp::check_attn_mask_shape,
-      sdp::check_nonzero_sequence_lengths_dense,
-      sdp::check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
-      check_head_dim_size_xpu,
-      check_no_grad);
+  constexpr auto constraints =
+      std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+          {sdp::check_nested_tensor,
+           sdp::check_for_dropout,
+           sdp::check_tensor_shapes,
+           sdp::check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
+           sdp::check_attn_mask_shape,
+           sdp::check_nonzero_sequence_lengths_dense,
+           sdp::check_last_dim_stride_equals_1_dense<
+               false /*ignore_singleton_dim*/>,
+           check_head_dim_size_xpu,
+           check_no_grad});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -125,10 +126,10 @@ bool can_use_mem_efficient_attention(
     bool debug) {
   // Define gate functions that determine if a mem efficient can be run
   constexpr auto general_constraints =
-      c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-          sdp::check_runtime_disabled_mem_efficient,
-          sdp::check_tensor_shapes,
-          check_head_dim_size_mem_efficient);
+      std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+          {sdp::check_runtime_disabled_mem_efficient,
+           sdp::check_tensor_shapes,
+           check_head_dim_size_mem_efficient});
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -136,10 +137,10 @@ bool can_use_mem_efficient_attention(
   }
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints =
-        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-            sdp::check_requires_grad_and_nested,
-            sdp::check_batch_size_nested,
-            sdp::check_for_seq_len_0_nested_tensor);
+        std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+            {sdp::check_requires_grad_and_nested,
+             sdp::check_batch_size_nested,
+             sdp::check_for_seq_len_0_nested_tensor});
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -148,10 +149,10 @@ bool can_use_mem_efficient_attention(
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints =
-        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-            sdp::check_nonzero_sequence_lengths_dense,
-            sdp::check_last_dim_stride_equals_1_dense<false>,
-            sdp::check_batch_size_and_num_heads_dense<false>);
+        std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+            {sdp::check_nonzero_sequence_lengths_dense,
+             sdp::check_last_dim_stride_equals_1_dense<false>,
+             sdp::check_batch_size_and_num_heads_dense<false>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;

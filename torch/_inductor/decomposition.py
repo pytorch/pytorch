@@ -463,7 +463,16 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    def add_input(out: torch.Tensor) -> torch.Tensor:
+        if alpha != 1:
+            out = alpha * out
+        if beta != 1:
+            return out + beta * self
+        return out + self
+
     if mat1.device.type not in ["cpu", "mps"]:
+        if beta == 0 and mat1.device.type == "cuda":
+            return NotImplemented
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
@@ -471,7 +480,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = mat1 * mat2
-            return alpha * out + beta * self
+            return add_input(out)
 
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
