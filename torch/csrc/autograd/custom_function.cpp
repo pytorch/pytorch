@@ -1,12 +1,48 @@
+#include <c10/core/AutogradState.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/custom_function.h>
+#include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
 #include <utility>
 
 namespace torch::autograd {
+
+static const Variable& input_at(const variable_list& inputs, size_t i) {
+  return inputs[i];
+}
+
+static const Variable& input_at(
+    at::ArrayRef<const Variable*> inputs,
+    size_t i) {
+  return *inputs[i];
+}
+
+static variable_list call_jvp(
+    const variable_list& inputs,
+    variable_list input_grads,
+    const _jvp_fn_t& jvp_user_function) {
+  return jvp_user_function(inputs, std::move(input_grads));
+}
+
+static variable_list call_jvp(
+    at::ArrayRef<const Variable*> inputs,
+    variable_list input_grads,
+    const _jvp_fn_t& jvp_user_function) {
+  variable_list owned;
+  owned.reserve(inputs.size());
+  for (const auto* input : inputs) {
+    owned.emplace_back(*input);
+  }
+  return jvp_user_function(std::move(owned), std::move(input_grads));
+}
+
+static bool is_forward_ad_active() {
+  return ForwardADLevel::has_any_level() &&
+      c10::AutogradState::get_tls_state().get_fw_grad_mode();
+}
 
 // This function has two main goals:
 //  1) Use the user-provided jvp function to populate the outputs' forward
@@ -26,8 +62,9 @@ namespace torch::autograd {
 //  sure that its
 //    forward grad was also modified inplace and already present on the
 //    corresponding output.
+template <typename InputVarsType>
 static void _process_forward_mode_AD(
-    const variable_list& inputs,
+    const InputVarsType& inputs,
     std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const optional_variable_list& outputs,
@@ -54,7 +91,7 @@ static void _process_forward_mode_AD(
     grad_impls.resize(num_inputs);
 
     for (const auto i : c10::irange(num_inputs)) {
-      const auto& inp = inputs[i];
+      const auto& inp = input_at(inputs, i);
       if (inp.is_view() && impl::get_view_autograd_meta(inp)->has_fw_view()) {
         inputs_bases.emplace(
             impl::get_view_autograd_meta(inp)
@@ -71,7 +108,7 @@ static void _process_forward_mode_AD(
   // Extract the input's forward gradients and record any info we will need
   // later
   for (const auto i : c10::irange(num_inputs)) {
-    const auto& inp = inputs[i];
+    const auto& inp = input_at(inputs, i);
     if (!inp.defined()) {
       continue;
     }
@@ -95,7 +132,7 @@ static void _process_forward_mode_AD(
   torch::autograd::variable_list forward_grads;
   {
     at::AutoFwGradMode fw_grad_mode(false);
-    forward_grads = jvp_user_function(inputs, std::move(input_grads));
+    forward_grads = call_jvp(inputs, std::move(input_grads), jvp_user_function);
   }
 
   const auto num_forward_grads = forward_grads.size();
@@ -173,7 +210,7 @@ static void _process_forward_mode_AD(
           // have a common base)
           const auto matching_input_idx =
               inputs_bases[out_view_info.base_.unsafeGetTensorImpl()];
-          const auto& matching_input = inputs[matching_input_idx];
+          const auto& matching_input = input_at(inputs, matching_input_idx);
 
           const auto& matching_input_grad = matching_input._fw_grad(level);
 
@@ -352,7 +389,11 @@ static optional_variable_list _process_backward_mode_ad(
   };
 
   optional_variable_list outputs;
-  std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
+  // Only filled when needed for the mark_dirty output check.
+  std::optional<std::unordered_set<at::TensorImpl*>> maybe_output_impls;
+  if (!dirty_inputs.empty()) {
+    maybe_output_impls.emplace();
+  }
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
 
@@ -413,7 +454,9 @@ static optional_variable_list _process_backward_mode_ad(
       ++num_diff_outputs;
     }
 
-    outputs_impl.insert(out_tensor_impl);
+    if (maybe_output_impls) {
+      maybe_output_impls->insert(out_tensor_impl);
+    }
     outputs.emplace_back(var);
   }
 
@@ -432,18 +475,21 @@ static optional_variable_list _process_backward_mode_ad(
 
   // All the modified Tensors must be returned as is for the rewrite to be
   // valid.
-  for (auto& dirty_input : dirty_inputs) {
-    TORCH_CHECK(
-        outputs_impl.count(dirty_input) > 0,
-        "Some elements marked as dirty during the forward method were not returned as output. The"
-        " inputs that are modified inplace must all be outputs of the Function.");
+  if (maybe_output_impls) {
+    for (auto& dirty_input : dirty_inputs) {
+      TORCH_CHECK(
+          maybe_output_impls->count(dirty_input) > 0,
+          "Some elements marked as dirty during the forward method were not returned as output. The"
+          " inputs that are modified inplace must all be outputs of the Function.");
+    }
   }
 
   return outputs;
 }
 
-optional_variable_list _wrap_outputs(
-    const variable_list& input_vars,
+template <typename InputVarsType>
+static optional_variable_list _wrap_outputs_impl(
+    const InputVarsType& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
@@ -455,7 +501,10 @@ optional_variable_list _wrap_outputs(
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
-    inputs_mapping.emplace(input_vars[i].unsafeGetTensorImpl(), i);
+    const auto& input_var = input_at(input_vars, i);
+    if (input_var.defined()) {
+      inputs_mapping.emplace(input_var.unsafeGetTensorImpl(), i);
+    }
   }
 
   // Limit pure views to 1-1 mapping as it is unclear if it is even
@@ -476,16 +525,64 @@ optional_variable_list _wrap_outputs(
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.
-  _process_forward_mode_AD(
-      input_vars,
-      std::move(inputs_mapping),
-      raw_outputs,
-      outputs,
-      non_differentiable,
-      dirty_inputs,
-      jvp_user_function);
+  if (is_forward_ad_active()) {
+    _process_forward_mode_AD(
+        input_vars,
+        std::move(inputs_mapping),
+        raw_outputs,
+        outputs,
+        non_differentiable,
+        dirty_inputs,
+        jvp_user_function);
+  }
 
   return outputs;
+}
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+optional_variable_list _wrap_outputs(
+    const variable_list& input_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
+    const c10::intrusive_ptr<Node>& cdata,
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view) {
+  return _wrap_outputs_impl(
+      input_vars,
+      non_differentiable,
+      dirty_inputs,
+      raw_outputs,
+      cdata,
+      jvp_user_function,
+      to_save_if_setup_context,
+      view_as_self_fn,
+      pure_view);
+}
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+optional_variable_list _wrap_outputs(
+    at::ArrayRef<const Variable*> input_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
+    const c10::intrusive_ptr<Node>& cdata,
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view) {
+  return _wrap_outputs_impl(
+      input_vars,
+      non_differentiable,
+      dirty_inputs,
+      raw_outputs,
+      cdata,
+      jvp_user_function,
+      to_save_if_setup_context,
+      view_as_self_fn,
+      pure_view);
 }
 
 void check_variable_result(
@@ -519,6 +616,7 @@ void check_variable_result(
       "' has changed the size of value");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AutogradContext::AutogradContext(PackedArgs& packed_args) {
   saved_data = packed_args.unpack_saved_data();
   saved_variables_override_ = packed_args.unpack<variable_list>();

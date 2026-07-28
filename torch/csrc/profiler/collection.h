@@ -106,6 +106,21 @@ using op_input_t = std::variant<
     c10::IValue,
     std::nullopt_t>;
 
+// Parsed op-argument metadata (shapes, dtypes, concrete inputs). Shared by the
+// KinetoEvent constructor and the Kineto metadata producers.
+struct OpArgData {
+  bool hasData;
+  std::vector<shape> shapes;
+  std::vector<std::string> dtypes;
+  std::vector<c10::IValue> concreteInputs;
+  std::vector<std::vector<int64_t>> shapesForKinetoEvent;
+  std::vector<shape> strides;
+};
+
+TORCH_API OpArgData parseArgData(
+    const std::vector<op_input_t>& input_shapes,
+    const std::vector<op_input_t>& concreteInputs);
+
 // ============================================================================
 // == ExtraFields =============================================================
 // ============================================================================
@@ -470,6 +485,20 @@ struct KinetoObserverContext : public at::ObserverContext {
 
   Event* event_;
   FallbackPair* fallback_{nullptr};
+
+  // Generation of the global session this op entered under, snapshotted from
+  // global_callback_session at enter time. That counter bumps per new global
+  // session (not on the mid-session toggle). At exit, a match means event_ is
+  // still live so the exit finalizes it; a mismatch means the session was torn
+  // down and event_ freed, so the exit drops without touching event_.
+  uint64_t session_generation_{0};
+
+  // True if begin_op pushed an external correlation id for this op. The
+  // matching pop must run on every exit path (including teardown /
+  // stale-session early exits), or the id leaks onto the device profiling
+  // backend's per-thread correlation stack, which is not reset across profiler
+  // sessions.
+  bool pushed_correlation_id_{false};
 };
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;

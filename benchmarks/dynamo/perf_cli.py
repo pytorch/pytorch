@@ -52,8 +52,8 @@ WORKFLOWS = {
         "name": "inductor-perf-nightly-rocm-mi300",
         "id": 197925166,
     },
-    "rocm-mi355": {
-        "name": "inductor-perf-nightly-rocm-mi355",
+    "rocm-mi350": {
+        "name": "inductor-perf-nightly-rocm-mi350",
         "id": 197925165,
     },
     "x86": {
@@ -1510,7 +1510,8 @@ def cmd_prepare_repro(args):
     if "timm_models" in suites:
         print("# ── Timm ──")
         print(
-            f"pip install git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
+            "pip install --no-deps "
+            f"git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
         )
         print()
 
