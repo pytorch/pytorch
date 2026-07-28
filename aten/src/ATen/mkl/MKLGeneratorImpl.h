@@ -12,7 +12,7 @@ namespace at {
 struct TORCH_API MKLGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   MKLGeneratorImpl(uint64_t seed_in = default_rng_seed_val);
-  ~MKLGeneratorImpl() override = default;
+  ~MKLGeneratorImpl() override;
 
   // MKLGeneratorImpl methods
   std::shared_ptr<MKLGeneratorImpl> clone() const;
