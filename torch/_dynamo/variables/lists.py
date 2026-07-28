@@ -39,10 +39,13 @@ from ..exc import (
     Unsupported,
 )
 from ..utils import (
+    check_positional,
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
+    no_keywords,
+    no_positional,
     odict_values,
     raise_args_mismatch,
     range_iterator,
@@ -335,7 +338,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # list_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L335-L351
         # tuple_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/tupleobject.c#L421-L430
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
@@ -460,13 +463,7 @@ class BaseListVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not len(args):
-            raise_args_mismatch(
-                tx,
-                "index",
-                "0 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        check_positional(tx, "index", len(args), 1, 3)
         try:
             # Speedup trace times for constant data structures
             items = [item.as_python_constant() for item in self.items]
@@ -509,13 +506,6 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if kwargs or len(args) != 1:
-            raise_args_mismatch(
-                tx,
-                "append",
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         (arg,) = args
         tx.output.side_effects.mutation(self)
         self.items.append(arg)
@@ -529,13 +519,6 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if kwargs or len(args) != 1:
-            raise_args_mismatch(
-                tx,
-                "extend",
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
 
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
@@ -573,13 +556,7 @@ class BaseListVariable(VariableTracker):
             return None
         from .tensor import SymNodeVariable
 
-        if kwargs or len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                "insert",
-                "2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        check_positional(tx, "insert", len(args), 2, 2)
         idx, value = args
         if isinstance(idx, SymNodeVariable):
             const_idx = idx.evaluate_expr()
@@ -598,13 +575,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if kwargs or len(args) > 1:
-            raise_args_mismatch(
-                tx,
-                "pop",
-                "at most 1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        check_positional(tx, "pop", len(args), 0, 1)
 
         if len(self.items) == 0:
             raise_observed_exception(IndexError, tx, args=["pop from empty list"])
@@ -626,13 +597,6 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if args or kwargs:
-            raise_args_mismatch(
-                tx,
-                "clear",
-                "0 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         tx.output.side_effects.mutation(self)
         self.items.clear()
         return ConstantVariable.create(None)
@@ -655,13 +619,6 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if args or kwargs:
-            raise_args_mismatch(
-                tx,
-                "reverse",
-                "0 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         self.items.reverse()
         tx.output.side_effects.mutation(self)
         return ConstantVariable.create(None)
@@ -674,13 +631,6 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if kwargs or len(args) != 1:
-            raise_args_mismatch(
-                tx,
-                "remove",
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         idx = self.call_method(tx, "index", args, kwargs)
         self.call_method(tx, "pop", [idx], {})
         return ConstantVariable.create(None)
@@ -693,8 +643,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if len(args) != 0:
-            raise_args_mismatch(tx, "sort", "0 args", f"{len(args)} args")
+        no_positional(tx, "sort", args)
         key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
         reverse = kwargs.pop(
             "reverse", ConstantVariable.create(False)
@@ -1068,7 +1017,7 @@ class RangeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # range_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L405-L416
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript (range_subscript), no slices.
         index = key.as_python_constant()
         return self.apply_index(tx, index)
@@ -1247,13 +1196,8 @@ class ListVariable(BaseListVariable):
         # list___init___impl: clear the list, then extend with the optional
         # iterable arg.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L2966-L2986
-        if kwargs or len(args) > 1:
-            raise_args_mismatch(
-                tx,
-                "__init__",
-                "at most 1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        no_keywords(tx, "list", kwargs)
+        check_positional(tx, "list", len(args), 0, 1)
         tx.output.side_effects.mutation(self)
         self.items.clear()
         if len(args) == 1:
@@ -1471,7 +1415,7 @@ class DequeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # deque_item: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1888
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
         try:
@@ -1665,13 +1609,6 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
-        if kwargs or len(args) != 1:
-            raise_args_mismatch(
-                tx,
-                "appendleft",
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         tx.output.side_effects.mutation(self)
         self.items[:] = [args[0], *self.items]
         self._clamp_maxlen("left")
@@ -1686,13 +1623,6 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
-        if kwargs or len(args) != 1:
-            raise_args_mismatch(
-                tx,
-                "extendleft",
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         # NOTE this is inefficient, but the alternative is to represent
         # self.items as a deque, which is a more intrusive change.
         unpack_and_apply_fn(
@@ -1709,13 +1639,6 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if kwargs or len(args) > 0:
-            raise_args_mismatch(
-                tx,
-                "popleft",
-                "0 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         tx.output.side_effects.mutation(self)
         result, *self.items[:] = self.items
         self.state += 1

@@ -97,7 +97,7 @@ def initialize_lazy_module(
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    if hasattr(mod, "_initialize_hook"):
+    if inspect.getattr_static(mod, "_initialize_hook", None) is not None:
 
         def convert_to_fake(x: Any) -> Any:
             if is_namedtuple(x):

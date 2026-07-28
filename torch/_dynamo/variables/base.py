@@ -24,7 +24,16 @@ import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum, IntFlag
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+
+from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
+    PyMappingSlots,
+    PyNumberSlots,
+    PySequenceSlots,
+    PyTypeSlots,
+)
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
@@ -270,6 +279,21 @@ def is_side_effect_safe(m: MutationType) -> bool:
     return m.scope == scope_id
 
 
+def maybe_get_python_type(obj: VariableTracker) -> type:
+    try:
+        return obj.python_type()
+    except NotImplementedError:
+        unimplemented(
+            gb_type="Unsupported python_type() call",
+            context=f"{obj} does not implement python_type()",
+            explanation="This VariableTracker does not implement python_type(), "
+            "which is required for object protocol operations.",
+            hints=[
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
+
+
 class NO_SUCH_SUBOBJ:
     """Sentinel indicating no concrete Python object is available."""
 
@@ -353,9 +377,9 @@ def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
 
 
 def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
-    """Resolve the arity flags for method `name` from the VT's runtime
-    python_type()."""
-    return _flags_from_ml_flags(maybe_get_python_type(vt), name)
+    """Resolve the arity flags for method `name` from the VT's arity-reference
+    type (see VariableTracker.method_flags_type)."""
+    return _flags_from_ml_flags(vt.method_flags_type(), name)
 
 
 @dataclasses.dataclass(slots=True)
@@ -445,6 +469,195 @@ class AsPythonConstantNotImplementedError(NotImplementedError):
         self.vt = vt
 
 
+class SlotGroup(Enum):
+    """A CPython slot group.  The value is the group's index into
+    get_type_slots()'s 4-tuple."""
+
+    SEQUENCE = 0
+    MAPPING = 1
+    NUMBER = 2
+    TYPE = 3
+
+
+@dataclasses.dataclass(frozen=True)
+class Slot:
+    """A CPython type slot: the name of the VariableTracker method implementing
+    the slot function.  Distinct from SlotDef (a slotdefs[] dunder entry) -- e.g.
+    the mp_length slot fn is the raw ``mp_length`` getter, not ``__len__``'s
+    ``tp_len_impl`` wrapper.  Mirrors the function pointer in a type's Py*Methods
+    struct: unbound, so the receiving ``vt`` is passed at call time as CPython
+    passes ``self`` to ``Py_TYPE(vt)->...->slot(vt, ...)``."""
+
+    impl: str
+
+    def __call__(
+        self,
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        *args: Any,
+        **kwargs: Any,
+    ) -> VariableTracker:
+        return getattr(type(vt), self.impl)(vt, tx, *args, **kwargs)
+
+
+class PyNumberMethods(NamedTuple):
+    nb_bool: Slot | None
+    nb_index: Slot | None
+    nb_int: Slot | None
+    nb_float: Slot | None
+    nb_negative: Slot | None
+    nb_positive: Slot | None
+    nb_absolute: Slot | None
+    nb_invert: Slot | None
+    nb_add: Slot | None
+    nb_inplace_add: Slot | None
+    nb_subtract: Slot | None
+    nb_inplace_subtract: Slot | None
+    nb_multiply: Slot | None
+    nb_inplace_multiply: Slot | None
+    nb_remainder: Slot | None
+    nb_inplace_remainder: Slot | None
+    nb_power: Slot | None
+    nb_inplace_power: Slot | None
+    nb_lshift: Slot | None
+    nb_inplace_lshift: Slot | None
+    nb_rshift: Slot | None
+    nb_inplace_rshift: Slot | None
+    nb_and: Slot | None
+    nb_inplace_and: Slot | None
+    nb_xor: Slot | None
+    nb_inplace_xor: Slot | None
+    nb_or: Slot | None
+    nb_inplace_or: Slot | None
+    nb_floor_divide: Slot | None
+    nb_inplace_floor_divide: Slot | None
+    nb_true_divide: Slot | None
+    nb_inplace_true_divide: Slot | None
+    nb_divmod: Slot | None
+    nb_matrix_multiply: Slot | None
+    nb_inplace_matrix_multiply: Slot | None
+
+
+class PySequenceMethods(NamedTuple):
+    sq_length: Slot | None
+    sq_concat: Slot | None
+    sq_repeat: Slot | None
+    sq_item: Slot | None
+    sq_ass_item: Slot | None
+    sq_contains: Slot | None
+    sq_inplace_concat: Slot | None
+    sq_inplace_repeat: Slot | None
+
+
+class PyMappingMethods(NamedTuple):
+    mp_length: Slot | None
+    mp_subscript: Slot | None
+    mp_ass_subscript: Slot | None
+
+
+class PyTypeObject(NamedTuple):
+    tp_repr: Slot | None
+    tp_hash: Slot | None
+    tp_call: Slot | None
+    tp_str: Slot | None
+    tp_getattro: Slot | None
+    tp_setattro: Slot | None
+    tp_richcompare: Slot | None
+    tp_iter: Slot | None
+    tp_iternext: Slot | None
+    tp_descr_get: Slot | None
+    tp_descr_set: Slot | None
+    tp_init: Slot | None
+    tp_as_number: PyNumberMethods
+    tp_as_sequence: PySequenceMethods
+    tp_as_mapping: PyMappingMethods
+
+
+# The tp_ slot fields of PyTypeObject (everything but the sub-struct pointers).
+_TYPE_FIELDS = tuple(f for f in PyTypeObject._fields if not f.startswith("tp_as_"))
+
+# Per group: C slot bit -> struct field name, keyed via the enum's UPPERCASE name.
+_BIT_FIELD: dict[SlotGroup, dict[int, str]] = {
+    SlotGroup.NUMBER: {
+        getattr(PyNumberSlots, f.upper()): f for f in PyNumberMethods._fields
+    },
+    SlotGroup.SEQUENCE: {
+        getattr(PySequenceSlots, f.upper()): f for f in PySequenceMethods._fields
+    },
+    SlotGroup.MAPPING: {
+        getattr(PyMappingSlots, f.upper()): f for f in PyMappingMethods._fields
+    },
+    SlotGroup.TYPE: {getattr(PyTypeSlots, f.upper()): f for f in _TYPE_FIELDS},
+}
+
+
+# The actual slot function (a VariableTracker method) each struct field dispatches to
+_SLOT_FN: dict[SlotGroup, dict[str, str]] = {
+    SlotGroup.NUMBER: {
+        **{f: f"{f}_impl" for f in PyNumberMethods._fields},
+        "nb_bool": "bool_impl",
+    },
+    SlotGroup.SEQUENCE: {
+        "sq_length": "sq_length",
+        "sq_concat": "sq_concat_impl",
+        "sq_repeat": "sq_repeat_impl",
+        "sq_item": "sq_item_impl",
+        "sq_ass_item": "sq_ass_item_impl",
+        "sq_contains": "sq_contains",
+        "sq_inplace_concat": "sq_inplace_concat_impl",
+        "sq_inplace_repeat": "sq_inplace_repeat_impl",
+    },
+    SlotGroup.MAPPING: {
+        "mp_length": "mp_length",
+        "mp_subscript": "mp_subscript_impl",
+        "mp_ass_subscript": "mp_ass_subscript_impl",
+    },
+    SlotGroup.TYPE: {
+        "tp_repr": "repr_impl",
+        "tp_hash": "tp_hash_impl",
+        "tp_call": "call_function",
+        "tp_str": "str_impl",
+        "tp_getattro": "getattro_impl",
+        "tp_setattro": "setattro_impl",
+        "tp_richcompare": "richcompare_impl",
+        "tp_iter": "tp_iter_impl",
+        "tp_iternext": "tp_iternext_impl",
+        "tp_descr_get": "tp_descr_get_impl",
+        "tp_descr_set": "tp_descr_set_impl",
+        "tp_init": "tp_init_impl",
+    },
+}
+
+# _SLOT_FN must name a slot fn for exactly each struct field.
+for _group, _fns in _SLOT_FN.items():
+    if set(_fns) != set(_BIT_FIELD[_group].values()):
+        raise AssertionError(f"{_group.name}: _SLOT_FN fields != struct fields")
+
+
+def _fill(group: SlotGroup, masks: tuple[int, int, int, int]) -> dict[str, Any]:
+    # {field -> Slot(slot fn) if the type fills the slot, else None}
+    mask = masks[group.value]
+    fn_map = _SLOT_FN[group]
+    return {
+        field: Slot(fn_map[field]) if has_slot(mask, bit) else None
+        for bit, field in _BIT_FIELD[group].items()
+    }
+
+
+@functools.cache
+def _tp_type(obj_type: type) -> PyTypeObject:
+    # obj_type's whole slot table (PyTypeObject-like).  Independent of _tp_dict's
+    # cross-group collapse, so a type with both sq_length and mp_length shows up in
+    # both the sequence and mapping views (as CPython's separate sub-structs do).
+    masks = get_type_slots(obj_type)
+    return PyTypeObject(
+        tp_as_number=PyNumberMethods(**_fill(SlotGroup.NUMBER, masks)),
+        tp_as_sequence=PySequenceMethods(**_fill(SlotGroup.SEQUENCE, masks)),
+        tp_as_mapping=PyMappingMethods(**_fill(SlotGroup.MAPPING, masks)),
+        **_fill(SlotGroup.TYPE, masks),
+    )
+
+
 class VariableTrackerMeta(type):
     all_subclasses: list[type] = []
 
@@ -531,6 +744,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
+
+    def method_flags_type(self) -> type:
+        """Type whose CPython ml_flags define this VT's tp_methods arities
+        (see _derive_method_flags). Defaults to python_type(); a VT whose
+        python_type() is a pure-Python stand-in without C ml_flags (e.g.
+        OrderedSet) overrides this to the builtin whose method arities it
+        mirrors, so MethodFlags still enforces arity."""
+        return maybe_get_python_type(self)
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
@@ -693,7 +914,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
         #
-        # Returns None when the type has no nb_bool, causing generic_bool to
+        # Returns None when the type has no nb_bool, causing generic_is_true to
         # fall through to length check, then truthy default.
         return None
 
@@ -1053,7 +1274,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        # vt_getitem handles dispatch and raises TypeError for non-subscriptable
+        # generic_getitem handles dispatch and raises TypeError for non-subscriptable
         # objects.  This base fallback fires for types with mp_subscript at the
         # C level but no Dynamo override yet.
         unimplemented(
@@ -1070,7 +1291,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
-        # Key has already been converted to int via nb_index_impl by vt_getitem.
+        # Key has already been converted to int via nb_index_impl by generic_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
             context=f"sq_item_impl {self} {key}",
@@ -1159,9 +1380,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         if name == "__getitem__":
             if len(args) == 1 and not kwargs:
-                from .object_protocol import vt_getitem
+                from .object_protocol import generic_getitem
 
-                return vt_getitem(tx, self, args[0])
+                return generic_getitem(tx, self, args[0])
             raise_args_mismatch(
                 tx,
                 name,
@@ -1191,9 +1412,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         elif name == "__len__" and not (args or kwargs):
-            from .object_protocol import generic_len
+            from .object_protocol import generic_size
 
-            return generic_len(tx, self)
+            return generic_size(tx, self)
         elif name == "__str__" and not (args or kwargs):
             from .object_protocol import generic_str
 
@@ -2240,6 +2461,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     raise AssertionError(
                         "source must not be None for ValueMutationExisting/AttributeMutationExisting"
                     )
+
+    @property
+    def tp_type(self) -> PyTypeObject:
+        return _tp_type(maybe_get_python_type(self))
+
+    @property
+    def tp_as_number(self) -> PyNumberMethods:
+        return _tp_type(maybe_get_python_type(self)).tp_as_number
+
+    @property
+    def tp_as_sequence(self) -> PySequenceMethods:
+        return _tp_type(maybe_get_python_type(self)).tp_as_sequence
+
+    @property
+    def tp_as_mapping(self) -> PyMappingMethods:
+        return _tp_type(maybe_get_python_type(self)).tp_as_mapping
+
+    @property
+    def tp_iter(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_iter
+
+    @property
+    def tp_iternext(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_iternext
+
+    @property
+    def tp_str(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_str
+
+    @property
+    def tp_repr(self) -> Slot | None:
+        return _tp_type(maybe_get_python_type(self)).tp_repr
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
