@@ -83,6 +83,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
+    requires_cuda_python_bindings,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
@@ -96,7 +97,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
-    TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -3300,11 +3300,10 @@ torch.cuda.synchronize()
         g.reset()
         del g
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs; "
-        "cuda-bindings required for debug_dump",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs; "
     )
+    @requires_cuda_python_bindings  # required for debug_dump
     def test_graph_debugdump(self):
         torch.cuda.empty_cache()
         x = torch.randn(1024, device="cuda")
@@ -5021,10 +5020,11 @@ exit(2)
         ):
             raw_pointer = graph.raw_cuda_graph()
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs",
     )
+    @requires_cuda_python_bindings
     def test_cuda_graph_raw_graph(self):
         import cuda.bindings.runtime as cudart
 
@@ -5048,10 +5048,11 @@ exit(2)
 
         graph.replay()
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    @unittest.skipUnless(
+        TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs",
     )
+    @requires_cuda_python_bindings
     @parametrize("keep_graph", [True, False])
     def test_cuda_graph_raw_graph_exec(self, keep_graph):
         import cuda.bindings.runtime as cudart
@@ -6172,6 +6173,52 @@ class TestCudaAllocator(TestCase):
                     self.assertTrue(event["user_metadata"] == "metadata test")
             finally:
                 torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    @requiresCppContext
+    def test_memory_plots_annotate(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._set_memory_metadata("alloc-time metadata")
+            torch.cuda.memory._record_memory_history(context="all")
+            x = torch.rand(3, 4, device="cuda")
+            torch.cuda.memory._set_memory_metadata("")
+            ptr = x.untyped_storage().data_ptr()
+            torch.cuda.memory._annotate_tensor(x, "retained by autograd")
+            torch.cuda.memory._annotate_tensor(x, "second annotation")
+
+            ss = torch.cuda.memory._snapshot()
+            notes = [e for e in ss["device_traces"][0] if e["action"] == "annotate"]
+            self.assertEqual(len(notes), 2)
+            for e in notes:
+                self.assertEqual(e["addr"], ptr)
+            self.assertEqual(notes[0]["user_metadata"], "retained by autograd")
+            self.assertEqual(notes[1]["user_metadata"], "second annotation")
+            # views resolve to the storage base address
+            view = x[1:]
+            self.assertNotEqual(view.data_ptr(), ptr)
+            torch.cuda.memory._annotate_tensor(view, "via view")
+            ss = torch.cuda.memory._snapshot()
+            notes = [e for e in ss["device_traces"][0] if e["action"] == "annotate"]
+            self.assertEqual(notes[-1]["addr"], ptr)
+            self.assertEqual(notes[-1]["user_metadata"], "via view")
+            # allocation-time metadata is not clobbered
+            alloc_events = [
+                e
+                for e in ss["device_traces"][0]
+                if e["action"] == "alloc" and e["addr"] == ptr
+            ]
+            self.assertEqual(len(alloc_events), 1)
+            self.assertEqual(alloc_events[0]["user_metadata"], "alloc-time metadata")
+            # annotating a dead pointer raises
+            del x, view
+            torch.cuda.synchronize()
+            with self.assertRaisesRegex(RuntimeError, "no live allocation"):
+                torch._C._cuda_annotateMemory(ptr, "should fail")
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
@@ -8691,11 +8738,6 @@ class TestMemPool(TestCase):
         not EXPANDABLE_SEGMENTS,
         "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
     )
-    # expandable_segments not supported (PYTORCH_C10_DRIVER_API_SUPPORTED not defined for windows builds)
-    @unittest.skipIf(
-        IS_WINDOWS and SM89OrLater,
-        "expandable_segments not supported (PYTORCH_C10_DRIVER_API_SUPPORTED not defined for windows builds)",
-    )
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
@@ -8970,6 +9012,7 @@ class TestMemPool(TestCase):
         self.assertTrue((ptrs_round_1 == ptrs_round_2).all().item())
 
     @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @requires_cuda_python_bindings
     @serialTest()
     def test_nccl_mem_alloc_addresses_in_random_order(self):
         """
@@ -9333,9 +9376,7 @@ class TestMemPool(TestCase):
             )
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
             x = torch.randn(256, 256, device="cuda")
@@ -9345,9 +9386,7 @@ class TestMemPool(TestCase):
         self.assertTrue(z.is_cuda)
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
         with torch.cuda._use_uvm():
@@ -9357,9 +9396,7 @@ class TestMemPool(TestCase):
         self.assertEqual(a_uvm, a_reg)
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
             with torch.autograd.set_multithreading_enabled(False):
@@ -9370,9 +9407,7 @@ class TestMemPool(TestCase):
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
-    @unittest.skipIf(
-        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
-    )
+    @requires_cuda_python_bindings
     def test_use_uvm_tensor_outlives_context(self):
         # Regression test: a tensor allocated inside _use_uvm() can outlive the
         # context, leaving its block cached in the PrivatePool until a later global

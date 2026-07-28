@@ -7329,8 +7329,6 @@ torch.cuda.synchronize()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
-    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocm
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
