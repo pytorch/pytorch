@@ -208,17 +208,13 @@ def _cute_scale_expr(
             return f"mx_e8m0_scale_intrinsic({source}, {max_value!r}, {rounding!r})"
         case "nvfp4_e4m3_scale":
             scale = f"({source} / {max_value!r})"
-            if tensorssa:
-                clamped = (
-                    f"cute.where({scale} < 0.015625, 0.015625, "
-                    f"cute.where({scale} > 448.0, 448.0, {scale}))"
-                )
-                return (
-                    f"({clamped}).to(cutlass.Float8E4M3FN).to(cutlass.Float32)"
-                )
-            return (
-                f"cutlass.Float32(cutlass.max(cutlass.min({scale}, 448.0), 0.015625))"
+            clamped = (
+                f"cute.where({scale} < 0.015625, 0.015625, "
+                f"cute.where({scale} > 448.0, 448.0, {scale}))"
+                if tensorssa
+                else f"cutlass.Float32(cutlass.max(cutlass.min({scale}, 448.0), 0.015625))"
             )
+            return f"({clamped}).to(cutlass.Float8E4M3FN).to(cutlass.Float32)"
         case _:
             raise AssertionError(f"unexpected scale op: {op_name}")
 
