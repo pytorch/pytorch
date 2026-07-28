@@ -27,7 +27,7 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import GemmReductionConfig
+from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
@@ -265,7 +265,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         store = GemmEpilogueIRAnalysis.store_from_buffer(node)
         classified = (
-            grouped_reduction_ir(store, gemm_node.get_name(), group)
+            grouped_reduction_ir(
+                store, gemm_node.get_name(), group, gemm_node.get_dtype()
+            )
             if store is not None
             else None
         )
@@ -734,7 +736,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         epilogue_reads: list[str] = []
         epilogue_writes: list[str] = []
         epilogue_var_renames: dict[str, Any] = {}
-        local_reduce: tuple[str | None, int, int, str, str, str] | None = None
+        local_reduce: GemmReductionPlan | None = None
 
         if epilogue_nodes:
             scheduler = V.graph.scheduler
@@ -746,23 +748,24 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                 if plan.reductions:
                     reduction = plan.reductions[0]
-                    local_reduce = (
-                        reduction.output_name,
-                        reduction.group,
-                        reduction.axis,
-                        reduction.reduction_type,
-                        reduction.source_type,
-                        original_buffer_name,
+                    local_reduce = GemmReductionPlan(
+                        reduction_output=reduction.output_name,
+                        group=reduction.group,
+                        axis=reduction.axis,
+                        reduction_type=reduction.reduction_type,
+                        source_type=reduction.source_type,
+                        primary_output=original_buffer_name,
                     )
                 feed_main = plan.feed_main
                 if feed_main is not None:
-                    local_reduce = (
-                        None,
-                        feed_main.group,
-                        feed_main.axis,
-                        feed_main.reduction_type,
-                        feed_main.source_type,
-                        feed_main.output_name,
+                    local_reduce = GemmReductionPlan(
+                        reduction_output=None,
+                        group=feed_main.group,
+                        axis=feed_main.axis,
+                        reduction_type=feed_main.reduction_type,
+                        source_type=feed_main.source_type,
+                        primary_output=feed_main.output_name,
+                        feeds_main=True,
                     )
                     epilogue_fn_code = (
                         f"def {EPILOGUE_FN_NAME}(accum):\n    D = accum\n    return D"
@@ -800,8 +803,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
                 if not only_gen_src_code:
                     write_bufs = OrderedSet(epilogue_writes)
-                    if local_reduce is not None and local_reduce[0] is not None:
-                        write_bufs.add(local_reduce[0])
+                    if local_reduce is not None:
+                        write_bufs.update(local_reduce.auxiliary_outputs)
                     for node in epilogue_nodes:
                         node_name = node.get_name()
                         if node_name in write_bufs:
