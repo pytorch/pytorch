@@ -527,31 +527,31 @@ _BIT_FIELD: dict[SlotGroup, dict[int, str]] = {
 _SLOT_FN: dict[SlotGroup, dict[str, str]] = {
     SlotGroup.NUMBER: {
         **{f: f"{f}_impl" for f in PyNumberMethods._fields},
-        "nb_bool": "bool_impl",
+        "nb_bool": "nb_bool_impl",
     },
     SlotGroup.SEQUENCE: {
-        "sq_length": "sq_length",
+        "sq_length": "sq_length_impl",
         "sq_concat": "sq_concat_impl",
         "sq_repeat": "sq_repeat_impl",
         "sq_item": "sq_item_impl",
         "sq_ass_item": "sq_ass_item_impl",
-        "sq_contains": "sq_contains",
+        "sq_contains": "sq_contains_impl",
         "sq_inplace_concat": "sq_inplace_concat_impl",
         "sq_inplace_repeat": "sq_inplace_repeat_impl",
     },
     SlotGroup.MAPPING: {
-        "mp_length": "mp_length",
+        "mp_length": "mp_length_impl",
         "mp_subscript": "mp_subscript_impl",
         "mp_ass_subscript": "mp_ass_subscript_impl",
     },
     SlotGroup.TYPE: {
-        "tp_repr": "repr_impl",
+        "tp_repr": "tp_repr_impl",
         "tp_hash": "tp_hash_impl",
         "tp_call": "call_function",
-        "tp_str": "str_impl",
-        "tp_getattro": "getattro_impl",
-        "tp_setattro": "setattro_impl",
-        "tp_richcompare": "richcompare_impl",
+        "tp_str": "tp_str_impl",
+        "tp_getattro": "tp_getattro_impl",
+        "tp_setattro": "tp_setattro_impl",
+        "tp_richcompare": "tp_richcompare_impl",
         "tp_iter": "tp_iter_impl",
         "tp_iternext": "tp_iternext_impl",
         "tp_descr_get": "tp_descr_get_impl",
@@ -834,7 +834,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker | None:
+    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker | None:
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
         #
@@ -890,7 +890,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: InstructionTranslatorBase,
         other: VariableTracker,
@@ -903,17 +903,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         the comparison (signaling do_richcompare to try the other operand).
 
         Called from two paths:
-        - call_method("__eq__") calls richcompare_impl directly (like CPython's
+        - call_method("__eq__") calls tp_richcompare_impl directly (like CPython's
           a.__eq__(b) calling tp_richcompare without do_richcompare).
-        - generic_richcompare calls richcompare_impl as part of the 4-step
+        - generic_richcompare calls tp_richcompare_impl as part of the 4-step
           do_richcompare algorithm (subclass priority, forward, reflected,
           fallback).
         """
         unimplemented(
-            gb_type="Missing richcompare_impl override",
-            context=f"richcompare_impl {self} {op}",
+            gb_type="Missing tp_richcompare_impl override",
+            context=f"tp_richcompare_impl {self} {op}",
             explanation=f"{type(self).__name__} does not implement "
-            f"richcompare_impl. Add a richcompare_impl override to "
+            f"tp_richcompare_impl. Add a tp_richcompare_impl override to "
             f"{type(self).__name__}.",
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
@@ -985,7 +985,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return None
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
         """Default attribute access via object_generic_getattr.
@@ -1093,7 +1093,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        """Dynamo's hasattr(): try getattro_impl, catch AttributeError.
+        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
 
         Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
         call tp_getattro, suppress AttributeError via PyErr_Clear, return
@@ -1101,7 +1101,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
         """
         try:
-            self.getattro_impl(tx, name)
+            self.tp_getattro_impl(tx, name)
             return variables.ConstantVariable.create(True)
         except ObservedAttributeError:
             tx.exn_vt_stack.clear_current_exception()
@@ -1176,7 +1176,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def sq_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -1184,7 +1184,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
-    def mp_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when mp_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -1223,7 +1223,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[],
         )
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: InstructionTranslatorBase, item: VariableTracker
     ) -> VariableTracker:
         """Called when sq_contains is not implemented."""
@@ -1344,7 +1344,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
             return generic_str(tx, self)
         elif name == "__repr__" and not args and not kwargs:
-            return self.repr_impl(tx)
+            return self.tp_repr_impl(tx)
         elif name == "__iter__" and not args and not kwargs:
             return self.tp_iter_impl(tx)
         elif name == "__next__" and not args and not kwargs:
@@ -1358,7 +1358,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 msg = VariableTracker.build(tx, f"expected 1 argument, got {len(args)}")
                 raise_observed_exception(TypeError, tx, args=[msg])
 
-            return self.sq_contains(tx, args[0])
+            return self.sq_contains_impl(tx, args[0])
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -1367,10 +1367,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ):
             # TODO(tp_getattro): In CPython, obj.__getattr__("foo") calls only
             # the type's __getattr__ method, not the full attribute resolution.
-            # Currently we dispatch through getattro_impl which does the full
+            # Currently we dispatch through tp_getattro_impl which does the full
             # GenericGetAttr + __getattr__ fallback. Fix in a follow-up to
             # call __getattr__ directly for UDOV types.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            return self.tp_getattro_impl(tx, args[0].as_python_constant())
         elif (
             name == "__getattribute__"
             and len(args) == 1
@@ -1379,11 +1379,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ):
             # TODO(tp_getattro): In CPython, obj.__getattribute__("foo")
             # calls GenericGetAttr WITHOUT the __getattr__ fallback.
-            # Currently we route through getattro_impl which, for UDOV,
+            # Currently we route through tp_getattro_impl which, for UDOV,
             # includes __getattr__. Fix in a follow-up to have UDOV
             # override this to call generic_getattr (the inner helper)
             # directly, skipping __getattr__.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            return self.tp_getattro_impl(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
         elif name == "__int__" and not args and not kwargs:
@@ -1396,7 +1396,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
             if hasattr(self, "tp_descr_get_impl"):
                 obj = args[0]
-                owner = args[1] if len(args) > 1 else obj.getattro_impl(tx, "__class__")
+                owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
                 return self.tp_descr_get_impl(tx, obj, owner)
         elif name == "__or__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
@@ -1535,7 +1535,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # do_richcompare's reflected-operand protocol.  This matches
             # CPython where a.__eq__(b) can return NotImplemented.
             # See object_protocol.py for the full dispatch architecture.
-            return self.richcompare_impl(tx, args[0], name)
+            return self.tp_richcompare_impl(tx, args[0], name)
         elif name == "__subclasscheck__" and len(args) == 1 and not kwargs:
             if (self_py := self.as_python_constant()) and (
                 derived_py := args[0].as_python_constant()
@@ -1861,7 +1861,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def repr_impl(
+    def tp_repr_impl(
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
@@ -1873,14 +1873,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Subclasses override to provide the actual repr implementation.
         """
         unimplemented(
-            gb_type="repr_impl not implemented",
-            context=f"{type(self).__name__} has tp_repr slot but no repr_impl override",
+            gb_type="tp_repr_impl not implemented",
+            context=f"{type(self).__name__} has tp_repr slot but no tp_repr_impl override",
             explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
-            "the corresponding VariableTracker doesn't implement repr_impl.",
+            "the corresponding VariableTracker doesn't implement tp_repr_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
-    def str_impl(
+    def tp_str_impl(
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
@@ -1889,8 +1889,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         handles dispatch and repr fallback.
         """
         unimplemented(
-            gb_type="str_impl not implemented",
-            context=f"{type(self).__name__} has no str_impl override for {self.python_type_name()}",
+            gb_type="tp_str_impl not implemented",
+            context=f"{type(self).__name__} has no tp_str_impl override for {self.python_type_name()}",
             explanation=f"Dynamo does not implement __str__ for {self.python_type_name()} "
             f"in {type(self).__name__}.",
             hints=[*graph_break_hints.SUPPORTABLE],

@@ -91,7 +91,7 @@ class CUDAMemPoolVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "id":

@@ -402,7 +402,7 @@ class StreamVariable(StreamContextVariable):
     def python_type(self) -> type:
         return self._cpython_type
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if self._device_handle_attr is not None and name == self._device_handle_attr:
@@ -417,7 +417,7 @@ class StreamVariable(StreamContextVariable):
             if hasattr(self.value, "native_handle"):
                 return ConstantVariable.create(self.value.native_handle)
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -508,7 +508,7 @@ class StreamVariable(StreamContextVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from ..guards import GuardBuilder, install_guard
         from ..utils import cmp_name_to_op_mapping
         from .constant import ConstantVariable
@@ -625,7 +625,7 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare

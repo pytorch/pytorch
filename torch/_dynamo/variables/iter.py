@@ -82,7 +82,7 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -98,12 +98,12 @@ class ItertoolsVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if self.value is itertools.chain and name == "from_iterable":
             return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -300,7 +300,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -457,7 +457,7 @@ class RepeatIteratorVariable(IteratorVariable):
             return ConstantVariable.create(self.remaining)
         return super().call_method(tx, name, args, kwargs)
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         item_repr = tracked_repr(tx, self.item)
         if self.times is None:
             return ConstantVariable.create(f"repeat({item_repr})")
@@ -517,10 +517,10 @@ class CountIteratorVariable(IteratorVariable):
         self.advance_count += 1
         return old_item
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
         if not (self.item.is_python_constant() and self.step.is_python_constant()):
-            return super().repr_impl(tx)
+            return super().tp_repr_impl(tx)
         cnt = self.item.as_python_constant()
         step = self.step.as_python_constant()
         # Suppress step in the repr when it is an integer equal to 1.

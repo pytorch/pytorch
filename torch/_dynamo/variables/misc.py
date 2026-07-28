@@ -191,7 +191,7 @@ class SuperVariable(VariableTracker):
             ],
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Check if getattr is a constant. If not, delay the actual work by
@@ -441,7 +441,7 @@ class FrameSummaryVariable(VariableTracker):
     def python_type(self) -> type:
         return traceback.FrameSummary
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "lineno":
@@ -452,7 +452,7 @@ class FrameSummaryVariable(VariableTracker):
             return VariableTracker.build(tx, self.frame_summary.name)
         elif name == "line":
             return VariableTracker.build(tx, self.frame_summary.line)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class TracebackVariable(VariableTracker):
@@ -525,13 +525,13 @@ class TracebackVariable(VariableTracker):
             self.tb_next = val
         return variables.ConstantVariable.create(None)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "tb_next":
             return self.tb_next
         elif name == "tb_lineno":
-            return self.frame_summary.getattro_impl(tx, "lineno")
+            return self.frame_summary.tp_getattro_impl(tx, "lineno")
         elif name == "frame_summary":
             return self.frame_summary
         elif name == "tb_lasti":
@@ -541,9 +541,9 @@ class TracebackVariable(VariableTracker):
                 explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -630,7 +630,7 @@ class ExceptionVariable(VariableTracker):
     def python_type(self) -> type:
         return self.exc_type
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -710,7 +710,7 @@ class ExceptionVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
@@ -729,9 +729,9 @@ class ExceptionVariable(VariableTracker):
                 tuple(self.args),
                 source=self.source and AttrSource(self.source, "args"),
             )
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
-    def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
@@ -759,7 +759,7 @@ class ExceptionVariable(VariableTracker):
         args = ", ".join(self._debug_format_arg(arg) for arg in self.args)
         return f"{self.python_type_name()}({args})"
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
         return VariableTracker.build(tx, self.debug_repr())
 
@@ -776,12 +776,12 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "value":
             return self.value
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -804,12 +804,12 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in self._attrs:
             return self._attrs[name]
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
@@ -877,7 +877,7 @@ class ComptimeVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError("comptime is special form")
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         from ..comptime import comptime
@@ -1408,7 +1408,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
@@ -1429,7 +1429,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 # type: ignore[attr-defined]
                 return VariableTracker.build(tx, self.value.needs_input_grad, source)
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class AutogradEngineVariable(UserDefinedObjectVariable):
@@ -1595,13 +1595,13 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import generic_richcompare
 
         try:
-            resolved = self.obj.getattro_impl(tx, self.name)
+            resolved = self.obj.tp_getattro_impl(tx, self.name)
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
@@ -1611,7 +1611,7 @@ class GetAttrVariable(VariableTracker):
             else:
                 unimplemented(
                     gb_type="Unresolved GetAttrVariable comparison",
-                    context=f"richcompare_impl {self} {op}",
+                    context=f"tp_richcompare_impl {self} {op}",
                     explanation=f"Cannot compare {self} because the attribute "
                     f"could not be resolved to a concrete value.",
                     hints=[*graph_break_hints.SUPPORTABLE],
@@ -1676,7 +1676,7 @@ class CallMethodVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -1726,7 +1726,7 @@ class PythonModuleVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"PythonModuleVariable({self.value})"
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
@@ -1744,7 +1744,7 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -1773,7 +1773,7 @@ class TypingVariable(VariableTracker):
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         if op in ("__eq__", "__ne__"):
@@ -1819,7 +1819,7 @@ class TypingVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1922,7 +1922,7 @@ class NumpyVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -2222,7 +2222,7 @@ class ObjectVariable(VariableTracker):
     def python_type(self) -> type[object]:
         return object
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -2415,7 +2415,7 @@ class ConstantLikeVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import python_constant_richcompare_impl
@@ -2461,7 +2461,7 @@ class ConstantLikeVariable(VariableTracker):
             ],
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         result = getattr(self.value, name)
@@ -2597,12 +2597,12 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if name == "name":
             return ConstantVariable.create(self.cv_obj.name)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class RandomClassVariable(VariableTracker):
@@ -2891,7 +2891,7 @@ class WeakRefVariable(VariableTracker):
 
         return generic_hash_impl(tx, self.referent_vt)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import generic_richcompare
