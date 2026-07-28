@@ -505,6 +505,70 @@ class RingBuffer {
   std::vector<T>* alloc_trace;
 };
 
+// BlockState, SegmentState, and PrivatePoolState contain the information
+// needed to reconstruct a private pool to a previous state.
+struct BlockState {
+  c10::DeviceIndex device = 0;
+  sycl::queue* queue = nullptr;
+  stream_set stream_uses;
+  size_t size = 0;
+  void* ptr = nullptr;
+  bool allocated = false;
+
+  explicit BlockState(Block* block);
+};
+
+struct SegmentState {
+  std::vector<BlockState> blocks;
+  bool is_small = false;
+
+  explicit SegmentState(Block* head);
+};
+
+struct PrivatePoolState : AllocatorState {
+  MempoolId_t owner_id = {0, 0};
+  std::vector<SegmentState> segments;
+
+  PrivatePoolState(
+      MempoolId_t pool_id,
+      const std::vector<Block*>& private_pool_head_blocks);
+};
+
+struct RestoreResult {
+  std::vector<void*> allocations_freed;
+  std::vector<Block*> allocations_created;
+};
+
+BlockState::BlockState(Block* block)
+    : device(block->device),
+      queue(block->queue),
+      stream_uses(block->stream_uses),
+      size(block->size),
+      ptr(block->ptr),
+      allocated(block->allocated) {
+  TORCH_CHECK(
+      block->event_count == 0,
+      "Events should have synchronized when checkpointing block");
+}
+
+SegmentState::SegmentState(Block* head) {
+  TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
+  is_small = head->pool->is_small;
+
+  for (Block* curr = head; curr != nullptr; curr = curr->next) {
+    blocks.emplace_back(curr);
+  }
+}
+
+PrivatePoolState::PrivatePoolState(
+    MempoolId_t pool_id,
+    const std::vector<Block*>& private_pool_head_blocks)
+    : owner_id(std::move(pool_id)) {
+  for (Block* head : private_pool_head_blocks) {
+    segments.emplace_back(head);
+  }
+}
+
 } // anonymous namespace
 
 class DeviceCachingAllocator {
@@ -526,13 +590,35 @@ class DeviceCachingAllocator {
   RecordContext record_context_ = RecordContext::NEVER;
   RingBuffer<TraceEntry> alloc_buffer;
   std::unordered_set<TraceEntry::Action> skip_actions_list;
+
+  // Active pool-diversion scopes. Each entry routes allocations matching its
+  // filter into a private mempool. Populated by beginAllocateToPool /
+  // endAllocateToPool, including from XPUGraph capture and MemPool usage. A
+  // non-empty list does NOT imply an active capture; for that, see
+  // num_active_captures_ below. Usually empty, so get_pool can short-circuit.
   std::vector<std::pair<MempoolId_t, std::function<bool(sycl::queue*)>>>
-      captures_underway;
+      allocation_scopes_;
+
+  // Count of in-progress SYCL graph captures on this device. Bumped by
+  // XPUGraph's capture_begin / capture_end around begin_recording /
+  // end_recording. Distinct from allocation_scopes_, which tracks pool routing
+  // and can be populated without an active capture (e.g. MemPool usage).
+  // Plain int because all access is serialized through `mutex`.
+  int num_active_captures_ = 0;
+
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
       graph_pools;
   // Pools no longer referenced by any graph.
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
+
+  // Blocks freed during XPU graph capture whose stream_uses are non-empty.
+  // Deferred because inserting events and querying event status are illegal
+  // during graph recording. Flushed in endAllocateToPool once capture ends.
+  ska::flat_hash_set<Block*> deferred_blocks;
+
+  // Tracks which stream uses on a block were recorded during capture.
+  std::unordered_map<Block*, stream_set> block_to_xpugraph_stream_uses;
 
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
@@ -650,6 +736,7 @@ class DeviceCachingAllocator {
   }
 
   void process_events(const std::shared_ptr<GatheredContext>& context) {
+    insert_events_deferred_until_no_capture(context);
     using namespace sycl::info;
     for (auto it = xpu_events.begin(); it != xpu_events.end();) {
       while (!it->second.empty()) {
@@ -694,8 +781,8 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, sycl::queue* queue) {
-    if (C10_UNLIKELY(!captures_underway.empty())) {
-      for (auto& entry : captures_underway) {
+    if (C10_UNLIKELY(!allocation_scopes_.empty())) {
+      for (auto& entry : allocation_scopes_) {
         // lookup for mempool id matching current capture graph
         if (entry.second(queue)) {
           auto it1 = graph_pools.find(entry.first);
@@ -975,6 +1062,10 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context,
       PrivatePool* pool = nullptr) {
+    // This function syncs (event.wait()), so graph capture must not be
+    // underway.
+    TORCH_INTERNAL_ASSERT(!is_capture_context());
+    insert_events_deferred_until_no_capture(context);
     for (auto& xe : xpu_events) {
       for (auto& e : xe.second) {
         auto event = e.first;
@@ -1155,7 +1246,7 @@ class DeviceCachingAllocator {
       MempoolId_t mempool_id) {
     bool streams_synced = false;
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
-        captures_underway.empty()) {
+        !is_capture_context()) {
       synchronize_and_free_events(context);
       // See Note [Safe to Free Blocks on BlockPool]
       c10::xpu::syncStreamsOnDevice(device_index);
@@ -1316,6 +1407,169 @@ class DeviceCachingAllocator {
     }
   }
 
+  // Returns true iff the calling thread's current stream is actively recording
+  // into a XPU graph. Allocator paths that gate on capture safety
+  // (event insertion, deferred-free, OOM-time release_cached_blocks) use this
+  // instead of a bare allocation_scopes_.empty() check, so that a private
+  // mempool diversion (e.g. via MemPool) is not mistaken for a real capture.
+  //
+  // Two layers, from cheapest to most expensive:
+  //   1. Device-wide counter: num_active_captures_ == 0 means no capture is in
+  //      progress anywhere on this device, so the answer is trivially false.
+  //      This is the common case and the hot path.
+  //   2. Per-stream query: ext_oneapi_get_state on the current stream, only
+  //      paid when some capture is active on this device. Distinguishes a
+  //      non-capturing stream on a device that has another stream capturing
+  //      from the capturing stream itself (which must follow capture rules).
+  //
+  // The counter read is safe because all callers hold `mutex`.
+  bool is_capture_context() const {
+    if (C10_LIKELY(num_active_captures_ == 0)) {
+      return false;
+    }
+    return xpu::getCurrentXPUStream(device_index).is_capturing();
+  }
+
+  // Removes stream uses that were recorded onto `block` during capture.
+  void remove_xpugraph_stream_uses(Block* block) {
+    auto it = block_to_xpugraph_stream_uses.find(block);
+    if (it == block_to_xpugraph_stream_uses.end()) {
+      return;
+    }
+    for (const auto& s : it->second) {
+      block->stream_uses.erase(s);
+    }
+    block_to_xpugraph_stream_uses.erase(it);
+  }
+
+  // handle deferred event which is not used by xpugraph
+  void insert_events_deferred_until_no_capture(
+      const std::shared_ptr<GatheredContext>& context) {
+    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+      for (auto* block : deferred_blocks) {
+        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        // Strip stream uses added during capture;
+        remove_xpugraph_stream_uses(block);
+        if (block->stream_uses.empty()) {
+          free_block(block, context);
+        } else {
+          insert_events(block);
+          if (block->event_count == 0) {
+            free_block(block, context);
+          }
+        }
+      }
+      deferred_blocks.clear();
+    }
+  }
+
+  // Restores the state of an allocation segment (which may have been split
+  // into multiple blocks) to match a previously checkpointed SegmentState.
+  void setSegmentStateToCheckpoint(
+      Block* block,
+      SegmentState& segment,
+      const std::shared_ptr<GatheredContext>& context,
+      RestoreResult& rr) {
+    Block* curr_block = block;
+    Block* last_block = block;
+
+    TORCH_INTERNAL_ASSERT(block->pool);
+    BlockPool& pool = *block->pool;
+    const auto segment_len = segment.blocks.size();
+
+    auto is_unmapped_tail = [](Block* b) {
+      return b->next == nullptr && !b->mapped && !b->allocated;
+    };
+
+    // Allocate all blocks in the segment.
+    for (size_t i = 0; i < segment_len; ++i) {
+      // Note [Last block when restoring checkpoint state]
+      // The last block in an expandable segment is one of:
+      // - case 1: an unmapped tail with remaining virtual address space.
+      // - case 2: segment has grown since checkpoint; after allocating all
+      //      checkpoint blocks, one extra mapped block and an unmapped tail
+      //      remain.
+      if (i == segment_len - 1 && curr_block->expandable_segment) {
+        bool valid_structure =
+            /* case 1 */ is_unmapped_tail(curr_block) ||
+            /* case 2 */
+            (curr_block->mapped && !curr_block->allocated && curr_block->next &&
+             is_unmapped_tail(curr_block->next));
+        TORCH_CHECK(
+            valid_structure,
+            "Invalid expandable segment structure during checkpoint restore");
+        continue;
+      }
+
+      auto& block_state = segment.blocks.at(i);
+      AllocParams params(
+          block_state.device,
+          block_state.size,
+          block_state.queue,
+          &pool,
+          block_state.size);
+      pool.blocks.erase(curr_block);
+      params.block = curr_block;
+      params.stat_types = get_stat_types_for_pool(pool);
+
+      bool split = curr_block->size > block_state.size;
+
+      curr_block = alloc_found_block(params, block_state.size, context, split);
+
+      TORCH_CHECK(curr_block->ptr == block_state.ptr);
+      TORCH_CHECK(curr_block->size == block_state.size);
+
+      last_block = curr_block;
+      curr_block = curr_block->next;
+
+      TORCH_CHECK((curr_block != nullptr) == ((i + 1) < (segment_len)));
+    }
+
+    while (last_block->prev) {
+      last_block = last_block->prev;
+    }
+
+    // Free blocks that are not allocated in the checkpoint.
+    curr_block = last_block;
+
+    for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
+      if (i == segment_len - 1 && curr_block->expandable_segment) {
+        // See Note [Last block when restoring checkpoint state]
+        bool valid_structure =
+            /* case 1 */ is_unmapped_tail(curr_block) ||
+            /* case 2 */
+            (curr_block->mapped && !curr_block->allocated && curr_block->next &&
+             is_unmapped_tail(curr_block->next));
+        TORCH_CHECK(
+            valid_structure,
+            "Invalid expandable segment structure during checkpoint restore");
+        continue;
+      }
+
+      auto& block_state = segment.blocks.at(i);
+      TORCH_INTERNAL_ASSERT(curr_block != nullptr);
+
+      if (block_state.allocated) {
+        rr.allocations_created.push_back(curr_block);
+        continue;
+      }
+
+      free(curr_block);
+
+      TORCH_CHECK(curr_block->ptr == block_state.ptr);
+      TORCH_CHECK(curr_block->allocated == block_state.allocated);
+
+      // See Note [Last block when restoring checkpoint state]
+      // The last mapped block (i == segment_len - 2) may merge with extra
+      // mapped memory from segment growth, making it larger than checkpoint.
+      bool is_last_mapped =
+          (i == segment_len - 2) && curr_block->expandable_segment;
+      TORCH_CHECK(
+          curr_block->size == block_state.size ||
+          (is_last_mapped && curr_block->size >= block_state.size));
+    }
+  }
+
   std::vector<Block*> get_private_pool_head_blocks(PrivatePool* pool) const {
     std::vector<Block*> blocks;
     for (Block* b : active_blocks) {
@@ -1384,7 +1638,7 @@ class DeviceCachingAllocator {
     auto context = maybeGatherContext(RecordContext::STATE);
 
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(captures_underway.empty())) {
+    if (C10_LIKELY(!is_capture_context())) {
       process_events(context);
     }
     size_t size = round_size(orig_size);
@@ -1494,7 +1748,11 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_allocated);
 
     if (!block->stream_uses.empty()) {
-      insert_events(block);
+      if (C10_UNLIKELY(is_capture_context())) {
+        deferred_blocks.insert(block);
+      } else {
+        insert_events(block);
+      }
     } else {
       free_block(block, context);
     }
@@ -1513,6 +1771,9 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+    if (C10_UNLIKELY(is_capture_context())) {
+      block_to_xpugraph_stream_uses[block].insert(stream);
+    }
   }
 
   void emptyCache(MempoolId_t mempool_id) {
@@ -1561,6 +1822,132 @@ class DeviceCachingAllocator {
       stats.inactive_split_bytes[statType].reset_peak();
       stats.requested_bytes[statType].reset_peak();
     }
+  }
+
+  std::unique_ptr<PrivatePoolState> getCheckpointState(MempoolId_t id) {
+    auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    insert_events_deferred_until_no_capture(context);
+
+    auto pool = graph_pools.find(id);
+    if (pool != graph_pools.end()) {
+      auto private_pool_head_blocks =
+          get_private_pool_head_blocks(pool->second.get());
+      return std::make_unique<PrivatePoolState>(id, private_pool_head_blocks);
+    } else if (graph_pools_freeable.count(id)) {
+      TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
+    } else {
+      TORCH_CHECK(false, "Could not find pool of id");
+    }
+  }
+
+  void freeBlocksAllocatedToPool(PrivatePool* private_pool, RestoreResult& rr) {
+    auto pool_blocks = get_private_pool_head_blocks(private_pool);
+
+    std::vector<Block*> head_blocks;
+    for (Block* block : pool_blocks) {
+      if (block->prev == nullptr) {
+        head_blocks.push_back(block);
+      }
+    }
+
+    for (Block* block : head_blocks) {
+      Block* curr = block;
+
+      while (curr) {
+        // When we free a block, its pointer should never change
+        // only its adjacent blocks, so free, then look at pointer
+        if (curr->allocated) {
+          TORCH_CHECK(
+              curr->event_count == 0,
+              "Events should have synchronized when setting checkpointed block");
+          rr.allocations_freed.push_back(curr->ptr);
+          free(curr);
+          TORCH_CHECK(!curr->allocated)
+        }
+        curr = curr->next;
+      }
+    }
+
+    for (Block* b : get_private_pool_head_blocks(private_pool)) {
+      Block* curr = b;
+      while (curr) {
+        TORCH_CHECK(!curr->allocated);
+        curr = curr->next;
+      }
+    }
+  }
+
+  RestoreResult setCheckpointPoolState(PrivatePoolState& pps) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::STATE);
+
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    RestoreResult rr;
+
+    TORCH_CHECK(
+        !graph_pools_freeable.count(pps.owner_id),
+        "Not expected to checkpoint freeable graph");
+
+    auto pool = graph_pools.find(pps.owner_id);
+    TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
+
+    PrivatePool* private_pool = pool->second.get();
+
+    freeBlocksAllocatedToPool(private_pool, rr);
+
+    std::unordered_map<void*, Block*> ptrs_to_blocks;
+    // at this point, all of the blocks should be free, so they will all be in
+    // the block set
+    for (Block* block : private_pool->small_blocks.blocks) {
+      ptrs_to_blocks[block->ptr] = block;
+    }
+    for (Block* block : private_pool->large_blocks.blocks) {
+      ptrs_to_blocks[block->ptr] = block;
+    }
+
+    for (auto& segment : pps.segments) {
+      auto ptr = segment.blocks.at(0).ptr;
+      TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
+      auto block = ptrs_to_blocks[ptr];
+
+      setSegmentStateToCheckpoint(block, segment, context, rr);
+    }
+    return rr;
+  }
+
+  bool checkPoolLiveAllocations(
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) const {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+
+    PrivatePool* pool = nullptr;
+    auto pool_it = graph_pools.find(mempool_id);
+    TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
+    pool = pool_it->second.get();
+
+    TORCH_INTERNAL_ASSERT(pool != nullptr);
+
+    size_t allocated_pool_blocks = 0;
+
+    for (Block* b : active_blocks) {
+      TORCH_INTERNAL_ASSERT(b != nullptr);
+      TORCH_INTERNAL_ASSERT(b->pool != nullptr);
+      if (b->allocated && b->pool->owner_PrivatePool == pool) {
+        if (!expected_live_allocations.count(b->ptr)) {
+          return false;
+        }
+
+        allocated_pool_blocks += 1;
+      }
+    }
+
+    return allocated_pool_blocks == expected_live_allocations.size();
+  }
+
+  bool isHistoryEnabled() const {
+    return record_history;
   }
 
   void record_trace(
@@ -1774,26 +2161,76 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
     auto not_found = std::all_of(
-        captures_underway.begin(),
-        captures_underway.end(),
+        allocation_scopes_.begin(),
+        allocation_scopes_.end(),
         [&](const auto& entry) { return entry.first != mempool_id; });
     TORCH_CHECK(
         not_found, "beginAllocateToPool: already recording to mempool_id");
-    captures_underway.emplace_back(mempool_id, std::move(filter));
+    allocation_scopes_.emplace_back(mempool_id, std::move(filter));
   }
 
   // Called by XPUGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    // Outside mutex to avoid deadlocks.
+    auto context = maybeGatherContext(RecordContext::ALL);
+    if (!deferred_blocks.empty()) {
+      auto pool_it = graph_pools.find(mempool_id);
+      if (pool_it != graph_pools.end()) {
+        auto* private_pool = pool_it->second.get();
+        std::vector<Block*> blocks_to_erase;
+        for (auto* block : deferred_blocks) {
+          if (block->pool->owner_PrivatePool == private_pool) {
+            // handle deferred blocks belonging to the pool when capture ends
+            remove_xpugraph_stream_uses(block);
+            if (block->stream_uses.empty()) {
+              // free if only stream uses are from capture; otherwise insert
+              // events to track pre-capture stream uses and free when events
+              // complete.
+              free_block(block, context);
+            } else {
+              insert_events(block);
+              if (block->event_count == 0) {
+                free_block(block, context);
+              }
+            }
+            blocks_to_erase.push_back(block);
+          }
+        }
+        for (auto* b : blocks_to_erase) {
+          deferred_blocks.erase(b);
+        }
+      }
+    }
 
     auto it = std::find_if(
-        captures_underway.begin(),
-        captures_underway.end(),
+        allocation_scopes_.begin(),
+        allocation_scopes_.end(),
         [&](const auto& entry) { return entry.first == mempool_id; });
     TORCH_INTERNAL_ASSERT(
-        it != captures_underway.end(),
+        it != allocation_scopes_.end(),
         "endAllocatePool: not currently recording to mempool_id");
-    captures_underway.erase(it);
+    allocation_scopes_.erase(it);
+  }
+
+  // Called by XPUGraph::capture_begin after begin_recording succeeds. Tracks
+  // real captures separately from the pool-routing list allocation_scopes_, so
+  // that allocator paths gated on "is a capture in progress" can distinguish a
+  // real capture (where event queries are illegal) from a private mempool
+  // diversion (where they are fine). Assumes begin/end for one capture are not
+  // racing each other.
+  void markCaptureBegin() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    num_active_captures_++;
+  }
+
+  // Called by XPUGraph::capture_end after end_recording.
+  void markCaptureEnd() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_INTERNAL_ASSERT(
+        num_active_captures_ > 0,
+        "markCaptureEnd called with no captures in progress");
+    num_active_captures_--;
   }
 
   // Called by XPUGraph::reset and MemPool::~MemPool()
@@ -1995,6 +2432,52 @@ class NativeCachingAllocator : public XPUAllocator {
     return result;
   }
 
+  std::shared_ptr<AllocatorState> getCheckpointState(
+      c10::DeviceIndex device,
+      MempoolId_t id) {
+    return device_allocators[device]->getCheckpointState(id);
+  }
+
+  CheckpointDelta setCheckpointPoolState(
+      c10::DeviceIndex device,
+      std::shared_ptr<AllocatorState> as) {
+    std::shared_ptr<PrivatePoolState> pps =
+        std::dynamic_pointer_cast<PrivatePoolState>(as);
+
+    TORCH_CHECK(pps, "Expected PrivatePoolState");
+
+    auto rr = device_allocators[device]->setCheckpointPoolState(*pps);
+
+    CheckpointDelta cpd;
+    for (void* ptr : rr.allocations_freed) {
+      get_allocated_block(ptr, /*remove*/ true);
+      cpd.ptrs_freed.push_back(ptr);
+    }
+    for (Block* block : rr.allocations_created) {
+      add_allocated_block(block);
+      cpd.dataptrs_allocd.emplace_back(
+          block->ptr,
+          block->ptr,
+          &local_raw_delete,
+          Device(DeviceType::XPU, device));
+    }
+
+    return cpd;
+  }
+
+  bool isHistoryEnabled() {
+    c10::DeviceIndex device = c10::xpu::current_device();
+    return device_allocators[device]->isHistoryEnabled();
+  }
+
+  bool checkPoolLiveAllocations(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) {
+    return device_allocators[device]->checkPoolLiveAllocations(
+        mempool_id, expected_live_allocations);
+  }
+  
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
     assertValidDevice(dev);
     assertValidDevice(dev_to_access);
@@ -2067,6 +2550,16 @@ class NativeCachingAllocator : public XPUAllocator {
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     device_allocators[device]->endAllocateToPool(mempool_id);
+  }
+
+  void markCaptureBegin(c10::DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->markCaptureBegin();
+  }
+
+  void markCaptureEnd(c10::DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->markCaptureEnd();
   }
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -2152,12 +2645,44 @@ void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.endAllocateToPool(device, mempool_id);
 }
 
+void markCaptureBegin(c10::DeviceIndex device) {
+  return native_allocator.markCaptureBegin(device);
+}
+
+void markCaptureEnd(c10::DeviceIndex device) {
+  return native_allocator.markCaptureEnd(device);
+}
+
 void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.releasePool(device, mempool_id);
 }
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.getPoolUseCount(device, mempool_id);
+}
+
+std::shared_ptr<AllocatorState> getCheckpointState(
+    c10::DeviceIndex device,
+    MempoolId_t id) {
+  return native_allocator.getCheckpointState(device, id);
+}
+
+CheckpointDelta setCheckpointPoolState(
+    c10::DeviceIndex device,
+    std::shared_ptr<AllocatorState> as) {
+  return native_allocator.setCheckpointPoolState(device, std::move(as));
+}
+
+bool isHistoryEnabled() {
+  return native_allocator.isHistoryEnabled();
+}
+
+bool checkPoolLiveAllocations(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations) {
+  return native_allocator.checkPoolLiveAllocations(
+      device, mempool_id, expected_live_allocations);
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
