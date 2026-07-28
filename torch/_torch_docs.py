@@ -14462,6 +14462,14 @@ Arguments:
         offset starts at 0, the total reserved within one graph must stay
         below ``2**64``).
 
+Returns:
+    tuple[Tensor, Tensor, Tensor]: ``(seed, offset, intragraph_offset)``,
+    each a 1-element ``int64`` tensor. ``seed`` and ``offset`` hold the
+    generator's seed and the reserved stream position as uint64 bits (CPU
+    tensors outside capture, CUDA tensors aliasing generator state during
+    capture); ``intragraph_offset`` is always a CPU tensor holding this
+    reservation's position within the capturing graph (0 outside capture).
+
 Example:
     >>> g_cuda = torch.Generator(device='cuda')
     >>> seed, offset, intragraph = g_cuda.philox_state(4)

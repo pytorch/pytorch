@@ -23,9 +23,10 @@ Generator Generator::graphsafe_get_state() const {
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> Generator::philox_state(
     uint64_t increment) {
-  at::Tensor seed, offset, intragraph;
-  this->impl_->philox_state(increment, seed, offset, intragraph);
-  return {std::move(seed), std::move(offset), std::move(intragraph)};
+  std::tuple<at::Tensor, at::Tensor, at::Tensor> state;
+  this->impl_->philox_state(
+      increment, std::get<0>(state), std::get<1>(state), std::get<2>(state));
+  return state;
 }
 
 } // namespace at
