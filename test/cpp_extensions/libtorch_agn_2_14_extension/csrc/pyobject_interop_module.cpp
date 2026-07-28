@@ -84,6 +84,8 @@ PyModuleDef moduledef = {
 
 } // namespace
 
-extern "C" PyObject* PyInit__interop() {
+// PyMODINIT_FUNC (not a bare extern "C") so the init symbol is dllexported on
+// Windows; without it the .pyd omits PyInit__interop and the import fails.
+PyMODINIT_FUNC PyInit__interop(void) {
   return PyModule_Create(&moduledef);
 }
