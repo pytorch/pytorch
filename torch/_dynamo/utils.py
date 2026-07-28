@@ -3319,11 +3319,15 @@ def check_positional(
     if nargs < min_args:
         rel = "" if min_args == max_args else "at least "
         s = "" if min_args == 1 else "s"
-        raise_type_error(tx, f"{funcname} expected {rel}{min_args} argument{s}, got {nargs}")
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{min_args} argument{s}, got {nargs}"
+        )
     if nargs > max_args:
         rel = "" if min_args == max_args else "at most "
         s = "" if max_args == 1 else "s"
-        raise_type_error(tx, f"{funcname} expected {rel}{max_args} argument{s}, got {nargs}")
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{max_args} argument{s}, got {nargs}"
+        )
 
 
 def no_positional(
