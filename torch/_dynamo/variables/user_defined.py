@@ -3467,35 +3467,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.resolve_data_descriptor(tx, name, type_attr, source)
 
         # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
-        skip_instance_dict = False
-        if tx.output.side_effects.has_pending_mutation_of_attr(
-            self,
-            name,
-            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-        ):
-            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-            if not isinstance(result, variables.DeletedVariable):
-                return result
-            # A deleted instance-dict entry can expose a class attribute,
-            # non-data descriptor, or __getattr__; only raise if those fail.
-            skip_instance_dict = True
-        elif tx.output.side_effects.has_pending_mutation_of_attr(
-            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-        ):
-            # obj.__dict__ = {...} replaces the lookup dict as a whole, unlike
-            # per-attribute mutations tracked by the branch above.
-            dict_vt = self.get_dict_vt(tx)
-            if dict_vt.contains(name):
-                return dict_vt.getitem(name)
-            skip_instance_dict = True
-        if (
-            not skip_instance_dict
-            and hasattr(self.value, "__dict__")
-            and name in self.value.__dict__
-        ):
-            subobj = self.value.__dict__[name]
-            source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
-            return VariableTracker.build(tx, subobj, source)
+        result = self.lookup_instance_dict(tx, name)
+        if result is not None:
+            return result
 
         # Step 4-5: Non-data descriptor or plain class attribute.
         if type_attr is not NO_SUCH_SUBOBJ:
@@ -3515,7 +3489,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #
         # Only safe when the class doesn't override __getattribute__,
         # otherwise we'd run arbitrary user code.
-        if not self._object_has_getattribute and not skip_instance_dict:
+        # Skip if side effects have mutations that supersede the live object.
+        has_instance_mutations = tx.output.side_effects.has_pending_mutation_of_attr(
+            self,
+            name,
+            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+        ) or tx.output.side_effects.has_pending_mutation_of_attr(
+            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        )
+        if not self._object_has_getattribute and not has_instance_mutations:
             try:
                 resolved = type(self.value).__getattribute__(self.value, name)
                 source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
@@ -3524,47 +3506,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
 
         # Step 6: __getattr__ fallback.
-        getattr_fn = self._check_for_getattr()
-        if isinstance(getattr_fn, types.FunctionType):
-            if (
-                getattr_fn is unpatched_nn_module_getattr
-                and isinstance(self, variables.UnspecializedNNModuleVariable)
-                and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
-                and istype(self.value._buffers, dict)  # type: ignore[attr-defined]
-                and istype(self.value._modules, dict)  # type: ignore[attr-defined]
-            ):
-                out = self.manually_trace_nn_module_getattr(tx, name)
-            else:
-                new_source = None
-                if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
-                out = variables.UserMethodVariable(
-                    getattr_fn, self, source=new_source
-                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
-
-            if self.source and getattr_fn is torch.nn.Module.__getattr__:
-                if isinstance(
-                    out,
-                    (
-                        variables.UnspecializedNNModuleVariable,
-                        variables.NNModuleVariable,
-                    ),
-                ):
-                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
-                        AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
-                    )
-            return out
-
-        elif getattr_fn is not None:
-            unimplemented(
-                gb_type="User-defined object with non-function __getattr__",
-                context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
-                explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
-                f" when attempting to getattr `{name}`",
-                hints=[
-                    "Ensure the object's __getattr__ is a function type.",
-                ],
-            )
+        result = self.call_getattr_fallback(tx, name)
+        if result is not None:
+            return result
 
         # Step 7: AttributeError.
         raise_observed_exception(
@@ -3796,6 +3740,83 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_var,
             source=descriptor_get_source,
         ).call_function(tx, [self, owner_var], {})
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        source: Source | None = AttrSource(self.source, name) if self.source else None
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self,
+            name,
+            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+        ):
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            if not isinstance(result, variables.DeletedVariable):
+                return result
+            return None
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        ):
+            dict_vt = self.get_dict_vt(tx)
+            if dict_vt.contains(name):
+                return dict_vt.getitem(name)
+            return None
+
+        if hasattr(self.value, "__dict__") and name in self.value.__dict__:
+            subobj = self.value.__dict__[name]
+            source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
+            return VariableTracker.build(tx, subobj, source)
+
+        return None
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        getattr_fn = self._check_for_getattr()
+        if isinstance(getattr_fn, types.FunctionType):
+            if (
+                getattr_fn is unpatched_nn_module_getattr
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
+                and istype(self.value._buffers, dict)  # type: ignore[attr-defined]
+                and istype(self.value._modules, dict)  # type: ignore[attr-defined]
+            ):
+                out = self.manually_trace_nn_module_getattr(tx, name)
+            else:
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
+                out = variables.UserMethodVariable(
+                    getattr_fn, self, source=new_source
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
+            if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                if isinstance(
+                    out,
+                    (
+                        variables.UnspecializedNNModuleVariable,
+                        variables.NNModuleVariable,
+                    ),
+                ):
+                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
+                        AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
+                    )
+            return out
+
+        elif getattr_fn is not None:
+            unimplemented(
+                gb_type="User-defined object with non-function __getattr__",
+                context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
+                explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
+                f" when attempting to getattr `{name}`",
+                hints=[
+                    "Ensure the object's __getattr__ is a function type.",
+                ],
+            )
+
+        return None
 
     def maybe_wrap_nn_module_source_for_instance(
         self,

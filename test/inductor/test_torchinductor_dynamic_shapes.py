@@ -72,6 +72,11 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
+    # This fails on periodic CPU shards but passes on other CPU configurations,
+    # so skip it instead of producing unexpected successes.
+    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
