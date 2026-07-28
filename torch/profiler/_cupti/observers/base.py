@@ -21,6 +21,8 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from torch.utils.hooks import RemovableHandle
+
 
 # graph_node_id -> annotation name (or None). The graph naming mechanism shared by
 # observers: map a CUDA-graph node id to its registered region name (survives graph
@@ -37,6 +39,12 @@ GraphAnnotationResolver = Callable[[int], "Any | None"]
 # annotation resolver; it reads the node's name via the graph annotation registry.
 LaneResolver = Callable[[int], "tuple[int, str] | None"]
 
+# graph_node_id -> predecessor graph_node_ids (or None when the node has no recorded
+# dependencies): the CUDA-graph node->node edges the pftrace export draws as dependency arrows,
+# read from the recorded dependency registry (survives replay, keyed on graph_node_id like the
+# annotation resolver). Pluggable; see ObserverAnnotationSettings.graph_dependency_resolver.
+GraphDependencyResolver = Callable[[int], "list[int] | None"]
+
 
 def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     """Default resolver: map a CUDA-graph node id to its registered annotation, or None when
@@ -50,6 +58,20 @@ def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     except Exception:
         return None
     return annotations.get(graph_node_id)
+
+
+def default_graph_dependency_resolver(graph_node_id: int) -> list[int] | None:
+    """Default resolver: map a CUDA-graph node id to its recorded predecessor graph_node_ids,
+    or None when it has none."""
+    if graph_node_id == 0:
+        return None
+    try:
+        from torch.cuda._graph_annotations import get_graph_dependencies
+
+        dependencies = get_graph_dependencies()
+    except Exception:
+        return None
+    return dependencies.get(graph_node_id)
 
 
 @dataclass(frozen=True)
@@ -72,6 +94,10 @@ class ObserverAnnotationSettings:
     # CUDA stream lane (no reassignment). Independent of graph_annotation_resolver, though a
     # consumer's implementation typically maps the node's annotation to a lane.
     graph_lane_resolver: LaneResolver | None = None
+    # Pluggable graph node->node dependency lookup (see GraphDependencyResolver). None -> no
+    # dependency arrows. Keyed on graph_node_id like graph_annotation_resolver; pass
+    # default_graph_dependency_resolver to enable.
+    graph_dependency_resolver: GraphDependencyResolver | None = None
 
 
 class CuptiMonitorObserver:
@@ -92,9 +118,9 @@ class CuptiMonitorObserver:
     # Both graph resolvers are keyed on graph_node_id: a node's annotation and lane are stable
     # once its graph is baked, so each resolves once for this observer's lifetime (reused across
     # every buffer delivery). Both take the int graph_node_id and are wrapped in functools.cache
-    # on assignment.
-    # TODO: the caches grow with distinct graph_node_ids (each recapture mints new ids); we
-    # could evict a graph's entries on its shutdown/recapture to bound growth in long runs.
+    # on assignment. The caches grow with distinct graph_node_ids (each recapture mints new ids);
+    # the per-resolver graph-destroy handlers (_register_graph_destroy_handlers) invalidate them
+    # when a graph is destroyed, bounding growth in long runs.
     @property
     def _annotation_resolver(self) -> GraphAnnotationResolver | None:
         return self._annotation_resolver_cached
@@ -113,6 +139,16 @@ class CuptiMonitorObserver:
     def _lane_resolver(self, fn: LaneResolver | None) -> None:
         self._lane_resolver_cached = functools.cache(fn) if fn is not None else None
 
+    @property
+    def _dependency_resolver(self) -> GraphDependencyResolver | None:
+        return self._dependency_resolver_cached
+
+    @_dependency_resolver.setter
+    def _dependency_resolver(self, fn: GraphDependencyResolver | None) -> None:
+        self._dependency_resolver_cached = (
+            functools.cache(fn) if fn is not None else None
+        )
+
     def __init__(
         self,
         activities: Any,
@@ -124,10 +160,12 @@ class CuptiMonitorObserver:
         if annotations is None:
             self._annotation_resolver = None
             self._lane_resolver = None
+            self._dependency_resolver = None
             self._eager = False
         else:
             self._annotation_resolver = annotations.graph_annotation_resolver
             self._lane_resolver = annotations.graph_lane_resolver
+            self._dependency_resolver = annotations.graph_dependency_resolver
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
             activities = self._with_graph_fields(activities)
@@ -151,11 +189,53 @@ class CuptiMonitorObserver:
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
+        # Register a graph-destroy handler per installed graph-node resolver so a
+        # destroyed CUDA graph purges that resolver's OSS registry and invalidates
+        # its cache. Registering any handler is also the "monitor active" gate
+        # torch.cuda.graphs checks before arming its destroy callback. Handles are
+        # removed in close() so nothing leaks this observer.
+        self._graph_destroy_handles: list[RemovableHandle] = []
+        if self.available:
+            self._register_graph_destroy_handlers()
 
     @property
     def available(self) -> bool:
         """True when the monitor was available and this observer registered."""
         return self._obs is not None
+
+    def _register_graph_destroy_handlers(self) -> None:
+        """Register a graph-destroy handler per installed graph-node resolver. Each
+        handler purges its own OSS registry (if any) and clears its resolver cache
+        (cache_clear is global per resolver -- it drops every graph's cached lookups,
+        not just the destroyed graph's -- acceptable on the infrequent destroy path
+        and what bounds cache growth over a long run). Handlers capture only the
+        cache wrapper + module purge fn, never self, so they cannot pin this observer;
+        run_graph_destroy_handlers also swallows any error they raise (finalizer-safe,
+        since a destroy may fire from a GC/finalizer thread). The lane resolver is
+        externally backed (no OSS registry to purge), so its handler only clears the
+        cache."""
+        from torch.cuda._graph_annotations import (
+            register_graph_destroy_handler,
+            remove_graph_dependencies,
+            remove_kernel_annotations,
+        )
+
+        handles = self._graph_destroy_handles
+
+        def add(cache: Any, purge: Any) -> None:
+            def handler(ids: set[int]) -> None:
+                if purge is not None:
+                    purge(ids)
+                cache.cache_clear()
+
+            handles.append(register_graph_destroy_handler(handler))
+
+        if self._annotation_resolver_cached is not None:
+            add(self._annotation_resolver_cached, remove_kernel_annotations)
+        if self._dependency_resolver_cached is not None:
+            add(self._dependency_resolver_cached, remove_graph_dependencies)
+        if self._lane_resolver_cached is not None:
+            add(self._lane_resolver_cached, None)
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
         """Worker-thread hook: ``{ActivityKind: {field_id: column}}`` demuxed by the
@@ -262,6 +342,9 @@ class CuptiMonitorObserver:
 
     def close(self) -> None:
         """Unregister from the monitor. Idempotent."""
+        for handle in self._graph_destroy_handles:
+            handle.remove()
+        self._graph_destroy_handles = []
         if self._obs is not None and self._monitor is not None:
             self._monitor.unregister(self._obs)
             self._obs = None

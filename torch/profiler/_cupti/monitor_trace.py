@@ -209,6 +209,63 @@ def _driver_requires_flow(name: str) -> bool:
     return name in _DRIVER_FLOW_NAMES
 
 
+_GRAPH_DEP_FLOW_ID_BASE = (
+    1 << 40
+)  # keep node->node arrow flow ids clear of correlation ids
+
+
+def _graph_dependency_flow_events(
+    node_rows: list[tuple[int, int, int, int, int, int]],
+    graph_deps: dict[int, list[int]],
+    *,
+    base_ns: int,
+) -> list[dict[str, object]]:
+    """Chrome flow (s/f) events drawing CUDA-graph node->node dependency arrows in the JSON
+    export. ``node_rows`` is (correlation_id, graph_node_id, device, tid, start_ns, end_ns) per
+    graphed op as displayed (tid is the resolver lane). Dependencies (graph_deps: node_id ->
+    predecessor node_ids) are resolved within the same replay (correlation_id) so arrows never
+    cross replays; each edge is one flow (pred end -> successor start). Empty without deps."""
+    if not graph_deps:
+        return []
+    by_corr: dict[int, dict[int, tuple[int, int, int, int]]] = {}
+    for corr, gnid, dev, tid, start_ns, end_ns in node_rows:
+        by_corr.setdefault(corr, {})[gnid] = (dev, tid, start_ns, end_ns)
+    events: list[dict[str, object]] = []
+    fid = _GRAPH_DEP_FLOW_ID_BASE
+    for node_map in by_corr.values():
+        for gnid, (dev, tid, start_ns, _end_ns) in node_map.items():
+            for pred in graph_deps.get(gnid, ()):
+                p = node_map.get(pred)
+                if p is None:
+                    continue
+                pdev, ptid, _pstart_ns, pend_ns = p
+                events.append(
+                    {
+                        "ph": "s",
+                        "id": fid,
+                        "pid": pdev,
+                        "tid": ptid,
+                        "ts": max((pend_ns - base_ns) / 1000.0, 0.0),
+                        "cat": _FLOW_CATEGORY,
+                        "name": _FLOW_CATEGORY,
+                    }
+                )
+                events.append(
+                    {
+                        "ph": "f",
+                        "id": fid,
+                        "pid": dev,
+                        "tid": tid,
+                        "ts": max((start_ns - base_ns) / 1000.0, 0.0),
+                        "cat": _FLOW_CATEGORY,
+                        "name": _FLOW_CATEGORY,
+                        "bp": "e",
+                    }
+                )
+                fid += 1
+    return events
+
+
 def _trace_window_entries(
     trace_window: dict[str, object],
     *,
@@ -287,6 +344,10 @@ def _trace_window_entries(
     seen_cpu_processes: dict[int, int] = {}
     seen_cpu_threads: set[tuple[int, int]] = set()
     need_overhead_metadata = False
+    # CUDA-graph node->node dependency arrows (drawn as flows below). Collect each graphed op as
+    # displayed so the arrows land on the resolver lanes, then emit after all GPU kinds.
+    graph_deps = cast("dict[int, list[int]]", trace_window.get("graph_deps") or {})
+    dep_node_rows: list[tuple[int, int, int, int, int, int]] = []
 
     # --- GPU ops (kernel / memcpy / memset): one X event + a terminating ac2g flow ---
     # Each kind builds X events from one dict literal per row over the bulk-converted
@@ -300,6 +361,7 @@ def _trace_window_entries(
         ts_l = np.maximum((starts - base_ns) / 1000.0, 0.0).tolist()
         dur_l = np.maximum((c["end_ns"] - starts) / 1000.0, 0.0).tolist()
         start_l = starts.tolist()
+        end_l = c["end_ns"].tolist()
         dev_l = c["device_id"].tolist()
         ctx_l = c["context_id"].tolist()
         str_l = c["stream_id"].tolist()
@@ -454,7 +516,9 @@ def _trace_window_entries(
                 if gid_l[i]:
                     a["graph id"] = gid_l[i]
                 if gnid_l[i]:
-                    a["graph node id"] = gnid_l[i]
+                    # Upper 32 bits are the graph id (emitted separately above); keep only the
+                    # lower 32-bit node id here rather than the full 9-digit packed value.
+                    a["graph node id"] = gnid_l[i] & 0xFFFFFFFF
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
@@ -468,6 +532,18 @@ def _trace_window_entries(
                     seen_streams.add((dev_l[i], lane_id))
                     if lane_name_l is not None and lane_name_l[i] is not None:
                         lane_names[(dev_l[i], lane_id)] = lane_name_l[i]
+            for i in range(n):
+                if gnid_l[i]:
+                    dep_node_rows.append(
+                        (
+                            corr_l[i],
+                            gnid_l[i],
+                            dev_l[i],
+                            display_tid_l[i],
+                            start_l[i],
+                            end_l[i],
+                        )
+                    )
         trace_events.extend(events)
         trace_events.extend(
             {
@@ -486,6 +562,10 @@ def _trace_window_entries(
         seen_streams.update(zip(dev_l, str_l))
         for dev, s in zip(dev_l, start_l):
             seen_devices.setdefault(dev, s)
+
+    trace_events.extend(
+        _graph_dependency_flow_events(dep_node_rows, graph_deps, base_ns=base_ns)
+    )
 
     # --- runtime / driver API: registered names only, remapped onto their CPU thread ---
     for ks in ("cuda_runtime", "cuda_driver"):
