@@ -813,6 +813,31 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_grouped_reduction_conversion_contract(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+
+        def classify(value):
+            square = Expr("mul", (value, value))
+            reduction = Expr("reduction", (torch.float32, torch.float32, "sum", square))
+            return grouped_reduction_ir(
+                GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.bfloat16
+            )
+
+        fp32 = Expr("to_dtype", (load, torch.float32))
+        self.assertEqual(classify(fp32), ("sum", "square"))
+        fp16_then_fp32 = Expr(
+            "to_dtype", (Expr("to_dtype", (load, torch.float16)), torch.float32)
+        )
+        self.assertIsNone(classify(fp16_then_fp32))
+        bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
+        self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
+
     def test_local_reduce_cache_specialization(self):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _local_reduce_specialization,
@@ -2012,7 +2037,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertTrue(epilogue_fused, "pointwise consumer was NOT fused")
         self.assertIn("out_ptr1", code)
 
-    def test_scaled_mm_pointwise_epilogue_fusion(self):
+    @parametrize("operation", ("mul", "sigmoid"))
+    def test_scaled_mm_pointwise_epilogue_fusion(self, operation):
         """Unary pointwise op is fused into an NVFP4 scaled GEMM epilogue."""
         m, n, k = self.M, self.N, self.K
         packed_k = k // 2
@@ -2039,13 +2065,15 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 scale_b=scale_b,
                 out_dtype=torch.bfloat16,
             )
-            return result * 0.5
+            return torch.sigmoid(result) if operation == "sigmoid" else result * 0.5
 
         result, code, epilogue_fused = self._compile_and_check(
             fn, a, b, scale_a, scale_b
         )
         torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
-        self.assertTrue(epilogue_fused, "multiply was NOT fused into scaled epilogue")
+        self.assertTrue(
+            epilogue_fused, f"{operation} was NOT fused into scaled epilogue"
+        )
 
     def test_matmul_single_store_epilogue_chain(self):
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
@@ -2286,6 +2314,42 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             result, fn(a, b, scale_a, scale_b, *biases), equal_nan=True
         )
 
+    @parametrize("bias_shape", ((1,), (1, 1)))
+    def test_scaled_mm_unit_dim_broadcast_epilogue_fusion(self, bias_shape):
+        m, n, k = 1, 128, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        bias = torch.randn(bias_shape, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b, scale_a, scale_b, bias):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return torch.relu(result + bias)
+
+        result, _, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b, bias
+        )
+        self.assertTrue(epilogue_fused)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b, bias))
+
     @parametrize(
         "case",
         (
@@ -2438,6 +2502,40 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result[1], expected[1])
         self.assertIn("'local_reduce_out'", code)
         self.assertIn(f"'local_reduce_source': '{source}'", code)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.half().float().view(m, -1, group)
+            return torch.relu(result), grouped.square().mean(-1)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertNotIn("'local_reduce_out'", code)
 
     @parametrize("group", (128, 256))
     def test_scaled_mm_coda_rmsnorm_fusion(self, group):
