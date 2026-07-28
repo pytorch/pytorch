@@ -122,7 +122,7 @@ PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 _FLATTENED_READ_VAR = sympy.Dummy("flattened_read", integer=True, nonnegative=True)
-# Model an uncoalesced access as up to 16 memory transactions.
+# Use a fixed 16x heuristic for uncoalesced memory traffic.
 _UNCOALESCED_MEMORY_COST_WEIGHT = 16
 
 
@@ -4159,8 +4159,8 @@ class _ReindexingMemoryBaseline:
 @dataclasses.dataclass(frozen=True)
 class _LoopReorderingResult:
     score: int
-    reindexing: _ReindexingPlan | None = None
     reindexing_baseline: _ReindexingMemoryBaseline | None = None
+    reindexing_attempted: bool = False
 
 
 @dataclasses.dataclass
@@ -7491,15 +7491,9 @@ class Scheduler:
         if not config.loop_reindexing_after_fusion:
             return _LoopReorderingResult(-1)
 
-        reindexing = self._prepare_reindexing(node1, node2)
-        if reindexing is None:
-            return _LoopReorderingResult(-1)
-        if not self._apply_reindexing(node1, node2, reindexing):
-            return _LoopReorderingResult(-1, reindexing=reindexing)
-
-        reindexing_baseline = self._capture_reindexing_memory_baseline(
-            node1, node2, reindexing
-        )
+        reindexing_attempted, reindexing_baseline = self._try_reindexing(node1, node2)
+        if reindexing_baseline is None:
+            return _LoopReorderingResult(-1, reindexing_attempted=reindexing_attempted)
         score = self.score_fusion_memory(node1, node2)
         if config.loop_ordering_after_fusion:
             reordered_score = self._try_reorder_loops_for_candidates(node1, node2)
@@ -7508,8 +7502,8 @@ class Scheduler:
 
         return _LoopReorderingResult(
             score,
-            reindexing=reindexing,
             reindexing_baseline=reindexing_baseline,
+            reindexing_attempted=True,
         )
 
     def _try_reorder_loops_for_candidates(
@@ -7607,38 +7601,42 @@ class Scheduler:
 
         return self.score_fusion_memory(node1, node2) if reordered else -1
 
-    def _capture_reindexing_memory_metrics(
-        self,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-    ) -> tuple[tuple[TilingAndMemoryMetrics, ...] | None, int | None]:
-        pw_node = node2 if node1.is_reduction() else node1
-        backend = self.get_backend(pw_node.get_device())
-        metrics = tuple(
-            backend.get_tiling_and_memory_scores([node]) for node in (node1, node2)
-        )
-        individual_metrics = (
-            typing.cast(tuple[TilingAndMemoryMetrics, ...], metrics)
-            if all(metric is not None for metric in metrics)
-            else None
-        )
-        return individual_metrics, _uncoalesced_memory_cost(pw_node.get_nodes())
-
     def _capture_reindexing_memory_baseline(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         plan: _ReindexingPlan,
     ) -> _ReindexingMemoryBaseline:
-        current_snapshot = _LoopStateSnapshot.create((node1, node2))
+        current_snapshot = _LoopStateSnapshot.create((plan.pw_node,))
         plan.rollback_snapshot.restore()
         try:
-            individual_metrics, uncoalesced_cost = (
-                self._capture_reindexing_memory_metrics(node1, node2)
+            backend = self.get_backend(plan.pw_node.get_device())
+            metrics = tuple(
+                backend.get_tiling_and_memory_metrics([node]) for node in (node1, node2)
+            )
+            individual_metrics = (
+                typing.cast(tuple[TilingAndMemoryMetrics, ...], metrics)
+                if all(metric is not None for metric in metrics)
+                else None
+            )
+            return _ReindexingMemoryBaseline(
+                individual_metrics,
+                _uncoalesced_memory_cost(plan.pw_node.get_nodes()),
             )
         finally:
             current_snapshot.restore()
-        return _ReindexingMemoryBaseline(individual_metrics, uncoalesced_cost)
+
+    def _try_reindexing(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> tuple[bool, _ReindexingMemoryBaseline | None]:
+        plan = self._prepare_reindexing(node1, node2)
+        if plan is None:
+            return False, None
+        if not self._apply_reindexing(node1, node2, plan):
+            return True, None
+        return True, self._capture_reindexing_memory_baseline(node1, node2, plan)
 
     def _reindexing_regresses_memory_coalescing(
         self,
@@ -7649,7 +7647,7 @@ class Scheduler:
         pw_node = node2 if node1.is_reduction() else node1
         if baseline.individual_metrics is not None:
             backend = self.get_backend(pw_node.get_device())
-            combined_metrics = backend.get_tiling_and_memory_scores([node1, node2])
+            combined_metrics = backend.get_tiling_and_memory_metrics([node1, node2])
             if combined_metrics is not None:
                 individual_cost = sum(
                     _weighted_memory_cost(metrics)
@@ -7737,7 +7735,7 @@ class Scheduler:
             snodes,
             red_numel,
             red_rnumel,
-            _LoopStateSnapshot.create((node1, node2)),
+            _LoopStateSnapshot.create((pw_node,)),
         )
 
     def _apply_reindexing(
@@ -8333,7 +8331,7 @@ class Scheduler:
         ):
             reordering = self.shared_data_after_reordering_loop(node1, node2)
             reindexing_baseline = reordering.reindexing_baseline
-            reindexing_attempted = reordering.reindexing is not None
+            reindexing_attempted = reordering.reindexing_attempted
             if reordering.score >= 0:
                 shared_data_score = reordering.score
 
@@ -8395,13 +8393,8 @@ class Scheduler:
             # writes buf[x]).  Try reindexing the pointwise to the
             # reduction's domain and retry.
             if config.loop_reindexing_after_fusion and not reindexing_attempted:
-                direct_reindexing = self._prepare_reindexing(node1, node2)
-                if direct_reindexing is not None and self._apply_reindexing(
-                    node1, node2, direct_reindexing
-                ):
-                    direct_baseline = self._capture_reindexing_memory_baseline(
-                        node1, node2, direct_reindexing
-                    )
+                _, direct_baseline = self._try_reindexing(node1, node2)
+                if direct_baseline is not None:
                     can_fuse_reindexed = (
                         self.can_fuse_vertical(
                             node1,
@@ -10560,7 +10553,7 @@ class BaseScheduling:  # noqa: docstring_linter
         """Return a set of .codegen.common.BackendFeature()"""
         return OrderedSet()
 
-    def get_tiling_and_memory_scores(
+    def get_tiling_and_memory_metrics(
         self, nodes: Sequence[BaseSchedulerNode]
     ) -> TilingAndMemoryMetrics | None:
         """Return tiling scores and selected-tiling memory costs when supported."""

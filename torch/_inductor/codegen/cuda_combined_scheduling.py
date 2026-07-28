@@ -58,15 +58,16 @@ class CUDACombinedScheduling(BaseScheduling):
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
 
-    def get_tiling_and_memory_scores(
+    def get_tiling_and_memory_metrics(
         self, nodes: Sequence[BaseSchedulerNode]
     ) -> TilingAndMemoryMetrics | None:
         if any(
-            self.choose_node_backend(node) is not self._triton_scheduling
+            self.choose_node_backend(snode) is not self._triton_scheduling
             for node in nodes
+            for snode in node.get_nodes()
         ):
             return None
-        return self._triton_scheduling.get_tiling_and_memory_scores(nodes)
+        return self._triton_scheduling.get_tiling_and_memory_metrics(nodes)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):

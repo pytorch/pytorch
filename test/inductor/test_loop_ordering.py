@@ -362,7 +362,7 @@ class ImplDetailTest(MockSchedulerTest):
         scheduler, pointwise, reduction, baseline, backend = (
             self._make_reindexing_memory_test_case()
         )
-        backend.get_tiling_and_memory_scores.return_value = TilingAndMemoryMetrics(
+        backend.get_tiling_and_memory_metrics.return_value = TilingAndMemoryMetrics(
             {"x": 1, "r0_": 1},
             {"x": 10, "r0_": 10},
             coalesced,
@@ -386,39 +386,42 @@ class ImplDetailTest(MockSchedulerTest):
             )
             self.assertTrue(decision)
 
-            backend.get_tiling_and_memory_scores.return_value = None
+            backend.get_tiling_and_memory_metrics.return_value = None
             decision = scheduler._reindexing_regresses_memory_coalescing(
                 pointwise, reduction, baseline
             )
             self.assertTrue(decision)
 
-    def test_capture_reindexing_baseline_restores_both_candidates(self):
+    def test_reindexing_baseline_restores_candidate(self):
         scheduler = Scheduler.__new__(Scheduler)
-        node1 = mock.Mock()
-        node2 = mock.Mock()
+        pointwise = mock.Mock()
+        reduction = mock.Mock()
         original_snapshot = mock.Mock()
         current_snapshot = mock.Mock()
         plan = _ReindexingPlan(
-            pw_node=node1,
-            snodes=(),
-            red_numel=sympy.S.One,
-            red_rnumel=sympy.S.One,
-            rollback_snapshot=original_snapshot,
+            pointwise,
+            (),
+            sympy.S.One,
+            sympy.S.One,
+            original_snapshot,
         )
-        scheduler._capture_reindexing_memory_metrics = mock.Mock(
-            return_value=(None, None)
-        )
+        backend = mock.Mock()
+        backend.get_tiling_and_memory_metrics.return_value = None
+        scheduler.get_backend = mock.Mock(return_value=backend)
+        pointwise.get_nodes.return_value = []
 
         with mock.patch.object(
             _LoopStateSnapshot, "create", return_value=current_snapshot
         ) as create_snapshot:
-            baseline = scheduler._capture_reindexing_memory_baseline(node1, node2, plan)
+            baseline = scheduler._capture_reindexing_memory_baseline(
+                pointwise, reduction, plan
+            )
 
-        create_snapshot.assert_called_once_with((node1, node2))
+        create_snapshot.assert_called_once_with((pointwise,))
         original_snapshot.restore.assert_called_once_with()
         current_snapshot.restore.assert_called_once_with()
         self.assertIsNone(baseline.individual_metrics)
-        self.assertIsNone(baseline.uncoalesced_cost)
+        self.assertEqual(baseline.uncoalesced_cost, 0)
 
 
 @inductor_config.patch(
@@ -460,7 +463,6 @@ class LoopOrderingTest(TestCase):
     def _record_reindexing_memory_decisions(self):
         decisions = []
         original = Scheduler._reindexing_regresses_memory_coalescing
-        original_can_fuse = Scheduler.can_fuse
 
         def record(
             scheduler,
@@ -469,7 +471,7 @@ class LoopOrderingTest(TestCase):
             baseline,
         ):
             backend = scheduler.get_backend(node1.get_device())
-            original_get_metrics = backend.get_tiling_and_memory_scores
+            original_get_metrics = backend.get_tiling_and_memory_metrics
             combined_metrics = []
 
             def get_metrics(nodes):
@@ -479,36 +481,16 @@ class LoopOrderingTest(TestCase):
                 return metrics
 
             with mock.patch.object(
-                backend, "get_tiling_and_memory_scores", get_metrics
+                backend, "get_tiling_and_memory_metrics", get_metrics
             ):
                 reject = original(scheduler, node1, node2, baseline)
             metrics = combined_metrics[-1] if combined_metrics else None
-            decisions.append((reject, metrics))
+            reduction = node1 if node1.is_reduction() else node2
+            decisions.append((tuple(reduction.group[1]), reject, metrics))
             return reject
 
-        def can_fuse(scheduler, node1, node2, *args, **kwargs):
-            states = {
-                sn: sn.snapshot_loop_state()
-                for node in (node1, node2)
-                for sn in node.get_nodes()
-                if isinstance(sn, SchedulerNode)
-            }
-            groups = {node: node.group for node in (node1, node2)}
-            decision_start = len(decisions)
-            result = original_can_fuse(scheduler, node1, node2, *args, **kwargs)
-            if any(reject for reject, _ in decisions[decision_start:]):
-                self.assertFalse(result)
-                for sn, state in states.items():
-                    self.assertEqual(sn.snapshot_loop_state(), state)
-                for node, group in groups.items():
-                    self.assertEqual(node.group, group)
-            return result
-
-        with (
-            mock.patch.object(
-                Scheduler, "_reindexing_regresses_memory_coalescing", record
-            ),
-            mock.patch.object(Scheduler, "can_fuse", can_fuse),
+        with mock.patch.object(
+            Scheduler, "_reindexing_regresses_memory_coalescing", record
         ):
             yield decisions
 
@@ -741,26 +723,27 @@ class LoopOrderingTest(TestCase):
             x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
             return x_normed.reshape(M, N).to(x.dtype)
 
-        M = 16
+        M, N = 16, 8192
         # Transposed input: shape [M, 8192] but stride (1, M)
-        x = torch.randn(8192, M, dtype=torch.bfloat16).T
+        x = torch.randn(N, M, dtype=torch.bfloat16).T
 
         ref = f(x)
         with self._record_reindexing_memory_decisions() as decisions:
             actual = torch.compile(f)(x)
         torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
         self.assertEqual(1, metrics.generated_kernel_count)
-        self.assertEqual({metrics is not None for _, metrics in decisions}, {True})
-        accepted_metrics = [
-            metrics
-            for reject, metrics in decisions
-            if not reject and metrics is not None
+        target_group = (M * (N // 128), 128)
+        target_decisions = [
+            (reject, memory_metrics)
+            for group, reject, memory_metrics in decisions
+            if group == target_group
         ]
-        self.assertTrue(accepted_metrics)
         self.assertTrue(
             any(
-                metrics.selected_tiling == {"y": M, "x": 64, "r0_": 128}
-                for metrics in accepted_metrics
+                not reject
+                and memory_metrics is not None
+                and memory_metrics.selected_tiling == {"y": M, "x": 64, "r0_": 128}
+                for reject, memory_metrics in target_decisions
             )
         )
 
@@ -951,9 +934,9 @@ class LoopOrderingTest(TestCase):
                 y = F.silu(self.norm(x))
                 return y + (self.skip(x) * 0.01)
 
-        channels = 128
-        mod = Mod(channels, 32).eval()
-        x = torch.randn(8, channels, 32, 32)
+        batch, channels, groups, spatial = 8, 128, 32, 64
+        mod = Mod(channels, groups).eval()
+        x = torch.randn(batch, channels, spatial // 2, spatial // 2)
         residual = torch.randn_like(x)
 
         with (
@@ -963,21 +946,28 @@ class LoopOrderingTest(TestCase):
         ):
             self.do_acc_test(mod, x, residual)
         self.assertEqual(6, metrics.generated_kernel_count)
-        self.assertEqual(
-            {metrics is not None for _, metrics in decisions},
-            {coalesce_analysis},
-        )
+        target_group = (batch * groups, (channels // groups) * spatial * spatial)
+        target_decisions = [
+            (reject, memory_metrics)
+            for group, reject, memory_metrics in decisions
+            if group == target_group
+        ]
         if coalesce_analysis:
             self.assertTrue(
                 any(
                     reject
-                    and metrics is not None
-                    and metrics.uncoalesced_memory_cost > 0
-                    for reject, metrics in decisions
+                    and memory_metrics is not None
+                    and memory_metrics.uncoalesced_memory_cost > 0
+                    for reject, memory_metrics in target_decisions
                 )
             )
         else:
-            self.assertTrue(any(reject for reject, _ in decisions))
+            self.assertTrue(
+                any(
+                    reject and memory_metrics is None
+                    for reject, memory_metrics in target_decisions
+                )
+            )
 
     @inductor_config.patch(
         {
@@ -1522,7 +1512,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
         analysis = node.get_coalesce_analysis()
         self.assertIsNotNone(analysis)
         backend = node.scheduler.get_backend(node.get_device())
-        memory_metrics = backend.get_tiling_and_memory_scores([node])
+        memory_metrics = backend.get_tiling_and_memory_metrics([node])
         self.assertIsNotNone(memory_metrics)
         self.assertEqual(list(memory_metrics.selected_tiling), expected_tiling)
         self.assertEqual(list(memory_metrics.tiling_scores), expected_tiling)

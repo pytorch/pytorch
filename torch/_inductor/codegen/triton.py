@@ -69,6 +69,7 @@ from ..scheduler import (
     FusedSchedulerNode,
     Scheduler,
     SchedulerNode,
+    TilingAndMemoryMetrics,
 )
 from ..shape_propagation import get_broadcasted_shape
 from ..stream_utils import get_raw_stream_name
@@ -7965,6 +7966,11 @@ class TritonScheduling(SIMDScheduling):
         for node in scheduler.nodes:
             if isinstance(node, (SchedulerNode, FusedSchedulerNode)):
                 node.debug_device_str = debug_triton_code
+
+    def get_tiling_and_memory_metrics(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> TilingAndMemoryMetrics | None:
+        return self._get_tiling_and_memory_metrics(nodes)
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

@@ -2056,7 +2056,7 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
-    def get_tiling_and_memory_scores(
+    def _get_tiling_and_memory_metrics(
         self, nodes: Sequence[scheduler.BaseSchedulerNode]
     ) -> scheduler.TilingAndMemoryMetrics | None:
         from torch._inductor.tiling_utils import analyze_memory_coalescing_for_nodes
@@ -2069,16 +2069,18 @@ class SIMDScheduling(BaseScheduling):
             return None
 
         snodes = [subnode for node in nodes for subnode in node.get_nodes()]
-        if not all(isinstance(node, scheduler.SchedulerNode) for node in snodes):
+        if not snodes or not all(
+            isinstance(node, scheduler.SchedulerNode) for node in snodes
+        ):
+            return None
+
+        analysis = analyze_memory_coalescing_for_nodes(snodes)
+        if analysis is None:
             return None
 
         reduction = max(snodes, key=lambda node: int(node.is_reduction()))
         _, (numel, rnumel) = reduction.group
         node_schedule = self.generate_node_schedule(snodes, numel, rnumel)
-        analysis = analyze_memory_coalescing_for_nodes(snodes)
-        if analysis is None:
-            return None
-
         selected_tiling, tiling_scores = self.get_tiling_and_scores(
             node_schedule, numel, rnumel, analysis
         )
