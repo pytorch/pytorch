@@ -4913,6 +4913,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
+        # Read-after-write companion to the #1615 guard in store(). If we read
+        # back a buffer we stored in a reduction loop, coalescing can put the
+        # store and load on different warps, so a warp may read before another
+        # warp's write is visible. Barrier first to make the writes visible.
+        if (
+            name in self.cse.invalidated_stores
+            and V.graph.get_current_device_or_throw().type != "cpu"
+        ):
+            load_buffer.writeline(DeferredLine(name, "tl.debug_barrier()"))
         self._handle_pdl_before_access(load_buffer, name)
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
