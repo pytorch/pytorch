@@ -8673,7 +8673,7 @@ and :attr:`exponent` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     {input}
-    exponent (Number or Tensor): the exponent value
+    exponent (Number or complex or Tensor): the exponent value
 
 Keyword args:
     {out}
@@ -8707,7 +8707,7 @@ The operation applied is:
     \text{{out}}_i = \text{{self}} ^ {{\text{{exponent}}_i}}
 
 Args:
-    self (Number): the scalar base value for the power operation
+    self (Number or complex): the scalar base value for the power operation
     exponent (Tensor): the exponent tensor
 
 Keyword args:
