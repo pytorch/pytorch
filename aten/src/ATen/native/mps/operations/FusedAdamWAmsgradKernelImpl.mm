@@ -37,7 +37,9 @@ void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                                  beta2,
                                                  weight_decay,
                                                  eps,
-                                                 maximize);
+                                                 maximize,
+                                                 grad_scale,
+                                                 found_inf);
 }
 void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                     TensorList grads,
@@ -68,7 +70,9 @@ void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                                  beta2,
                                                  weight_decay,
                                                  eps,
-                                                 maximize);
+                                                 maximize,
+                                                 grad_scale,
+                                                 found_inf);
 }
 
 } // namespace at::native::mps

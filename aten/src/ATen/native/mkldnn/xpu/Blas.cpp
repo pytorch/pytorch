@@ -52,15 +52,15 @@ Tensor& addmm_out(
       " != ",
       mat2.dtype())
 
+  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
+  result.resize_(result_shape);
+
   // complex case
   if (self.is_complex()) {
     at::native::addmm_complex_out_xpu(self, mat1, mat2, beta, alpha, result);
 
     return result;
   }
-
-  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
-  result.resize_(result_shape);
 
   IntArrayRef result_sizes = result.sizes();
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {

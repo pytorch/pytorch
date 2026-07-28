@@ -336,7 +336,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         });
         return;
       }
-      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'");
+      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << '\'');
     }
     if (device.has_value() || requires_grad.has_value()) {
       throw(

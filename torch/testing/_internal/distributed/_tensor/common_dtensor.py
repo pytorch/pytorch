@@ -20,8 +20,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import (
-    all_gather_tensor_autograd,
-    reduce_scatter_tensor_autograd,
+    all_gather_single_autograd,
+    reduce_scatter_single_autograd,
 )
 from torch.distributed._local_tensor import (
     LocalIntNode,
@@ -312,7 +312,7 @@ class ExpertParallel(ParallelStyle):
         self, mod: nn.Module, inputs: tuple, device_mesh: DeviceMesh
     ) -> tuple[torch.Tensor]:
         (x,) = inputs
-        x_gathered = all_gather_tensor_autograd(
+        x_gathered = all_gather_single_autograd(
             x,
             gather_dim=0,
             group=device_mesh.get_group(),
@@ -323,7 +323,7 @@ class ExpertParallel(ParallelStyle):
     def _token_combine(
         self, mod: nn.Module, output: torch.Tensor, device_mesh: DeviceMesh
     ) -> torch.Tensor:
-        result = reduce_scatter_tensor_autograd(
+        result = reduce_scatter_single_autograd(
             output,
             "sum",
             scatter_dim=0,
@@ -381,11 +381,11 @@ class ExpertParallelWithTP(ParallelStyle):
 
         def ep_dispatch(mod, inputs):
             (x,) = inputs
-            x = all_gather_tensor_autograd(x, gather_dim=0, group=ep_mesh.get_group())
+            x = all_gather_single_autograd(x, gather_dim=0, group=ep_mesh.get_group())
             return (torch.ops._c10d_functional.wait_tensor(x),)
 
         def ep_combine(mod, inputs, output):
-            out = reduce_scatter_tensor_autograd(
+            out = reduce_scatter_single_autograd(
                 output, "sum", scatter_dim=0, group=ep_mesh.get_group()
             )
             return torch.ops._c10d_functional.wait_tensor(out)
@@ -821,8 +821,8 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if "nccl" in backend or "xccl" in backend:
-            # set device for nccl pg for collectives
+        if requires_gpu:
+            # set device for accelerator pg for collectives (nccl/xccl/hccl)
             # TODO: if users want to enable testing across hosts, we may need
             # to change this part.
             torch.accelerator.set_device_index(self.rank)
@@ -855,7 +855,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
 
         if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
-            # of the most pripority, which means if the test specifies to use CPU for
+            # of the most priority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
             # To avoid this and better respect `self.device_type`, we add this branch to
             # enforce barrier() to use CPU when `self.device_type` is CPU and other

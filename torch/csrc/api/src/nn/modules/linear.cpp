@@ -85,6 +85,7 @@ void UnflattenImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Unflatten(dim=" << options.dim()
          << ", unflattened_size={";
   auto sizes = options.sizes();
+  TORCH_CHECK(!sizes.empty(), "Unflatten requires non-empty sizes");
   size_t i = 0;
   for (; i < sizes.size() - 1; ++i) {
     stream << sizes[i] << ", ";

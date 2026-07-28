@@ -37,7 +37,12 @@ install(DIRECTORY
 # Copy vendored external kernel sources into torch/_inductor.
 # The original Python code raises RuntimeError when the source is missing
 # on CUDA-enabled builds (cutlass submodule should be present).
-set(_cutedsl_src "${PROJECT_SOURCE_DIR}/third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py")
+set(_cutedsl_rel_path "examples/python/CuTeDSL/cute/blackwell/kernel/grouped_gemm/grouped_gemm.py")
+set(_cutedsl_src "${PROJECT_SOURCE_DIR}/third_party/cutlass/${_cutedsl_rel_path}")
+if(NOT EXISTS "${_cutedsl_src}")
+  set(_cutedsl_rel_path "examples/python/CuTeDSL/blackwell/grouped_gemm.py")
+  set(_cutedsl_src "${PROJECT_SOURCE_DIR}/third_party/cutlass/${_cutedsl_rel_path}")
+endif()
 if(EXISTS "${_cutedsl_src}")
   set(_cutedsl_dest "${SKBUILD_PLATLIB_DIR}/torch/_inductor/kernel/vendored_templates/cutedsl/kernels")
   install(FILES "${_cutedsl_src}"
@@ -61,11 +66,9 @@ elseif(USE_CUDA)
 endif()
 
 # --- Symlink-replacement copies ---
-# Copy files that were previously handled via symlinks in setup.py.
-install(FILES
-  "${PROJECT_SOURCE_DIR}/torch/_utils_internal.py"
-  DESTINATION "${SKBUILD_PLATLIB_DIR}/tools/shared"
-)
+# torch/_utils_internal.py and tools/shared/_utils_internal.py exist as two
+# regular-file copies in the source tree; only the torch/ one ships in the
+# wheel.
 install(FILES
   "${PROJECT_SOURCE_DIR}/third_party/valgrind-headers/callgrind.h"
   DESTINATION "${SKBUILD_PLATLIB_DIR}/torch/utils/benchmark/utils/valgrind_wrapper"

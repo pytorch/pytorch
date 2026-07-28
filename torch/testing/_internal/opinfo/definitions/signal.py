@@ -379,6 +379,7 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="cpu",
+                dtypes=(torch.float64,),
                 active_if=TEST_WITH_TORCHINDUCTOR,
             ),
             DecorateInfo(
@@ -386,6 +387,7 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="cuda",
+                dtypes=(torch.float64,),
                 active_if=TEST_WITH_TORCHINDUCTOR,
             ),
             DecorateInfo(
@@ -393,6 +395,7 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="xpu",
+                dtypes=(torch.float64,),
                 active_if=TEST_WITH_TORCHINDUCTOR,
             ),
         ),
@@ -430,6 +433,7 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="cpu",
+                dtypes=(torch.float64,),
                 active_if=TEST_WITH_TORCHINDUCTOR,
             ),
             DecorateInfo(
@@ -437,6 +441,7 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="cuda",
+                dtypes=(torch.float64,),
                 active_if=TEST_WITH_TORCHINDUCTOR,
             ),
             DecorateInfo(
@@ -444,6 +449,7 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="xpu",
+                dtypes=(torch.float64,),
                 active_if=TEST_WITH_TORCHINDUCTOR,
             ),
         ),

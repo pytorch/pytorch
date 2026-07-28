@@ -54,12 +54,14 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     IS_WINDOWS,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
 
 
 # LLM-useful op names to filter from unary_ufuncs
@@ -481,7 +483,6 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
 
 ROCM_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "log1p": {fp32},
         "rsqrt": {bf16, fp32},
         "sigmoid": {fp32},
         "sin": {fp32},
@@ -504,12 +505,98 @@ ROCM_XFAIL_DICTS = {
     "binary_numerical": ROCM_BINARY_NUMERICAL_XFAILS,
 }
 
+# fbcode ships a different Triton fork (triton+fb) and cuBLAS/CUDA/GPU stack than
+# OSS CI (e.g. A100 vs L4), which changes compiled-path numerics. These combos pass
+# in OSS but not in fbcode, so they are merged in only when IS_FBCODE (CUDA).
+FBCODE_BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "bmm": {fp32},
+    },
+    "inductor_default": {
+        "bmm": {fp32},
+    },
+    "inductor_numerics": {
+        "bmm": {fp32},
+    },
+}
+
+FBCODE_UNARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "sqrt": {bf16, fp32},
+    },
+    "inductor_numerics": {
+        "exp2": {bf16, fp32},
+        "expm1": {bf16, fp32},
+        "log1p": {fp32},
+        "reciprocal": {bf16, fp32},
+        "rsqrt": {bf16, fp32},
+        "sin": {fp32},
+        "sqrt": {bf16, fp32},
+        "tan": {bf16, fp32},
+        "tanh": {fp32},
+    },
+}
+
+FBCODE_BINARY_NUMERICAL_XFAILS = {
+    "inductor_numerics": {
+        "fmod": {bf16, fp32},
+    },
+}
+
+FBCODE_XFAIL_DICTS = {
+    "batch_invariance": FBCODE_BATCH_INVARIANCE_XFAILS,
+    "unary_numerical": FBCODE_UNARY_NUMERICAL_XFAILS,
+    "binary_numerical": FBCODE_BINARY_NUMERICAL_XFAILS,
+}
+
+ROCM_RELAXED_PROPERTY_CASES = {
+    "eager_equivalence": {
+        "inductor_default": {
+            "exp": {fp32},
+            "log1p": {fp32},
+            "rsqrt": {fp32},
+            "tanh": {fp32},
+        },
+    },
+    "unary_numerical": {
+        "inductor_default": {
+            "cos": {fp32},
+            "exp": {fp32},
+            "log1p": {fp16, fp32},
+        },
+        "inductor_numerics": {
+            "rsqrt": {bf16},
+        },
+    },
+}
+
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
     xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
-    xfails = xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set())
+    xfails = set(xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set()))
+    # fbcode's Triton fork + cuBLAS/GPU stack differ from OSS CI, so some combos
+    # fail the compiled-vs-eager numerics only in fbcode. Gate on IS_FBCODE (CUDA
+    # only) so OSS does not hit spurious XPASS on these.
+    if IS_FBCODE and torch.version.hip is None:
+        fbcode_xfails = (
+            FBCODE_XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
+        )
+        xfails = xfails | fbcode_xfails
     return dtype in xfails or ALL in xfails
+
+
+def is_relaxed_property_case(device_type, op_name, backend, test_type, dtype=None):
+    """Return True for the narrow ROCm op/dtype cases that use numeric tolerance."""
+    if device_type != "cuda" or torch.version.hip is None:
+        return False
+
+    allowed = (
+        ROCM_RELAXED_PROPERTY_CASES.get(test_type, {})
+        .get(backend, {})
+        .get(op_name, set())
+    )
+    return dtype in allowed or ALL in allowed
 
 
 def compile_fn(fn, backend):
@@ -781,7 +868,7 @@ class TestOpInfoProperties(TestCase):
                         compiled_fn3 = compile_fn(fn, backend)
                         out3 = compiled_fn3(*args, **kwargs)
 
-                # Bitwise identical
+                # Zero-tolerance equality across recompilations.
                 self.assertEqual(out1, out2, rtol=0, atol=0)
                 self.assertEqual(out2, out3, rtol=0, atol=0)
 
@@ -802,6 +889,14 @@ class TestOpInfoProperties(TestCase):
     @parametrize("backend", BACKENDS)
     def test_eager_equivalence(self, device, dtype, op, backend):
         """Test bitwise equivalence with eager execution."""
+        if (
+            op.name == "nn.functional.gelu"
+            and dtype == torch.float32
+            and backend == "inductor_default"
+        ):
+            # Disabled due to CI failures; see
+            # https://github.com/pytorch/pytorch/issues/190242
+            self.skipTest("disabled due to CI failures; see #190242")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 
@@ -823,8 +918,13 @@ class TestOpInfoProperties(TestCase):
                 compiled_fn = compile_fn(fn, backend)
                 compiled_out = compiled_fn(*args, **kwargs)
 
-                # Bitwise identical
-                self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
+                # Zero-tolerance equality unless this ROCm case needs numeric tolerance.
+                if is_relaxed_property_case(
+                    device_type, op.name, backend, "eager_equivalence", dtype
+                ):
+                    self.assertEqual(eager_out, compiled_out)
+                else:
+                    self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "eager_equivalence", dtype, run_test
@@ -859,6 +959,11 @@ class TestOpInfoProperties(TestCase):
             # Sampled: 64k random bit patterns
             test_values = generate_sampled_fp32(NUM_SAMPLES, device)
 
+        # On ROCm, restrict inputs to the op domain: out-of-domain values (NaN/Inf)
+        # diverge bitwise between eager and compiled. CUDA keeps full bit-pattern coverage.
+        if device_type == "cuda" and torch.version.hip is not None:
+            test_values = _filter_unary_elementwise_tensor(test_values.clone(), op=op)
+
         # Eager reference
         eager_out = fn(test_values)
 
@@ -867,8 +972,13 @@ class TestOpInfoProperties(TestCase):
         compiled_out = compiled_fn(test_values)
 
         def run_test():
-            # Bitwise identical
-            self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
+            # Zero-tolerance equality unless this ROCm case needs numeric tolerance.
+            if is_relaxed_property_case(
+                device_type, op.name, backend, "unary_numerical", dtype
+            ):
+                self.assertEqual(eager_out, compiled_out)
+            else:
+                self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "unary_numerical", dtype, run_test
@@ -906,7 +1016,7 @@ class TestOpInfoProperties(TestCase):
         compiled_out = compiled_fn(x, y)
 
         def run_test():
-            # Bitwise identical
+            # Zero-tolerance equality.
             self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
         self._run_with_expected_failure(

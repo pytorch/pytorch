@@ -43,11 +43,13 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   c10::Device get_device() override;
 
-  bool world_within_direct_access() override;
-
   ncclWindow_t get_window();
 
   size_t get_offset() override;
+
+  // Byte offset of this handle's data within the NCCL window. The window
+  // starts at the signal pad, so this is buffer_offset + get_offset().
+  size_t get_window_offset();
 
  private:
   c10::intrusive_ptr<NCCLPeerAllocInfo> pai_;

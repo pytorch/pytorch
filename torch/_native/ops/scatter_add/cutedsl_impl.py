@@ -55,6 +55,16 @@ _VEC_DST_ALIGN_BYTES = 4
 
 
 @functools.cache
+def _is_rocm() -> bool:
+    # These kernels are built on the CUTLASS Python DSL (CuteDSL), which is
+    # NVIDIA-only and performs a hard CUDA-driver dependency check at compile
+    # time. On a ROCm/HIP build ``tensor.is_cuda`` is still True, so without
+    # this guard the cond approves and ``cute.compile`` fails with
+    # CudaDriverDependencyError. Decline so scatter_add falls back to aten.
+    return torch.version.hip is not None
+
+
+@functools.cache
 def _has_sm90_plus() -> bool:
     if not torch.cuda.is_available():
         return False
@@ -79,6 +89,8 @@ def _any_cow(*tensors: torch.Tensor) -> bool:
 
 def _base_cond_ok(*tensors: torch.Tensor) -> bool:
     """Pre-checks shared by every path: env sanity, all CUDA, non-COW."""
+    if _is_rocm():
+        return False
     if _deterministic():
         return False
     if not all(t.is_cuda for t in tensors):

@@ -210,7 +210,7 @@ class GuardSource(enum.Enum):
 Base class for a "GuardBuilder" role.
 
 The GuardBuilderBase role is to represent a scope within which to build a guard. The name is a little
-confusing, as its not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
+confusing, as it's not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
 to torchdynamo's GuardBuilder.
 
 Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
@@ -713,7 +713,7 @@ class GuardsSet:
 
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+context. Its lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
 directly outside of it. For passing around internal state representations of this object,
 prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
@@ -1528,6 +1528,8 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
+        is_fake_tensor,
+        maybe_get_fake_mode,
     )
 
     # If TracingContext has a fake_mode, use it authoritatively.
@@ -1548,17 +1550,19 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
-        if isinstance(flat_input, FakeTensor):
-            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+        if is_fake_tensor(flat_input):
+            fake_modes.append((maybe_get_fake_mode(flat_input), "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
             fake_tensors: list[FakeTensor] = [
-                x for x in out if isinstance(x, FakeTensor)
+                x
+                for x in out
+                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             ]
             fake_modes.extend(
                 [
-                    (tensor.fake_mode, f"subclass input {i}", ix)
+                    (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
                 ]
             )
