@@ -4,11 +4,45 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <cuda_runtime.h>
+
+#ifdef _WIN32
+#include <c10/util/win32-headers.h>
+#include <fmt/os.h>
+#else
 #include <dlfcn.h>
+#endif
 
 namespace c10::cuda {
 
 namespace {
+
+#ifdef _WIN32
+void* nvml_dlopen(const char* name) {
+  return LoadLibraryA(name);
+}
+
+void* nvml_dlsym(void* handle, const char* name) {
+  return reinterpret_cast<void*>(
+      GetProcAddress(static_cast<HMODULE>(handle), name));
+}
+
+std::string nvml_dlerror() {
+  auto err = static_cast<int>(GetLastError());
+  return fmt::windows_error(err, "WinError {}", err).what();
+}
+#else
+void* nvml_dlopen(const char* name) {
+  return dlopen(name, RTLD_LAZY);
+}
+
+void* nvml_dlsym(void* handle, const char* name) {
+  return dlsym(handle, name);
+}
+
+const char* nvml_dlerror() {
+  return dlerror();
+}
+#endif // _WIN32
 
 void* get_symbol(const char* name, int version);
 
@@ -31,16 +65,16 @@ DriverAPI create_driver_api() {
 #undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL
 
   if (handle_1) {
-#define LOOKUP_NVML_ENTRY(name)                          \
-  r.name##_ = ((decltype(&name))dlsym(handle_1, #name)); \
-  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
+#define LOOKUP_NVML_ENTRY(name)                                               \
+  r.name##_ = reinterpret_cast<decltype(&name)>(nvml_dlsym(handle_1, #name)); \
+  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", nvml_dlerror())
     C10_NVML_DRIVER_API(LOOKUP_NVML_ENTRY)
 #undef LOOKUP_NVML_ENTRY
   }
 
   if (handle_1) {
 #define LOOKUP_NVML_ENTRY_OPTIONAL(name) \
-  r.name##_ = ((decltype(&name))dlsym(handle_1, #name));
+  r.name##_ = reinterpret_cast<decltype(&name)>(nvml_dlsym(handle_1, #name));
     C10_NVML_DRIVER_API_OPTIONAL(LOOKUP_NVML_ENTRY_OPTIONAL)
 #undef LOOKUP_NVML_ENTRY_OPTIONAL
   }
@@ -78,7 +112,11 @@ void* get_symbol(const char* name, int version) {
 } // namespace
 
 void* DriverAPI::get_nvml_handle() {
-  static void* nvml_handle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
+#ifdef _WIN32
+  static void* nvml_handle = nvml_dlopen("nvml.dll");
+#else
+  static void* nvml_handle = nvml_dlopen("libnvidia-ml.so.1");
+#endif
   return nvml_handle;
 }
 

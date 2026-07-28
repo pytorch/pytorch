@@ -2157,14 +2157,14 @@ def ensure_cute_available() -> bool:
 
 @functools.lru_cache(maxsize=1)
 def ensure_nv_universal_gemm_available() -> bool:
-    """Check if NVIDIA Universal GEMM (cutlass_api) is importable; cache the result for reuse.
+    """Check if NVIDIA Universal GEMM (cutlass.operators) is importable; cache the result for reuse.
 
-    Call ensure_nv_universal_gemm_available.cache_clear() after installing cutlass_api
-    in the same interpreter to retry the import.
+    Call ensure_nv_universal_gemm_available.cache_clear() after installing
+    cutlass.operators in the same interpreter to retry the import.
     """
     try:
-        available = importlib.util.find_spec("cutlass_api") is not None
-    except ImportError:
+        available = importlib.util.find_spec("cutlass.operators") is not None
+    except (ImportError, ValueError):
         return False
     if available:
         _ensure_fp4_dtype_registered()
@@ -2172,27 +2172,27 @@ def ensure_nv_universal_gemm_available() -> bool:
 
 
 def _ensure_fp4_dtype_registered():
-    """Patch cutlass_api to handle torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
+    """Ensure cutlass.operators maps torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
 
-    NOTE: cutlass_api doesn't natively map this dtype. We patch the lookup function
-    in-place so all callers (including TensorWrapper) pick up the change.
-    Remove once cutlass_api adds native FP4 support.
+    cutlass.operators natively supports this dtype, so this is normally a no-op.
+    We keep the patch as a safety net (and for backward compat with generated
+    code that calls this) in case a future version regresses.
     """
-    import cutlass_api.utils
+    import cutlass.operators.utils.dtype as _dtype_utils
 
     try:
-        cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        _dtype_utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
     except (KeyError, AttributeError):
         import cutlass
 
-        _orig = cutlass_api.utils.cutlass_type_from_torch_type
+        _orig = _dtype_utils.cutlass_type_from_torch_type
 
         def _patched(dtype):
             if dtype == torch.float4_e2m1fn_x2:
                 return cutlass.Float4E2M1FN
             return _orig(dtype)
 
-        cutlass_api.utils.cutlass_type_from_torch_type = _patched
+        _dtype_utils.cutlass_type_from_torch_type = _patched
 
 
 @functools.lru_cache(maxsize=1)
@@ -2324,7 +2324,7 @@ def use_nv_universal_gemm_template(
 
     Required conditions:
         1. NVGEMM backend is enabled
-        2. cutlass_api is available
+        2. cutlass.operators is available
         3. We are on a NVIDIA GPU
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
@@ -2333,7 +2333,7 @@ def use_nv_universal_gemm_template(
 
     Note:
         - Shape and stride constraints are handled internally by
-          cutlass_api.get_kernels() which filters incompatible kernels.
+          cutlass.operators.get_operators() which filters incompatible kernels.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
         - Dynamic shapes are supported as long as they have hints
@@ -2361,7 +2361,7 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass_api can't handle unbacked symbols because it needs to evaluate
+    # cutlass.operators can't handle unbacked symbols because it needs to evaluate
     # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
     # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
     dims_to_check = [m, n, k]
@@ -2370,7 +2370,7 @@ def use_nv_universal_gemm_template(
     if any(has_free_unbacked_symbols(dim) for dim in dims_to_check):
         return False
 
-    # Base pointer must be 16-byte aligned. cutlass_api can't check this at
+    # Base pointer must be 16-byte aligned. cutlass.operators can't check this at
     # compile time because it only sees FakeTensors without real data pointers.
     tensors_to_check = [mat_a, mat_b]
     if offs is not None:
@@ -4215,13 +4215,13 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
     - Ops with the cudagraph_unsafe tag
     - index_put_ with boolean indices (triggers .nonzero() during capture)
-    - Control flow nodes (Conditional, WhileLoop)
+    - Control flow nodes (Switch, WhileLoop)
     - Ops with sparse tensor outputs
     """
     from . import ir
 
     # Control flow nodes are cudagraph-unsafe
-    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+    if isinstance(node, (ir.Switch, ir.WhileLoop)):
         return True
 
     if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
@@ -4520,12 +4520,16 @@ def python_subprocess_env() -> dict[str, str]:
     Get a base environment for running Python subprocesses.
     """
 
+    torch_package_root = os.path.dirname(
+        os.path.dirname(os.path.abspath(torch.__file__))
+    )
     env = {
         # Inherit the environment of the current process.
         **os.environ,
         # Set the PYTHONPATH so the subprocess can find torch.
         "PYTHONPATH": os.environ.get(
-            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+            "TORCH_CUSTOM_PYTHONPATH",
+            os.pathsep.join((torch_package_root, *sys.path)),
         ),
     }
 
@@ -4540,6 +4544,42 @@ def python_subprocess_env() -> dict[str, str]:
         env["PYTHONHOME"] = sysconfig.get_path("data")
 
     return env
+
+
+def apply_subprocess_env(extra_env: Mapping[str, str | None] | None) -> None:
+    """
+    Apply environment updates sent from a parent process to a persistent worker.
+    A None value means the variable is absent in the parent and should be
+    removed from the worker, rather than leaving a stale value behind.
+    """
+    if extra_env is None:
+        return
+
+    for key, value in extra_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+@contextlib.contextmanager
+def patch_subprocess_env(
+    extra_env: Mapping[str, str | None] | None,
+) -> Iterator[None]:
+    """
+    Temporarily apply parent process environment updates in a persistent worker.
+    """
+    if extra_env is None:
+        yield
+        return
+
+    old_env = dict(os.environ)
+    apply_subprocess_env(extra_env)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -4784,18 +4824,30 @@ def _infer_scale_swizzle_impl(
 
     # NVFP4: BlockWise1x16 with float8_e4m3fn scales
     if mat_dtype == torch.float4_e2m1fn_x2 and scale_dtype == torch.float8_e4m3fn:
-        expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[1], 16), 4
-        )
-        expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[0], 16), 4
-        )
-        if eq_fn(scale_numel, expected_numel_a) or eq_fn(scale_numel, expected_numel_b):
-            return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
+        if torch.xpu._is_compiled():
+            # XPU: no swizzle
+            expected_numel_a = ceildiv(mat_size[0], 16) * K_multiplier * mat_size[1]
+            expected_numel_b = ceildiv(K_multiplier * mat_size[1], 16) * mat_size[0]
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        else:
+            # NVIDIA: uses swizzled 32x4x4 layout
+            expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 16), 4
+            )
+            expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 16), 4
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
     # MXFP8: BlockWise1x32 with float8_e8m0fnu scales
     if scale_dtype == torch.float8_e8m0fnu:
-        if not torch.version.hip:
+        if not torch.version.hip and not torch.xpu._is_compiled():
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
                 ceildiv(K_multiplier * mat_size[1], 32), 4
@@ -4808,7 +4860,7 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD: no swizzle
+            # AMD/XPU: no swizzle
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
