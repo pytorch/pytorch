@@ -40,8 +40,8 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
-    TMA_DESCRIPTOR_SIZE,
     tdm_descriptor_row_major,
+    TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
     using_rocm_rdna3,
@@ -3317,6 +3317,8 @@ class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
 
 class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
     """Shared stable-descriptor options for gfx1250 scaled TDM templates."""
+
+    tdm_scaled_persistent_mm_configs: list[BaseConfig]
 
     def __init__(self) -> None:
         super().__init__()

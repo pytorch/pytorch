@@ -54,9 +54,9 @@ from ..utils import (
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
     use_triton_scaling_template,
-    use_triton_template,
     use_triton_tdm_scaled_template,
     use_triton_tdm_template,
+    use_triton_template,
     use_triton_tma_template,
 )
 from .mm_common import (

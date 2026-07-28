@@ -6010,9 +6010,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
     @parametrize("dtype", ("fp16", "bf16", "fp32"))
     @parametrize("num_stages", (1, 2))
-    def test_tdm_descriptor_template_lowers_to_amdgcn_tdm(
-        self, dtype, num_stages
-    ):
+    def test_tdm_descriptor_template_lowers_to_amdgcn_tdm(self, dtype, num_stages):
         if not self._tdm_capable_triton():
             self.skipTest("Triton without gfx1250 TDM backend support")
 
