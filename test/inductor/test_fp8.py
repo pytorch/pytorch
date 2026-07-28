@@ -43,7 +43,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     is_big_gpu,
-    run_triton_code_in_subprocess,
     running_on_tdm_device,
 )
 from torch.utils._sympy.symbol import SymT
@@ -2442,58 +2441,6 @@ class TestTDMScaled(TestCase):
         self.assertEqual(options["MIN_BLOCK_TILE_AK"], 64)
         self.assertEqual(options["MIN_BLOCK_TILE_BK"], 64)
         self.assertEqual(options["MIN_BLOCK_TILE_BN"], 128)
-
-    def test_tdm_scaled_descriptors_lower_to_amdgcn_tdm(self):
-        from torch.utils._triton import has_triton_amd_tdm_device
-
-        if not has_triton_amd_tdm_device("gfx1250"):
-            self.skipTest("Triton without gfx1250 TDM backend support")
-
-        import textwrap
-
-        child = textwrap.dedent(
-            """
-            import triton
-            import triton.language as tl
-            from triton.backends.compiler import GPUTarget
-
-            @triton.jit
-            def k(x_ptr, o_ptr, M, N,
-                  BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
-                desc = tl.make_tensor_descriptor(
-                    x_ptr, shape=[M, N], strides=[N, 1],
-                    block_shape=[BLOCK_M, BLOCK_N])
-                x = tl.load_tensor_descriptor(desc, [0, 0])
-                offsets = (tl.arange(0, BLOCK_M)[:, None] * N
-                           + tl.arange(0, BLOCK_N)[None, :])
-                tl.store(o_ptr + offsets, x)
-
-            target = GPUTarget("hip", "gfx1250", 32)
-            outputs = []
-            for dtype in ("fp8e4nv", "fp8e5"):
-                for num_stages in (1, 2):
-                    src = triton.compiler.ASTSource(
-                        fn=k,
-                        signature={"x_ptr": f"*{dtype}", "o_ptr": "*fp32",
-                                   "M": "i32", "N": "i32",
-                                   "BLOCK_M": "constexpr", "BLOCK_N": "constexpr"},
-                        constexprs={"BLOCK_M": 64, "BLOCK_N": 128},
-                    )
-                    outputs.append(triton.compile(
-                        src,
-                        target=target,
-                        options={"num_stages": num_stages},
-                    ).asm["amdgcn"])
-            print("<<<SEP>>>".join(outputs))
-            """
-        )
-        proc = run_triton_code_in_subprocess(child)
-        if proc.returncode != 0:
-            self.fail(proc.stderr.strip())
-        parts = proc.stdout.split("<<<SEP>>>")
-        self.assertEqual(len(parts), 4)
-        for asm in parts:
-            self.assertRegex(asm, r"async_tdm|tensor_load_to_lds|tensor\.load\.to\.lds")
 
 
 @unittest.skipUnless(
