@@ -794,7 +794,7 @@ namespace {
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype, bool compute_pivots = true) {
     // Select a custom pivoted LU factorization kernel over cuSOLVER/cuBLAS.
     // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
-    if (compute_pivots && (m == n) && (4 <= batch && batch <= 65536) && m >= 256) {
+    if ((m == n) && ((compute_pivots && (4 <= batch && batch <= 65536) && m >= 256) || (!compute_pivots && m <= 1024))) {
       return SolverBackend::CUSTOM;
     }
 

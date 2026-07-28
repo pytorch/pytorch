@@ -528,6 +528,66 @@ batched_panel_register_resident_fused_kernel(
   }
 }
 
+template <typename scalar_t>
+__global__ void
+batched_panel_register_resident_nopiv_fused_kernel(
+  scalar_t* __restrict__ dA, int64_t matrix_stride,
+  int lda, int m,
+  int col_start, int nb,
+  int* __restrict__ dinfo
+) {
+  const int tid = threadIdx.x;
+  const int batch = blockIdx.x;
+  const int nrows = m - col_start;
+  auto* A = dA + batch * matrix_stride;
+  int linfo = (col_start == 0) ? 0 : dinfo[batch];
+
+  extern __shared__ char smem_raw[];
+  auto* spivrow = reinterpret_cast<scalar_t*>(smem_raw);
+
+  // Each thread owns its full row stored in registers;
+  scalar_t rA[MAX_RECNB];
+  #pragma unroll
+  for (int i = 0; i < nb; ++i) {
+    rA[i] = (tid < nrows)
+      ? A[LinOff(col_start + tid, col_start + i, lda)]
+      : static_cast<scalar_t>(0);
+  }
+
+  for (int i = 0; i < nb; ++i) {
+    // 1. Broadcast current "pivot" row
+    if (i == tid) {
+      #pragma unroll
+      for (int j = 0; j < nb; ++j) {
+        spivrow[j] = rA[j];
+      }
+    }
+    __syncthreads();
+
+    linfo = (spivrow[i] == static_cast<scalar_t>(0) && linfo == 0) ? (col_start + i + 1) : linfo;
+
+    // 2. Scale and rank-1 update
+    if (tid > i) {
+      rA[i] /= spivrow[i];
+      #pragma unroll
+      for (int j = i + 1; j < nb; ++j) {
+        rA[j] -= rA[i] * spivrow[j];
+      }
+    }
+  }
+
+  // Write info
+  if (tid == 0) { dinfo[batch] = linfo; }
+
+  // Write back result
+  if (tid < nrows) {
+    #pragma unroll
+    for (int i = 0; i < nb; ++i) {
+      A[LinOff(col_start + tid, col_start + i, lda)] = rA[i];
+    }
+  }
+}
+
 // Dispatch helper for register-resident fused panel kernel (NB 1-MAX_RECNB)
 template <typename scalar_t>
 bool try_launch_fused_panel_register_resident(
@@ -542,16 +602,23 @@ bool try_launch_fused_panel_register_resident(
   if (nrows > 1024 || nb > MAX_RECNB) return false;
 
   using real_t = c10::scalar_value_type<scalar_t>::type;
-  size_t shmem = nb * sizeof(scalar_t) + nrows * sizeof(real_t) + nrows * sizeof(int) + nb * sizeof(int);
 
   dim3 grid(batch_count);
   dim3 threads(nrows);
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  batched_panel_register_resident_fused_kernel<scalar_t><<<grid, threads, shmem, stream>>>(
-    dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
-  );
+  if (compute_pivots) {
+    size_t shmem = nb * sizeof(scalar_t) + nrows * sizeof(real_t) + nrows * sizeof(int) + nb * sizeof(int);
+    batched_panel_register_resident_fused_kernel<<<grid, threads, shmem, stream>>>(
+      dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+    );
+  } else {
+    size_t shmem = nb * sizeof(scalar_t);
+    batched_panel_register_resident_nopiv_fused_kernel<<<grid, threads, shmem, stream>>>(
+      dA, matrix_stride, lda, m, col_start, nb, dinfo
+    );
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
