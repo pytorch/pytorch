@@ -2,10 +2,10 @@ diff --git a/gemm_act.py b/gemm_act.py
 index bc3b5b3..fe29a6e 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
-@@ -489 +489 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -496 +496 @@ class GemmActMixin(ComposableEpiMixin):
 -                tRS_rD.store(epilogue_result[0])
 +                tRS_rD.store(epilogue_result[0].to(self.acc_dtype))
-@@ -512,10 +512,9 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -519,10 +519,9 @@ class GemmActMixin(ComposableEpiMixin):
                      main_result = epilogue_result[0]
                      if const_expr(self.grouped_n_contract_group == 1):
 -                        tRS_rD.store(main_result)

@@ -8,8 +8,11 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
+    FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR,
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
+    flex_gemm_output_config_supported,
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
@@ -274,8 +277,12 @@ class FlexGemmRuntimeOutputPlan:
     main_transform: FlexGemmGroupedMainOutputTransform | None = None
 
     def __post_init__(self) -> None:
-        if self.main_transform is not None and self.aux_outs:
+        if self.main_transform is None:
+            return
+        if self.aux_outs:
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+        if self.main_transform.chunked and self.local_reduce is not None:
+            raise NotImplementedError(FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR)
 
     def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
         """Return the logical shape after applying the grouped-main transform."""
@@ -566,6 +573,7 @@ def gemm_epilogue(
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey | None = None,
+    config_is_lowering_validated: bool = False,
     expected_ndim: int | None = None,
     device_capacity_override: tuple[int, int] | None = None,
     stream: int | None = None,
@@ -587,6 +595,8 @@ def gemm_epilogue(
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, ``col``, or ``scalar`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
+        config_is_lowering_validated: Whether generated lowering already checked the
+            config against the complete output plan.
         expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
         stream: Optional raw CUDA stream pointer supplied by the generated wrapper.
@@ -616,16 +626,67 @@ def gemm_epilogue(
         gemm_config_from_key,
     )
 
-    config = (
-        gemm_config_from_key(config_key)
-        if config_key is not None
-        else candidate_gemm_configs_for_device(a.device)[0]
-    )
+    if main_transform is not None:
+        device_capacity = (
+            torch.cuda.get_device_capability(a.device)
+            if device_capacity_override is None
+            else device_capacity_override
+        )
+        main_transform.validate_quack(device_capacity[0])
+        if main_transform.chunked and b.stride(-1) == 1:
+            raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
+        if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args:
+            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+
+    config = gemm_config_from_key(config_key) if config_key is not None else None
+    if config is None or not config_is_lowering_validated:
+        candidates = candidate_gemm_configs_for_device(
+            a.device, device_capacity_override
+        )
+        local_reduce_geometries = (
+            () if local_reduce is None else (local_reduce.geometry,)
+        )
+        local_reduce_output_layout = (
+            None if local_reduce is None else local_reduce.output_layout
+        )
+        if config is not None and config not in candidates:
+            raise NotImplementedError(
+                "FlexGEMM explicit QUACK config is not supported on this device"
+            )
+        if config is None:
+            config = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if flex_gemm_output_config_supported(
+                        candidate,
+                        physical_output_shape[-1],
+                        local_reduce_geometries,
+                        main_transform,
+                        local_reduce_output_layout,
+                        None if local_reduce is None else local_reduce.geometry,
+                    )
+                ),
+                None,
+            )
+        elif not flex_gemm_output_config_supported(
+            config,
+            physical_output_shape[-1],
+            local_reduce_geometries,
+            main_transform,
+            local_reduce_output_layout,
+            None if local_reduce is None else local_reduce.geometry,
+            allow_local_reduce_swap_ab=config.swap_ab,
+        ):
+            config = None
+        if config is None:
+            contract = (
+                "grouped main output" if main_transform is not None else "output plan"
+            )
+            raise NotImplementedError(
+                f"FlexGEMM QUACK config is incompatible with {contract}"
+            )
     logical_output_shape = output_plan.output_shape(physical_output_shape)
-    if main_transform is not None and (
-        a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args
-    ):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     expected_dtype = out_dtype
     if expected_dtype is None:
         expected_dtype = out.dtype if out is not None else a.dtype
