@@ -176,6 +176,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
 
   at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
 
+  // The pool is now acquired and being recorded to. Track this so reset() can
+  // release it even if the capture fails before capture_end() completes.
+  allocated_pool_ = true;
+  capturing_to_pool_ = true;
+
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
@@ -226,6 +231,9 @@ void CUDAGraph::capture_end_pre() {
   // remove the pool routing entry added by beginAllocateToPool.
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  // Allocation recording has stopped (even if endCaptureErr is a failure), so
+  // reset() must not end the pool again.
+  capturing_to_pool_ = false;
   AT_CUDA_CHECK(endCaptureErr);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
@@ -337,20 +345,12 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
 }
 
 void CUDAGraph::reset() {
-  // I'd prefer these checks throw exceptions, not print warnings,
-  // but the destructor calls reset(), and at least one CI build
-  // refuses to compile with a throwing destructor.
-  //
-  // Instead of calling reset() in the destructor to clean up, I could
-  // call reset() in the __del__ method of a thin Python wrapper,
-  // in which case reset would be allowed to throw exceptions.
-  // But Stackoverflow does not like user-defined __del__.
-  // __del__ prevents Graph instances from EVER being garbage collected
-  // if they participate in a reference cycle.
-  // And exceptions thrown in __del__ only print a warning anyway.
-  //
-  // Calling reset() in the C++ destructor, with warnings instead of exceptions
-  // if calls fail, is the compromise we chose.
+  // These checks warn instead of throwing: reset() is called from the
+  // destructor, and at least one CI build refuses to compile with a throwing
+  // destructor. Resource cleanup lives here in C++ so it runs on garbage
+  // collection regardless of Python state; the Python __del__ on
+  // torch.cuda.CUDAGraph only tears down bookkeeping and intentionally does not
+  // call reset().
   //
   // If capture_begin, the capture, or capture_end failed at some point, this CUDAGraph, the generator,
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
@@ -373,7 +373,16 @@ void CUDAGraph::reset() {
     capture_id_ = 0;
   }
 
-  if (capture_ended_) {
+  if (allocated_pool_) {
+    if (capturing_to_pool_) {
+      // Capture was abandoned before capture_end() ran, so the allocator is
+      // still routing allocations to this pool. Stop that before releasing so
+      // the pool is left in a consistent, freeable state.
+      c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+      at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+      capturing_to_pool_ = false;
+    }
+
     // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
     // private pool cleanup
     clearCublasWorkspacesForStream(capture_stream_.stream());
@@ -385,6 +394,7 @@ void CUDAGraph::reset() {
     retained_mempool_ids_.clear();
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
+    allocated_pool_ = false;
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));

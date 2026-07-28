@@ -87,6 +87,7 @@ from .sizevars import SimplifyIndexing
 from .utils import (
     _unstable_customized_partition_wrapper,
     cache_on_self,
+    cache_on_self_and_args,
     cmp,
     device_need_guard,
     get_current_backend,
@@ -1328,6 +1329,7 @@ class BaseSchedulerNode:
 
     def clear_read_writes_dependent_caches(self) -> None:
         self.get_coalesce_analysis.clear_cache(self)
+        typing.cast(Any, self.get_tiling).clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -1336,6 +1338,14 @@ class BaseSchedulerNode:
         if not isinstance(self, (SchedulerNode, FusedSchedulerNode)):
             return None
         return _analyze_memory_coalescing(self)
+
+    @cache_on_self_and_args("BaseSchedulerNode")
+    def get_tiling(
+        self, numel: sympy.Expr, rnumel: sympy.Expr
+    ) -> dict[str, sympy.Expr]:
+        from .codegen.simd import SIMDScheduling
+
+        return SIMDScheduling.select_tiling(self.get_nodes(), numel, rnumel)
 
     def set_last_usage(
         self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
@@ -2285,10 +2295,11 @@ class SchedulerNode(BaseSchedulerNode):
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
-        if fake_deps:
-            self.set_read_writes(
-                self.read_writes.with_read(fake_deps).rename(self.mutation_renames)
-            )
+        if fake_deps or self.mutation_renames:
+            read_writes = self.read_writes
+            if fake_deps:
+                read_writes = read_writes.with_read(fake_deps)
+            self.set_read_writes(read_writes.rename(self.mutation_renames))
 
     def refresh_dependencies(
         self, normalize: bool, need_clear_tiling_cache: bool
@@ -2350,6 +2361,13 @@ class SchedulerNode(BaseSchedulerNode):
     def _before_loop_state_mutation(self) -> None:
         if self._loop_mutation_listener is not None:
             self._loop_mutation_listener(self)
+
+    def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> None:
+        if self._body is None:
+            raise AssertionError("expected a loop body")
+        self._before_loop_state_mutation()
+        self._body = self._body.with_indexing_exprs(replacements)
+        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._before_loop_state_mutation()
@@ -3443,6 +3461,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def combinable_nodes(
         cls, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
+        """Filter a node list down to combo-kernel candidates.
+
+        Drops node kinds that can't or shouldn't share a combo kernel:
+        extern, grouped, mixed-order reduction, existing foreach, and
+        template nodes.
+        """
         extern = [x for x in nodes if isinstance(x, ExternKernelSchedulerNode)]
         if extern:
             log.debug(
@@ -3509,6 +3533,28 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     len(reduction_nodes),
                 )
             filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
+
+        # Synthetic benchmark inputs cannot preserve indirect-index constraints and may
+        # produce out-of-bounds indices. Keep these nodes out of benchmarked combos.
+        if config.benchmark_combo_kernel or (
+            config.combo_kernels_autotune > 0
+            and config.combo_kernel_per_subkernel_blocks
+            and config.combo_kernel_compile_time_autotune
+        ):
+            indirect_nodes = [
+                n
+                for n in filtered_nodes
+                if any(
+                    isinstance(dep, MemoryDep) and dep.is_indirect()
+                    for dep in n.read_writes.reads_and_writes()
+                )
+            ]
+            if indirect_nodes:
+                log.debug(
+                    "ComboKernels: %d indirect-indexing nodes are filtered",
+                    len(indirect_nodes),
+                )
+                filtered_nodes = [n for n in filtered_nodes if n not in indirect_nodes]
 
         return filtered_nodes
 
@@ -4292,9 +4338,9 @@ class Scheduler:
             ):
                 self.create_combo_kernel_nodes(num_ck_nodes=None)
 
-        # torch.cond can contain arbitrary subgraphs, which can contain collectives
-        # reordering these can cause a nccl hang
-        self._enforce_conditional_ordering()
+        # torch.cond and torch.switch can contain arbitrary subgraphs with collectives;
+        # reordering them can cause an nccl hang.
+        self._enforce_switch_ordering()
 
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
@@ -5109,10 +5155,8 @@ class Scheduler:
             visit(node)
         return result
 
-    def _enforce_conditional_ordering(self) -> None:
-        conditional_nodes = [
-            n for n in self.nodes if isinstance(n.node, ir.Conditional)
-        ]
+    def _enforce_switch_ordering(self) -> None:
+        conditional_nodes = [n for n in self.nodes if isinstance(n.node, ir.Switch)]
         for i in range(1, len(conditional_nodes)):
             mutating_buf = next(iter(conditional_nodes[i].get_buffer_names()))
             prev_buf = next(iter(conditional_nodes[i - 1].get_buffer_names()))
@@ -7130,6 +7174,13 @@ class Scheduler:
 
         if any(n.is_cpu() for n in [node1, node2]):
             return -1
+        if not isinstance(node2, SchedulerNode):
+            return -1
+        if not isinstance(node2.node, ir.ComputedBuffer):
+            return -1
+        body = node2._body
+        if body is None:
+            return -1
 
         # Check for shared buffers between nodes
         node1_buffer_names = node1.read_writes.buffer_names()
@@ -7150,7 +7201,7 @@ class Scheduler:
             return -1
 
         # Currently only handle single read/write operations
-        if len(node2.read_writes.reads) > 1 or len(node2.read_writes.writes) > 1:
+        if len(node2.read_writes.reads) != 1 or len(node2.read_writes.writes) != 1:
             return -1
 
         node2_read = next(iter(node2.read_writes.reads))
@@ -7161,11 +7212,13 @@ class Scheduler:
         ):
             return -1
 
-        node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
-        if node2_read.name not in node1_writes:
+        matching_node1_writes = [
+            dep for dep in node1.read_writes.writes if dep.name == node2_read.name
+        ]
+        if len(matching_node1_writes) != 1:
             return -1
 
-        node1_write = node1_writes[node2_read.name]
+        node1_write = matching_node1_writes[0]
 
         if not isinstance(node1_write, MemoryDep):
             return -1
@@ -7186,39 +7239,36 @@ class Scheduler:
             return -1
 
         # Verify we have exactly two indexing expressions (one read, one write)
-        if len(node2._body.indexing_exprs) != 2:  # type: ignore[attr-defined]
+        if len(body.indexing_exprs) != 2:
             return -1
 
         # No subblocks allowed for this optimization
-        if node2._body.subblocks:  # type: ignore[attr-defined]
+        if body.subblocks:
             return -1
 
-        if not (
-            "index0" in node2._body.indexing_exprs  # type: ignore[attr-defined]
-            and "index1" in node2._body.indexing_exprs  # type: ignore[attr-defined]
-        ):
+        if not ("index0" in body.indexing_exprs and "index1" in body.indexing_exprs):
             raise AssertionError("expected index0 and index1 in node2 indexing_exprs")
 
         # Extract and verify single read expression
-        node2_read_exprs = OrderedSet(expr for expr in node2._body.get_read_exprs())  # type: ignore[attr-defined]
+        node2_read_exprs = OrderedSet(body.get_read_exprs())
         if len(node2_read_exprs) != 1:
             return -1
 
         read_expr = next(iter(node2_read_exprs))
 
         # Determine which index is for reading vs writing
-        if read_expr == node2._body.indexing_exprs["index0"]:  # type: ignore[attr-defined]
+        if read_expr == body.indexing_exprs["index0"]:
             read_expr_index = "index0"
             write_expr_index = "index1"
         else:
-            if read_expr != node2._body.indexing_exprs["index1"]:  # type: ignore[attr-defined]
+            if read_expr != body.indexing_exprs["index1"]:
                 raise AssertionError("expected read_expr to match node2 index1 expr")
             read_expr_index = "index1"
             write_expr_index = "index0"
 
         from torch._inductor.invert_expr_analysis import generate_inverse_formula
 
-        index_vars = node2._body.vars[0]  # type: ignore[attr-defined]
+        index_vars = body.vars[0]
         if len(index_vars) != 1:
             return -1
 
@@ -7229,7 +7279,9 @@ class Scheduler:
             )
         simplified_read_expr = sum(simplified_terms)
 
-        inverse_formula = generate_inverse_formula(simplified_read_expr, index_vars[0])
+        inverse_formula = generate_inverse_formula(
+            simplified_read_expr, index_vars[0], node2_read.size[0]
+        )
 
         # formula is not invertible
         if inverse_formula is None:
@@ -7238,16 +7290,19 @@ class Scheduler:
         # === Apply Inversion ===
 
         # Swap the indexing expressions using the inverse formula
-        node2._body.indexing_exprs[read_expr_index] = node2._body.indexing_exprs[  # type: ignore[attr-defined]
-            write_expr_index
-        ]
-        node2._body.indexing_exprs[write_expr_index] = inverse_formula  # type: ignore[attr-defined]
+        node2.apply_indexing_exprs(
+            {
+                read_expr_index: body.indexing_exprs[write_expr_index],
+                write_expr_index: inverse_formula,
+            }
+        )
 
-        # Refresh dependencies and calculate fusion score
-        node2.refresh_dependencies(True, False)  # type: ignore[attr-defined]
+        # Calculate fusion score
         score = self.score_fusion_memory(node1, node2)
         if not isinstance(score, int):
             raise AssertionError("expected score to be an int")
+        if score == 0:
+            score = self._score_fusion_memory_by_fusable_read_write(node1, node2)
 
         fusion_log.info("Shared memory after inversion: %d", score)
         return score
@@ -9053,8 +9108,8 @@ class Scheduler:
         if isinstance(node.node, ir.DeviceCopy):
             return "DeviceCopy ops"
 
-        if isinstance(node.node, ir.Conditional):
-            return "Conditional ops"
+        if isinstance(node.node, ir.Switch):
+            return "Switch ops"
 
         if getattr(node.node, "unbacked_bindings", None):
             return "unbacked binding ops"
