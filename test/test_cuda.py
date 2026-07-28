@@ -3096,6 +3096,140 @@ torch.cuda.synchronize()
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
 
+    def test_philox_state_eager(self):
+        g = torch.Generator(device="cuda")
+        g.manual_seed(123)
+        seed_t, off_t, intra_t = g.philox_state(8)
+        self.assertEqual(seed_t.item(), g.initial_seed())
+        self.assertEqual(off_t.item(), 0)
+        self.assertEqual(intra_t.item(), 0)
+        # Outside capture all three are CPU tensors (PhiloxCudaState's
+        # HostState); during capture seed/offset are CUDA (DevState).
+        for t in (seed_t, off_t, intra_t):
+            self.assertEqual(t.dtype, torch.int64)
+            self.assertEqual(t.shape, (1,))
+            self.assertEqual(t.device.type, "cpu")
+        self.assertEqual(g.get_offset(), 8)
+        _, off_t, _ = g.philox_state(8)
+        self.assertEqual(off_t.item(), 8)
+        self.assertEqual(g.get_offset(), 16)
+
+    def test_philox_state_rounds_increment_to_multiple_of_4(self):
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        g.philox_state(1)
+        self.assertEqual(g.get_offset(), 4)
+        g.philox_state(5)
+        self.assertEqual(g.get_offset(), 12)
+
+    def test_philox_state_large_seed_reinterpreted_as_int64(self):
+        # Seeds >= 2**63 come back reinterpreted as negative int64.
+        g = torch.Generator(device="cuda")
+        seed = (1 << 64) - 3
+        g.manual_seed(seed)
+        seed_t, _, _ = g.philox_state(4)
+        self.assertEqual(seed_t.item() & ((1 << 64) - 1), seed)
+
+    def test_philox_state_offset_overflows_int64(self):
+        # The C++ offset is uint64. The returned tensor carries its exact
+        # bits in int64, so offsets >= 2**63 read back negative via .item()
+        # and are recovered with `& (2**64 - 1)`. Advancement wraps modulo
+        # 2**64 in uint64 space: from 2**64 - 4, reserving 4 lands on 0.
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        big = (1 << 64) - 4
+        g.set_offset(big)
+        _, off_t, _ = g.philox_state(4)
+        self.assertEqual(off_t.item() & ((1 << 64) - 1), big)
+        self.assertEqual(g.get_offset(), 0)
+
+    def test_philox_state_composes_with_eager_ops(self):
+        # A reservation must consume the same Philox stream positions an
+        # eager kernel would, so subsequent eager ops are reproducible via
+        # set_offset.
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        torch.rand(1000, device="cuda", generator=g)
+        off = g.get_offset()
+        g.philox_state(4)
+        b = torch.rand(1000, device="cuda", generator=g)
+        g.manual_seed(0)
+        g.set_offset(off + 4)
+        self.assertEqual(torch.rand(1000, device="cuda", generator=g), b)
+
+    def test_philox_state_advances_default_generator(self):
+        # Reserving through the default generator advances the global state
+        # that generator-less ops consume, by exactly the reserved amount.
+        g = torch.cuda.default_generators[0]
+        g.manual_seed(0)
+        ref = torch.rand(1000, device="cuda")
+        g.manual_seed(0)
+        _, off_t, _ = g.philox_state(4)
+        self.assertEqual(off_t.item(), 0)
+        shifted = torch.rand(1000, device="cuda")
+        self.assertNotEqual(shifted, ref)
+        g.manual_seed(0)
+        g.set_offset(4)
+        self.assertEqual(torch.rand(1000, device="cuda"), shifted, atol=0, rtol=0)
+
+    def test_philox_state_errors(self):
+        cpu_gen = torch.Generator()
+        with self.assertRaisesRegex(NotImplementedError, "philox_state"):
+            cpu_gen.philox_state(4)
+        g = torch.Generator(device="cuda")
+        with self.assertRaisesRegex(OverflowError, "negative"):
+            g.philox_state(-1)
+        with self.assertRaisesRegex(RuntimeError, "expected an int"):
+            g.philox_state(1.5)
+
+    def test_philox_state_graphsafe_shared_state(self):
+        g = torch.Generator(device="cuda")
+        g.manual_seed(0)
+        new_state = g.clone_state()
+        g.graphsafe_set_state(new_state)
+        g.philox_state(8)
+        self.assertEqual(new_state.get_offset(), 8)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_philox_state_graph_capture(self):
+        torch.rand(1, device="cuda")
+        g = torch.cuda.default_generators[0]
+        g.manual_seed(0)
+        graph = torch.cuda.CUDAGraph()
+        s = torch.cuda.Stream()
+        x = torch.zeros(1, device="cuda")
+        with torch.cuda.stream(s):
+            graph.capture_begin()
+            seed_t, off_t, intra_t0 = g.philox_state(4)
+            x += 1
+            _, _, intra_t1 = g.philox_state(4)
+            graph.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        self.assertEqual(seed_t.device.type, "cuda")
+        self.assertEqual(off_t.device.type, "cuda")
+        self.assertEqual(intra_t0.item(), 0)
+        self.assertEqual(intra_t1.item(), 4)
+
+        # Each replay refills the extragraph tensors with the generator's
+        # current (seed, offset) and advances the offset by the whole-graph
+        # increment.
+        for _ in range(2):
+            offset_before = g.get_offset()
+            graph.replay()
+            self.assertEqual(seed_t.item(), g.initial_seed())
+            self.assertEqual(off_t.item(), offset_before)
+            self.assertEqual(g.get_offset(), offset_before + 8)
+
+        # The returned aliases must not allow reallocating the capture
+        # state's storage out from under the captured graph.
+        data_ptr = seed_t.data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "not resizable"):
+            seed_t.resize_(64)
+        self.assertEqual(seed_t.data_ptr(), data_ptr)
+
     @skipIfRocmVersionLessThan((7, 14))
     @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
