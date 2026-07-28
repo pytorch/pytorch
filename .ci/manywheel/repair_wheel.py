@@ -145,6 +145,7 @@ ROCM_SO_FILES: list[str] = [
     "librccl.so",
     "librocblas.so",
     "librocfft.so",
+    "libamd_smi.so",
     "librocrand.so",
     "librocsolver.so",
     "librocsparse.so",
@@ -159,31 +160,6 @@ ROCM_SO_FILES: list[str] = [
     "librocm-core.so",
     "librocroller.so",
 ]
-
-
-def _rocm_version_tuple(version: str) -> tuple[int, int]:
-    parts = version.split(".")
-    nums = [int(p) for p in parts[:2] if p.isdigit()]
-    while len(nums) < 2:
-        nums.append(0)
-    return nums[0], nums[1]
-
-
-def rocm_smi_lib(gpu_arch_version: str, desired_cuda: str) -> str:
-    """ROCm <= 7.2 ships librocm_smi64; newer releases use libamd_smi."""
-    version = gpu_arch_version
-    if not version and desired_cuda.startswith("rocm"):
-        version = desired_cuda.removeprefix("rocm")
-    if version and _rocm_version_tuple(version) <= (7, 2):
-        return "librocm_smi64.so"
-    return "libamd_smi.so"
-
-
-def rocm_so_files(gpu_arch_version: str, desired_cuda: str) -> list[str]:
-    files = list(ROCM_SO_FILES)
-    smi_idx = files.index("librocfft.so") + 1
-    files.insert(smi_idx, rocm_smi_lib(gpu_arch_version, desired_cuda))
-    return files
 
 
 def rocm_os_deps() -> list[Path]:
@@ -247,7 +223,7 @@ def rocm_lib_kernels(
 
 
 def rocm_bundle(
-    rocm_home: Path, gpu_arch_version: str, desired_cuda: str
+    rocm_home: Path, gpu_arch_version: str
 ) -> tuple[list[BundledLib], list[AuxFile]]:
     """Build the ROCm bundle spec: shared libs and auxiliary kernel/db files.
 
@@ -257,7 +233,10 @@ def rocm_bundle(
     rewritten to the renamed copies via patchelf in repair_wheel().
     """
     libs: list[BundledLib] = []
-    for stem in rocm_so_files(gpu_arch_version, desired_cuda):
+    so_files = list(ROCM_SO_FILES)
+    if gpu_arch_version and float(gpu_arch_version) <= 7.2:
+        so_files.append("librocm_smi64.so")
+    for stem in so_files:
         path = find_rocm_lib(rocm_home, stem)
         if path is None:
             sys.exit(f"Required ROCm library not found: {stem}")
@@ -434,9 +413,7 @@ def main() -> None:
         force_rpath = True
     elif is_rocm:
         rocm_home = Path(os.environ.get("ROCM_HOME", "/opt/rocm"))
-        bundled_libs, aux_files = rocm_bundle(
-            rocm_home, gpu_arch_version, os.environ.get("DESIRED_CUDA", "")
-        )
+        bundled_libs, aux_files = rocm_bundle(rocm_home, gpu_arch_version)
         c_so_rpath = "$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = "$ORIGIN"
         force_rpath = True
