@@ -28,10 +28,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_get_kernel_function(
     AOTIMetalShaderLibraryHandle library_handle,
     const char* kernel_name,
     AOTIMetalKernelFunctionHandle* function_handle);
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // MetalKernelFunction functions
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_mps_start_encoding(AOTIMetalKernelFunctionHandle func);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
