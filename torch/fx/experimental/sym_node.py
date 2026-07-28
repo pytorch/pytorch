@@ -809,7 +809,7 @@ unary_nonmagic_methods = {
 unary_methods = unary_magic_methods | unary_nonmagic_methods
 
 # Most methods are only registered on SymInt and SymFloat
-# Some methods are only be registered on SymBool
+# Some methods are only registered on SymBool
 only_bool_magic_methods = {"and", "or", "xor", "sym_not", "sym_ite"}
 # Methods that implicitly convert SymBool into SymInt
 bool_becomes_int_magic_methods = {"add", "sub", "mul"}

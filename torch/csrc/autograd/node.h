@@ -189,7 +189,7 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   // Marker for expected undefined input
   struct undefined_input {};
 
-  /// Adds the type and shape metadata for a new input. Returns the index of
+  /// Adds the type and shape metadata for a new input. Returns the index
   /// of the new input.
   uint32_t add_input_metadata(
       const at::TensorOptions& options,

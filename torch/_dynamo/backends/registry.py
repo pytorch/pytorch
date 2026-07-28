@@ -200,15 +200,11 @@ def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
     if compiler_fn in _COMPILER_FNS.values():
         return True
 
-    # Check for _TorchCompileInductorWrapper or _TorchCompileWrapper
-    # These have a compiler_name attribute that identifies the backend
-    if hasattr(compiler_fn, "compiler_name"):
-        compiler_name = compiler_fn.compiler_name
-        if compiler_name in _BACKENDS or compiler_name in _COMPILER_FNS:
-            return True
+    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
+        return True
 
-    # Check if the wrapper has a compiler_fn attribute (e.g., _TorchCompileWrapper)
-    if hasattr(compiler_fn, "compiler_fn"):
+    # _TorchCompileWrapper wraps either a registered backend or a custom callable
+    if isinstance(compiler_fn, torch._TorchCompileWrapper):
         return compiler_fn.compiler_fn in _COMPILER_FNS.values()
 
     return False
