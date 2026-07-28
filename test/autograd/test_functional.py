@@ -97,6 +97,31 @@ vectorized_logging_tensor = parametrize(
 )
 
 
+def _test_construct_standard_basis_for(self, inputs):
+    numels = tuple(tensor.numel() for tensor in inputs)
+    results = autogradF._construct_standard_basis_for(inputs, numels)
+    for result, inp in zip(results, inputs):
+        self.assertEqual(result.dtype, inp.dtype)
+        self.assertEqual(result.device, inp.device)
+    results = torch.cat(
+        [result.to(device="cpu", dtype=torch.float) for result in results], dim=1
+    )
+    expected = torch.eye(results[0].shape[0], dtype=torch.float)
+    self.assertEqual(results, expected)
+
+
+def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
+    expected = autogradF.jacobian(f, inputs, vectorize=False)
+    result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
+    self.assertEqual(result_backward_mode, expected)
+
+    if test_forward_ad:
+        result_forward_mode = autogradF.jacobian(
+            f, inputs, strategy="forward-mode", vectorize=True
+        )
+        self.assertEqual(result_forward_mode, expected)
+
+
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
@@ -621,18 +646,6 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
-    def _test_construct_standard_basis_for(self, inputs):
-        numels = tuple(tensor.numel() for tensor in inputs)
-        results = autogradF._construct_standard_basis_for(inputs, numels)
-        for result, inp in zip(results, inputs):
-            self.assertEqual(result.dtype, inp.dtype)
-            self.assertEqual(result.device, inp.device)
-        results = torch.cat(
-            [result.to(device="cpu", dtype=torch.float) for result in results], dim=1
-        )
-        expected = torch.eye(results[0].shape[0], dtype=torch.float)
-        self.assertEqual(results, expected)
-
     @base_and_logging_tensor
     def test_construct_standard_basis_for(self, ctors):
         test_cases = [
@@ -647,18 +660,7 @@ class TestAutogradFunctional(TestCase):
         ]
 
         for inputs in test_cases:
-            self._test_construct_standard_basis_for(inputs)
-
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
-    def test_construct_standard_basis_for_cuda(self, ctors):
-        test_cases = [
-            (ctors.randn(2), ctors.randn(3, device="cuda")),
-            (ctors.randn(3, device="cuda"), ctors.randn(2)),
-        ]
-
-        for inputs in test_cases:
-            self._test_construct_standard_basis_for(inputs)
+            _test_construct_standard_basis_for(self, inputs)
 
     def _test_vectorize_raises_no_warnings(self, api, ctors):
         # vmap is an experimental prototype. When someone calls torch.vmap,
@@ -893,24 +895,13 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
 
-    def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
-        expected = autogradF.jacobian(f, inputs, vectorize=False)
-        result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
-        self.assertEqual(result_backward_mode, expected)
-
-        if test_forward_ad:
-            result_forward_mode = autogradF.jacobian(
-                f, inputs, strategy="forward-mode", vectorize=True
-            )
-            self.assertEqual(result_forward_mode, expected)
-
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_simple(self, ctors):
         def f(x):
             return 3 * x**2
 
         x = ctors.randn(2, 3, 5)
-        self._check_jacobian_vectorize_correctness(f, x)
+        _check_jacobian_vectorize_correctness(self, f, x)
 
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_multi_input(self, ctors):
@@ -919,7 +910,7 @@ class TestAutogradFunctional(TestCase):
 
         x = ctors.randn(2, 3)
         y = ctors.randn(3, 5)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
+        _check_jacobian_vectorize_correctness(self, f, (x, y))
 
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_multi_input_multi_output(self, ctors):
@@ -928,7 +919,7 @@ class TestAutogradFunctional(TestCase):
 
         x = ctors.randn(5, 3)
         y = ctors.randn(3, 5)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
+        _check_jacobian_vectorize_correctness(self, f, (x, y))
 
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_unrelated_outputs(self, ctors):
@@ -937,7 +928,7 @@ class TestAutogradFunctional(TestCase):
 
         x = ctors.randn(2)
         y = ctors.randn(3)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
+        _check_jacobian_vectorize_correctness(self, f, (x, y))
 
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_zero_dim(self, ctors):
@@ -947,14 +938,14 @@ class TestAutogradFunctional(TestCase):
 
         x = ctors.randn(3)
         y = ctors.randn(3)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
+        _check_jacobian_vectorize_correctness(self, f, (x, y))
 
         # zero-dim input
         def g(x):
             return torch.stack([x, x, x])
 
         x = ctors.randn([])
-        self._check_jacobian_vectorize_correctness(g, x)
+        _check_jacobian_vectorize_correctness(self, g, x)
 
         # Mixed zero-dim input / zero-dim output
         def h(x, y):
@@ -962,17 +953,7 @@ class TestAutogradFunctional(TestCase):
 
         x = ctors.randn([])
         y = ctors.randn(1)
-        self._check_jacobian_vectorize_correctness(h, (x, y))
-
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
-    def test_jacobian_vectorize_correctness_different_devices(self, ctors):
-        def f(x, y):
-            return x * y, (x * y).cuda()
-
-        x = ctors.randn(3)
-        y = ctors.randn(3)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
+        _check_jacobian_vectorize_correctness(self, h, (x, y))
 
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_different_dtype(self, ctors):
@@ -983,7 +964,7 @@ class TestAutogradFunctional(TestCase):
         y = ctors.randn(3)
         # The Jacobian computed using forward AD has the dtype of the output
         # but the Jacobian computed with reverse AD has dtype of input
-        self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
+        _check_jacobian_vectorize_correctness(self, f, (x, y), test_forward_ad=False)
 
     def _check_hessian_vectorize_correctness(self, f, inputs):
         expected = autogradF.hessian(f, inputs, vectorize=False)
@@ -1740,7 +1721,32 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 
+class TestAutogradFunctionalDevice(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @base_and_logging_tensor
+    def test_construct_standard_basis_for_cuda(self, ctors):
+        test_cases = [
+            (ctors.randn(2), ctors.randn(3, device="cuda")),
+            (ctors.randn(3, device="cuda"), ctors.randn(2)),
+        ]
+
+        for inputs in test_cases:
+            _test_construct_standard_basis_for(self, inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @base_and_logging_tensor
+    def test_jacobian_vectorize_correctness_different_devices(self, ctors):
+        def f(x, y):
+            return x * y, (x * y).cuda()
+
+        x = ctors.randn(3)
+        y = ctors.randn(3)
+        _check_jacobian_vectorize_correctness(self, f, (x, y))
+
+
 instantiate_parametrized_tests(TestAutogradFunctional)
+instantiate_parametrized_tests(TestAutogradFunctionalDevice)
+
 
 if __name__ == "__main__":
     run_tests()
