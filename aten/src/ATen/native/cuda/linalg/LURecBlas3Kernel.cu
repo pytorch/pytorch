@@ -91,8 +91,8 @@ inline LUTuning get_tuning() {
 // pivinfo: absolute permutation vector (one per batch, size m).
 template <typename scalar_t>
 struct LUWorkspace {
-  LUWorkspace(const Tensor& input, int nb) {
-    batch_count = cuda_int_cast(batchCount(input), "batchCount");
+  LUWorkspace(const Tensor& input, int nb, bool compute_pivots) {
+    int batch_count = cuda_int_cast(batchCount(input), "batchCount");
     int m = cuda_int_cast(input.size(-2), "input.size(-2)");
     int n = cuda_int_cast(input.size(-1), "input.size(-1)");
 
@@ -102,12 +102,11 @@ struct LUWorkspace {
     dA12_array = static_cast<scalar_t**>(buffer.select(0, 1).data_ptr());
 
     // Permutation vector workspace: m ints per batch
-    pivinfo_buffer = at::empty({batch_count, m}, input.options().dtype(at::kInt));
-    pivinfo = static_cast<int*>(pivinfo_buffer.data_ptr());
-    pivinfo_stride = m;
+    pivinfo_buffer = compute_pivots ? at::empty({batch_count, m}, input.options().dtype(at::kInt)) : Tensor{};
+    pivinfo = compute_pivots ? static_cast<int*>(pivinfo_buffer.data_ptr()) : nullptr;
+    pivinfo_stride = compute_pivots ? m : 0;
   }
 
-  int batch_count;
   Tensor buffer;
 
   // TRSM arrays
@@ -775,7 +774,7 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
     }
 
     int nb = (n >= tuning.nb_crossover_n) ? nbc.nb_large : nbc.nb_small;
-    auto ws = LUWorkspace<scalar_t>(input, nb);
+    auto ws = LUWorkspace<scalar_t>(input, nb, compute_pivots);
     auto min_mn = std::min(m, n);
     auto ipiv_stride = min_mn;
 
