@@ -603,6 +603,37 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=1)
 
+    def test_long_left_associated_chain_no_recursion_error(self):
+        t = torch.ones(2)
+
+        def fn(t, vals):
+            total = 0
+            for v in vals:
+                total = total + v
+            return t.sin(), total
+
+        n = 300
+        arg_sets = [(t, list(range(n))), (t, list(range(1, n + 1)))]
+        self._check(fn, arg_sets, expected_frames=2)
+
+    @torch._dynamo.config.patch(computed_lazy_constant_max_nodes=2)
+    def test_over_budget_chain_falls_back_to_guards(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), a + a + a + a
+
+        self._check(fn, [(t, 1), (t, 2)], expected_frames=2)
+
+    @torch._dynamo.config.patch(computed_lazy_constant_max_nodes=0)
+    def test_disabled_computed_lazy_constant_installs_guards(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
     def test_computed_constant_in_branch_recompiles(self):
         t = torch.ones(2)
 
