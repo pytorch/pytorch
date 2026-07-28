@@ -354,13 +354,9 @@ def mark_warmup_incomplete() -> None:
     This is a no-op unless called synchronously from a function currently running
     in CUDA Graph Trees warmup.
     """
-    if not torch._C._is_key_in_tls("tree_manager_containers"):
-        return
-
-    for container in get_obj(local, "tree_manager_containers").values():
-        manager = container.tree_manager
-        if manager is not None:
-            manager.mark_warmup_incomplete()
+    manager = get_manager(create_if_none_exists=False)
+    if manager is not None:
+        manager.mark_warmup_incomplete()
 
 
 def reset_cudagraph_trees() -> None:
@@ -408,11 +404,18 @@ def get_container(device_index: int) -> TreeManagerContainer:
 
 
 def get_manager(
-    device_index: int, create_if_none_exists: bool = True
+    device_index: int | None = None, create_if_none_exists: bool = True
 ) -> CUDAGraphTreeManager | None:
+    if device_index is None:
+        if not torch.cuda.is_initialized():
+            return None
+        device_index = torch.cuda.current_device()
+
     if create_if_none_exists:
         return get_container(device_index).get_tree_manager()
-    return get_container(device_index).tree_manager
+
+    container = get_obj(local, "tree_manager_containers").get(device_index)
+    return None if container is None else container.tree_manager
 
 
 def is_cudagraph_capture_sizes(int_key: int | tuple[int, ...]) -> bool:

@@ -151,7 +151,6 @@ class TestCase(InductorTestCase):
 
 
 class CUDAGraphAPIOnlyTests(TestCase):
-    @config.patch({"triton.cudagraphs": False, "triton.cudagraph_trees": False})
     def test_mark_warmup_incomplete_without_cudagraphs(self):
         cudagraph_trees = torch._inductor.cudagraph_trees
         containers = cudagraph_trees.get_obj(
