@@ -4566,6 +4566,15 @@ class TestMPS(TestCaseMPS):
         x = torch.arange(2, device="mps")
         self.assertEqual(x.reshape(1, 1, 2).unique(), x)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/97310:
+        # highly-skewed input with a single long run of duplicates triggered
+        # MPSGraph scatter contention that took ~19s on a 2M-element tensor.
+        # Workload shape mirrors per-frame connected-component labels for
+        # 1080p video.
+        skewed = torch.zeros(1080 * 1920, dtype=torch.int64)
+        skewed[100_000:157_600] = 193_501
+        helper(skewed, True, True)
+
     def test_unique_consecutive(self):
         def helper(x, dim, return_inverse, return_counts):
             cpu_x = x
@@ -5934,13 +5943,43 @@ class TestMPS(TestCaseMPS):
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
 
-    def test_sum_integer_no_overflow(self):
+    @parametrize("n", [33, 64, 100, 1000, 20000, 262185, 1 << 20])
+    def test_int64_minmax_partial_simdgroups(self, n):
+        # simd_max/min<long> is emulated on top of simd_shuffle_and_fill_down and
+        # reads its neighbours' registers, so a reduction stage that leaves fewer
+        # than 32 lanes active used to fold their zeros into the result. Sizes
+        # span threadgroups of 64 to 1024 threads over the single-pass and
+        # split-K paths.
+        x = -torch.arange(1, n + 1, dtype=torch.int64, device="mps")
+        self.assertEqual(x.amax().cpu(), x.cpu().amax())
+        self.assertEqual((-x).amin().cpu(), (-x).cpu().amin())
+
+    @parametrize("case", ["full_1d", "full_2d", "inner", "outer"])
+    def test_sum_integer_no_overflow(self, case):
         # int sums must accumulate in int64: 2**30 overflows int32 after 4 adds
-        cases = (((1 << 20,), None), ((1024, 1024), None), ((131072, 16), 1), ((65536, 16), 0))
-        for shape, dim in cases:
-            x = torch.full(shape, 2**30, dtype=torch.int32, device="mps")
-            args = () if dim is None else (dim,)
-            self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+        shape, dim = {"full_1d": ((1 << 20,), None), "full_2d": ((1024, 1024), None),
+                      "inner": ((131072, 16), 1), "outer": ((65536, 16), 0)}[case]
+        x = torch.full(shape, 2**30, dtype=torch.int32, device="mps")
+        args = () if dim is None else (dim,)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.int8, torch.uint8, torch.bool, torch.int16, torch.int32, torch.int64])
+    @parametrize("reduction", ["full", "outer", "inner"])
+    def test_sum_no_input_upcast(self, dtype, reduction):
+        # Skipping the input up-cast puts the (int8|uint8|bool|int16|int32, int64)
+        # kernels on the live path for the first time.
+        x = (torch.arange(1 << 20, device="mps") % 7).to(dtype)
+        dim = {"full": None, "outer": 0, "inner": 1}[reduction]
+        args = () if dim is None else (dim,)
+        if dim is not None:
+            x = x.view(1024, 1024)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_sum_lowp_no_input_upcast(self, dtype):
+        # (half|bfloat16, float32) kernels, likewise unreachable before.
+        x = ((torch.arange(1 << 20, device="mps") % 4) * 0.25).to(dtype)
+        self.assertEqual(x.sum(dtype=torch.float32).cpu(), x.cpu().sum(dtype=torch.float32))
 
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
