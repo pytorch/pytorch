@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
+from torch._inductor.runtime.triton_compat import CompilationError, HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -46,7 +46,6 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
-from torch._inductor.runtime.triton_compat import CompilationError
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
@@ -427,6 +426,26 @@ class TestTritonHeuristics(TestCase):
         ):
             with self.assertRaises(NoTritonConfigsError):
                 autotuner._precompile_worker()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_precompile_worker_skips_bad_config_keeps_good(self):
+        # A CompilationError on one config must not sink the others: the
+        # regression in #190002 is that the *first* invalid config aborted the
+        # whole precompile even though a later config was perfectly fine.
+        args = self._get_cos_kernel_caching_autotuner_args()
+        autotuner = CachingAutotuner(**args)
+        bad_config = args["configs"][0]
+        good_result = MagicMock()
+
+        def precompile_config(self, cfg):
+            if cfg is bad_config:
+                raise CompilationError("shape mismatch in generated triton")
+            return good_result
+
+        with patch.object(CachingAutotuner, "_precompile_config", precompile_config):
+            autotuner._precompile_worker()
+
+        self.assertEqual(autotuner.compile_results, [good_result])
 
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device(GPU_TYPE))

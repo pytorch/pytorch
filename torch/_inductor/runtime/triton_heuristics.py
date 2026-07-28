@@ -816,7 +816,7 @@ class CachingAutotuner(KernelInterface):
         if len(compile_results) == 0:
             raise NoTritonConfigsError(
                 f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            ) from exc
         self.compile_results = compile_results
         self.configs = None
 
