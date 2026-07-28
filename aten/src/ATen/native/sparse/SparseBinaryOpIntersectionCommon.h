@@ -113,11 +113,11 @@ TensorIterator make_value_selection_intersection_iter(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_owned_output(res_values)
-    .add_owned_input(restride_values(lhs_values))
-    .add_owned_input(restride_idx(lhs_select_idx))
-    .add_owned_input(restride_values(rhs_values))
-    .add_owned_input(restride_idx(rhs_select_idx))
-    .add_owned_input(restride_idx(intersection_counts))
+    .add_owned_const_input(restride_values(lhs_values))
+    .add_owned_const_input(restride_idx(lhs_select_idx))
+    .add_owned_const_input(restride_values(rhs_values))
+    .add_owned_const_input(restride_idx(rhs_select_idx))
+    .add_owned_const_input(restride_idx(intersection_counts))
     .build();
 
   return iter;
@@ -264,7 +264,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(hash)
-      .add_input(probably_coalesced_nnz_arange)
+      .add_const_input(probably_coalesced_nnz_arange)
       .build();
 
     {
@@ -345,7 +345,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .add_owned_output(dummy.expand_as(source_arange))
-      .add_input(source_arange)
+      .add_const_input(source_arange)
       .build();
 
     {
