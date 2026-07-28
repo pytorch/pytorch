@@ -574,43 +574,6 @@ def clear_kernel_annotations() -> None:
     _pending_scopes.clear()
 
 
-# tools_id -> list of predecessor tools_ids, keyed by exec-graph tools_id (which equals the
-# CUPTI graph_node_id), so it joins to profiler kernel records directly. Independent of
-# _kernel_annotations: recorded even without mark_kernels, so the profiler's graph node->node
-# dependency arrows work without any annotation scopes.
-_graph_dependencies: dict[int, list[int]] = {}
-
-
-def record_graph_dependencies(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Record the exec graph's node dependency edges keyed by tools_id.
-
-    Reads the topology from ``get_graph_data()`` (needs ``keep_graph=True`` and an instantiated
-    graph -- it raises otherwise, so this naturally no-ops for keep_graph=False). Stores, for
-    each node with predecessors, ``tools_id -> [predecessor tools_ids]``. Idempotent: re-recording
-    the same exec graph overwrites the same tools_ids."""
-    if _is_tools_id_unavailable():
-        return
-    try:
-        nodes = torch_cuda_graph.get_graph_data()["nodes"]
-        tid_by_index = [n["tools_id"] for n in nodes]
-        for n in nodes:
-            deps = n["dependencies"]
-            if deps:
-                _graph_dependencies[n["tools_id"]] = [tid_by_index[i] for i in deps]
-    except (RuntimeError, AttributeError, KeyError):
-        pass
-
-
-def get_graph_dependencies() -> dict[int, list[int]]:
-    """Return the graph dependency map (tools_id -> predecessor tools_ids)."""
-    return _graph_dependencies
-
-
-def clear_graph_dependencies() -> None:
-    """Clear all recorded graph dependencies."""
-    _graph_dependencies.clear()
-
-
 # Counter-based stream ID registry. IDs start at 60 (above the highest
 # observed non-graphed CUDA stream ID) so every assigned lane is visually
 # distinct in Perfetto and doesn't collide with real streams.
