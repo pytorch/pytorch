@@ -99,7 +99,11 @@ def check_graph_breaks(
         # graph_breaks is the primary metric: if the model has no baseline
         # graph_breaks entry it is missing from the baseline entirely.
         if expected_graph_breaks is None:
-            print(f"{model:34}  {'MISSING:':19} graph_breaks=None, expected=None")
+            actual_graph_breaks = get_field(actual_csv, model, "graph_breaks")
+            print(
+                f"{model:34}  {'MISSING:':19} "
+                f"graph_breaks={actual_graph_breaks}, expected=None"
+            )
             improved.append(model)
             continue
         if not dynamo_called:
