@@ -309,7 +309,7 @@ class TestLibtorchAgnostic(TestCase):
     def test_pyobject_non_tensor_raises(self, device):
         import libtorch_agn_2_14 as libtorch_agnostic
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
             libtorch_agnostic._interop.pyobject_roundtrip("not a tensor")
 
     # TODO: Debug this:
