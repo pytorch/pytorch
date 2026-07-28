@@ -78,6 +78,73 @@ if _TORCHCOMM_AVAILABLE:
         if torchcomms.is_backend_built(_backend):
             globals()[_flag] = True
 
+
+def setup_torchcomms_pg(
+    backend: str,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    store_path: str,
+    group_name: str,
+) -> c10d.ProcessGroup:
+    """Build a bare ProcessGroup whose backend is a torchcomms _BackendWrapper.
+
+    Creates a torchcomms comm of the requested ``backend`` (e.g. ``nccl``,
+    ``ncclx``) and wraps it in ``_BackendWrapper``, then registers it as the
+    NCCL backend on a fresh ``ProcessGroup`` and publishes the group into
+    ``c10d._world`` so name-based lookups (e.g. ``symm_mem.rendezvous(...,
+    group=group_name)``) resolve to it.
+
+    Callers are responsible for choosing a ``group_name`` (and matching
+    ``store_path``) that is unique within the process — duplicates trip
+    ``_register_pg_in_world`` and the underlying FileStore.
+    """
+    from torch.distributed.distributed_c10d import (
+        _BackendWrapper,
+        _register_pg_in_world,
+    )
+
+    file_store = c10d.FileStore(store_path, world_size)
+
+    os.environ["TORCHCOMM_RANK"] = str(rank)
+    os.environ["TORCHCOMM_SIZE"] = str(world_size)
+
+    tc_comm = torchcomms.new_comm(
+        backend,
+        device,
+        name=f"{group_name}_comm",
+        store=c10d.PrefixStore(f"{group_name}_tc/", file_store),
+        hints={"persistent_store": "true"},
+    )
+
+    pg = c10d.ProcessGroup(
+        c10d.PrefixStore(f"{group_name}_pg/", file_store),
+        tc_comm.get_rank(),
+        tc_comm.get_size(),
+    )
+    pg._register_backend(
+        tc_comm.get_device(),
+        c10d.ProcessGroup.BackendType.NCCL,
+        _BackendWrapper(tc_comm),
+    )
+    # _register_backend only updates the per-device map; backendType_ stays
+    # UNDEFINED. getDefaultBackend()-dependent setters (including
+    # use_pg_for_symm_mem_rendezvous) fail without this.
+    pg._set_default_backend(c10d.ProcessGroup.BackendType.NCCL)
+
+    pg._set_group_name(group_name)
+    _register_pg_in_world(
+        pg,
+        backend_name=backend,
+        store=file_store,
+        group_name=group_name,
+        backend_config=backend,
+        rank_mapping={r: r for r in range(world_size)},
+    )
+
+    return pg
+
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -128,10 +195,10 @@ class DistTestCases:
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
-    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
-    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc", "xccl"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
@@ -453,6 +520,13 @@ def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
+    )
+
+
+def requires_xccl():
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_xccl_available(),
+        "c10d was not compiled with the XCCL backend",
     )
 
 
@@ -1978,7 +2052,10 @@ class MultiProcContinuousTest(TestCase):
         This supports instantiate_device_type_tests which calls setUpClass during
         class creation (before any tests run), when spawning would be premature.
         """
-        if cls._processes_spawned:
+        # Check the class's own dict: a subclass must not inherit the flag from
+        # a base test class that already ran and tore down its workers, else it
+        # would dispatch tests to the base class's dead worker processes.
+        if cls.__dict__.get("_processes_spawned", False):
             return
 
         # Handle method, property, and string attribute for device_type
@@ -2026,8 +2103,10 @@ class MultiProcContinuousTest(TestCase):
         Class-scope test fixture. Run once for entire test class, after all tests finish.
         Tear down the process group if spawned.
         """
-        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down
-        if not cls._processes_spawned:
+        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down.
+        # Check the class's own dict to avoid tearing down an already-finished
+        # base class's workers (see _ensure_processes_spawned).
+        if not cls.__dict__.get("_processes_spawned", False):
             super().tearDownClass()
             return
 

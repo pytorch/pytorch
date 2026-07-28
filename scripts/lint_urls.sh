@@ -36,7 +36,14 @@ while IFS=: read -r filepath url; do
             "https://check-host.net/check-result/$request_id" \
             | jq -r -e '.[][0][3]') || new_code=000
           [[ "$new_code" =~ ^[0-9]+$ ]] || new_code=000
-          if [ "$new_code" -ge 200 ] && [ "$new_code" -lt 400 ]; then
+          # check-host.net reports 000 only while a node has not produced a
+          # result yet (or the host is genuinely unreachable); any real HTTP
+          # status it returns is authoritative, so adopt it and let the
+          # WARN/FAIL/OK logic below classify it. Previously this accepted only
+          # 2xx/3xx, which discarded the 403/429/503 WAF responses we treat as
+          # WARN -- yielding a false FAIL for live-but-bot-protected hosts such
+          # as hud.pytorch.org (pytorch/pytorch#188510).
+          if [ "$new_code" -ge 100 ] && [ "$new_code" -le 599 ]; then
             code=$new_code
             break
           fi
@@ -72,6 +79,7 @@ done < <(
     ':(exclude,glob)**/*gradle*'
     ':(exclude,glob)**/third-party/**'
     ':(exclude,glob)**/third_party/**'
+    ':(exclude,glob)torch/_vendor/quack/**'
   )
   if [ $# -eq 2 ]; then
     for filename in $(git diff --name-only --unified=0 "$1...$2"); do

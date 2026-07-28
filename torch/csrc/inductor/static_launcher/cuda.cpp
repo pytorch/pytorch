@@ -8,11 +8,16 @@
 #include <cstdint>
 
 #include <torch/csrc/utils/python_numbers.h>
+#include <cstring>
 #include <filesystem>
 #include <optional>
+#include <utility>
 
 #if defined(USE_ROCM)
 #include <hip/hip_runtime_api.h>
+#include <fstream>
+#include <iterator>
+#include <vector>
 #endif
 
 /**
@@ -100,9 +105,69 @@ CUdeviceptr getPointer(PyObject* obj) {
   return dev_ptr;
 }
 
+#if !defined(USE_ROCM)
+// CUtensorMap is a fixed 128-byte CUDA driver ABI type passed to the kernel by
+// value; catch a header change to its size at compile time.
+static_assert(
+    sizeof(CUtensorMap) == 128,
+    "CUtensorMap is expected to be 128 bytes (CUDA ABI change?)");
+
+// Mirror of triton's PyCUtensorMap object (nvidia/backend/driver.c) so we can
+// read its embedded CUtensorMap.
+struct PyCUtensorMapObject {
+  PyObject_HEAD
+  alignas(alignof(CUtensorMap)) CUtensorMap tensorMap;
+};
+
+// Pointer to the CUtensorMap in a host-side TMA descriptor arg (triton's
+// PyCUtensorMap, or a duck-typed tma_desc_cpu_ptr()). Owned by `obj`, which
+// must stay alive across the launch.
+void* getTmaDescPtr(PyObject* obj) {
+  if (std::strcmp(
+          Py_TYPE(obj)->tp_name, "triton.backends.nvidia.PyCUtensorMap") == 0) {
+    // Fail loudly if triton's object no longer matches our mirror: tp_basicsize
+    // catches a resized field or a CUDA-major mismatch (alignof is 64 on 12.x
+    // vs 128 on 13.x). A same-size reorder isn't caught here; correctness tests
+    // are.
+    TORCH_CHECK(
+        Py_TYPE(obj)->tp_basicsize == sizeof(PyCUtensorMapObject),
+        "triton PyCUtensorMap layout changed (tp_basicsize=",
+        Py_TYPE(obj)->tp_basicsize,
+        ", expected ",
+        sizeof(PyCUtensorMapObject),
+        "); the static launcher's CUtensorMap mirror is stale");
+    return &reinterpret_cast<PyCUtensorMapObject*>(obj)->tensorMap;
+  }
+  // Duck-typed fallback: tma_desc_cpu_ptr() -> host pointer to a CUtensorMap.
+  THPObjectPtr method{PyObject_GetAttrString(obj, "tma_desc_cpu_ptr")};
+  TORCH_CHECK(
+      method,
+      "tensordesc argument must be a triton PyCUtensorMap or expose "
+      "tma_desc_cpu_ptr()");
+  THPObjectPtr ret{PyObject_CallNoArgs(method)};
+  TORCH_CHECK(ret, "tma_desc_cpu_ptr() call failed");
+  auto host_ptr = static_cast<uintptr_t>(THPUtils_unpackUInt64(ret));
+  TORCH_CHECK(host_ptr != 0, "tma_desc_cpu_ptr() returned NULL");
+  return reinterpret_cast<void*>(host_ptr);
+}
+#endif
+
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
-CUfunction loadKernel(
+#if defined(USE_ROCM)
+std::vector<char> readKernelImage(const std::string& filePath) {
+  std::ifstream file(filePath, std::ios::binary);
+  TORCH_CHECK(file, "Failed to open kernel image: ", filePath);
+
+  auto begin = std::istreambuf_iterator<char>(file);
+  auto end = std::istreambuf_iterator<char>();
+  std::vector<char> image(begin, end);
+  TORCH_CHECK(!image.empty(), "Kernel image is empty: ", filePath);
+  return image;
+}
+#endif
+
+std::pair<CUmodule, CUfunction> loadKernel(
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
@@ -117,7 +182,10 @@ CUfunction loadKernel(
   CUfunction func = nullptr;
 
 #if defined(USE_ROCM)
-  AT_CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+  // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
+  // HSACO. Load from memory to avoid retaining one FD per static launcher.
+  auto image = readKernelImage(filePath);
+  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
@@ -200,7 +268,7 @@ CUfunction loadKernel(
         shared_optin - shared_static));
 #endif
   }
-  return func;
+  return {mod, func};
 }
 
 inline void launchKernel(
@@ -324,6 +392,16 @@ void parseKernelArgs(
         *reinterpret_cast<CUdeviceptr*>(slot) = ptr;
         break;
       }
+      case 'M': { // host-side TMA descriptor (CUtensorMap, 128-byte by-value)
+#if defined(USE_ROCM)
+        TORCH_CHECK(false, "tensordesc kernel args are not supported on ROCm");
+#else
+        // Point the kernel arg at the descriptor's 128 bytes; no 8-byte slot,
+        // so skip the slot write.
+        kernelArgs[i] = getTmaDescPtr(item);
+        continue;
+#endif
+      }
       default:
         TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
     }
@@ -333,10 +411,12 @@ void parseKernelArgs(
 }
 
 /* Load the CUDA kernel into memory (called during torch.compile), and
-  return a pointer to it (along with nregs and nspills).
+  return pointers to its owning module and function (along with nregs
+  and nspills).  The module must remain loaded while the function may
+  be launched.
   Called in python as:
-  (function, n_regs, n_spills) = load_kernel(cubin_path, func_name,
-  sharedMemBytes)
+  (module, function, n_regs, n_spills) = load_kernel(
+      cubin_path, func_name, sharedMemBytes)
 */
 PyObject* load_kernel(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
@@ -369,8 +449,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   }
 #endif
 
-  CUfunction func = nullptr;
-  func = loadKernel(filePath, funcName, sharedMemBytes, device);
+  auto [mod, func] = loadKernel(filePath, funcName, sharedMemBytes, device);
 
 #if defined(USE_ROCM)
   AT_CUDA_DRIVER_CHECK(
@@ -386,9 +465,13 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 
 #endif
   n_spills /= 4;
-  // Return a tuple of CUFunction, n_regs, n_spills
+  // Return a tuple of CUmodule, CUfunction, n_regs, n_spills.
   return Py_BuildValue(
-      "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
+      "(KKii)",
+      reinterpret_cast<uint64_t>(mod),
+      reinterpret_cast<uint64_t>(func),
+      n_regs,
+      n_spills);
   END_HANDLE_TH_ERRORS
 }
 
@@ -557,7 +640,25 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
+PyObject* unload_kernel(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  uint64_t mod_ptr = 0;
+  if (!PyArg_ParseTuple(args, "K", &mod_ptr)) {
+    return nullptr;
+  }
+  CUmodule mod = reinterpret_cast<CUmodule>(mod_ptr);
+  if (mod) {
+#if defined(USE_ROCM)
+    AT_CUDA_DRIVER_CHECK(hipModuleUnload(mod));
+#else
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleUnload(mod));
+#endif
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+std::array<PyMethodDef, 3> StaticCudaLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
         launch_kernel,
@@ -567,7 +668,12 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_load_kernel",
         load_kernel,
         METH_VARARGS,
-        "Load CUDA kernel from cubin file"}};
+        "Load CUDA kernel from cubin file"},
+    PyMethodDef{
+        "_unload_kernel",
+        unload_kernel,
+        METH_VARARGS,
+        "Unload CUDA/HIP module loaded by _load_kernel"}};
 
 // Define a minimal type for StaticCudaLauncher.
 // We don't implement __new__ or __init__ because we're using it only as a
@@ -627,7 +733,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
     return THPUtils_unpackUInt64(obj);
 #endif
   }
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return 0;
   }
   // Fast type check: inductor-generated tensors are always exact THPVariable
@@ -803,6 +909,15 @@ static PyObject* fast_launcher_vectorcall(
       case 'O': {
         *reinterpret_cast<CUdeviceptr*>(slot) = getPointerFast(item);
         break;
+      }
+      case 'M': {
+#if defined(USE_ROCM)
+        TORCH_CHECK(false, "tensordesc kernel args are not supported on ROCm");
+#else
+        // Override the pre-bound slot to point at the descriptor's 128 bytes.
+        self->kernelArgs[i] = getTmaDescPtr(item);
+        continue;
+#endif
       }
       case 'b':
         convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);

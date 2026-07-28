@@ -35,6 +35,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM90OrLater,
     TEST_MULTIGPU,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
+    skipIfCachingAllocatorDisabled,
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
@@ -52,7 +54,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
@@ -68,6 +70,12 @@ requires_multigpu = functools.partial(
 )
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import skipCUDAIf
+
+
+def _strip_triton_static_asserts(code):
+    return "\n".join(
+        line for line in code.splitlines() if "tl.static_assert" not in line
+    )
 
 
 try:
@@ -117,6 +125,22 @@ class CudaReproTests(TestCase):
         expected = fn(a, b)
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_frexp_non_finite(self):
+        def fn(x):
+            return torch.frexp(x)
+
+        x = torch.tensor(
+            [float("inf"), float("-inf"), float("nan")], device=device_type
+        )
+        expected_mantissa, expected_exponent = fn(x)
+        actual_mantissa, actual_exponent = torch.compile(
+            fn, backend="inductor", fullgraph=True
+        )(x)
+
+        self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
+        self.assertEqual(actual_exponent, expected_exponent)
 
     def test_index_put_issue(self):
         def forward(
@@ -245,8 +269,8 @@ class CudaReproTests(TestCase):
     # Mismatched elements: 23 / 33062912 (0.0%)
     # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
     # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
+    @skipIfXpu(msg="RuntimeError, not target, torch-xpu-ops: 2697")
     @skipIfRocmArch(MI350_ARCH)
-    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2697")
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -333,9 +357,14 @@ class CudaReproTests(TestCase):
         )[0]
         compiled_out.sum().backward()
 
-        self.assertEqual(compiled_out, eager_out)
-        self.assertEqual(compiled_q.grad, eager_q.grad)
-        self.assertEqual(compiled_kv.grad, eager_kv.grad)
+        tol_kwargs = {}
+        if device_type == "xpu":
+            # XPU fp16 SDPA compile-vs-eager can drift ~1% relative.
+            tol_kwargs = {"atol": 1e-4, "rtol": 1e-2}
+
+        self.assertEqual(compiled_out, eager_out, **tol_kwargs)
+        self.assertEqual(compiled_q.grad, eager_q.grad, **tol_kwargs)
+        self.assertEqual(compiled_kv.grad, eager_kv.grad, **tol_kwargs)
 
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
@@ -504,6 +533,7 @@ class CudaReproTests(TestCase):
 
         self._test_split_reduction_impl(x)
 
+    @tf32_on_and_off(0.001)
     def test_split_with_sizes_reshape_cat_cantsplit_regression(self):
         class Repro(nn.Module):
             def __init__(self):
@@ -544,7 +574,7 @@ class CudaReproTests(TestCase):
             eager_out = model(x, indices)
             compiled_out = torch.compile(model)(x, indices)
 
-        torch.testing.assert_close(compiled_out, eager_out)
+        self.assertEqual(compiled_out, eager_out)
 
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
@@ -612,6 +642,7 @@ class CudaReproTests(TestCase):
 
         # fwd, backward
         for code in codes:
+            code = _strip_triton_static_asserts(code)
             f = FileCheck()
             # in eager, there are two down casts
             for _ in range(2):
@@ -1143,7 +1174,7 @@ class CudaReproTests(TestCase):
         # tmp0 - not wrapping of negative numbers
         FileCheck().check("tl.device_assert(((0 <= tmp0) & (tmp0 < 4))").check_next(
             "atomic_add"
-        ).run(code[0])
+        ).run(_strip_triton_static_asserts(code[0]))
         self.assertEqual(
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
@@ -1159,7 +1190,8 @@ class CudaReproTests(TestCase):
         out = compiled(inp)
         norm = out.norm(dim=-1)
         self.assertTrue(
-            torch.all(norm <= 1.0), f"expected norm <= 1.0 but got {norm.item()}"
+            torch.all(norm <= 1.0),
+            lambda msg: f"{msg}\nexpected norm <= 1.0 but got {norm.item()}",
         )
 
     def test_libdevice_routing(self):
@@ -1620,10 +1652,63 @@ class CudaReproTests(TestCase):
         self.assertEqual(ref, res)
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
+    @config.patch(
+        emulate_precision_casts=False,
+        emulate_precision_casts_on_saved_tensors=True,
+    )
+    def test_saved_lowp_checkpoint_truncates_subsequent_uses(self, lowp_dtype):
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        torch.manual_seed(0)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+
+        def policy(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sigmoid.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy)
+
+        def g(x):
+            y = torch.sigmoid(x)
+            return y * y
+
+        def fn(x):
+            return checkpoint(g, x, use_reentrant=False, context_fn=context_fn)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = (torch.randn(64, device=device_type, dtype=lowp_dtype) * 3).requires_grad_(
+            True
+        )
+
+        expected = fn(x)
+        actual, (code,) = run_and_get_code(
+            opt_fn, x.detach().clone().requires_grad_(True)
+        )
+
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        self.assertIn(f".to(tl.{lowp_name})", code)
+
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
         self, lowp_dtype
     ):
+        if TEST_XPU and lowp_dtype is torch.float16:
+            # To be enabled once triton-xpu emits a constrained fptrunc for
+            # `arith.truncf f32 -> f16`, so the fp32 -> fp16 -> fp32 barrier
+            # survives SPIR-V/IGC lowering (currently folded to identity).
+            # Upstream triton bug: intel/intel-xpu-backend-for-triton#7491.
+            # Tracker: intel/torch-xpu-ops#4358.
+            raise unittest.SkipTest(
+                "XPU: to be enabled after triton-xpu fix "
+                "(intel/intel-xpu-backend-for-triton#7491)"
+            )
         torch.manual_seed(0)
         torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
         lowp_name = str(lowp_dtype).removeprefix("torch.")
@@ -1663,6 +1748,22 @@ class CudaReproTests(TestCase):
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_promoted_lowp_cuda(self):
+        def fn(x):
+            y = x.to(torch.float16)
+            return y + x
+
+        x = torch.tensor([70000.0], device=device_type)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x)
+        actual, (code,) = run_and_get_code(opt_fn, x)
+
+        self.assertEqual(expected, actual)
+        self.assertIn(".to(tl.float16)", code)
+
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_norm_rounding(self):
         torch.manual_seed(0)
@@ -1682,7 +1783,6 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expected, actual)
 
-    @skipIfXpu(msg="AssertionError, torch-xpu-ops: #2554")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_min_pow_chain(self):
         torch.manual_seed(0)
@@ -1726,14 +1826,19 @@ class CudaReproTests(TestCase):
             ]
             compiled_out = opt_fn(*compiled_args)
 
+            # On XPU, the Triton backend's kernel fusion produces slightly
+            # different mixed-precision (fp16/bf16/f32) intermediate values,
+            # which the chained pow ops amplify exponentially.
+            rtol = 5e-2 if TEST_XPU else 1e-3
             for eager_tensor, compiled_tensor in zip(eager_out, compiled_out):
                 torch.testing.assert_close(
                     eager_tensor,
                     compiled_tensor,
-                    rtol=1e-3,
+                    rtol=rtol,
                     atol=1e-3,
                 )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2118,6 +2223,43 @@ class CudaReproTests(TestCase):
         out2 = compiled_scan(a, b)
         self.assertEqual(out1, out2)
 
+    def test_associative_scan_dynamic_ndim(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("associative_scan pointwise lowering requires CUDA")
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        def add_combine(a, b):
+            return a + b
+
+        def scan_dim0(x):
+            return associative_scan(add_combine, x, dim=0)
+
+        x1 = torch.randn(7, device=device_type)
+        torch.compiler.reset()
+        compiled_1d = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x1, 0), compiled_1d(x1))
+
+        x2 = torch.randn(4, 8, device=device_type)
+        torch.compiler.reset()
+        compiled_static = torch.compile(scan_dim0)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_static(x2))
+
+        torch.compiler.reset()
+        compiled_dynamic = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_dynamic(x2))
+
+        def mul_combine(a, b):
+            return a * b
+
+        def scan_dim1(x):
+            return associative_scan(mul_combine, x, dim=1)
+
+        x3 = torch.randn(2, 9, 5, device=device_type).clamp(-2, 2)
+        torch.compiler.reset()
+        compiled_3d = torch.compile(scan_dim1, dynamic=True)
+        self.assertEqual(scan_dim1(x3), compiled_3d(x3))
+
     def test_dynamic_persistent_reductions(self):
         @torch.compile(dynamic=True)
         def inner_reduce(x):
@@ -2137,6 +2279,124 @@ class CudaReproTests(TestCase):
         out, code = run_and_get_code(outer_reduce, a)
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
+
+    @config.patch(
+        {
+            "triton.multi_kernel": 0,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": False,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+    )
+    def test_persistent_reduction_selection_uses_tiling_scores(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(x):
+            hidden = x.shape[1] // 2
+            group_size = 128
+            gate = x[:, :hidden].to(torch.float32)
+            up = x[:, hidden:].to(torch.float32)
+            prod = F.silu(gate) * up
+            grouped = prod.view(x.shape[0], hidden // group_size, group_size)
+            return torch.amax(torch.abs(grouped), dim=-1)
+
+        x = torch.randn(4, 512, device=device_type, dtype=torch.bfloat16)
+        expected = fn(x)
+        out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(expected, out)
+
+        code = "\n".join(code)
+        self.assertIn("@triton_heuristics.persistent_reduction", code)
+        self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
+        persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
+        self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
+        self.assertNotIn("for roffset", persistent_code)
+
+    @parametrize("use_block_ptr", [False, True])
+    @parametrize("dynamic_batch", [False, True])
+    @config.patch(
+        {
+            "triton.multi_kernel": 0,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": False,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+    )
+    def test_persistent_reduction_cse_reindexed_epilogue(
+        self, use_block_ptr, dynamic_batch
+    ):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        out_dtype = torch.float16
+        fp8_min = -448.0
+        fp8_max = 448.0
+        min_fp8_scale = 1.0 / (fp8_max * 512.0)
+
+        def fn(out, x, scales_out, scale_ub):
+            hidden = x.shape[1] // 2
+            group_size = 128
+            gate = x[:, :hidden].to(torch.float32)
+            up = x[:, hidden:].to(torch.float32)
+            prod = F.silu(gate) * up
+            grouped = prod.view(x.shape[0], hidden // group_size, group_size)
+            scales = torch.amax(torch.abs(grouped), dim=-1)
+            scales = torch.clamp(scales, max=scale_ub)
+            scales = torch.clamp(scales * (1.0 / fp8_max), min=min_fp8_scale)
+            y = torch.clamp(grouped / scales[:, :, None], fp8_min, fp8_max).to(
+                out.dtype
+            )
+            scales_out.copy_(scales)
+            out.copy_(y.view_as(out))
+
+        x = torch.randn(4, 512, device=device_type, dtype=torch.bfloat16)
+        out = torch.empty(4, 256, device=device_type, dtype=out_dtype)
+        scales_out = torch.empty(4, 2, device=device_type)
+        expected_out = torch.empty_like(out)
+        expected_scales = torch.empty_like(scales_out)
+        scale_ub = torch.tensor(1e6, device=device_type)
+
+        fn(expected_out, x, expected_scales, scale_ub)
+        if dynamic_batch:
+            for tensor in (x, out, scales_out):
+                torch._dynamo.mark_dynamic(tensor, 0)
+        with config.patch("triton.use_block_ptr", use_block_ptr):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            _, code = run_and_get_code(
+                compiled_fn,
+                out,
+                x,
+                scales_out,
+                scale_ub,
+            )
+            if dynamic_batch:
+                x2 = torch.randn(7, 512, device=device_type, dtype=torch.bfloat16)
+                out2 = torch.empty(7, 256, device=device_type, dtype=out_dtype)
+                scales_out2 = torch.empty(7, 2, device=device_type)
+                expected_out2 = torch.empty_like(out2)
+                expected_scales2 = torch.empty_like(scales_out2)
+                fn(expected_out2, x2, expected_scales2, scale_ub)
+                compiled_fn(out2, x2, scales_out2, scale_ub)
+                self.assertEqual(expected_out2, out2)
+                self.assertEqual(expected_scales2, scales_out2)
+        self.assertEqual(expected_out, out)
+        self.assertEqual(expected_scales, scales_out)
+
+        code = "\n".join(code)
+        self.assertIn("@triton_heuristics.persistent_reduction", code)
+        self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
+        persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
+        if use_block_ptr:
+            self.assertIn("tl.make_block_ptr(in_ptr0", persistent_code)
+            self.assertEqual(
+                2, persistent_code.count("tl.load(tl.make_block_ptr(in_ptr0")
+            )
+        else:
+            self.assertEqual(2, persistent_code.count("tl.load(in_ptr0 +"))
+        self.assertLessEqual(persistent_code.count("libdevice.exp"), 1)
 
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
@@ -2263,6 +2523,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(idxs, [0])
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_unused_cpu_input_cudagraphs(self):
         def fn(x, y):
@@ -2301,6 +2562,7 @@ class CudaReproTests(TestCase):
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)
@@ -2355,7 +2617,7 @@ foo(torch.rand([256], device=\"{device_type}\"))
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        lines = code[0].split("\n")
+        lines = _strip_triton_static_asserts(code[0]).split("\n")
         start = lines.index("@triton.jit")
         kernel_code = "\n".join(lines[start : start + 14])
         self.assertExpectedInline(
@@ -2378,6 +2640,50 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not SM90OrLater, "needs at least 6 GiB of GPU memory headroom")
+    def test_chunked_unrolled_slice_gather_int32_overflow(self):
+        # Regression for an int32-indexing miscompile when an unrolled chunked
+        # loop containing a per-chunk F.linear and a gather gets fused into one
+        # pointwise kernel. Per-chunk buffer storage individually fits in int32,
+        # but the cross-buffer index `V * x0` reaches `V * total_numel` which
+        # overflows int32, and a separate kernel-level fusion synthesizes
+        # exactly that expression. Result before the fix: cudaErrorIllegalAddress.
+        torch.manual_seed(0)
+        T, D, V_, CHUNKSZ = 16384, 128, 200008, 2048
+        x = torch.randn(1, T, D, device=device_type, dtype=torch.bfloat16)
+        targets = torch.randint(0, V_, (1, T), device=device_type, dtype=torch.int64)
+        W = torch.randn(V_, D, device=device_type, dtype=torch.bfloat16) * 0.01
+        bias = torch.zeros(V_, device=device_type, dtype=torch.bfloat16)
+
+        def fwd(x, targets, W, bias):
+            seqlen = x.shape[-2]
+            out = torch.empty(x.shape[:-1], device=x.device, dtype=torch.float32)
+            for start in range(0, seqlen, CHUNKSZ):
+                end = start + CHUNKSZ
+                chunk_x = x[..., start:end, :]
+                chunk_targets = targets[..., start:end]
+                logits = torch.nn.functional.linear(chunk_x, W) + bias
+                m = logits.amax(dim=-1, keepdim=True)
+                tok = (
+                    torch.log(
+                        torch.sum(torch.exp(logits - m), dim=-1, dtype=torch.float32)
+                    )
+                    + m.squeeze(-1).to(torch.float32)
+                    - torch.gather(logits, -1, chunk_targets[..., None])
+                    .squeeze(-1)
+                    .to(torch.float32)
+                )
+                out[..., start:end] = tok
+            return out
+
+        eager = fwd(x, targets, W, bias)
+        opt = torch.compile(fwd, dynamic=False, fullgraph=True)
+        compiled = opt(x, targets, W, bias)
+        torch.accelerator.synchronize()
+        # bf16 matmul + log_sum_exp leaves some slack; loose tol is fine here,
+        # the test is about not crashing.
+        self.assertTrue(torch.allclose(eager, compiled, atol=1e-2, rtol=1e-2))
+
     def test_int64_index_intermediate(self):
         def foo(inp):
             view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
@@ -2603,6 +2909,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2727,7 +3034,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 # They should be identical (or very close)
                 self.assertTrue(
                     torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
-                    f"Results differ for input shape {(batch, channels, h, w)}. "
+                    lambda msg: f"{msg}\nResults differ for input shape {(batch, channels, h, w)}. "
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 
@@ -2824,6 +3131,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
         msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
     )
@@ -3010,7 +3318,75 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(compile_decimal, Decimal(0))
 
-    @skipIfXpu(msg="AssertionError: torch-xpu-ops: #3006")
+    @unittest.skipUnless(HAS_GPU, "requires GPU")
+    def test_fused_slice_scatter_int32_const_overflow(self):
+        # End-to-end repro for the int32 address-constant overflow guarded
+        # by SIMDKernelFeatures.any_index_expr_overflows_int32.
+        # On unfixed builds the fused backward kernel raises
+        #   ValueError('Scalar -2779057358 is out of range for type int32')
+        # because slice_scatter.backward + mm.backward fuse into a kernel
+        # whose simplified index expression contains a constant > 2**31.
+        # Needs ~30 GB free GPU memory (leaves + grads); skipped otherwise.
+        total_rows = 9_500_000
+        slice_begin = 9_472_768
+        slice_end = 9_499_648
+        col_widths = [32, 32, 32, 32, 32, 32, 32, 32, 32, 22]
+        total_cols = sum(col_widths)
+        int32_max = 2**31 - 1
+
+        # Three triggering conditions for the bug.
+        self.assertLess(total_rows * max(col_widths), int32_max)
+        self.assertLess((slice_end - slice_begin) * total_cols, int32_max)
+        self.assertGreater(slice_begin * total_cols, int32_max)
+
+        # ~2x leaf bytes for .grad, plus 1.3x safety margin.
+        leaf_bytes = sum(total_rows * w * 4 for w in col_widths)
+        need_gb = leaf_bytes * 2 / 1024**3 * 1.3
+        free_gb = getattr(torch, device_type).mem_get_info()[0] / 1024**3
+        if free_gb < need_gb:
+            raise unittest.SkipTest(
+                f"requires ~{need_gb:.1f} GB free GPU memory, have {free_gb:.1f} GB"
+            )
+
+        class SliceConcatDense(nn.Module):
+            def __init__(self, widths):
+                super().__init__()
+                self.widths = widths
+                self.linears = nn.ModuleList(
+                    [nn.Linear(w, w, bias=False) for w in widths]
+                )
+
+            def forward(self, inputs):
+                sliced = [t[slice_begin:slice_end, :] for t in inputs]
+                cat = torch.cat(sliced, dim=1)
+                out = cat.new_zeros(())
+                col = 0
+                for w, linear in zip(self.widths, self.linears):
+                    out = out + linear(cat[:, col : col + w]).sum()
+                    col += w
+                return out
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        inputs = [
+            torch.randn(
+                total_rows,
+                w,
+                device=device_type,
+                dtype=torch.float32,
+                requires_grad=True,
+            )
+            for w in col_widths
+        ]
+        model = SliceConcatDense(col_widths).to(device_type)
+        compiled = torch.compile(model, dynamic=False)
+        try:
+            loss = compiled(inputs)
+            loss.backward()
+        finally:
+            del inputs, model, compiled
+            getattr(torch, device_type).empty_cache()
+
     @config.patch(
         {"triton.use_block_ptr": True, "triton.codegen_upcast_to_fp32": False}
     )
@@ -3035,6 +3411,51 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
+    @skipIfXpu(msg="PTX atan codegen is CUDA-specific")
+    def test_atan_special_psi_eager_parity(self):
+        def atan_fn(x):
+            return torch.ops.aten.atan(x)
+
+        def fn(x):
+            out = atan_fn(x)
+            return torch.ops.aten.special_psi(out, out=out)
+
+        atan_x = torch.tensor(
+            [
+                -float("inf"),
+                -10.0,
+                -1.5516796112060547,
+                -1.0,
+                -0.0,
+                0.0,
+                1.0,
+                1.5516796112060547,
+                10.0,
+                float("inf"),
+                float("nan"),
+            ],
+            device=device_type,
+        )
+        actual_atan = torch.compile(atan_fn, backend="inductor", fullgraph=True)(atan_x)
+        expected_atan = atan_fn(atan_x)
+        self.assertEqual(
+            actual_atan.view(torch.uint32),
+            expected_atan.view(torch.uint32),
+        )
+
+        # Selected from the original seed-0 repro where a 1 ULP atan difference
+        # was amplified by special_psi into an assert_close failure.
+        x = torch.tensor([-1.5516796112060547], device=device_type)
+        actual, code = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+        expected = fn(x)
+
+        torch.testing.assert_close(actual, expected)
+        self.assertTrue(any("rcp.approx.ftz.f32" in src for src in code))
 
     def test_vector_norm_negative_dim_size_one(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/182181

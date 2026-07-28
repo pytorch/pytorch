@@ -454,8 +454,7 @@ static PyObject* THPStream_richcompare(
         break;
     }
   }
-  Py_XINCREF(result);
-  return result;
+  return Py_XNewRef(result);
 }
 
 static const std::initializer_list<PyMemberDef> THPStream_members = {

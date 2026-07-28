@@ -2,9 +2,11 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import cli.lib.core.vllm.vllm_build as vllm_build
+import cli.lib.core.vllm.vllm_test as vllm_test
 
 
 _VLLM_BUILD_MODULE = "cli.lib.core.vllm.vllm_build"
@@ -175,3 +177,29 @@ class TestBuildCmdAndRun(unittest.TestCase):
         _, kwargs = mock_run.call_args
         if kwargs.get("cwd") != "vllm":
             raise AssertionError(f"Expected cwd='vllm', got cwd={kwargs.get('cwd')!r}")
+
+
+class TestVllmTestRunner(unittest.TestCase):
+    @patch.dict(
+        os.environ,
+        {
+            "CI": "1",
+            "HF_HOME": "/tmp/hf",
+            "VLLM_TEST_HUGGING_FACE_TOKEN": "token",
+        },
+        clear=True,
+    )
+    def test_set_envs_disables_custom_op_aliasing_errors(self):
+        args = SimpleNamespace(
+            shard_id=1,
+            num_shards=1,
+            test_plan="vllm_basic_correctness_test",
+        )
+        runner = vllm_test.VllmTestRunner(args)
+        params = SimpleNamespace(torch_cuda_arch_list="8.0")
+
+        runner._set_envs(params)
+
+        self.assertEqual(os.environ["TORCH_CUDA_ARCH_LIST"], "8.0")
+        self.assertEqual(os.environ["HF_TOKEN"], "token")
+        self.assertEqual(os.environ["TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING"], "0")
