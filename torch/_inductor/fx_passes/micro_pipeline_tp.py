@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import operator
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from math import prod
@@ -68,6 +69,24 @@ def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
     if not isinstance(val, torch.Tensor):
         raise AssertionError(f"expected node val to be a Tensor, got {type(val)}")
     return val
+
+
+def _enable_symm_mem(group_name):
+    from torch.distributed._symmetric_memory import (
+        enable_symm_mem_for_group,
+        is_symm_mem_enabled_for_group,
+    )
+
+    if is_symm_mem_enabled_for_group(group_name):
+        return True
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            enable_symm_mem_for_group(group_name)
+        return True
+    except (TypeError, RuntimeError, KeyError) as e:
+        log.debug("async TP cannot enable symm_mem for group %s: %s", group_name, e)
+        return False
 
 
 @dataclass
@@ -836,7 +855,6 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         return
 
     from torch.distributed._symmetric_memory import (
-        is_symm_mem_enabled_for_group,
         restride_A_shard_for_fused_all_gather_matmul,
     )
 
@@ -848,7 +866,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         all_gather.group_name,
     )
 
-    if not is_symm_mem_enabled_for_group(group_name):
+    if not _enable_symm_mem(group_name):
         return
 
     filter_matmul = None
@@ -1086,7 +1104,6 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     from torch.distributed._symmetric_memory import (
-        is_symm_mem_enabled_for_group,
         restride_A_for_fused_matmul_reduce_scatter,
     )
 
@@ -1106,7 +1123,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         reduce_scatter.group_name,
     )
 
-    if not is_symm_mem_enabled_for_group(group_name):
+    if not _enable_symm_mem(group_name):
         return
 
     filter_matmul = None
