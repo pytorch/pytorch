@@ -41,6 +41,14 @@ from torch.testing._internal.inductor_utils import (
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
+from torch.utils._triton import has_triton_block_ptr
+
+
+# Tests that assert block-pointer codegen only run on Triton builds that still
+# provide the block-pointer frontend API (removed in triton-lang/triton#10833).
+requires_block_ptr = unittest.skipUnless(
+    has_triton_block_ptr(), "requires Triton block-pointer API"
+)
 
 
 try:
@@ -1596,6 +1604,16 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1, 2]" in code)
                 # Loading b
                 self.assertTrue("boundary_check=[0, 1]" in code)
+
+
+@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+@requires_block_ptr
+@config.patch("triton.use_block_ptr", True)
+class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
+    device = GPU_TYPE
+
+
+test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

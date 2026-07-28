@@ -770,6 +770,7 @@ class PaddingTest(TestCaseBase):
             "pad_outputs": True,
             "padding_stride_threshold": 0,
             "triton.prefer_nd_tiling": True,
+            "triton.use_block_ptr": True,
             "triton.codegen_upcast_to_fp32": False,
             "unroll_reductions_threshold": 1,
         }
@@ -906,6 +907,7 @@ class PaddingTest(TestCaseBase):
             "padding_alignment_bytes": alignment_bytes,
             "pad_outputs": True,
             "padding_stride_threshold": 0,
+            "triton.use_block_ptr": True,
         }
         with config.patch(config_patches):
             torch._dynamo.mark_dynamic(input_tensors[0], 2)
