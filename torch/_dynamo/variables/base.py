@@ -331,21 +331,6 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
-def maybe_get_python_type(obj: VariableTracker) -> type:
-    try:
-        return obj.python_type()
-    except NotImplementedError:
-        unimplemented(
-            gb_type="Unsupported python_type() call",
-            context=f"{obj} does not implement python_type()",
-            explanation="This VariableTracker does not implement python_type(), "
-            "which is required for object protocol operations.",
-            hints=[
-                *graph_break_hints.DYNAMO_BUG,
-            ],
-        )
-
-
 # CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
 # deliberately mirrors the low four so the mapping is near-identity.
 _METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
