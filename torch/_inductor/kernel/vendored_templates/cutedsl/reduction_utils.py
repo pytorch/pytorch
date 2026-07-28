@@ -1,9 +1,9 @@
-"""CuTeDSL geometry helpers shared by QuACK-compatible reductions."""
+"""CuTeDSL geometry helpers shared by NVGEMM reduction kernels."""
 
 import cutlass.cute as cute
 
-from . import layout_utils
-from .sm90_utils import partition_for_epilogue
+from torch._vendor.quack import layout_utils
+from torch._vendor.quack.sm90_utils import partition_for_epilogue
 
 
 __all__ = ["get_lane_warp_layouts", "partition_for_epilogue"]
