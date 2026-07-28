@@ -2427,7 +2427,11 @@ class SIMDScheduling(BaseScheduling):
 
     # pyrefly: ignore [bad-override]
     def benchmark_codegened_module(
-        self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
+        self,
+        mod,
+        n_spills_threshold=8,
+        node_names: OrderedSet[str] | None = None,
+        skip_perf_cache: bool = False,
     ) -> tuple[float, str]:
         raise NotImplementedError
 
@@ -3532,7 +3536,9 @@ class SIMDScheduling(BaseScheduling):
         V.graph.wrapper_code.generate_debug_sync(V.graph.wrapper_code)
 
     def _codegen_standalone_kernel(
-        self, node_info: NodeInfo, only_gen_src_code: bool
+        self,
+        node_info: NodeInfo,
+        only_gen_src_code: bool,
     ) -> tuple[str, TritonKernel]:
         kernel_kwargs: dict[str, Any] = {}
         self.kernel_type.apply_feature_required_overrides(
@@ -3614,13 +3620,21 @@ class SIMDScheduling(BaseScheduling):
         return configs, kernel
 
     @staticmethod
+    def _stitch_combo_block_config(chosen_configs: list[Any]) -> dict[str, int]:
+        """Suffix each subkernel's BLOCK kwargs into one combo config dict
+        (XBLOCK -> XBLOCK_0, XBLOCK_1, ...; R0_BLOCK -> R0_BLOCK_0, ...)."""
+        return {
+            f"{key}_{i}": int(cfg.kwargs[key])
+            for i, cfg in enumerate(chosen_configs)
+            for key in cfg.kwargs
+            if key.endswith("BLOCK")
+        }
+
+    @staticmethod
     def _stitch_no_bench_combo_config(
         chosen_configs: list[Any], chosen_nodes: list[Any]
     ) -> Any:
         import triton
-
-        def block_keys(cfg: Any) -> list[str]:
-            return [k for k in cfg.kwargs if k.endswith("BLOCK")]
 
         def node_total_bytes(snode: Any) -> int:
             return sum(
@@ -3640,11 +3654,9 @@ class SIMDScheduling(BaseScheduling):
         )
         winner_cfg = chosen_configs[winner_idx]
 
-        stitched_kwargs: dict[str, Any] = {
-            f"{key}_{i}": int(cfg.kwargs[key])
-            for i, cfg in enumerate(chosen_configs)
-            for key in block_keys(cfg)
-        }
+        stitched_kwargs: dict[str, Any] = SIMDScheduling._stitch_combo_block_config(
+            chosen_configs
+        )
         stitched_kwargs.update(
             {
                 key: value
@@ -3658,6 +3670,217 @@ class SIMDScheduling(BaseScheduling):
             num_warps=int(winner_cfg.num_warps),
             num_stages=int(winner_cfg.num_stages),
         )
+
+    def _autotune_subkernels_compile_time(
+        self, group: list[Any], node_schedule_map: dict[Any, NodeInfo]
+    ) -> list[Any | None]:
+        """Autotune each combo subkernel standalone at compile time and read back its winning
+        config (None for a subkernel whose compile or benchmark failed, which the caller
+        carves out to run standalone instead of failing the compile).
+
+        Triton precompiles are submitted to the async compile pool as each subkernel is codegened.
+        The subkernels are then benchmarked in compile-completion order through the standard
+        benchmark_codegened_module path, so device benchmarking overlaps the remaining precompiles
+        while retaining preserve_rng_state, argument cloning and the n_spills guard. Subkernels
+        with a single candidate config (unless coordinate descent tuning is on) or an autotune
+        cache hit are taken directly with no benchmark.
+        """
+        from concurrent.futures import as_completed
+
+        from ..async_compile import AsyncCompile
+        from ..codecache import CodeCacheFuture
+
+        async_compile = AsyncCompile()
+        use_process_pool = async_compile.use_process_pool()
+        work: list[tuple[Any, Any, bool, bool, Any]] = []
+        futures_by_autotuner: dict[int, Any] = {}
+        seen_autotuners: OrderedSet[int] = OrderedSet()
+
+        # Benchmark codegen must not count toward generated_kernel_count: these kernels
+        # are never emitted into the wrapper.
+        old_kernel_count = metrics.generated_kernel_count
+        for pn in group:
+            node_info = node_schedule_map[pn]
+            # Cooperative reductions are disabled to match how the combo emits its
+            # subkernels; force_cooperative_reductions must be patched too since it
+            # short-circuits should_use_cooperative_reduction before the first flag.
+            with config.patch(
+                {
+                    "triton.cooperative_reductions": False,
+                    "triton.force_cooperative_reductions": False,
+                }
+            ):
+                src_code = self.generate_kernel_code_from_nodes(
+                    pn.get_nodes(),
+                    benchmark_kernel=True,
+                    coalesce_analysis=node_info.features.coalesce_analysis,
+                )
+            mod = PyCodeCache.load(src_code)
+            autotuner = mod.triton_
+            configs = autotuner.configs
+            already_tuned = bool(autotuner.launchers)  # from a prior compile this run
+            # One candidate config -> nothing to autotune among configs, so take it directly.
+            # Skip only when CDT is off: with CDT on, coordinate descent can still improve a
+            # single config by searching its neighbors.
+            single = (
+                not config.coordinate_descent_tuning
+                and configs is not None
+                and len(configs) == 1
+            )
+            autotuner_id = id(autotuner)
+            duplicate = autotuner_id in seen_autotuners
+            seen_autotuners.add(autotuner_id)
+            future = futures_by_autotuner.get(autotuner_id)
+            if not already_tuned and not duplicate and not single and use_process_pool:
+                # triton() may compile synchronously and return a raw autotuner
+                # (e.g. TRITON_INTERPRET=1) despite use_process_pool being True.
+                maybe_future = async_compile.triton("triton_", src_code)
+                future = (
+                    maybe_future if isinstance(maybe_future, CodeCacheFuture) else None
+                )
+                futures_by_autotuner[autotuner_id] = future
+            work.append((pn, mod, already_tuned or duplicate, single, future))
+        metrics.generated_kernel_count = old_kernel_count
+
+        winners: list[Any | None] = [None] * len(work)
+        failed: OrderedSet[int] = OrderedSet()
+
+        def fallback(index: int, pn: Any) -> None:
+            counters["inductor"]["combo_subkernel_autotune_fallback"] += 1
+            log.warning("combo compile-time autotune failed for %s; carving out", pn)
+            failed.add(index)
+
+        def benchmark(index: int) -> None:
+            pn, mod, already_tuned, single, _ = work[index]
+            autotuner = mod.triton_
+            configs = autotuner.configs
+            benchmark_failed = False
+            if not already_tuned and not single:
+                # skip_perf_cache: the winner is needed in launchers, not just the timing.
+                try:
+                    ms, _mod_path = self.benchmark_codegened_module(
+                        mod, skip_perf_cache=True
+                    )
+                except Exception:
+                    log.debug("combo subkernel benchmark raised", exc_info=True)
+                    ms = float("inf")
+                # inf means the benchmark failed or spilled; launchers != 1 means the
+                # autotune race never pruned to a winner.
+                benchmark_failed = (
+                    math.isinf(ms) and len(autotuner.launchers) != 1
+                ) or len(autotuner.launchers) > 1
+            if benchmark_failed:
+                fallback(index, pn)
+                return
+            launchers = autotuner.launchers
+            info = autotuner.autotune_cache_info or {}
+            # cached == no fresh benchmark ran: in-process reuse (launchers already set),
+            # the benchmark was skipped (no launchers), or a .best_config hit.
+            cached = (
+                already_tuned
+                or not launchers
+                or info.get("autotune_cache_state") == "hit"
+            )
+            counters["inductor"][
+                "combo_subkernel_autotune_cached"
+                if cached
+                else "combo_subkernel_autotune"
+            ] += 1
+            if launchers:
+                winners[index] = launchers[0].config
+            elif configs:
+                winners[index] = configs[0]
+            else:
+                # configs is None after a precompile that failed to produce launchers.
+                fallback(index, pn)
+
+        pending: dict[Any, list[int]] = {}
+        ready: list[int] = []
+        for index, (*_, future) in enumerate(work):
+            raw_future = getattr(future, "future", None)
+            if raw_future is None:
+                ready.append(index)
+            else:
+                pending.setdefault(raw_future, []).append(index)
+
+        def resolve_and_benchmark(future: Any, indices: list[int]) -> None:
+            if future is not None:
+                try:
+                    # Waiting on the raw pool future (not the LambdaFuture wrapper)
+                    # surfaces worker exceptions without repeating the wrapper's
+                    # parent-side precompile of a kernel we discard: benchmark() uses
+                    # mod.triton_, whose own precompile hits the now-warm disk cache.
+                    future.result()
+                except Exception:
+                    for index in indices:
+                        fallback(index, work[index][0])
+                    return
+            for index in indices:
+                benchmark(index)
+
+        resolved_futures: OrderedSet[int] = OrderedSet()
+        for index in ready:
+            future = work[index][-1]
+            if future is not None and id(future) in resolved_futures:
+                future = None
+            elif future is not None:
+                resolved_futures.add(id(future))
+            resolve_and_benchmark(future, [index])
+
+        for raw_future in as_completed(pending):
+            resolve_and_benchmark(raw_future, pending[raw_future])
+
+        if any(w is None for i, w in enumerate(winners) if i not in failed):
+            raise AssertionError("expected all combo subkernels to be autotuned")
+        return winners
+
+    def _build_combo_kernel(
+        self,
+        fusion_pns: list[Any],
+        node_schedule_map: dict[Any, NodeInfo],
+        enable_autotune: bool,
+        mixed_sizes: bool,
+        per_subkernel_blocks: bool,
+        only_gen_src_code: bool,
+    ) -> Any:
+        """Build a ComboKernel and its sub-kernels from a list of partition nodes."""
+        from .triton_combo_kernel import ComboKernel
+
+        kernel = ComboKernel(
+            triton_kernel_cls=self.kernel_type,
+            enable_autotune=enable_autotune,
+            mixed_sizes=mixed_sizes,
+            per_subkernel_blocks=per_subkernel_blocks,
+        )
+        for pn in fusion_pns:
+            node_info = node_schedule_map[pn]
+            subkernel = ComboKernel.create_triton_kernel(
+                node_info.tiling,
+                features=node_info.features,
+                optimize_mask=not mixed_sizes,
+                triton_kernel_cls=self.kernel_type,
+                tiling_scores=node_info.tiling_scores,
+                per_subkernel_blocks=per_subkernel_blocks,
+            )
+            self.process_kernel(
+                kernel.create_sub_kernel(subkernel),
+                node_info.node_schedule,
+                only_gen_src_code,
+            )
+        return kernel
+
+    @staticmethod
+    def _combo_launch_candidates(winners: list[Any]) -> list[Any]:
+        """Deduplicate the subkernels' winner launch configs (non-block kwargs + num_warps +
+        num_stages) into the candidate set for the combo's kernel-level autotune."""
+        from .triton_combo_kernel import ComboLaunchConfig
+
+        seen: dict[Any, Any] = {}
+        for w in winners:
+            nb = {k: int(v) for k, v in w.kwargs.items() if not k.endswith("BLOCK")}
+            key = (tuple(sorted(nb.items())), int(w.num_warps), int(w.num_stages))
+            seen[key] = ComboLaunchConfig(nb, int(w.num_warps), int(w.num_stages))
+        return [seen[k] for k in sorted(seen)]
 
     def generate_combo_kernel_code(
         self,
@@ -3763,6 +3986,54 @@ class SIMDScheduling(BaseScheduling):
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
+                if (
+                    enable_autotune
+                    and per_subkernel_blocks
+                    and config.combo_kernel_compile_time_autotune
+                    and not only_gen_src_code
+                ):
+                    group = list(node_group)
+                    tuned = self._autotune_subkernels_compile_time(
+                        group, node_schedule_map
+                    )
+                    # A None winner means its compile/benchmark failed; carve it out to
+                    # run standalone rather than stitch a bogus config or fail compile.
+                    fusable = [(pn, w) for pn, w in zip(group, tuned) if w is not None]
+                    carve_out = [pn for pn, w in zip(group, tuned) if w is None]
+                    if len(fusable) >= 2:
+                        fusable_pns = [pn for pn, _ in fusable]
+                        winners = [w for _, w in fusable]
+                        kernel = self._build_combo_kernel(
+                            fusable_pns,
+                            node_schedule_map,
+                            enable_autotune=True,
+                            mixed_sizes=mixed_sizes,
+                            per_subkernel_blocks=True,
+                            only_gen_src_code=only_gen_src_code,
+                        )
+                        kernel.combo_compile_time_autotune = True
+                        kernel.combo_launch_candidates = self._combo_launch_candidates(
+                            winners
+                        )
+                        # Compile-time autotune needs only the per-subkernel block sizes;
+                        # warps / num_stages / backend kwargs are autotuned over
+                        # combo_launch_candidates.
+                        kernel.stitched_block_config = self._stitch_combo_block_config(
+                            winners
+                        )
+                        src_code = kernel.codegen_kernel()
+                        # pyrefly: ignore [bad-argument-type]
+                        kernel_code_list.append((src_code, kernel, fusable_pns))
+                    else:
+                        # Fewer than two tunable sub-kernels: emit them all standalone.
+                        carve_out = list(group)
+                    for pn in carve_out:
+                        co_src, co_kernel = self._codegen_standalone_kernel(
+                            node_schedule_map[pn], only_gen_src_code
+                        )
+                        # pyrefly: ignore [bad-argument-type]
+                        kernel_code_list.append((co_src, co_kernel, [pn]))
+                    continue
                 no_bench_mode = (
                     per_subkernel_blocks
                     and not enable_autotune
@@ -3793,27 +4064,14 @@ class SIMDScheduling(BaseScheduling):
                     fusion_pns = list(node_group)
 
                 if len(fusion_pns) >= 2:
-                    kernel = ComboKernel(
-                        triton_kernel_cls=self.kernel_type,
+                    kernel = self._build_combo_kernel(
+                        fusion_pns,
+                        node_schedule_map,
                         enable_autotune=enable_autotune,
                         mixed_sizes=mixed_sizes,
                         per_subkernel_blocks=per_subkernel_blocks,
+                        only_gen_src_code=only_gen_src_code,
                     )
-                    for pn in fusion_pns:
-                        node_info = node_schedule_map[pn]
-                        subkernel = ComboKernel.create_triton_kernel(
-                            node_info.tiling,
-                            features=node_info.features,
-                            optimize_mask=not mixed_sizes,
-                            triton_kernel_cls=self.kernel_type,
-                            tiling_scores=node_info.tiling_scores,
-                            per_subkernel_blocks=per_subkernel_blocks,
-                        )
-                        self.process_kernel(
-                            kernel.create_sub_kernel(subkernel),
-                            node_info.node_schedule,
-                            only_gen_src_code,
-                        )
 
                     if no_bench_mode and fusion_configs:
                         kernel.no_bench_stitched_config = (
@@ -4630,13 +4888,19 @@ class SIMDScheduling(BaseScheduling):
         return False
 
     def generate_kernel_code_from_nodes(
-        self, nodes, benchmark_kernel=False, hint_override: int | None = None
+        self,
+        nodes,
+        benchmark_kernel=False,
+        hint_override: int | None = None,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            coalesce_analysis = None
-            if torch._inductor.config.triton.coalesce_tiling_analysis:
+            if (
+                coalesce_analysis is None
+                and torch._inductor.config.triton.coalesce_tiling_analysis
+            ):
                 from torch._inductor.tiling_utils import (
                     analyze_memory_coalescing_for_nodes,
                 )
@@ -4651,10 +4915,13 @@ class SIMDScheduling(BaseScheduling):
                 rnumel,
                 features.coalesce_analysis,
             )
+            kernel_kwargs: dict[str, Any] = {}
+            self.kernel_type.apply_feature_required_overrides(features, kernel_kwargs)
             kernel = self.kernel_type(
                 tiling,
                 features=features,
                 tiling_scores=tiling_scores,
+                **kernel_kwargs,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             # Collect config_patches from operations
