@@ -2382,6 +2382,28 @@ class TestMaxAutotune(TestCase):
             ):
                 torch.compile(func_test1, dynamic=False)(a, b, a, b)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "TF32 disabled on ROCm in this module")
+    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    def test_allow_tf32_dynamic_shape(self):
+        # A symbolic M that is large by hint must still enable TF32; the gate
+        # previously used statically_known_true, which is False for dynamic M.
+        def mm(x, w):
+            return x @ w
+
+        def gen_code(m):
+            x = torch.rand(m, 2048, device=GPU_TYPE)
+            w = torch.rand(2048, 2048, device=GPU_TYPE)
+            torch._dynamo.mark_dynamic(x, 0)
+            with fresh_cache():
+                _, code = run_and_get_code(torch.compile(mm), x, w)
+            return code[0]
+
+        # setUpModule sets float32_matmul_precision("high") -> fp32_precision tf32.
+        # Large hint clears m >= 16, so TF32 is enabled on the symbolic-M GEMM.
+        self.assertIn("ALLOW_TF32 : tl.constexpr = True", gen_code(4096))
+        # Small hint fails m >= 16, so TF32 stays disabled.
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", gen_code(8))
+
     @config.patch(
         {
             "max_autotune": True,
