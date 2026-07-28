@@ -3,6 +3,7 @@
  ******************************************************************************/
 
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <fmha_fwd.hpp>
 #include <mask.hpp>
 
@@ -422,8 +423,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     // Hand the kernel seqlen-padded *allocations* (the extra rows are mapped
     // scratch) while leaving seqlen_q/seqlen_k unchanged, so the kernel's logical
     // masking is identical and numerics are unchanged; the real rows are copied
-    // back into the caller-visible tensors below. Engages only for tile-unaligned
-    // seqlens on the non-swapped path; skipped when seqlenq_ngroups_swapped is
+    // back into the caller-visible tensors below. Engages only on gfx950 (MI350X)
+    // for tile-unaligned seqlens on the non-swapped path; skipped when seqlenq_ngroups_swapped is
     // active (that fast path reshapes seqlen_q into the batch/group dim, so the
     // tile-tail over-read does not apply).
     // Scope: covers Q/K/V (read) and O/LSE (write) only. attn_bias (bias_ptr,
@@ -438,8 +439,13 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     constexpr int kCkSeqTileLCM = 256; // >= every fwd kM0/kN0 in the generated set
     const int seqlen_q_pad = round_multiple(seqlen_q, kCkSeqTileLCM);
     const int seqlen_k_pad = round_multiple(seqlen_k, kCkSeqTileLCM);
+    // Restrict to gfx950 (MI350X): the only arch observed to fault on the tile-
+    // tail over-read. Elsewhere (e.g. gfx942/MI300X) the pad+copy is pure
+    // overhead with no fault to avoid. Placed last so isGPUArch is evaluated only
+    // for the rare tile-unaligned non-swapped shapes.
     const bool ck_oob_guard = !seqlenq_ngroups_swapped &&
-        ((seqlen_q_pad != seqlen_q) || (seqlen_k_pad != seqlen_k));
+        ((seqlen_q_pad != seqlen_q) || (seqlen_k_pad != seqlen_k)) &&
+        at::detail::getCUDAHooks().isGPUArch({"gfx950"});
     if (ck_oob_guard) {
         if (seqlen_q_pad != seqlen_q) {
             q_arg   = at::pad(q_padded, {0, 0, 0, 0, 0, seqlen_q_pad - seqlen_q});

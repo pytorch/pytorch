@@ -4,6 +4,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/DimVector.h>
 
 #include <atomic>
@@ -21,6 +22,15 @@ class C10_API SymbolicShapeMeta {
   SymInt storage_offset_ = 0;
 
   bool strides_valid_ = true; // e.g. for sparse where there are no strides
+
+  // storing concrete sizes/strides for C++ FakeTensors without a PyInterpreter
+  // this is what owns the vector for sizes/strides
+  // so that sizes_custom()/strides_custom() can return a proper IntArrayRef
+
+  // lifetime is tied to lifetime of tensor
+  // no race conditions since its not stored directly on TensorImpl
+  mutable SmallVector<int64_t, 5> materialized_sizes_;
+  mutable SmallVector<int64_t, 5> materialized_strides_;
 
   SymbolicShapeMeta() = default;
   ~SymbolicShapeMeta() = default;
@@ -72,6 +82,12 @@ class C10_API SymbolicShapeMeta {
   }
   bool has_is_non_overlapping_and_dense() const {
     return available_.load() & is_non_overlapping_and_dense_avail;
+  }
+  bool has_materialized_sizes() const {
+    return available_.load() & sizes_materialized_avail;
+  }
+  bool has_materialized_strides() const {
+    return available_.load() & strides_materialized_avail;
   }
 
   // Accessors to cached derived properties
@@ -134,6 +150,20 @@ class C10_API SymbolicShapeMeta {
     return is_non_overlapping_and_dense_;
   }
 
+  IntArrayRef materialized_sizes() const {
+    if (C10_UNLIKELY(!has_materialized_sizes())) {
+      init_materialized_sizes();
+    }
+    return IntArrayRef(materialized_sizes_);
+  }
+
+  IntArrayRef materialized_strides() const {
+    if (C10_UNLIKELY(!has_materialized_strides())) {
+      init_materialized_strides();
+    }
+    return IntArrayRef(materialized_strides_);
+  }
+
   // Assumptions so we can short-circuit computation
   // NOTE: Don't need to lock mutables_ since these aren't const
   void assume_contiguous(SymBool val = true) {
@@ -191,6 +221,8 @@ class C10_API SymbolicShapeMeta {
   void init_is_channels_last() const;
   void init_is_channels_last_3d() const;
   void init_is_non_overlapping_and_dense() const;
+  void init_materialized_sizes() const;
+  void init_materialized_strides() const;
 
   // NOTE: These only set if !has_foo()
   void set_numel(SymInt val) const;
@@ -200,6 +232,8 @@ class C10_API SymbolicShapeMeta {
   void set_is_channels_last(SymBool val) const;
   void set_is_channels_last_3d(SymBool val) const;
   void set_is_non_overlapping_and_dense(SymBool val) const;
+  void set_materialized_sizes() const;
+  void set_materialized_strides() const;
 
   // Lazily initialized variables, with the corresponding available_ flag
   // indicating whether the value has been initialized
@@ -213,6 +247,8 @@ class C10_API SymbolicShapeMeta {
     is_channels_last_avail = 1 << 4,
     is_channels_last_3d_avail = 1 << 5,
     is_non_overlapping_and_dense_avail = 1 << 6,
+    sizes_materialized_avail = 1 << 7,
+    strides_materialized_avail = 1 << 8,
   };
 
   // Mutex to prevent races when initializing the variable from const accessors
