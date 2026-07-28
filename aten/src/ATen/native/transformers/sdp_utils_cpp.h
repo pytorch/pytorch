@@ -393,7 +393,10 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   return true;
 }
 
-template <bool supports_gqa, bool requires_same_num_heads=true>
+template <
+    bool supports_gqa,
+    bool requires_same_num_heads = true,
+    bool supports_mqa = false>
 inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
@@ -433,6 +436,13 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
 
   // same num heads condition for non-gqa case
   if (!same_num_heads){
+    if constexpr (supports_mqa) {
+      const bool broadcastable_num_heads =
+          q_num_heads > 0 && k_num_heads == 1 && v_num_heads == 1;
+      if (broadcastable_num_heads) {
+        return true;
+      }
+    }
     if (debug) {
       TORCH_WARN(
           "For dense input, both fused kernels require query, key and value to have the same num_heads. ",
