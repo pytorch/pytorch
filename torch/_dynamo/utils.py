@@ -5732,6 +5732,60 @@ def get_optimize_ddp_mode() -> OptimizeDDPMode:
     return cast("OptimizeDDPMode", mode)
 
 
+@dataclasses.dataclass(frozen=True)
+class DynamoExecutionState:
+    grad_enabled: bool
+    inference_mode_enabled: bool
+
+
+_user_execution_state_tls = threading.local()
+
+# Repro generation happens after maybe_disable_inference_mode() has normalized
+# the current state, so it cannot sample torch directly. The top stack entry is
+# the original outer user state for the dynamic extent of preserve_global_state.
+# Nested compilations push that same state, and the context manager always pops
+# it in a finally block. Direct repro generation with no active entry samples
+# the current state instead.
+
+
+def get_current_execution_state() -> DynamoExecutionState:
+    return DynamoExecutionState(
+        grad_enabled=torch.is_grad_enabled(),
+        inference_mode_enabled=torch.is_inference_mode_enabled(),
+    )
+
+
+def get_user_execution_state() -> DynamoExecutionState:
+    """Return the preserved outer user state, or the current state if unset."""
+    stack: list[DynamoExecutionState] | None = getattr(
+        _user_execution_state_tls, "stack", None
+    )
+    if stack:
+        return stack[-1]
+    return get_current_execution_state()
+
+
+@contextmanager
+def preserve_user_execution_state(
+    state: DynamoExecutionState,
+) -> Generator[None, None, None]:
+    """Expose ``state`` to repro generation for one compilation's lifetime."""
+    stack: list[DynamoExecutionState] | None = getattr(
+        _user_execution_state_tls, "stack", None
+    )
+    if stack is None:
+        stack = []
+        _user_execution_state_tls.stack = stack
+
+    stack.append(state)
+    try:
+        yield
+    finally:
+        stack.pop()
+        if not stack:
+            del _user_execution_state_tls.stack
+
+
 @contextmanager
 def maybe_disable_inference_mode() -> Generator[None, None, None]:
     """
