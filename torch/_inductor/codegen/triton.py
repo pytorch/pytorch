@@ -73,6 +73,7 @@ from ..scheduler import (
 from ..shape_propagation import get_broadcasted_shape
 from ..stream_utils import get_raw_stream_name
 from ..utils import (
+    _descriptor_shape_fits_in_int32,
     _TDM_SUPPORTED_DTYPES,
     _TMA_SUPPORTED_DTYPES,
     cache_on_self,
@@ -3013,14 +3014,18 @@ class TMACompatibilityChecker:
         )
         if using_tdm:
             if not 1 <= len(block_params.shape) <= 5:
-                return False
-            int32_max = torch.iinfo(torch.int32).max
-            if not all(
-                V.graph.sizevars.statically_known_true(
-                    sympy.And(sympy.Ge(size, 0), sympy.Le(size, int32_max))
+                log.debug(
+                    "%s TDM descriptors require rank between 1 and 5. Shape is: %s",
+                    self.failed_debug_prefix,
+                    block_params.shape,
                 )
-                for size in block_params.shape
-            ):
+                return False
+            if not _descriptor_shape_fits_in_int32(block_params.shape):
+                log.debug(
+                    "%s TDM descriptor dimensions must fit in int32. Shape is: %s",
+                    self.failed_debug_prefix,
+                    block_params.shape,
+                )
                 return False
 
         # The TMA API requires that the innermost stride is 1

@@ -6027,6 +6027,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                 "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
                 return_value=True,
             ),
+            mock.patch("torch._inductor.codegen.triton.log.debug") as log_debug,
         ):
             checker = TMACompatibilityChecker(
                 kernel, torch.float16, for_store=False, force=True
@@ -6041,6 +6042,9 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                     BlockParameters(shape=[torch.iinfo(torch.int32).max + 1])
                 )
             )
+            self.assertEqual(log_debug.call_count, 2)
+            self.assertIn("rank between 1 and 5", log_debug.call_args_list[0].args[0])
+            self.assertIn("fit in int32", log_debug.call_args_list[1].args[0])
 
     def _tdm_capable_triton(self):
         from torch.utils._triton import has_triton_amd_tdm_device
