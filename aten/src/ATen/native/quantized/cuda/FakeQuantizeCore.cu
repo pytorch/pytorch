@@ -32,7 +32,7 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
     .check_all_same_dtype(false)
     .add_output(output)
     .add_output(mask)
-    .add_input(input)
+    .add_const_input(input)
     .build();
 
   if (at::isReducedFloatingType(input.scalar_type())) {
@@ -88,7 +88,7 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
     .check_all_same_dtype(false)
     .add_output(output)
     .add_output(mask)
-    .add_input(input)
+    .add_const_input(input)
     .build();
 
   if (at::isReducedFloatingType(input.scalar_type())) {
