@@ -2271,14 +2271,24 @@ def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
     )
 
 
-def use_flex_tdm_descriptor(*matrices: IRNode) -> bool:
+def use_flex_tdm_descriptor(
+    *matrices: IRNode,
+    block_shapes: Sequence[Sequence[sympy.Expr | int]] | None = None,
+) -> bool:
     """Return whether flex operands satisfy TDM descriptor and request constraints."""
     from .virtualized import V
 
     if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
         return False
 
-    def operand_compatible(mat: IRNode) -> bool:
+    if block_shapes is None:
+        block_shapes = [()] * len(matrices)
+    elif len(block_shapes) != len(matrices):
+        raise AssertionError("Expected one block shape per flex descriptor operand")
+
+    def operand_compatible(
+        mat: IRNode, block_shape: Sequence[sympy.Expr | int]
+    ) -> bool:
         if mat.get_dtype() not in _TDM_SUPPORTED_DTYPES:
             return False
         sizes = mat.get_size()
@@ -2316,6 +2326,19 @@ def use_flex_tdm_descriptor(*matrices: IRNode) -> bool:
         ):
             return False
 
+        if block_shape:
+            if len(block_shape) != 2:
+                return False
+            if not _descriptor_shape_fits_in_int32(block_shape):
+                return False
+            if not aligned(block_shape[-1] * itemsize, TMA_ALIGNMENT):
+                return False
+            if not aligned(
+                block_shape[-1] * itemsize,
+                _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
+            ):
+                return False
+
         return aligned(
             sizes_i[-1] * itemsize,
             _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
@@ -2324,7 +2347,10 @@ def use_flex_tdm_descriptor(*matrices: IRNode) -> bool:
             for stride in strides_i[:-1]
         )
 
-    return all(operand_compatible(mat) for mat in matrices)
+    return all(
+        operand_compatible(mat, block_shape)
+        for mat, block_shape in zip(matrices, block_shapes)
+    )
 
 
 def use_triton_tma_template(

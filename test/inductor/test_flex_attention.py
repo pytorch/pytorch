@@ -628,6 +628,8 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         bad_outer = make_qkv("bad_outer", [32768, 8192, 65, 1])
         bad_offset = make_qkv("bad_offset", [32768, 8192, 64, 1], offset=1)
         semantic_offset = make_qkv("semantic_offset", [32768, 8192, 64, 1], offset=8)
+        good_block_shapes = [(128, 64), (128, 64), (128, 64)]
+        bad_block_shapes = [(128, 64), (128, 64), (128, 96)]
         graph = mock.Mock(sizevars=FakeSizeVars(), unaligned_buffers=set())
         with (
             V.set_graph_handler(graph),
@@ -638,15 +640,26 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
             self.assertFalse(use_flex_tdm_descriptor(good, good, bad_outer))
             self.assertFalse(use_flex_tdm_descriptor(good, good, bad_offset))
             self.assertTrue(use_flex_tdm_descriptor(good, good, semantic_offset))
+            self.assertTrue(
+                use_flex_tdm_descriptor(
+                    good, good, good, block_shapes=good_block_shapes
+                )
+            )
+            self.assertFalse(
+                use_flex_tdm_descriptor(good, good, good, block_shapes=bad_block_shapes)
+            )
 
     def test_flex_tdm_helper_preserves_num_stages(self):
         from torch._inductor.kernel.flex.common import apply_gfx1250_tdm_descriptor
 
         opts = {"num_stages": 2}
+        q, k, v = object(), object(), object()
+        block_shapes = [(128, 64), (128, 64), (128, 64)]
         with mock.patch(
             "torch._inductor.utils.use_flex_tdm_descriptor", return_value=True
-        ):
-            apply_gfx1250_tdm_descriptor(opts, object(), object(), object())
+        ) as gate:
+            apply_gfx1250_tdm_descriptor(opts, q, k, v, block_shapes=block_shapes)
+        gate.assert_called_once_with(q, k, v, block_shapes=block_shapes)
         self.assertTrue(opts["USE_TDM"])
         self.assertEqual(opts["num_stages"], 2)
 
@@ -665,12 +678,13 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         from torch._inductor.kernel.flex.common import apply_gfx1250_tdm_descriptor
 
         key, value = object(), object()
+        block_shapes = [(128, 64), (128, 64)]
         with mock.patch(
             "torch._inductor.utils.use_flex_tdm_descriptor", return_value=True
         ) as gate:
             opts = {}
-            apply_gfx1250_tdm_descriptor(opts, key, value)
-        gate.assert_called_once_with(key, value)
+            apply_gfx1250_tdm_descriptor(opts, key, value, block_shapes=block_shapes)
+        gate.assert_called_once_with(key, value, block_shapes=block_shapes)
         self.assertTrue(opts["USE_TDM"])
 
     def test_flex_templates_gate_descriptors_on_tma_or_tdm(self):

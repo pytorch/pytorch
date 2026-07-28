@@ -53,11 +53,14 @@ SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 def apply_gfx1250_tdm_descriptor(
     kernel_options: dict[str, Any],
     *descriptor_operands: Any,
+    block_shapes: Sequence[Sequence[sympy.Expr | int]] | None = None,
 ) -> None:
     """Enable the flex descriptor branch when all named operands admit TDM."""
     from ...utils import use_flex_tdm_descriptor
 
-    kernel_options["USE_TDM"] = use_flex_tdm_descriptor(*descriptor_operands)
+    kernel_options["USE_TDM"] = use_flex_tdm_descriptor(
+        *descriptor_operands, block_shapes=block_shapes
+    )
 
 
 def can_skip_boundary_checks(seq_len, sparse_block_size) -> bool:

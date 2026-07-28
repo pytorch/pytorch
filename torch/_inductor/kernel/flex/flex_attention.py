@@ -469,6 +469,18 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
+        # Shrink default tiles to fit smaller pow2 sparse block sizes;
+        # user-pinned tiles and non-pow2 sparse sizes still error out below.
+        block_m, block_n = conf.block_m, conf.block_n
+        if len(configs) == 1 and all(
+            is_power_of_2(s) and s >= 16
+            for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
+        ):
+            block_m = min(block_m, SPARSE_Q_BLOCK_SIZE)
+            block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("BLOCK_M", block_m)
+        cur_kernel_options.setdefault("BLOCK_N", block_n)
+
         # Intel GPU enables TMA by default
         cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
 
@@ -481,21 +493,24 @@ def flex_attention(
                 query,
                 key,
                 value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
             )
         else:
             cur_kernel_options["USE_TDM"] = False
 
-        # Shrink default tiles to fit smaller pow2 sparse block sizes;
-        # user-pinned tiles and non-pow2 sparse sizes still error out below.
-        block_m, block_n = conf.block_m, conf.block_n
-        if len(configs) == 1 and all(
-            is_power_of_2(s) and s >= 16
-            for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
-        ):
-            block_m = min(block_m, SPARSE_Q_BLOCK_SIZE)
-            block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
-        cur_kernel_options.setdefault("BLOCK_M", block_m)
-        cur_kernel_options.setdefault("BLOCK_N", block_n)
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)

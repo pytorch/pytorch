@@ -405,7 +405,21 @@ def create_flex_decoding_kernel(*args, **kwargs):
             cur_kernel_options["USE_TMA"] = False
 
         if not cur_kernel_options["USE_TMA"]:
-            apply_gfx1250_tdm_descriptor(cur_kernel_options, key, value)
+            apply_gfx1250_tdm_descriptor(
+                cur_kernel_options,
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
         else:
             cur_kernel_options["USE_TDM"] = False
 
