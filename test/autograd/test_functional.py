@@ -1753,7 +1753,7 @@ class TestAutogradFunctionalDevice(TestCase):
 
 
 instantiate_parametrized_tests(TestAutogradFunctional)
-instantiate_device_type_tests(TestAutogradFunctionalDevice, globals())
+instantiate_device_type_tests(TestAutogradFunctionalDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
