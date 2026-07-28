@@ -5291,6 +5291,27 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Inherited list.__init__ initializes the underlying storage; route to
+        # _base_vt so content is not lost. CPython's list.__init__ (Argument
+        # Clinic) enforces the no-keyword-args check only when the type does not
+        # override __new__ (tp_new): a list subclass with a custom __new__
+        # tolerates and ignores keyword args, while positional count is still
+        # validated by list.__init__. Mirrors the dict subclass tp_init_impl.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
+        if self._maybe_get_baseclass_method("__init__") is list.__init__:
+            if kwargs and type(self.value).__new__ is not list.__new__:
+                kwargs = {}
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in tp_init_impl")
+            return self._base_vt.call_method(tx, "__init__", args, kwargs)
+        return super().tp_init_impl(tx, args, kwargs)
+
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
     """
