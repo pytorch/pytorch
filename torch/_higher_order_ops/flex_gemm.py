@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import math
 from collections.abc import Callable, Mapping
 from functools import partial
 from typing import Any, cast
@@ -131,6 +132,206 @@ def flex_gemm_body_decomposition_table(
             flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
         )
     return merged_decompositions
+
+
+def normalize_mx_scale_rounding(rounding: str | None) -> str:
+    """Resolve the MX scale-rounding recipe."""
+    match rounding:
+        case None:
+            return "rceil"
+        case "floor" | "rceil":
+            return rounding
+        case _:
+            raise ValueError(
+                f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
+            )
+
+
+def normalize_nvfp4_scale_rounding(rounding: str | None) -> str:
+    """Resolve the NVFP4 scale-rounding recipe."""
+    match rounding:
+        case None | "nearest":
+            return "nearest"
+        case _:
+            raise ValueError(
+                f"nvfp4_e4m3_scale rounding must be 'nearest' or None, got {rounding!r}"
+            )
+
+
+def validate_scale_max_value(op_name: str, max_value: float) -> None:
+    """Require a finite positive quantized-type maximum."""
+    if (
+        not isinstance(max_value, float)
+        or not math.isfinite(max_value)
+        or max_value <= 0
+    ):
+        raise ValueError(
+            f"{op_name} max_value must be a finite positive float, got {max_value!r}"
+        )
+
+
+@torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
+def mx_e8m0_scale(
+    amax: torch.Tensor,
+    max_value: float = 448.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    """Encode absolute block maxima as biased E8M0 scales.
+
+    ``"rceil"`` is the FlexGEMM default and matches TorchAO's Blackwell
+    ``cvt.rp.satfinite.ue8m0x2.f32`` path: values at or below ``2**-127``
+    after division by ``max_value`` encode as 0, positive infinity encodes as
+    254, and NaN encodes as 255. ``"floor"`` matches TorchAO's exponent-based
+    FLOOR scale encoding. TorchAO currently chooses FLOOR by default, so callers
+    requiring its default recipe should pass it explicitly.
+
+    Args:
+        amax: Nonnegative absolute block maxima to encode.
+        max_value: Maximum magnitude of the quantized element type.
+        rounding: Scale calculation recipe: ``"rceil"`` (the default) or
+            ``"floor"``.
+
+    Returns:
+        E8M0 scale values with the same shape as ``amax``.
+    """
+    validate_scale_max_value("mx_e8m0_scale", max_value)
+    rounding = normalize_mx_scale_rounding(rounding)
+    mbits_f32 = 23
+    f32_exp_bias = 127
+    e8m0_exp_bias = 127
+    max_abs = amax.to(torch.float32)
+    if rounding == "floor":
+        max_power = math.floor(math.log2(max_value))
+        max_abs_int32 = max_abs.view(torch.int32)
+        extracted_pow2 = (
+            (torch.bitwise_right_shift(max_abs_int32, mbits_f32)) & 0xFF
+        ) - f32_exp_bias
+        scale_e8m0_unbiased = extracted_pow2 - max_power
+        scale_e8m0_unbiased = torch.clamp(
+            scale_e8m0_unbiased, min=-e8m0_exp_bias, max=e8m0_exp_bias + 1
+        )
+        scale_e8m0_biased = (scale_e8m0_unbiased + e8m0_exp_bias).to(torch.uint8)
+        scale_e8m0_biased = torch.where(
+            torch.isnan(max_abs),
+            torch.full_like(scale_e8m0_biased, 255),
+            scale_e8m0_biased,
+        )
+    else:
+        descale = max_abs / max_value
+        descale_int32 = descale.view(torch.int32)
+        exponent = torch.bitwise_right_shift(descale_int32, mbits_f32) & 0xFF
+        mantissa = descale_int32 & 0x7FFFFF
+        scale_e8m0_biased = exponent + (mantissa != 0).to(torch.int32)
+        scale_e8m0_biased = torch.where(
+            (exponent == 0) & (mantissa <= 0x400000),
+            torch.zeros_like(scale_e8m0_biased),
+            scale_e8m0_biased,
+        )
+        scale_e8m0_biased = torch.clamp(scale_e8m0_biased, max=254).to(torch.uint8)
+        scale_e8m0_biased = torch.where(
+            torch.isnan(descale),
+            torch.full_like(scale_e8m0_biased, 255),
+            scale_e8m0_biased,
+        )
+    return scale_e8m0_biased.view(torch.float8_e8m0fnu)
+
+
+@mx_e8m0_scale.register_fake
+def _(
+    amax: torch.Tensor,
+    max_value: float = 448.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    validate_scale_max_value("mx_e8m0_scale", max_value)
+    normalize_mx_scale_rounding(rounding)
+    return torch.empty_like(amax, dtype=torch.float8_e8m0fnu)
+
+
+@torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
+def nvfp4_e4m3_scale(
+    amax: torch.Tensor,
+    max_value: float = 6.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    """Encode an NVFP4 per-block E4M3 scale using nearest rounding.
+
+    Args:
+        amax: Nonnegative absolute block maxima to encode.
+        max_value: Maximum magnitude of the quantized element type. The default
+            preserves the symmetric E2M1 recipe.
+        rounding: Scale calculation recipe. Only ``"nearest"`` is supported.
+
+    Returns:
+        E4M3 scale values with the same shape as ``amax``.
+    """
+    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
+    normalize_nvfp4_scale_rounding(rounding)
+    scale = amax.to(torch.float32) / max_value
+    scale = torch.clamp(
+        scale,
+        min=torch.finfo(torch.float8_e4m3fn).tiny,
+        max=torch.finfo(torch.float8_e4m3fn).max,
+    )
+    return scale.to(torch.float8_e4m3fn)
+
+
+@nvfp4_e4m3_scale.register_fake
+def _(
+    amax: torch.Tensor,
+    max_value: float = 6.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
+    normalize_nvfp4_scale_rounding(rounding)
+    return torch.empty_like(amax, dtype=torch.float8_e4m3fn)
+
+
+def validate_nvfp4_pack_input(input: torch.Tensor) -> None:
+    """Require paired Float32 values along the innermost dimension."""
+    if input.dtype is not torch.float32 or input.ndim == 0 or input.shape[-1] != 2:
+        raise ValueError(
+            "nvfp4_pack input must be Float32 with innermost dimension 2, "
+            f"got dtype={input.dtype}, shape={tuple(input.shape)}"
+        )
+
+
+@torch.library.custom_op("flex_gemm::nvfp4_pack", mutates_args=())
+def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
+    """Quantize adjacent normalized values into packed E2M1 storage.
+
+    Args:
+        input: Float32 values with an innermost pair dimension. Finite values
+            are rounded to nearest E2M1, and infinities saturate to its finite
+            range. NaN encoding is unspecified, matching the floatx conversion
+            contract used by TorchAO.
+
+    Returns:
+        Contiguous Uint8 storage with the innermost pair dimension removed.
+    """
+    validate_nvfp4_pack_input(input)
+    input_bits = input.view(torch.int32)
+    sign = input_bits & 0x80000000
+    magnitude = (input_bits ^ sign).view(torch.float32)
+    saturated = magnitude >= 6.0
+    denormal = (~saturated) & (magnitude < 1.0)
+    normal = ~(saturated | denormal)
+    denormal_code = ((magnitude + 4194304.0).view(torch.int32) - 1249902592).to(
+        torch.uint8
+    )
+    normal_bits = magnitude.view(torch.int32)
+    mantissa_odd = (normal_bits >> 22) & 1
+    normal_code = ((normal_bits - 1054867457 + mantissa_odd) >> 22).to(torch.uint8)
+    codes = torch.full_like(magnitude, 7, dtype=torch.uint8)
+    codes = torch.where(denormal, denormal_code, codes)
+    codes = torch.where(normal, normal_code, codes)
+    codes = codes | (((sign >> 28).to(torch.uint8)) & 8)
+    return (codes[..., 1] << 4) | codes[..., 0]
+
+
+@nvfp4_pack.register_fake
+def _(input: torch.Tensor) -> torch.Tensor:
+    validate_nvfp4_pack_input(input)
+    return torch.empty(tuple(input.shape[:-1]), device=input.device, dtype=torch.uint8)
 
 
 def apply_flex_gemm_body_graph_passes(
