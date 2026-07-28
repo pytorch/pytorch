@@ -2230,23 +2230,6 @@ class ObjectVariable(VariableTracker):
         return object_richcompare(self, tx, other, op)
 
 
-if sys.version_info >= (3, 15):
-
-    class SentinelVariable(VariableTracker):
-        # Use builtins.sentinel to avoid ruff errors
-        _cpython_type = builtins.sentinel
-
-        def __init__(self, value: builtins.sentinel, **kwargs: Any) -> None:
-            super().__init__(**kwargs)
-            self.value = value
-
-        def get_real_python_backed_value(self) -> builtins.sentinel:
-            return self.value
-
-        def python_type(self) -> type[builtins.sentinel]:
-            return self._cpython_type
-
-
 class DebuggingVariable(VariableTracker):
     """
     Represents a call to a debugging function like print(), or something
