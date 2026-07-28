@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextvars
 import dataclasses
 import enum
 import functools
@@ -119,6 +120,7 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
 from .source import (
+    _contextvar_has_explicit_binding,
     AttrProxySource,
     AttrSource,
     CallFunctionNoArgsSource,
@@ -129,6 +131,8 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    ContextVarExplicitStateSource,
+    ContextVarExplicitValueSource,
     ContextVarGetSource,
     CurrentStreamSource,
     DataclassFieldsSource,
@@ -2046,6 +2050,26 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, ContextVarExplicitValueSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: contextvars.copy_context().get(
+                    x, contextvars.Token.MISSING
+                ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ContextVarExplicitStateSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: _contextvar_has_explicit_binding(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, FloatTensorSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")

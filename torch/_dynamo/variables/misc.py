@@ -57,7 +57,10 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
+    _CONTEXTVAR_EXPLICIT_STATE_SENTINEL,
     AttrSource,
+    ContextVarExplicitStateSource,
+    ContextVarExplicitValueSource,
     GenericAttrSource,
     GetItemSource,
     TypeMROSource,
@@ -97,6 +100,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.side_effects import _ContextVarStateKind
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
@@ -2629,7 +2633,7 @@ class ContextVarVariable(VariableTracker):
     """Wraps a contextvars.ContextVar for Dynamo tracing.
 
     .get() is resolved at trace time with a guard that re-checks at cache time.
-    .set() and .reset() graph-break in Phase 1.
+    .set() and .reset() update symbolic state and replay on runtime exit.
     """
 
     _nonvar_fields = {
@@ -2653,17 +2657,10 @@ class ContextVarVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "get":
             return self._handle_get(tx, args, kwargs)
-        elif name in ("set", "reset"):
-            unimplemented(
-                gb_type="ContextVar mutation not supported",
-                context=f"ContextVar('{self.cv_obj.name}').{name}()",
-                explanation=(
-                    f"ContextVar.{name}() is not yet supported inside "
-                    f"torch.compile. Move the .{name}() call outside the "
-                    f"compiled region."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+        elif name == "set":
+            return self._handle_set(tx, args, kwargs)
+        elif name == "reset":
+            return self._handle_reset(tx, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def _handle_get(
@@ -2672,6 +2669,7 @@ class ContextVarVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from ..side_effects import _ContextVarStateKind
         from ..source import ContextVarGetSource
         from ..utils import is_safe_constant
         from .base import NO_SUCH_SUBOBJ
@@ -2690,6 +2688,7 @@ class ContextVarVariable(VariableTracker):
         default_var = args[0] if args else None
         has_default = default_var is not None
         default_value = None
+        state_kind, state_value = tx.output.side_effects.get_contextvar_state(self)
 
         if has_default:
             default_value = default_var.get_real_python_backed_value()
@@ -2703,6 +2702,17 @@ class ContextVarVariable(VariableTracker):
                     ),
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
+
+        if self.source is not None:
+            tx.output.current_tracer.traced_sources.add(self.source)
+
+        if state_kind is _ContextVarStateKind.EXPLICIT:
+            if state_value is None:
+                raise AssertionError("Explicit ContextVar state must have a value")
+            return state_value
+
+        if state_kind is _ContextVarStateKind.UNSET:
+            return self._get_unset_value(tx, has_default, default_value)
 
         value = self._get_value(tx, has_default, default_value)
 
@@ -2730,6 +2740,247 @@ class ContextVarVariable(VariableTracker):
 
     # contextvars.ContextVar.name is a read-only member.
     tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
+    def _get_unset_value(
+        self,
+        tx: "InstructionTranslatorBase",
+        has_default: bool,
+        default_value: Any,
+    ) -> "VariableTracker":
+        if has_default:
+            return VariableTracker.build(tx, default_value)
+        from ..source import ContextVarGetSource
+
+        try:
+            value = contextvars.Context().run(self.cv_obj.get)
+        except LookupError:
+            raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
+        if self.source is None:
+            raise AssertionError("ContextVarVariable requires a source for .get()")
+        return VariableTracker.build(
+            tx, value, source=ContextVarGetSource(base=self.source)
+        )
+
+    def _get_token_old_value(
+        self,
+        tx: "InstructionTranslatorBase",
+        state_kind: "_ContextVarStateKind",
+        state_value: VariableTracker | None,
+    ) -> "tuple[_ContextVarStateKind, VariableTracker]":
+        from ..side_effects import _ContextVarStateKind
+
+        if state_kind is _ContextVarStateKind.EXPLICIT:
+            if state_value is None:
+                raise AssertionError("Explicit ContextVar state must have a value")
+            return _ContextVarStateKind.EXPLICIT, state_value
+
+        if self.source is None:
+            raise AssertionError(
+                "ContextVarVariable requires a source for token.old_value"
+            )
+        explicit_state_source = ContextVarExplicitStateSource(base=self.source)
+        explicit_value_source = ContextVarExplicitValueSource(base=self.source)
+        install_guard(explicit_state_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+        if state_kind is _ContextVarStateKind.UNSET:
+            return _ContextVarStateKind.UNSET, VariableTracker.build(
+                tx, contextvars.Token.MISSING, source=explicit_value_source
+            )
+
+        bound_value = contextvars.copy_context().get(
+            self.cv_obj, _CONTEXTVAR_EXPLICIT_STATE_SENTINEL
+        )
+        if bound_value is _CONTEXTVAR_EXPLICIT_STATE_SENTINEL:
+            return _ContextVarStateKind.UNSET, VariableTracker.build(
+                tx, contextvars.Token.MISSING, source=explicit_value_source
+            )
+        return _ContextVarStateKind.EXPLICIT, VariableTracker.build(
+            tx, bound_value, source=explicit_value_source
+        )
+
+    def _handle_set(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if not config.replay_side_effects and not tx.one_graph:
+            unimplemented(
+                gb_type="ContextVar mutation requires side-effect replay",
+                context=f"ContextVar('{self.cv_obj.name}').set(...) with replay_side_effects=False",
+                explanation=(
+                    "ContextVar.set() inside torch.compile requires side-effect "
+                    "replay unless the region is compiled as a single full graph."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if kwargs:
+            raise_observed_exception(
+                TypeError, tx, args=["ContextVar.set() takes no keyword arguments"]
+            )
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"ContextVar.set() takes exactly one argument ({len(args)} given)"
+                ],
+            )
+
+        state_kind, state_value = tx.output.side_effects.get_contextvar_state(self)
+        token_old_state_kind, token_old_value = self._get_token_old_value(
+            tx, state_kind, state_value
+        )
+        token = ContextVarTokenVariable(
+            contextvar=self,
+            old_value=token_old_value,
+            old_state_kind=token_old_state_kind,
+            from_tracing_set=True,
+        )
+        tx.output.side_effects.record_contextvar_set(self, args[0], token)
+        return token
+
+    def _handle_reset(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if not config.replay_side_effects and not tx.one_graph:
+            unimplemented(
+                gb_type="ContextVar.reset() requires side-effect replay",
+                context=f"ContextVar('{self.cv_obj.name}').reset(...) with replay_side_effects=False",
+                explanation=(
+                    "ContextVar.reset() inside torch.compile requires side-effect "
+                    "replay unless the region is compiled as a single full graph."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if kwargs:
+            raise_observed_exception(
+                TypeError, tx, args=["ContextVar.reset() takes no keyword arguments"]
+            )
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"ContextVar.reset() takes exactly one argument ({len(args)} given)"
+                ],
+            )
+        token = args[0].realize()
+        if not isinstance(token, ContextVarTokenVariable):
+            token_value = token.get_real_python_backed_value()
+            if isinstance(token_value, contextvars.Token):
+                unimplemented(
+                    gb_type="ContextVar.reset() on external token not supported",
+                    context=f"ContextVar('{self.cv_obj.name}').reset(<external token>)",
+                    explanation=(
+                        "ContextVar.reset() on a token created outside the current "
+                        "compiled region is not yet supported inside torch.compile."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            token_repr = (
+                repr(token_value)
+                if token_value is not NO_SUCH_SUBOBJ
+                else token.debug_repr()
+            )
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"expected an instance of Token, got {token_repr}"],
+            )
+        if not token.from_tracing_set:
+            unimplemented(
+                gb_type="ContextVar.reset() on external token not supported",
+                context=f"ContextVar('{self.cv_obj.name}').reset(<external token>)",
+                explanation=(
+                    "ContextVar.reset() on a token created outside the current "
+                    "compiled region is not yet supported inside torch.compile."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if tx.output.side_effects.is_contextvar_token_used(token):
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=[f"{token.debug_repr()} has already been used once"],
+            )
+        if token.contextvar.cv_obj is not self.cv_obj:
+            raise_observed_exception(
+                ValueError,
+                tx,
+                args=[f"{token.debug_repr()} was created by a different ContextVar"],
+            )
+
+        tx.output.side_effects.record_contextvar_reset(self, token)
+        tx.output.side_effects.mark_contextvar_token_used(token)
+        return ConstantVariable.create(None)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        if name == "name":
+            return ConstantVariable.create(self.cv_obj.name)
+        return super().tp_getattro_impl(tx, name)
+
+
+class ContextVarTokenVariable(VariableTracker):
+    _nonvar_fields = {
+        "old_state_kind",
+        "from_tracing_set",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        contextvar: ContextVarVariable,
+        old_value: VariableTracker | None,
+        old_state_kind: "_ContextVarStateKind",
+        from_tracing_set: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.contextvar = contextvar
+        self.old_value = old_value
+        self.old_state_kind = old_state_kind
+        self.from_tracing_set = from_tracing_set
+
+    def python_type(self) -> type:
+        return contextvars.Token
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        if name == "var":
+            return self.contextvar
+        if name == "old_value":
+            if self.contextvar.source is not None:
+                tx.output.current_tracer.traced_sources.add(self.contextvar.source)
+            if self.old_value is None:
+                raise AssertionError("ContextVar token missing old_value")
+            if self.old_value.source is not None:
+                tx.output.current_tracer.traced_sources.add(self.old_value.source)
+            return self.old_value
+        return super().tp_getattro_impl(tx, name)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.source is not None and not self.from_tracing_set:
+            codegen(self.source)
+            return
+        unimplemented(
+            gb_type="ContextVar token escape requires side-effect replay",
+            context="ContextVarTokenVariable",
+            explanation=(
+                "ContextVar tokens are only supported when they are materialized "
+                "directly by side-effect replay. Reconstructing tokens through "
+                "returned objects/containers, or when side-effect replay is "
+                "disabled, is not supported."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def debug_repr(self) -> str:
+        return f"<Token var={self.contextvar.cv_obj!r} at 0x{id(self):x}>"
 
 
 class RandomClassVariable(VariableTracker):

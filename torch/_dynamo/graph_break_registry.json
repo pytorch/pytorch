@@ -4010,6 +4010,57 @@
       ]
     }
   ],
+  "GB6640": [
+    {
+      "Gb_type": "ContextVar.set()/reset() with opaque runtime function calls",
+      "Context": "target={target_name}",
+      "Explanation": "Dynamo does not support mixing ContextVar.set()/reset() with opaque runtime function calls in the same compiled region because the runtime call could observe stale ContextVar state.",
+      "Hints": [
+        "Move the ContextVar mutation or the opaque runtime call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1769": [
+    {
+      "Gb_type": "ContextVar token escape requires side-effect replay",
+      "Context": "ContextVarTokenVariable",
+      "Explanation": "ContextVar tokens are only supported when they are materialized directly by side-effect replay. Reconstructing tokens through returned objects/containers, or when side-effect replay is disabled, is not supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5118": [
+    {
+      "Gb_type": "ContextVar mutation requires side-effect replay",
+      "Context": "ContextVar('{self.cv_obj.name}').set(...) with replay_side_effects=False",
+      "Explanation": "ContextVar.set() inside torch.compile requires side-effect replay unless the region is compiled as a single full graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9303": [
+    {
+      "Gb_type": "ContextVar.reset() requires side-effect replay",
+      "Context": "ContextVar('{self.cv_obj.name}').reset(...) with replay_side_effects=False",
+      "Explanation": "ContextVar.reset() inside torch.compile requires side-effect replay unless the region is compiled as a single full graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6839": [
+    {
+      "Gb_type": "ContextVar.reset() on external token not supported",
+      "Context": "ContextVar('{self.cv_obj.name}').reset(<external token>)",
+      "Explanation": "ContextVar.reset() on a token created outside the current compiled region is not yet supported inside torch.compile.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0250": [
     {
       "Gb_type": "ndarray.astype(object)",

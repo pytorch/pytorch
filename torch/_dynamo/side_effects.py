@@ -31,6 +31,7 @@ import textwrap
 import traceback
 import weakref
 from collections.abc import Callable, Generator, MutableMapping
+from dataclasses import dataclass
 from types import CellType
 from typing import Any, TYPE_CHECKING
 
@@ -192,6 +193,20 @@ def _manual_deque_update(deque_from: Any, deque_to: Any) -> None:
     collections.deque.extend(deque_to, deque_from)
 
 
+class _ContextVarStateKind(enum.Enum):
+    ORIGINAL = 0
+    EXPLICIT = 1
+    UNSET = 2
+
+
+@dataclass
+class _ContextVarMutation:
+    method_name: str
+    contextvar: VariableTracker
+    value: VariableTracker | None = None
+    token: VariableTracker | None = None
+
+
 class SideEffects:
     """
     Maintain records of mutations and provide methods to apply them during code generation.
@@ -244,6 +259,13 @@ class SideEffects:
             ],
         ]
         | None = None,
+        contextvar_states: dict[
+            VariableTracker, tuple[_ContextVarStateKind, VariableTracker | None]
+        ]
+        | None = None,
+        contextvar_mutations: list[_ContextVarMutation] | None = None,
+        _contextvar_first_mutation_node_count: int | None = None,
+        _contextvar_used_tokens: set[int] | None = None,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
@@ -254,6 +276,12 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        self.contextvar_states = contextvar_states or {}
+        self.contextvar_mutations = contextvar_mutations or []
+        self._contextvar_first_mutation_node_count = (
+            _contextvar_first_mutation_node_count
+        )
+        self._contextvar_used_tokens = _contextvar_used_tokens or set()
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -379,6 +407,11 @@ class SideEffects:
             and self.attr_mutation_kinds == other.attr_mutation_kinds
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
+            and self.contextvar_states == other.contextvar_states
+            and self.contextvar_mutations == other.contextvar_mutations
+            and self._contextvar_first_mutation_node_count
+            == other._contextvar_first_mutation_node_count
+            and self._contextvar_used_tokens == other._contextvar_used_tokens
         )
 
     def diff(self, other: "SideEffects") -> str | None:
@@ -402,6 +435,17 @@ class SideEffects:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
             return "tensor_hooks"
+        elif self.contextvar_states != other.contextvar_states:
+            return "contextvar_states"
+        elif self.contextvar_mutations != other.contextvar_mutations:
+            return "contextvar_mutations"
+        elif (
+            self._contextvar_first_mutation_node_count
+            != other._contextvar_first_mutation_node_count
+        ):
+            return "_contextvar_first_mutation_node_count"
+        elif self._contextvar_used_tokens != other._contextvar_used_tokens:
+            return "_contextvar_used_tokens"
         else:
             return None
 
@@ -423,6 +467,10 @@ class SideEffects:
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
+            contextvar_states=dict(self.contextvar_states),
+            contextvar_mutations=list(self.contextvar_mutations),
+            _contextvar_first_mutation_node_count=self._contextvar_first_mutation_node_count,
+            _contextvar_used_tokens=set(self._contextvar_used_tokens),
         )
 
     def __contains__(self, item: object) -> bool:
@@ -679,6 +727,49 @@ class SideEffects:
         # would name a nonexistent `G.G`. Record the source readers actually
         # use, so mutated_sources intersects with traced_sources.
         self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
+
+    def get_contextvar_state(
+        self, var: VariableTracker
+    ) -> tuple[_ContextVarStateKind, VariableTracker | None]:
+        return self.contextvar_states.get(var, (_ContextVarStateKind.ORIGINAL, None))
+
+    def _snapshot_first_mutation_node_count(self) -> None:
+        if self._contextvar_first_mutation_node_count is not None:
+            return
+        output_graph = self.output_graph_weakref()
+        if output_graph is not None:
+            self._contextvar_first_mutation_node_count = len(output_graph.graph.nodes)
+
+    def record_contextvar_set(
+        self,
+        var: VariableTracker,
+        value: VariableTracker,
+        token: VariableTracker,
+    ) -> None:
+        self._snapshot_first_mutation_node_count()
+        self.mutation(var)
+        self.contextvar_states[var] = (_ContextVarStateKind.EXPLICIT, value)
+        self.contextvar_mutations.append(
+            _ContextVarMutation("set", var, value=value, token=token)
+        )
+
+    def record_contextvar_reset(
+        self,
+        var: VariableTracker,
+        token: VariableTracker,
+    ) -> None:
+        if not isinstance(token, variables.ContextVarTokenVariable):
+            raise AssertionError(f"Expected ContextVarTokenVariable, got {type(token)}")
+        self._snapshot_first_mutation_node_count()
+        self.mutation(var)
+        self.contextvar_states[var] = (token.old_state_kind, token.old_value)
+        self.contextvar_mutations.append(_ContextVarMutation("reset", var, token=token))
+
+    def is_contextvar_token_used(self, token: VariableTracker) -> bool:
+        return id(token) in self._contextvar_used_tokens
+
+    def mark_contextvar_token_used(self, token: VariableTracker) -> None:
+        self._contextvar_used_tokens.add(id(token))
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -1089,6 +1180,8 @@ class SideEffects:
                 pre_existing_vars,
                 tx.output.backward_state,
                 self.tensor_hooks,
+                list(self.contextvar_states.items()),
+                [(m.contextvar, m.value, m.token) for m in self.contextvar_mutations],
             ],
         )
         # Manually release the self-referential function, which indirectly
@@ -1492,6 +1585,50 @@ class SideEffects:
             ),
         )
 
+    def codegen_contextvar_mutations(
+        self, cg: PyCodegen, log_side_effects: bool = False
+    ) -> None:
+        if not self.contextvar_mutations:
+            return
+
+        side_effect_messages: list[str] = []
+        logged_vars: set[VariableTracker] = set()
+
+        def _maybe_log_side_effect(var: VariableTracker) -> None:
+            if (
+                config.side_effect_replay_policy != "silent"
+                and log_side_effects
+                and var not in logged_vars
+            ):
+                side_effect_messages.append(self._format_side_effect_message(var))
+                logged_vars.add(var)
+
+        for mutation in self.contextvar_mutations:
+            if mutation.contextvar.source is None:
+                raise AssertionError("ContextVar replay requires a source")
+
+            cg(mutation.contextvar.source)
+            cg.load_method(mutation.method_name)
+            if mutation.method_name == "set":
+                if mutation.value is None or mutation.token is None:
+                    raise AssertionError(
+                        "ContextVar.set replay requires value and token"
+                    )
+                cg(mutation.value)
+                cg.extend_output(create_call_method(1))
+                cg.add_cache(mutation.token)
+            else:
+                if mutation.token is None:
+                    raise AssertionError("ContextVar.reset replay requires a token")
+                cg(mutation.token)
+                cg.extend_output(create_call_method(1))
+                cg.append_output(create_instruction("POP_TOP"))
+
+            _maybe_log_side_effect(mutation.contextvar)
+
+        if log_side_effects and side_effect_messages:
+            self._emit_side_effect_messages(side_effect_messages)
+
     def codegen_update_mutated(
         self, cg: PyCodegen, log_side_effects: bool = False
     ) -> None:
@@ -1509,6 +1646,8 @@ class SideEffects:
             if not config.replay_side_effects and not isinstance(
                 var.source, TempLocalSource
             ):
+                continue
+            if isinstance(var, variables.ContextVarVariable):
                 continue
 
             ctx = SideEffectReplayContext(

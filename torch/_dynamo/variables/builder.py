@@ -1912,13 +1912,50 @@ class VariableBuilder:
             ]
             genfn = LocalGeneratorFunctionVariable(VariableTracker.build(self.tx, fn))
             return genfn.call_function(self.tx, args, {})
+        elif isinstance(value, contextvars.Token):
+            from ..side_effects import _ContextVarStateKind
+            from .misc import ContextVarTokenVariable, ContextVarVariable
+
+            if self.source is None:
+                raise AssertionError("ContextVar token requires a source")
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+
+            contextvar_var = VariableTracker.build(
+                self.tx,
+                value.var,
+                source=AttrSource(self.source, "var"),
+            )
+            if not isinstance(contextvar_var, ContextVarVariable):
+                raise AssertionError(
+                    f"Expected ContextVarVariable, got {type(contextvar_var)}"
+                )
+
+            old_state_kind = (
+                _ContextVarStateKind.UNSET
+                if value.old_value is contextvars.Token.MISSING
+                else _ContextVarStateKind.EXPLICIT
+            )
+            old_value = VariableTracker.build(
+                self.tx,
+                value.old_value,
+                source=AttrSource(self.source, "old_value"),
+            )
+            return ContextVarTokenVariable(
+                contextvar=contextvar_var,
+                old_value=old_value,
+                old_state_kind=old_state_kind,
+                source=self.source,
+            )
         elif isinstance(value, contextvars.ContextVar):
             from .misc import ContextVarVariable
 
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ContextVarVariable(
-                cv_obj=value,
-                source=self.source,
+            return self.tx.output.side_effects.track_mutable(
+                value,
+                ContextVarVariable(
+                    cv_obj=value,
+                    source=self.source,
+                ),
             )
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
@@ -2343,6 +2380,9 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif value is contextvars.Token.MISSING:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ObjectVariable(value, source=self.source)
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return ObjectVariable(value, source=self.source)
@@ -5168,6 +5208,43 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
+        elif value is contextvars.Token.MISSING:
+            return ObjectVariable(value)
+        elif isinstance(value, contextvars.Token):
+            from ..side_effects import _ContextVarStateKind
+            from .misc import ContextVarTokenVariable, ContextVarVariable
+
+            contextvar_var = SourcelessBuilder.create(tx, value.var)
+            if not isinstance(contextvar_var, ContextVarVariable):
+                raise AssertionError(
+                    f"Expected ContextVarVariable, got {type(contextvar_var)}"
+                )
+            old_state_kind = (
+                _ContextVarStateKind.UNSET
+                if value.old_value is contextvars.Token.MISSING
+                else _ContextVarStateKind.EXPLICIT
+            )
+            return ContextVarTokenVariable(
+                contextvar=contextvar_var,
+                old_value=SourcelessBuilder.create(tx, value.old_value),
+                old_state_kind=old_state_kind,
+            )
+        elif isinstance(value, contextvars.ContextVar):
+            from .misc import ContextVarVariable
+
+            existing = tx.output.side_effects.id_to_variable.get(id(value))
+            if existing is not None:
+                if not isinstance(existing, ContextVarVariable):
+                    raise AssertionError(
+                        f"Expected ContextVarVariable, got {type(existing)}"
+                    )
+                return existing
+            return tx.output.side_effects.track_mutable(
+                value,
+                ContextVarVariable(
+                    cv_obj=value,
+                ),
+            )
         elif (
             is_opaque_constant_type(type(value))
             and not isinstance(value, enum.Enum)
