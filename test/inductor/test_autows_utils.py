@@ -3,7 +3,6 @@ import os
 import subprocess
 import sys
 
-from torch._inductor.autows_utils import has_meta_ws
 from torch._inductor.test_case import run_tests, TestCase
 
 

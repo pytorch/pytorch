@@ -7,10 +7,8 @@
         return
     start_pid = tl.program_id(0)
     grid_m = tl.cdiv(M, BLOCK_M)
-    {%- if TWO_CTAS is defined and TWO_CTAS %}
-    # Even M-tile count so CTAs pair into 2-CTA clusters; must match the even
-    # grid from blackwell_persistent_mm_grid. Padding tiles run in cluster
-    # lockstep (no per-tile guard) and rely on TMA bounds clamping.
+    {%- if TWO_CTAS %}
+    # even M-tile count so CTAs pair into clusters; must match blackwell_persistent_mm_grid
     grid_m = (grid_m + 1) // 2 * 2
     {%- endif %}
     grid_n = tl.cdiv(N, BLOCK_N)
@@ -40,7 +38,7 @@
     tile_id_c = start_pid - NUM_SMS
     num_pid_in_group = GROUP_M * grid_n
 
-    {%- if USE_META_WS is defined and USE_META_WS %}
+    {%- if USE_META_WS %}
     for tile_id in tl.range(
         start_pid,
         num_tiles,
@@ -80,7 +78,7 @@
                 if B_ROW_MAJOR
                 else [offs_bn_desc, offs_k_desc],
             )
-            {%- if TWO_CTAS is defined and TWO_CTAS %}
+            {%- if TWO_CTAS %}
             accumulator += tl.dot(
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,

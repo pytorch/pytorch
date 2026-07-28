@@ -18,7 +18,7 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
-from ...autows_utils import has_meta_ws
+from ...autows_utils import has_meta_ws, has_two_ctas
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -67,10 +67,10 @@ USE_META_WS = has_meta_ws() and os.environ.get("TRITON_USE_META_WS", "0") == "1"
 
 
 def _use_template_autows() -> bool:
-    """Expand the GEMM search space with Meta Triton autoWS knobs. Requires the
-    opt-in flag, TRITON_USE_META_WS=1, and a meta-WS Triton build (the extra
-    tl.range kwargs are a compile error otherwise)."""
+    """Whether to expand the Blackwell GEMM search space with Meta Triton autoWS
+    configs: opt-in flag plus an enabled meta-WS Triton build."""
     return config.triton.enable_template_autows and USE_META_WS
+
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
@@ -162,6 +162,11 @@ class BlackwellGPUGemmConfig(GemmConfig):
     epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
+    # Meta Triton autoWS knobs (meta-WS builds only)
+    use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
+    data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
+    separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
+    two_ctas: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -879,7 +884,15 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
             # Add BlackwellGPUGemmConfig specific fields to key if present
             if isinstance(conf, BlackwellGPUGemmConfig):
-                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+                key += (
+                    conf.epilogue_subtile,
+                    conf.warp_specialize,
+                    conf.flatten,
+                    conf.use_meta_ws,
+                    conf.data_partition_factor,
+                    conf.separate_epilogue_store,
+                    conf.two_ctas,
+                )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
             key += extra_key
@@ -902,6 +915,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+                    kwargs["USE_META_WS"] = conf.use_meta_ws
+                    kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
+                    kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
+                    kwargs["TWO_CTAS"] = conf.two_ctas
 
                 kwargs.update(extra_kwargs)
 
@@ -2665,13 +2682,17 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        use_autows = _use_template_autows()
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
             **kwargs,
         ):
+            use_meta_ws = template_kwargs.get("USE_META_WS", False)
+            # autoWS configs come from a full sweep; drop combos the lowering
+            # does not support so no invalid config reaches codegen.
+            if use_meta_ws and not self._autows_constraints_ok(template_kwargs):
+                continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
@@ -2686,60 +2707,85 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and not USE_META_WS
+                and not use_meta_ws
             )
-            base_kwargs = {
+            out = {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
-            if not use_autows:
-                yield base_kwargs
-                continue
+            if template_kwargs.get("TWO_CTAS", False):
+                out["ctas_per_cga"] = (2, 1, 1)
+            yield out
 
-            block_m = base_kwargs["BLOCK_M"]
-            block_n = base_kwargs["BLOCK_N"]
-            # Keep each config's own EPILOGUE_SUBTILE and also try a deeper
-            # subtile=8 variant when the N tile stays wide enough.
-            base_subtile = base_kwargs.get("EPILOGUE_SUBTILE", 1)
-            subtiles = [base_subtile]
-            if base_subtile < 8 and block_n // 8 >= 32:
-                subtiles.append(8)
-            # 2-CTA needs the TMA epilogue store to participate in the cluster
-            # barrier protocol; without it the cluster deadlocks. Requiring
-            # enable_template_tma_store also means the output was already
-            # validated as TMA-storable during template selection.
-            two_ctas_choices = (
-                (False, True) if config.triton.enable_template_tma_store else (False,)
+    @staticmethod
+    def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
+        """autoWS lowering constraints; swept configs violating these are pruned."""
+        block_m = template_kwargs["BLOCK_M"]
+        block_n = template_kwargs["BLOCK_N"]
+        subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
+        # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
+        if block_n // subtile < 32:
+            return False
+        # dp=2 splits a 256-row tile into two 128-row MMA partitions
+        if dp == 2 and block_m != 256:
+            return False
+        if template_kwargs.get("TWO_CTAS", False):
+            # 2-CTA deadlocks without the TMA epilogue store to drive the cluster
+            # barrier, and needs a 128-row MMA tile per partition with BLOCK_N >= 128
+            if not (has_two_ctas() and config.triton.enable_template_tma_store):
+                return False
+            if block_m // dp != 128 or block_n < 128:
+                return False
+            # fb-triton's cross-CTA 2-CTA sync barrier is single-buffered
+            # (phase = iter % 2 in Insert2CTASync), so a pipeline deeper than 2
+            # stages wraps the phase and hangs on mbarrier.try_wait
+            if template_kwargs["num_stages"] > 2:
+                return False
+        return True
+
+    def _get_config_generator(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        # No curated autoWS set yet: sweep the full autoWS space for both default
+        # and exhaustive search, and let _get_template_configs_impl prune it.
+        if _use_template_autows():
+            return partial(
+                self.preprocess_mm_configs, configs=self._generate_autows_configs()
             )
-            for epilogue_subtile in subtiles:
-                if block_n // epilogue_subtile < 32:
-                    continue
-                for data_partition_factor in (1, 2):
-                    # dp=2 splits a 256-row tile into two 128-row MMA partitions.
-                    if data_partition_factor == 2 and block_m != 256:
-                        continue
-                    for separate_epilogue_store in (False, True):
-                        for two_ctas in two_ctas_choices:
-                            # 2-CTA needs a 128-row MMA tile per partition and
-                            # BLOCK_N >= 128.
-                            if two_ctas and (
-                                block_m // data_partition_factor != 128
-                                or block_n < 128
-                            ):
-                                continue
-                            config_kwargs = {
-                                **base_kwargs,
-                                "USE_META_WS": True,
-                                "EPILOGUE_SUBTILE": epilogue_subtile,
-                                "DATA_PARTITION_FACTOR": data_partition_factor,
-                                "SEPARATE_EPILOGUE_STORE": separate_epilogue_store,
-                                "TWO_CTAS": two_ctas,
-                            }
-                            if two_ctas:
-                                config_kwargs["ctas_per_cga"] = (2, 1, 1)
-                            yield config_kwargs
+        return super()._get_config_generator()
+
+    @staticmethod
+    def _generate_autows_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product([32, 64, 128, 256], repeat=3):
+            for num_stages in [2, 3, 4, 5, 6]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for epilogue_subtile in [1, 2, 4, 8]:
+                        for data_partition_factor in [1, 2]:
+                            for separate_epilogue_store in [False, True]:
+                                for two_ctas in [False, True]:
+                                    configs.append(
+                                        BlackwellGPUGemmConfig(
+                                            block_m=BLOCK_M,
+                                            block_n=BLOCK_N,
+                                            block_k=BLOCK_K,
+                                            num_stages=num_stages,
+                                            num_warps=num_warps,
+                                            group_m=8,
+                                            epilogue_subtile=epilogue_subtile,
+                                            use_meta_ws=True,
+                                            data_partition_factor=data_partition_factor,
+                                            separate_epilogue_store=separate_epilogue_store,
+                                            two_ctas=two_ctas,
+                                            warp_specialize=True,
+                                            flatten=True,
+                                        )
+                                    )
+        return configs
 
     @staticmethod
     def _generate_exhaustive_configs() -> list[BaseConfig]:

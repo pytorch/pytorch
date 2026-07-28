@@ -40,13 +40,8 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
 
 @SymbolicGridFn
 def blackwell_persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
-    """Grid for the Blackwell persistent TMA kernel.
-
-    Same as persistent_mm_grid, but when 2-CTA is enabled the M tiles and the
-    launched grid are both rounded to even so CTAs pair up into clusters
-    (ctas_per_cga=(2, 1, 1)). TWO_CTAS is a static config value, so the branch
-    resolves at grid-trace time; the arithmetic stays branch-free on the
-    symbolic grid size.
+    """Like persistent_mm_grid, but when 2-CTA is enabled rounds the M-tile count
+    and launched grid to even so CTAs pair into clusters (ctas_per_cga=(2, 1, 1)).
     """
     num_pid_m = cdiv(M, meta["BLOCK_M"])
     if meta.get("TWO_CTAS", False):
