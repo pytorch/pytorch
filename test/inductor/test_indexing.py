@@ -142,10 +142,10 @@ class TestIndexingSimplification(InductorTestCase):
 
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-        r3 = sympy.Symbol("r3", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
+        i2 = sympy.Symbol("i2", integer=True, nonnegative=True)
+        r3 = sympy.Symbol("r3", integer=True, nonnegative=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -1076,8 +1076,8 @@ class TestWideExpressionThresholds(InductorTestCase):
         self.assertEqual(result, FloorDiv(128 * i1, 8192))
 
     def test_modular_indexing_simplification_small(self):
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
         self.assertEqual(
             ModularIndexing(i0 + i1 * 10, 1, 10),
             ModularIndexing(i0, 1, 10),
@@ -1206,6 +1206,30 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
 
         with unittest.mock.patch.object(sympy.Basic, "subs", fail_subs):
             self.assertEqual(sizevars.optimization_hint(expr, fallback=0), 0)
+
+    def test_hint_respects_symbolic_upper_bound_assert(self):
+        # A reducing slice x[u0:] is sized s0 - u0. The invariant u0 <= s0 lives
+        # only in deferred_runtime_asserts, not var_to_range (which keeps the loose
+        # [0, fallback]). optimization_hint must honor it so u0 is capped at s0's
+        # hint rather than the generic fallback; otherwise s0 - u0 hints negative
+        # (16 - fallback) and overflows downstream allocations such as the AOTI
+        # autotuning example tensors.
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        s0 = shape_env.create_symbol(
+            16,
+            source=ConstantSource("__test_s0"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            constraint_dim=None,
+        )
+        u0 = shape_env.create_unbacked_symint().node.expr
+        shape_env.guard_or_defer_runtime_assert(u0 <= s0, "u0 <= s0")
+
+        self.assertLessEqual(sizevars.optimization_hint(u0, fallback=1024), 16)
+        self.assertGreaterEqual(sizevars.optimization_hint(s0 - u0, fallback=1024), 0)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):
