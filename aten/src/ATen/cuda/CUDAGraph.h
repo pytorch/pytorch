@@ -8,9 +8,9 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <atomic>
 #include <limits>
 #include <optional>
-#include <stack>
 #include <vector>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -86,7 +86,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // keep_graph=false, or by an explicit instantiate()). The Python replay()
   // wrapper uses this to instantiate on demand for keep_graph=true.
   bool has_graph_exec() const {
-    return has_graph_exec_;
+    return graph_exec_ != nullptr;
   }
   void replay();
   void reset();
@@ -110,10 +110,18 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
  private:
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
-  std::function<bool(cudaStream_t)> create_child_allocate_filter();
+  cudaError_t end_active_segment(cudaGraph_t* graph);
+  void register_active_segment(CaptureId_t capture_id);
   void record_retained_pool(MempoolId_t pool);
   bool has_retained_pool(MempoolId_t pool) const;
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  struct SuspendedCaptureFrame {
+    cudaGraph_t graph = nullptr;
+    cudaGraphNode_t resume_after = nullptr;
+    cudaGraphConditionalHandle handle{};
+  };
+
+  void begin_segment(cudaGraph_t graph, cudaGraphNode_t dependency = nullptr);
   void begin_capture_to_conditional_node(
       const Tensor& scalar_cuda_pred_tensor,
       cudaGraphConditionalNodeType conditional_type);
@@ -126,29 +134,22 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // internal states so reset() can do its best cleaning up
 
   // Set to true in capture_end if cudaStreamEndCapture succeeded
-  // Set back to false after instantiate() unless keep_graph=True or
-  // enable_debug_mode() was called on any CUDAGraph instance.
-  bool has_graph_ = false;
-  // Set to true in capture_end if cudaStreamEndCapture succeeded
   bool capture_ended_ = false;
-  // Set to true in capture_end if cudaGraphInstantiate succeeded
-  bool has_graph_exec_ = false;
 
   // Set to true in capture_begin once a private pool has been acquired
   // (beginAllocateToPool). Tells reset() it must release the pool, even if the
   // capture failed before capture_end() completed. Otherwise a failed capture
   // leaks the pool: its use_count never returns to zero, so empty_cache can
   // never reclaim its segments for the rest of the process.
-  bool allocated_pool_ = false;
-  // Set to true in capture_begin after beginAllocateToPool and cleared in
-  // capture_end after endAllocateToPool. Tells reset() whether the allocator is
-  // still routing allocations to the pool (capture abandoned before capture_end
-  // ran) and must be ended before the pool can be released.
-  bool capturing_to_pool_ = false;
+  bool pool_acquired_ = false;
+  bool pool_routing_ = false;
 
   // the ID assigned by cuda during graph capture,
-  // used to identify when a stream is participating in capture
+  // used for whole-graph generator state in an unsegmented capture
   CaptureId_t capture_id_ = 0;
+  // CUDA assigns a new ID to every resumed capture segment. Only this ID is
+  // registered as actively capturing and accepted by allocator filters.
+  std::atomic<CaptureId_t> active_segment_id_{0};
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.
@@ -185,30 +186,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaStreamCaptureMode capture_mode_{};
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
-  struct OwnedCUDAStream {
-    cudaStream_t stream = nullptr;
-    OwnedCUDAStream() = default;
-    explicit OwnedCUDAStream(cudaStream_t s) : stream(s) {}
-    ~OwnedCUDAStream() {
-      if (stream)
-        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
-    }
-    OwnedCUDAStream(const OwnedCUDAStream&) = delete;
-    OwnedCUDAStream& operator=(const OwnedCUDAStream&) = delete;
-    OwnedCUDAStream(OwnedCUDAStream&& o) noexcept
-        : stream(std::exchange(o.stream, nullptr)) {}
-    OwnedCUDAStream& operator=(OwnedCUDAStream&& o) noexcept {
-      if (stream)
-        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
-      stream = std::exchange(o.stream, nullptr);
-      return *this;
-    }
-  };
-
-  std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
-  std::stack<CaptureId_t> conditional_graph_capture_ids_;
-  std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
-  std::stack<cudaGraphConditionalHandle> conditional_node_handles_;
+  std::vector<SuspendedCaptureFrame> suspended_capture_frames_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 
