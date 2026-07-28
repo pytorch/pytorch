@@ -94,8 +94,9 @@ void initCuptiMonitorBindings(py::module& m) {
       "reset_buffers", []() { CuptiMonitorBuffers::get().reset(); });
 
   // Native decode worker (GIL-free): pulls completed buffers, iterates records
-  // with cuptiActivityGetNextRecord_v2 (address passed from Python, which owns
-  // the libcupti handle + subscriber), and accumulates per-(kind, field)
+  // with cuptiActivityGetNextRecord_v2 and (for self-flush) drives
+  // cuptiActivityFlushAll -- both as addresses passed from Python, which owns
+  // the libcupti handle + subscriber -- and accumulates per-(kind, field)
   // columns.
   using torch::profiler::impl::CuptiMonitorDecoder;
   cupti_monitor.def(
@@ -103,41 +104,26 @@ void initCuptiMonitorBindings(py::module& m) {
       [](uintptr_t subscriber,
          uintptr_t get_next_record_fn,
          uint32_t fence_kind,
-         int fence_end_field) {
+         int fence_end_field,
+         bool self_flush,
+         uint64_t flush_period_ns,
+         uintptr_t flush_fn) {
         CuptiMonitorDecoder::get().configure(
-            subscriber, get_next_record_fn, fence_kind, fence_end_field);
+            subscriber,
+            get_next_record_fn,
+            fence_kind,
+            fence_end_field,
+            self_flush,
+            flush_period_ns,
+            flush_fn);
       },
       py::arg("subscriber"),
       py::arg("get_next_record_fn"),
       py::arg("fence_kind") = 0,
-      py::arg("fence_end_field") = -1);
-  // Drop noisy runtime/driver records by cbid in the decoder. filters: {kind:
-  // (keep_mode, [cbids])} -- keep_mode True keeps only those cbids (driver
-  // allowlist), False drops them (runtime blocklist). cbid_field_id is the cbid
-  // field in the record.
-  cupti_monitor.def(
-      "set_cbid_filter",
-      [](int cbid_field_id, const py::dict& filters) {
-        std::unordered_map<
-            uint32_t,
-            std::pair<bool, std::unordered_set<uint32_t>>>
-            converted;
-        converted.reserve(filters.size());
-        for (auto item : filters) {
-          auto kind = item.first.cast<uint32_t>();
-          auto spec = item.second.cast<py::tuple>();
-          bool keep_mode = spec[0].cast<bool>();
-          std::unordered_set<uint32_t> cbids;
-          for (auto c : spec[1].cast<py::iterable>()) {
-            cbids.insert(c.cast<uint32_t>());
-          }
-          converted.emplace(kind, std::make_pair(keep_mode, std::move(cbids)));
-        }
-        CuptiMonitorDecoder::get().set_cbid_filter(
-            cbid_field_id, std::move(converted));
-      },
-      py::arg("cbid_field_id"),
-      py::arg("filters"));
+      py::arg("fence_end_field") = -1,
+      py::arg("self_flush") = false,
+      py::arg("flush_period_ns") = 0,
+      py::arg("flush_fn") = 0);
   cupti_monitor.def(
       "start_decoder", []() { CuptiMonitorDecoder::get().start(); });
   cupti_monitor.def(

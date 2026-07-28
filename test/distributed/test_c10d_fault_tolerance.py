@@ -15,11 +15,12 @@ if not dist.is_available():
 
 import torch.distributed.distributed_c10d as c10d
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 
 
 FAULT_TOLERANCE_BACKENDS = [
     ("gloo", "cpu"),
+    ("nccl2", "cuda"),
 ]
 
 
@@ -27,6 +28,12 @@ class AbstractFaultToleranceTest:
     @property
     def world_size(self):
         return 3
+
+    @property
+    def device(self):
+        if self.device_type == "cuda":
+            return f"cuda:{self.rank}"
+        return self.device_type
 
     def setUp(self):
         super().setUp()
@@ -46,6 +53,8 @@ class AbstractFaultToleranceTest:
 
     def _init_reconfigurable_pg(self):
         self.store = self._create_store()
+        if self.device_type == "cuda":
+            torch.cuda.set_device(self.rank)
         dist.init_process_group(
             self.backend_name,
             world_size=self.world_size,
@@ -55,7 +64,7 @@ class AbstractFaultToleranceTest:
             enable_reconfigure=True,
         )
         self.pg = c10d._get_default_group()
-        self.backend = self.pg._get_backend(torch.device(self.device))
+        self.backend = dist.get_backend_impl(self.pg, torch.device(self.device))
         self.assertTrue(dist._supports_reconfigure())
         self.assertTrue(self.backend.supports_reconfigure)
 
@@ -214,6 +223,21 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1002, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    def test_reconfigure_after_abort(self):
+        # Port of torchcomms' ReconfigureTest.test_reconfigure_after_abort:
+        # abort() (a revoke in reconfigurable mode) must be recoverable by a
+        # reconfigure() with a fresh uuid.
+        self._create_reconfigured_pg("ft_abort", 1200)
+        self.backend.abort()
+        if hasattr(self.backend, "get_error"):
+            from torch._C._distributed_c10d import ErrorType
+
+            self.assertEqual(self.backend.get_error(), ErrorType.COMM_ERROR)
+
+        handles = self._collect_handles("ft_abort_recover")
+        self._reconfigure(1201, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
         uuid = 1100 + self.rank
@@ -222,23 +246,29 @@ class AbstractFaultToleranceTest:
             self._reconfigure(uuid, [dist._get_reconfigure_handle()])
 
 
-def _make_fault_tolerance_test_class(backend_name, device):
+def _make_fault_tolerance_test_class(backend_name, device_type):
     class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
         pass
 
     FaultToleranceTest.backend_name = backend_name
-    FaultToleranceTest.device = device
+    FaultToleranceTest.device_type = device_type
     FaultToleranceTest.__name__ = f"{backend_name.capitalize()}FaultToleranceTest"
     FaultToleranceTest.__qualname__ = FaultToleranceTest.__name__
-    return unittest.skipIf(
+    cls = unittest.skipIf(
         not dist.is_backend_available(backend_name),
         f"{backend_name} backend is not available",
     )(FaultToleranceTest)
+    if device_type == "cuda":
+        cls = unittest.skipIf(
+            not TEST_CUDA or torch.cuda.device_count() < 3,
+            "fault tolerance CUDA tests require at least 3 GPUs",
+        )(cls)
+    return cls
 
 
-for backend_name, device in FAULT_TOLERANCE_BACKENDS:
+for backend_name, device_type in FAULT_TOLERANCE_BACKENDS:
     globals()[f"{backend_name.capitalize()}FaultToleranceTest"] = (
-        _make_fault_tolerance_test_class(backend_name, device)
+        _make_fault_tolerance_test_class(backend_name, device_type)
     )
 
 

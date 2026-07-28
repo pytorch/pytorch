@@ -3,9 +3,11 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
+import threading
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
 import os
@@ -25,6 +27,28 @@ else:
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
+
+# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+# _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
+# ran); the module hard-imports the latter, so guard on both to skip (not error) where
+# the stubs were not generated.
+TEST_CUPTI = (
+    _check_module_exists("cupti")
+    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and not TEST_WITH_ROCM
+)
+
+def _cupti_version():
+    if not TEST_CUPTI:
+        return 0
+    try:
+        from torch.profiler._cupti.cupti_python import pylibcupti
+        return pylibcupti().get_version()
+    except Exception:
+        return 0
+
+
+TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
 
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
@@ -90,7 +114,14 @@ def gfx_arch_supports_opportunistic_fastatomics():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
+        # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it.
+        # The AOTriton path needs the gfx1250 GPU image from AOTriton 0.12.1b,
+        # which is wired up by PR #188242 (which also adds gfx1250 to this list);
+        # this gate-only PR leaves it out so the two changes do not conflict
+        # (see cmake/External/aotriton.cmake). The CK FAv3/AITER codegen is
+        # separately not yet wired for gfx1250
+        # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -108,7 +139,12 @@ def evaluate_platform_supports_ck_sdpa():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
+        # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
+        # for it. The AOTriton gfx1250 image (from AOTriton 0.12.1b) is wired up
+        # by PR #188242, which also adds gfx1250 here; this gate-only PR leaves
+        # it out to avoid conflicting with that change. The CK FAv3/AITER codegen
+        # is separately not yet wired for gfx1250.
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -227,6 +263,8 @@ def evaluate_platform_supports_mx_gemm():
                 return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
         else:
             return SM100OrLater
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
@@ -280,20 +318,45 @@ def initialize_cuda_context_rng():
         __cuda_ctx_rng_initialized = True
 
 
+_tf32_off_lock = threading.Lock()
+_tf32_off_depth = 0
+_tf32_off_saved_precision = None
+_tf32_off_cudnn_ctx = None
+
+
 @contextlib.contextmanager
 def tf32_off():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    # First-in saves state and disables tf32; last-out restores. Multithreaded
+    # test runners (e.g. MultiThreadedTestCase) enter this context once per
+    # rank thread over the same process-global flags, so per-entry
+    # save/restore can interleave and leak a modified state past the last
+    # exit, which the TestCase fp32 precision leak detector then flags.
+    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    with _tf32_off_lock:
+        if _tf32_off_depth == 0:
+            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
+            # writing allow_tf32 back can't reproduce the "none" default (it
+            # yields "ieee"), which the leak detector would flag on ROCm.
+            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
+            torch.backends.cuda.matmul.allow_tf32 = False
+            _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
+            _tf32_off_cudnn_ctx.__enter__()
+        _tf32_off_depth += 1
     try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield
+        yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        with _tf32_off_lock:
+            _tf32_off_depth -= 1
+            if _tf32_off_depth == 0:
+                _tf32_off_cudnn_ctx.__exit__(None, None, None)
+                _tf32_off_cudnn_ctx = None
+                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
+                _tf32_off_saved_precision = None
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -301,7 +364,7 @@ def tf32_on(self, tf32_precision=1e-5):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
         self.precision = old_precision
 
 
@@ -311,7 +374,7 @@ def tf32_enabled():
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
     """
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
@@ -319,7 +382,7 @@ def tf32_enabled():
         ):
             yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
 
 
 # This is a wrapper that wraps a test to run this test twice, one with

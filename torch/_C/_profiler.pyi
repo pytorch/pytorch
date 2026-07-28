@@ -281,11 +281,9 @@ class _CuptiMonitorModule:
         get_next_record_fn: int,
         fence_kind: int = 0,
         fence_end_field: int = -1,
-    ) -> None: ...
-    @staticmethod
-    def set_cbid_filter(
-        cbid_field_id: int,
-        filters: dict[int, tuple[bool, list[int]]],
+        self_flush: bool = False,
+        flush_period_ns: int = 0,
+        flush_fn: int = 0,
     ) -> None: ...
     @staticmethod
     def start_decoder() -> None: ...

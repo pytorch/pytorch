@@ -512,6 +512,7 @@ aten::_pdist_backward.out
 aten::_pdist_forward
 aten::_pdist_forward.out
 aten::_philox_key_fold_in
+aten::_philox_key_fold_in.Tensor
 aten::_philox_key_split
 aten::_philox_normal
 aten::_philox_normal.out

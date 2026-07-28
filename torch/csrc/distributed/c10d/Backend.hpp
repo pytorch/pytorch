@@ -398,6 +398,22 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support gather"));
   }
 
+  // Gathers a single tensor inputBuffer from every rank into a single flat
+  // outputBuffer on the root rank, interpreted as a contiguous collection of
+  // size inputBuffer * WORLD_SIZE. This is the single-tensor analog of gather
+  // that avoids materializing a per-rank output tensor list.
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const GatherOptions& /* opts */ = GatherOptions()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support gather_into_tensor"));
+  }
+
   virtual c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
