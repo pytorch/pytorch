@@ -859,17 +859,11 @@ class GraphLowering(torch.fx.Interpreter):
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
             meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
-            return (
-                meta_val.size(0) * 2 <= meta_val.size(1)
-                and meta_val.size(2) > 1
-            )
+            return meta_val.size(0) * 2 <= meta_val.size(1) and meta_val.size(2) > 1
 
         def is_small_channel(n: torch.fx.Node) -> bool:
             meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
-            return (
-                meta_val.size(0) <= 64
-                and meta_val.size(1) <= 64
-            )
+            return meta_val.size(0) <= 64 and meta_val.size(1) <= 64
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
