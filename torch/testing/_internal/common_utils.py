@@ -2550,6 +2550,8 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
     )
     return decorator(func) if func is not None else decorator
 
+requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
+
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
         torch.cuda.is_available()
