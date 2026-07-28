@@ -35,7 +35,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-cutlass-backend:
     name: linux-jammy-cuda13.0-py3.10-gcc11-sm90-cutlass-backend
@@ -51,7 +51,6 @@ jobs:
         { include: [
           { config: "h100_cutlass_backend", shard: 1, num_shards: 1, runner: "linux.aws.h100", owners: ["oncall:pt2"] },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -67,7 +66,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-cutlass-backend.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-cutlass-backend.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-cutlass-backend.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"

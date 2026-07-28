@@ -261,7 +261,7 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
       state.get(),
       1,
       device_type != at::kCPU ? THPGenerator_getOffset(_self, nullptr)
-                              : Py_None);
+                              : Py_NewRef(Py_None));
   PyTuple_SET_ITEM(state.get(), 2, THPGenerator_getState(_self, nullptr));
   PyTuple_SET_ITEM(ret.get(), 2, state.release());
 
@@ -390,7 +390,7 @@ bool THPGenerator_init(PyObject* module) {
   if (PyModule_AddType(module, &THPGeneratorType) < 0)
     return false;
   // Register _set_generator_metaclass on torch._C so Python code can
-  // late-bind OpaqueBaseMeta as Generator's metaclass (see rng_prims.py).
+  // late-bind CustomClassBaseMeta as Generator's metaclass (see rng_prims.py).
   if (PyModule_AddFunctions(module, THPGenerator_moduleMethods) < 0)
     return false;
   return true;

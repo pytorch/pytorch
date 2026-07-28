@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import \
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
+     largeTensorTest)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -314,17 +315,27 @@ class TestFFT(TestCase):
                 torch.half: torch.complex32,
                 torch.float: torch.complex64,
                 torch.double: torch.complex128,
+                # bfloat16 is promoted to float32 on CUDA/XPU, yielding complex64
+                torch.bfloat16: torch.complex64,
             }
-            C = torch.fft.rfft(t)
-            self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
+            device_type = torch.device(device).type
+            if dtype is torch.bfloat16 and device_type not in ('cuda', 'xpu'):
+                pass  # bfloat16 FFT only supported on CUDA/XPU, skip on CPU
+            elif dtype in PROMOTION_MAP_R2C:
+                C = torch.fft.rfft(t)
+                self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
-        sample = first_sample(self, op.sample_inputs(device, dtype))
+        # bfloat16 is supported on CUDA/XPU via promotion to float32, so
+        # only expect an error on other device types (e.g. CPU, ROCm).
         device_type = torch.device(device).type
+        if dtype is torch.bfloat16 and device_type in ('cuda', 'xpu') and not TEST_WITH_ROCM:
+            return
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
@@ -332,6 +343,24 @@ class TestFFT(TestCase):
             err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
+
+    @onlyOn(["cuda", "xpu"])
+    @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
+         allowed_dtypes=[torch.bfloat16])
+    def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
+        # bfloat16 inputs should be silently promoted to float32 on CUDA/XPU,
+        # producing complex64 output without raising an error.
+        # ROCm/hipFFT does not support bfloat16, so skip this test on ROCm.
+        # See: promote_type_fft() in SpectralOps.cpp
+        if TEST_WITH_ROCM:
+            self.skipTest("bfloat16 FFT not supported on ROCm")
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+        result = op(sample.input, *sample.args, **sample.kwargs)
+        # Output must be complex64 (bfloat16 -> float32 -> complex64)
+        self.assertTrue(
+            result.dtype in (torch.complex64, torch.float32),
+            f"Expected complex64 or float32 output for bfloat16 input, got {result.dtype}"
+        )
 
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
@@ -916,6 +945,20 @@ class TestFFT(TestCase):
 
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
+
+    @onlyCUDA
+    @largeTensorTest("18GB")
+    def test_fft_conjugate_symmetry_fill_int64_indexing(self, device):
+        # The CUDA conjugate-symmetry fill uses 32-bit index math when numel and
+        # every element offset fit in int32, else a 64-bit fallback. Space the
+        # output rows 2**31 elements apart so max_out_offset exceeds INT32_MAX and
+        # the 64-bit path is taken, while the filled region itself stays tiny.
+        rows, cols, stride = 2, 8, 2 ** 31
+        x = torch.randn(rows, cols, device=device)
+        buf = torch.empty((rows - 1) * stride + cols, dtype=torch.complex64, device=device)
+        out = buf.as_strided((rows, cols), (stride, 1))
+        torch.fft.fft(x, dim=-1, out=out)
+        self.assertEqual(out, torch.fft.fft(x, dim=-1))
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")

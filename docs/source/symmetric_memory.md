@@ -194,6 +194,29 @@ https://github.com/meta-pytorch/kraken/blob/main/kraken to see additional
 utilities and examples of using symmetric memory to implement common patterns in
 Triton.
 
+## One-sided get
+
+Symmetric memory also exposes a small one-sided `get` API for copying data from
+a peer's symmetric allocation into a local tensor:
+
+```python
+src = symm_mem.empty(1024, device=device)
+hdl = symm_mem.rendezvous(src, group)
+
+if dist.get_rank(group) == 0:
+    dst = torch.empty((512,), device=device)
+    # Copy the last 512 elements of the peer's allocation into dst.
+    symm_mem.get(dst, hdl, peer=1, offset=512)
+```
+
+`hdl` is the symmetric memory handle returned by `rendezvous`; the remote
+source is the peer's allocation backing that handle. The number of elements
+copied is inferred from `dst`, so pass a view (e.g. `dst[:n]`) to fill only
+part of a tensor; `offset` is given in elements of `dst`'s dtype and defaults
+to `0`. `dst` may be a regular CUDA tensor or another symmetric tensor; it must
+be on the same device as `hdl` and backed by contiguous memory. The copy is
+issued on the current CUDA stream.
+
 ## Scale out
 
 Large language models distribute experts onto more than 8 GPUs, hence requiring
@@ -435,6 +458,10 @@ communicator for the process group if it doesn't already exist.
 
 ```{eval-rst}
 .. autofunction:: rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: get
 ```
 
 ```{eval-rst}
