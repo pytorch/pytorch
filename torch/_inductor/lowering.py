@@ -981,6 +981,40 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+_FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
+    torch.float32,
+    torch.float64,
+    torch.float16,
+    torch.bfloat16,
+)
+
+
+def _float8_e8m0fnu_to_dtype(x: TensorBox, dtype: torch.dtype) -> TensorBox:
+    x_u8 = to_dtype_bitcast(x, torch.uint8)
+
+    def _to_float(value):
+        # E8M0's exponent bits map directly to FP32; only encodings 0 and 255
+        # need special handling for 2^-127 and NaN, respectively.
+        value_i32 = ops.to_dtype(value, torch.int32)
+        f32_bits = ops.bitwise_left_shift(value_i32, ops.constant(23, torch.int32))
+        f32_bits = ops.where(
+            ops.eq(value, ops.constant(0, torch.uint8)),
+            ops.constant(0x00400000, torch.int32),
+            f32_bits,
+        )
+        f32_bits = ops.where(
+            ops.eq(value, ops.constant(255, torch.uint8)),
+            ops.constant(0x7F800001, torch.int32),
+            f32_bits,
+        )
+        dequant = ops.to_dtype_bitcast(f32_bits, torch.float32, src_dtype=torch.int32)
+        if dtype != torch.float32:
+            return ops.to_dtype(dequant, dtype)
+        return dequant
+
+    return make_pointwise(_to_float, override_return_dtype=dtype)(x_u8)
+
+
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
 def _foreach_map(subgraph, *args, **kwargs):
     """
@@ -1042,6 +1076,9 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
                 prims.convert_element_type.default, add_to_fallback_set=False
             )(x, dtype)
     src_dtype = x.get_dtype()
+    if src_dtype == torch.float8_e8m0fnu and dtype in _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES:
+        return _float8_e8m0fnu_to_dtype(x, dtype)
+
     low_pr_fp = (torch.bfloat16, torch.float16)
     # In precision-emulation mode, explicit lowp casts must materialize the
     # storage dtype. Later pointwise barriers will widen from that rounded value.
@@ -2758,20 +2795,24 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         if not node:
             return True
 
-        # allow bitcast, views, memory movement, but not arithmetic
+        # Allow bitcasts, views, memory movement, and supported conversions,
+        # but not arithmetic.
         # TODO: delete once triton adds native support
-        return not (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target
-            in (
-                aten.view.dtype,
-                aten.cat.default,
-                aten.clone.default,
-                aten._scaled_mm.default,
-                aten._scaled_mm_v2.default,
+        if not isinstance(node.target, torch._ops.OpOverload):
+            return True
+        if node.target in (
+            aten.view.dtype,
+            aten.cat.default,
+            aten.clone.default,
+            aten._scaled_mm.default,
+            aten._scaled_mm_v2.default,
+        ) or is_view(node.target):
+            return False
+        if node.target == torch.ops.prims.convert_element_type.default:
+            return not (
+                len(node.args) >= 2 and node.args[1] in _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES
             )
-            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
-        )
+        return True
 
     return False
 
