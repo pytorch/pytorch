@@ -6003,6 +6003,45 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                 )
             )
 
+    def test_tdm_generic_descriptor_checker_force_path_enforces_shape_bounds(self):
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+        )
+
+        class FakeSizeVars:
+            @staticmethod
+            def replace_backed_symbols_with_hints(expr):
+                return expr
+
+            @staticmethod
+            def statically_known_true(expr):
+                return bool(expr)
+
+        kernel = mock.Mock(no_x_dim=False)
+        graph = mock.Mock(sizevars=FakeSizeVars())
+        graph.get_current_device_or_throw.return_value = mock.Mock(type="cuda")
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=True,
+            ),
+        ):
+            checker = TMACompatibilityChecker(
+                kernel, torch.float16, for_store=False, force=True
+            )
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[128] * 6)
+                )
+            )
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[torch.iinfo(torch.int32).max + 1])
+                )
+            )
+
     def _tdm_capable_triton(self):
         from torch.utils._triton import has_triton_amd_tdm_device
 
