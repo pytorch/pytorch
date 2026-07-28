@@ -1357,7 +1357,7 @@ class TestDistributions(DistributionsTestCase):
             # For simplex-constrained distributions (e.g. RelaxedOneHotCategorical),
             # samples near the boundary cause numerical Jacobian to produce nan
             # because log_prob inverts ExpTransform via log(), and finite
-            # differencing (eps=1e-6) near zero yields log(~0) = -inf/nan.
+            # differencing (eps=1e-6) near zero yields log(<=0) = -inf/nan.
             # Clamp to the simplex interior (1e-4 gives ~100x margin above
             # gradcheck eps) and renormalize.
             if isinstance(distribution.support, constraints._Simplex):
