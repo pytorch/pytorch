@@ -22,7 +22,7 @@
                       compilers, so we perform an explicit cast */   \
         static_cast<uint32_t>(__LINE__),                             \
         false,                                                       \
-        __cuda_error_log);                                           \
+        &__cuda_error_log);                                          \
   } while (0)
 
 namespace c10::cuda {

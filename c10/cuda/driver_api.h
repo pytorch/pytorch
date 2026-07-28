@@ -106,40 +106,45 @@
   _(cuStreamWriteValue32, 12000)                   \
   _(cuGetErrorString, 12000)
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12080)
-#define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
-  _(cuCtxFromGreenCtx, 12080)              \
-  _(cuCtxGetCurrent, 12080)                \
-  _(cuCtxPopCurrent, 12080)                \
-  _(cuCtxPushCurrent, 12080)               \
-  _(cuCtxSetCurrent, 12080)                \
-  _(cuGreenCtxCreate, 12080)               \
-  _(cuGreenCtxDestroy, 12080)              \
-  _(cuGreenCtxStreamCreate, 12080)         \
-  _(cuDevSmResourceSplitByCount, 12080)    \
-  _(cuDeviceGetDevResource, 12080)         \
-  _(cuDevResourceGenerateDesc, 12080)      \
-  _(cuMulticastAddDevice, 12030)           \
-  _(cuMulticastBindMem, 12030)             \
-  _(cuMulticastCreate, 12030)              \
-  _(cuMulticastUnbind, 12030)
-#elif defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
-#define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
-  _(cuMulticastAddDevice, 12030)           \
-  _(cuMulticastBindMem, 12030)             \
-  _(cuMulticastCreate, 12030)              \
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
+#define C10_LIBCUDA_DRIVER_API_12_3(_) \
+  _(cuMulticastAddDevice, 12030)       \
+  _(cuMulticastBindMem, 12030)         \
+  _(cuMulticastCreate, 12030)          \
   _(cuMulticastUnbind, 12030)
 #else
-#define C10_LIBCUDA_DRIVER_API_OPTIONAL(_)
+#define C10_LIBCUDA_DRIVER_API_12_3(_)
 #endif
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 13000)
-#define C10_LIBCUDA_DRIVER_LOG_API_OPTIONAL(_) \
-  _(cuLogsCurrent, 12090)                     \
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12080)
+#define C10_LIBCUDA_DRIVER_API_12_8(_) \
+  _(cuCtxFromGreenCtx, 12080)          \
+  _(cuCtxGetCurrent, 12080)            \
+  _(cuCtxPopCurrent, 12080)            \
+  _(cuCtxPushCurrent, 12080)           \
+  _(cuCtxSetCurrent, 12080)            \
+  _(cuGreenCtxCreate, 12080)           \
+  _(cuGreenCtxDestroy, 12080)          \
+  _(cuGreenCtxStreamCreate, 12080)     \
+  _(cuDevSmResourceSplitByCount, 12080) \
+  _(cuDeviceGetDevResource, 12080)     \
+  _(cuDevResourceGenerateDesc, 12080)
+#else
+#define C10_LIBCUDA_DRIVER_API_12_8(_)
+#endif
+
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
+#define C10_LIBCUDA_DRIVER_API_12_9(_) \
+  _(cuLogsCurrent, 12090)              \
   _(cuLogsDumpToMemory, 12090)
 #else
-#define C10_LIBCUDA_DRIVER_LOG_API_OPTIONAL(_)
+#define C10_LIBCUDA_DRIVER_API_12_9(_)
 #endif
+
+#define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
+  C10_LIBCUDA_DRIVER_API_12_3(_)           \
+  C10_LIBCUDA_DRIVER_API_12_8(_)           \
+  C10_LIBCUDA_DRIVER_API_12_9(_)
 
 #define C10_NVML_DRIVER_API(_)            \
   _(nvmlInit_v2)                          \
@@ -150,10 +155,12 @@
   _(nvmlSystemGetCudaDriverVersion_v2)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12040)
-#define C10_NVML_DRIVER_API_OPTIONAL(_) _(nvmlDeviceGetGpuFabricInfoV)
+#define C10_NVML_DRIVER_API_12_4(_) _(nvmlDeviceGetGpuFabricInfoV)
 #else
-#define C10_NVML_DRIVER_API_OPTIONAL(_)
+#define C10_NVML_DRIVER_API_12_4(_)
 #endif
+
+#define C10_NVML_DRIVER_API_OPTIONAL(_) C10_NVML_DRIVER_API_12_4(_)
 
 namespace c10::cuda {
 
@@ -169,14 +176,6 @@ struct DriverAPI {
 
   static C10_CUDA_API DriverAPI* get();
   static void* get_nvml_handle();
-};
-
-struct CUDAErrorLogAPI {
-#define CREATE_MEMBER_VERSIONED(name, version) decltype(&name) name##_;
-  C10_LIBCUDA_DRIVER_LOG_API_OPTIONAL(CREATE_MEMBER_VERSIONED)
-#undef CREATE_MEMBER_VERSIONED
-
-  static C10_CUDA_API CUDAErrorLogAPI* get();
 };
 
 } // namespace c10::cuda

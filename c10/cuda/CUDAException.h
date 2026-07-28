@@ -51,7 +51,7 @@ class C10_CUDA_API CUDAErrorLogCapture {
                       compilers, so we perform an explicit cast */   \
         static_cast<uint32_t>(__LINE__),                             \
         true,                                                        \
-        __cuda_error_log);                                           \
+        &__cuda_error_log);                                          \
   } while (0)
 // backwards compat due to hipify v2 changes, for extension projects
 #define C10_HIP_CHECK C10_CUDA_CHECK
@@ -112,14 +112,7 @@ C10_CUDA_API void c10_cuda_check_implementation(
     const char* filename,
     const char* function_name,
     const uint32_t line_number,
-    const bool include_device_assertions);
-
-C10_CUDA_API void c10_cuda_check_implementation(
-    const int32_t err,
-    const char* filename,
-    const char* function_name,
-    const uint32_t line_number,
     const bool include_device_assertions,
-    CUDAErrorLogCapture& error_log);
+    CUDAErrorLogCapture* error_log = nullptr);
 
 } // namespace c10::cuda

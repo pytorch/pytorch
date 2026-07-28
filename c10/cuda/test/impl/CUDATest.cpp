@@ -31,7 +31,7 @@ TEST(CUDAGuardImplTest, UncheckedSetDeviceSwallowsErrorAndDoesNotTerminate) {
       impl.uncheckedSetDevice(c10::Device(c10::DeviceType::CUDA, -1)));
 }
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && (CUDA_VERSION >= 13000)
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
 TEST(CUDAErrorTest, IncludesDriverErrorLog) {
   int device_count = 0;
   if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
@@ -39,7 +39,7 @@ TEST(CUDAErrorTest, IncludesDriverErrorLog) {
     GTEST_SKIP() << "No CUDA device is available";
   }
 
-  auto* log_api = c10::cuda::CUDAErrorLogAPI::get();
+  auto* log_api = c10::cuda::DriverAPI::get();
   if (!log_api->cuLogsCurrent_ || !log_api->cuLogsDumpToMemory_) {
     GTEST_SKIP() << "The CUDA driver log APIs are unavailable";
   }

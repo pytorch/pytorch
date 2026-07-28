@@ -14,9 +14,9 @@ namespace c10::cuda {
 
 CUDAErrorLogCapture::CUDAErrorLogCapture() noexcept {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
-    defined(CUDA_VERSION) && (CUDA_VERSION >= 13000)
+    defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
   try {
-    auto* api = CUDAErrorLogAPI::get();
+    auto* api = DriverAPI::get();
     if (api->cuLogsCurrent_ && api->cuLogsDumpToMemory_) {
       CUlogIterator iterator;
       if (api->cuLogsCurrent_(&iterator, 0) == CUDA_SUCCESS) {
@@ -31,7 +31,7 @@ CUDAErrorLogCapture::CUDAErrorLogCapture() noexcept {
 
 std::string CUDAErrorLogCapture::get_error_log_suffix() {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
-    defined(CUDA_VERSION) && (CUDA_VERSION >= 13000)
+    defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
   if (!enabled_) {
     return {};
   }
@@ -40,7 +40,7 @@ std::string CUDAErrorLogCapture::get_error_log_suffix() {
   size_t size = sizeof(buffer);
   auto iterator = static_cast<CUlogIterator>(iterator_);
   try {
-    auto* api = CUDAErrorLogAPI::get();
+    auto* api = DriverAPI::get();
     if (api->cuLogsDumpToMemory_(&iterator, buffer, &size, 0) ==
             CUDA_SUCCESS &&
         size > 0 && size <= sizeof(buffer)) {
@@ -55,9 +55,7 @@ std::string CUDAErrorLogCapture::get_error_log_suffix() {
   return {};
 }
 
-namespace {
-
-void c10_cuda_check_implementation_internal(
+void c10_cuda_check_implementation(
     const int32_t err,
     const char* filename,
     const char* function_name,
@@ -97,39 +95,6 @@ void c10_cuda_check_implementation_internal(
       {.function = function_name, .file = filename, .line = line_number},
       err,
       std::move(check_message));
-}
-
-} // namespace
-
-void c10_cuda_check_implementation(
-    const int32_t err,
-    const char* filename,
-    const char* function_name,
-    const uint32_t line_number,
-    const bool include_device_assertions) {
-  c10_cuda_check_implementation_internal(
-      err,
-      filename,
-      function_name,
-      line_number,
-      include_device_assertions,
-      nullptr);
-}
-
-void c10_cuda_check_implementation(
-    const int32_t err,
-    const char* filename,
-    const char* function_name,
-    const uint32_t line_number,
-    const bool include_device_assertions,
-    CUDAErrorLogCapture& error_log) {
-  c10_cuda_check_implementation_internal(
-      err,
-      filename,
-      function_name,
-      line_number,
-      include_device_assertions,
-      &error_log);
 }
 
 } // namespace c10::cuda
