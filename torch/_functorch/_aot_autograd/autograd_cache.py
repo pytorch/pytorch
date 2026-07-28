@@ -172,6 +172,14 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # Autocast/inference_mode regions inside a compiled function trace these
+        # _enter_*/_exit_* nodes into the graph. Their behavior is fully
+        # determined by their args (device type, dtype, enabled), which are
+        # hashed into the cache key. See #191106.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
+        "torch.autograd.grad_mode._enter_inference_mode",
+        "torch.autograd.grad_mode._exit_inference_mode",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
