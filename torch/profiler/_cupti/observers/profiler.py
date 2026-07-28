@@ -21,6 +21,7 @@ from torch.profiler._cupti.monitor_trace import merge_trace_window_into_chrome_t
 from torch.profiler._cupti.observers.base import (
     CuptiMonitorObserver,
     default_graph_annotation_resolver,
+    default_graph_dependency_resolver,
     ObserverAnnotationSettings,
 )
 from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
@@ -253,6 +254,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             selection,
             annotations=ObserverAnnotationSettings(
                 graph_annotation_resolver=default_graph_annotation_resolver,
+                graph_dependency_resolver=default_graph_dependency_resolver,
             ),
         )
         if self.available:
@@ -514,6 +516,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # Attach the per-collective blob as a "metadata" column on the GPU-op kinds (these
         # columns are this thread's now, no lock). No-op without comms metadata.
         _attach_metadata(columns, meta, self._metadata_resolver)
+        graph_deps = _window_graph_deps(self._dependency_resolver, columns)
         with self._lock:
             w = self._windows.get(window_id)
             if w is None:
@@ -523,6 +526,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 "user_annotations": w["annotations"],
                 "thread_resource_map": w["thread_map"],
                 "start_ns": start,
+                "graph_deps": graph_deps,
             }
 
     def _maybe_write(self, window_id: int) -> None:
@@ -621,6 +625,29 @@ def _attach_metadata(
                     if blob is not None:
                         meta[i] = blob
         c["metadata"] = meta
+
+
+def _window_graph_deps(
+    resolver: Any, columns: dict[str, dict[str, Any]]
+) -> dict[int, list[int]]:
+    """Resolve the graph node->node dependency edges for the graph_node_ids present in this
+    window, so the pftrace export can draw node->node arrows. Calls ``resolver`` per present
+    graph_node_id (memoized by the observer, see CuptiMonitorObserver._dependency_resolver) and
+    keeps only nodes with a nonempty predecessor list. Empty when there is no resolver, no
+    graphed ops, or no recorded dependencies."""
+    if resolver is None:
+        return {}
+    present: set[int] = set()
+    for kind_str in ("kernel", "gpu_memcpy", "gpu_memset"):
+        c = columns.get(kind_str)
+        if c is not None and "graph_node_id" in c:
+            present.update(int(g) for g in np.unique(c["graph_node_id"]) if g)
+    deps: dict[int, list[int]] = {}
+    for g in present:
+        preds = resolver(g)
+        if preds:
+            deps[g] = preds
+    return deps
 
 
 def _demangle_column(names: Any) -> Any:

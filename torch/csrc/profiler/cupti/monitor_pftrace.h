@@ -156,6 +156,13 @@ struct PftraceRenderStages {
   const int64_t* block_z;
   const uint64_t* kernel_iid; // nullable; -> InternedComputeKernel (0 = none)
   const uint64_t* name_iid; // nullable; -> EventName, the timeline slice label
+  // nullable CSR (event_wait_offsets length n+1, event_wait_ids flat): render
+  // stage i depends on the event_ids in event_wait_ids[event_wait_offsets[i],
+  // event_wait_offsets[i+1]) -> GpuRenderStageEvent.event_wait_ids (field 18),
+  // which the viewer draws as node->node flow arrows (the graph dependency
+  // DAG).
+  const int32_t* event_wait_offsets;
+  const uint64_t* event_wait_ids;
   std::vector<PftraceComputeArg> launch_args; // -> ComputeKernelLaunch.args
   std::vector<PftraceRenderExtra> extra; // -> GpuRenderStageEvent.extra_data
   std::vector<PftraceConstExtra> const_extra; // trace-wide string extra_data
@@ -186,10 +193,14 @@ struct PftraceGroup {
   std::vector<PftraceArrAnno> arr_annos;
   std::vector<PftraceJsonAnno> json_annos;
   const int64_t* flow; // nullable
-  // nullable: per-slice GpuTrackEvent.gpu_correlation (field 3000) ->
-  // GpuCorrelation.render_stage_submission_event_ids, linking a host launch to
-  // its GPU render-stage (event_id == this value). 0 = no link.
-  const int64_t* gpu_corr;
+  // nullable CSR (gpu_corr_offsets length n+1, gpu_corr_ids flat): per-slice
+  // GpuTrackEvent.gpu_correlation (field 3000), whose
+  // render_stage_submission_event_ids (field 1) is slice i's list
+  // gpu_corr_ids[gpu_corr_offsets[i], gpu_corr_offsets[i+1]) -- the
+  // render-stage event_ids this host launch submitted (a graph launch links to
+  // all its replay's nodes). Empty slice (offsets equal) = no link.
+  const int32_t* gpu_corr_offsets;
+  const int64_t* gpu_corr_ids;
   // nullable: per-slice interned EventCategory iid (index into category_table +
   // 1), emitted as TrackEvent.category_iids so the viewer can tell cpu_op /
   // cuda_runtime / cuda_driver / user_annotation slices apart. 0 = no category.

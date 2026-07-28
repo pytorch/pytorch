@@ -485,7 +485,8 @@ class TestCuptiRecords(TestCase):
                 "stream_id": i64(7, 7),  # both replayed on the capture stream
                 "correlation_id": i64(11, 12),
                 "graph_id": i64(1, 1),
-                "graph_node_id": i64(101, 102),
+                # graph id packed into the upper 32 bits; only the lower node id is kept
+                "graph_node_id": i64((1 << 32) | 101, (1 << 32) | 102),
                 "name": np.array(["graphKernelA", "graphKernelB"], dtype=object),
                 "annotation": np.array(
                     [{"ann_id": "a"}, {"ann_id": "b"}], dtype=object
@@ -590,6 +591,36 @@ class TestCuptiRecords(TestCase):
         # stream 5 still has non-reassigned work (k14), so its annotation is kept there
         self.assertEqual(by_name["reduce_scatter"]["tid"], 5)
 
+    def test_graph_dependency_flows_json(self):
+        # CUDA-graph node->node dependency arrows in the JSON export: one flow (predecessor end
+        # -> successor start) per edge, resolved within the same replay (correlation_id) so
+        # arrows never cross replays, drawn on the ops' display lanes. No CUDA.
+        from torch.profiler._cupti.monitor_trace import _graph_dependency_flow_events
+
+        # replay 100: node 11 on lane 7 [1000,2000]; node 12 on lane 8 [3000,4000], 12 -> 11.
+        # replay 200 repeats the same nodes and must stay self-contained.
+        node_rows = [
+            (100, 11, 0, 7, 1000, 2000),
+            (100, 12, 0, 8, 3000, 4000),
+            (200, 11, 0, 7, 5000, 6000),
+            (200, 12, 0, 8, 7000, 8000),
+        ]
+        events = _graph_dependency_flow_events(node_rows, {12: [11]}, base_ns=0)
+        starts = [e for e in events if e["ph"] == "s"]
+        fins = [e for e in events if e["ph"] == "f"]
+        self.assertEqual(len(starts), 2)  # one edge per replay
+        self.assertEqual(len(fins), 2)
+        s0 = starts[0]
+        f0 = next(f for f in fins if f["id"] == s0["id"])
+        # arrow leaves the predecessor's end on its lane and lands on the successor's start
+        self.assertEqual((s0["tid"], s0["ts"]), (7, 2.0))
+        self.assertEqual((f0["tid"], f0["ts"], f0["bp"]), (8, 3.0, "e"))
+        self.assertNotEqual(
+            starts[0]["id"], starts[1]["id"]
+        )  # replays don't share a flow
+        # no recorded dependencies -> no flows
+        self.assertEqual(_graph_dependency_flow_events(node_rows, {}, base_ns=0), [])
+
     def test_pftrace_render_stages_reassign_lane(self):
         # The pftrace render-stage builder reassigns a graphed kernel onto its logical lane
         # (named by the resolver); a GPU annotation stays on its capture-stream lane (as
@@ -597,7 +628,10 @@ class TestCuptiRecords(TestCase):
         # keeps its "stream N" lane. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import _build_render_stages
+        from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
+            _build_render_stages,
+        )
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -622,7 +656,10 @@ class TestCuptiRecords(TestCase):
                 "name": np.array(["all_reduce"], dtype=object),
             },
         }
-        result = _build_render_stages(columns, gfx_pid=1, iid_of={}, name_table=[])
+        event_id, _corr, wait_off, wait_ids = _assign_render_event_ids(columns, {})
+        result = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
         self.assertIsNotNone(result)
         specs, _gfx, stage_cols, *_ = result
         name_by_iid = {iid: name for iid, name, _cat in specs}
@@ -647,6 +684,7 @@ class TestCuptiRecords(TestCase):
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
             _build_render_stages,
             _HW_QUEUE_IID_BASE,
         )
@@ -667,7 +705,10 @@ class TestCuptiRecords(TestCase):
                 "name": np.array(["k0", "k1"], dtype=object),
             },
         }
-        specs, *_ = _build_render_stages(columns, gfx_pid=1, iid_of={}, name_table=[])
+        event_id, _corr, wait_off, wait_ids = _assign_render_event_ids(columns, {})
+        specs, *_ = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
         # hw-queue lanes are appended in ascending lane-id order; Perfetto re-sorts by name, so
         # the names sorted lexicographically must equal that ascending-id order.
         lane_names = [name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE]
@@ -703,7 +744,9 @@ class TestCuptiRecords(TestCase):
                     "start_ns": i64(1000, 1200),
                     "end_ns": i64(2000, 2200),
                     "graph_node_id": i64(101, 0),  # first graphed, second eager
-                    "logical_lane": i64(8, 7),  # graphed moved to lane 8; eager stays on 7
+                    "logical_lane": i64(
+                        8, 7
+                    ),  # graphed moved to lane 8; eager stays on 7
                 },
             },
             "user_annotations": {555: "all_reduce"},
@@ -991,7 +1034,9 @@ class TestCuptiRecords(TestCase):
 
             name_table = captured["name_table"]
             specs, _gfx, stage_cols, *_ = captured["render"]
-            ts, dur, event_id, gpu, hw_queue_iid, stage, _context, name_iid = stage_cols
+            ts, dur, event_id, gpu, hw_queue_iid, stage, _context, name_iid, _wait = (
+                stage_cols
+            )
             # specs maps every iid -> name: the stage iids (Kernel/Memcpy/Memset/Annotation)
             # and the hardware-queue lane iids (labeled "[<padded lane id>] <label>").
             name_by_iid = {int(iid): name for iid, name, _cat in specs}
@@ -1020,17 +1065,21 @@ class TestCuptiRecords(TestCase):
             track_pid_tid = {
                 t[0]: (int(t[3]), int(t[4])) for t in captured["tracks"] if not t[2]
             }
-            # A launch group carries a per-slice gpu_corr (== correlation) linking the CPU
-            # launch track_event to its GPU render stage (matched by event_id). Read the
-            # correlation -> CPU (pid, tid) source off those groups.
-            pftrace_arrow_src = {}
+            # A launch group carries a per-slice gpu_corr CSR (offsets, event_ids) listing the
+            # render-stage event_ids it launched (an eager launch -> its one kernel). Build the
+            # set of (CPU (pid, tid) source -> (device, lane) target) arrows off those groups,
+            # mapping each event_id to its render stage's lane via render_op_lane.
+            pftrace_arrows = set()
             for g in captured["group_tuples"]:
                 uu, gpu_corr = g[2], g[9]
                 if gpu_corr is None:
                     continue
-                for u, c in zip(np.asarray(uu).tolist(), np.asarray(gpu_corr).tolist()):
-                    if c:
-                        pftrace_arrow_src[int(c)] = track_pid_tid[int(u)]
+                offsets = np.asarray(gpu_corr[0]).tolist()
+                ids = np.asarray(gpu_corr[1]).tolist()
+                for slc, u in enumerate(np.asarray(uu).tolist()):
+                    for j in range(offsets[slc], offsets[slc + 1]):
+                        eid = int(ids[j])
+                        pftrace_arrows.add((track_pid_tid[int(u)], render_op_lane[eid]))
 
         # 2 kernels + memcpy + memset + 1 GPU annotation, identical down both export paths.
         self.assertEqual(len(chrome_slices), 5)
@@ -1071,14 +1120,9 @@ class TestCuptiRecords(TestCase):
         chrome_arrows = {
             c: (flow_src[c], flow_tgt[c]) for c in flow_src if c in flow_tgt
         }
-        pftrace_arrows = {
-            c: (src, render_op_lane[c])
-            for c, src in pftrace_arrow_src.items()
-            if c in render_op_lane
-        }
         # both launches (corr 11 -> lane 7, 12 -> lane 8) link; not the un-launched memcpy/memset.
         self.assertEqual(set(chrome_arrows), {11, 12})
-        self.assertEqual(chrome_arrows, pftrace_arrows)
+        self.assertEqual(set(chrome_arrows.values()), pftrace_arrows)
 
     def test_pftrace_chrome_lane_order_parity(self):
         # The GPU lane DISPLAY ORDER matches across formats -- both order by numeric lane id.
@@ -1505,7 +1549,7 @@ class TestCuptiRecords(TestCase):
 
         packets = [v for fn, _wt, v in flds(raw) if fn == 1]
 
-        # Per render stage (keyed by event_id == correlation), collect its extra_data pairs.
+        # Per render stage (keyed by event_id), collect its extra_data pairs.
         per_stage: dict[int, dict] = {}
         for pkt in packets:
             for fn, _wt, v in flds(pkt):
@@ -1527,16 +1571,177 @@ class TestCuptiRecords(TestCase):
                             pairs[name] = value
                 per_stage[event_id] = pairs
 
+        # Row order (from _render_stage_cols) is stable: row 0 == event_id 1, row 1 == 2.
         # Row 0: annotation-only -> its fields spread (numbers stringified).
-        self.assertEqual(per_stage[50]["Process Group Name"], "5")
-        self.assertEqual(per_stage[50]["In msg nelems"], "2048")
+        self.assertEqual(per_stage[1]["Process Group Name"], "5")
+        self.assertEqual(per_stage[1]["In msg nelems"], "2048")
         # Row 1: annotation + metadata merge onto the one render stage.
-        self.assertEqual(per_stage[51]["Process Group Name"], "6")
-        self.assertEqual(per_stage[51]["dtype"], "bf16")
+        self.assertEqual(per_stage[2]["Process Group Name"], "6")
+        self.assertEqual(per_stage[2]["dtype"], "bf16")
         # graphNodeId is emitted with only its lower 32-bit node id; the graph id packed in the
         # upper bits is dropped here (it rides along separately as "graph id").
-        self.assertEqual(per_stage[50]["graph node id"], "10")
-        self.assertEqual(per_stage[51]["graph node id"], "11")
+        self.assertEqual(per_stage[1]["graph node id"], "10")
+        self.assertEqual(per_stage[2]["graph node id"], "11")
+
+    def test_pftrace_graph_node_dependency_arrows(self):
+        # A CUDA-graph replay's node dependency DAG becomes GpuRenderStageEvent.event_wait_ids
+        # (node->node flow arrows) and the cudaGraphLaunch's GpuCorrelation lists ALL its
+        # replay's node event_ids. Two graphed kernels share one correlation (one replay) with
+        # distinct graph_node_ids; B depends on A. Runs the REAL native encoder end-to-end,
+        # gunzips, and decodes the protobuf with a minimal hand-rolled scanner (the perfetto
+        # python lib is not installed). No CUDA. Field numbers verified against perfetto.h:
+        # TracePacket.gpu_render_stage_event=53, .track_event=11; GpuRenderStageEvent.event_id=1,
+        # .event_wait_ids=18; GpuCorrelation is nested at field 3000 with its
+        # render_stage_submission_event_ids at field 1.
+        import tempfile
+
+        import numpy as np
+        from cupti.cupti import (  # pyrefly: ignore[missing-import]
+            Runtime_api_trace_cbid,
+        )
+
+        from torch.profiler._cupti.monitor_trace import (
+            _runtime_cbid_name,
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        base_ns = 0
+        graph_launch_cbid = next(
+            e.value
+            for e in Runtime_api_trace_cbid
+            if _runtime_cbid_name(e.value) == "cudaGraphLaunch"
+        )
+        gnid_a, gnid_b, corr = 1001, 1002, 50
+        columns = {
+            # Two graphed kernels of ONE replay: same correlation (one launch), distinct
+            # graph_node_ids, B depends on A. Same stream (CUPTI piles a replay on one stream).
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(corr, corr),
+                "graph_id": i64(1, 1),
+                "graph_node_id": i64(gnid_a, gnid_b),
+                "name": np.array(["nodeA", "nodeB"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+            # One cudaGraphLaunch record sharing the replay's correlation -> its GpuCorrelation
+            # fans out to both node event_ids.
+            "cuda_runtime": {
+                "start_ns": i64(500),
+                "end_ns": i64(600),
+                "cbid": i64(graph_launch_cbid),
+                "process_id": i64(1000),
+                "thread_id": i64(1),
+                "correlation_id": i64(corr),
+            },
+        }
+        window = {
+            "columns": columns,
+            "user_annotations": {},
+            "graph_deps": {gnid_b: [gnid_a]},  # B depends on A
+        }
+
+        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
+            s = r = 0
+            while True:
+                x = b[i]
+                i += 1
+                r |= (x & 0x7F) << s
+                if not x & 0x80:
+                    return r, i
+                s += 7
+
+        def flds(b):  # scan a message into [(field_no, wire_type, value)]
+            i = 0
+            o = []
+            while i < len(b):
+                k, i = rv(b, i)
+                fn, wt = k >> 3, k & 7
+                if wt == 0:
+                    v, i = rv(b, i)
+                    o.append((fn, 0, v))
+                elif wt == 2:
+                    n, i = rv(b, i)
+                    o.append((fn, 2, b[i : i + n]))
+                    i += n
+                elif wt == 5:
+                    i += 4
+                elif wt == 1:
+                    i += 8
+            return o
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps(
+                        {"baseTimeNanoseconds": base_ns, "traceEvents": []}
+                    ).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with gzip.open(out_path, "rb") as f:
+                raw = f.read()
+
+        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+
+        # Collect the GPU render stages (field 53) as (event_id, [event_wait_ids]).
+        render_stages = []
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 53:
+                    continue
+                event_id = 0
+                waits = []
+                for sfn, _swt, sv in flds(v):
+                    if sfn == 1:
+                        event_id = sv
+                    elif sfn == 18:
+                        waits.append(sv)
+                render_stages.append((event_id, waits))
+
+        # Two kernel render stages; exactly one (node B) has event_wait_ids, pointing at the
+        # other (node A) -- the node->node dependency arrow.
+        self.assertEqual(len(render_stages), 2)
+        with_waits = [(e, w) for e, w in render_stages if w]
+        self.assertEqual(len(with_waits), 1)
+        node_b_event_id, node_b_waits = with_waits[0]
+        node_a_event_id = next(e for e, w in render_stages if not w)
+        self.assertEqual(node_b_waits, [node_a_event_id])
+        self.assertNotEqual(node_a_event_id, node_b_event_id)
+
+        # The cudaGraphLaunch track_event (field 11) carries a GpuCorrelation (nested field
+        # 3000) listing BOTH node event_ids (render_stage_submission_event_ids at field 1).
+        submission_id_sets = []
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 11:
+                    continue
+                for sfn, _swt, sv in flds(v):
+                    if sfn == 3000:
+                        ids = [gv for gfn, _gwt, gv in flds(sv) if gfn == 1]
+                        submission_id_sets.append(set(ids))
+        self.assertEqual(len(submission_id_sets), 1)
+        self.assertEqual(submission_id_sets[0], {node_a_event_id, node_b_event_id})
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")

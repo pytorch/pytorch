@@ -194,6 +194,10 @@ class CUDAGraph(_CUDAGraph):
     # before the first remap. Lets a re-instantiate (which produces a fresh exec
     # id) rekey annotations from the previous exec id to the new one.
     _remapped_exec_id: int | None
+    # Exec graph ids this graph has recorded annotation/dependency data under
+    # (one per instantiate). Purged from the module-level annotation registries
+    # by the destroy callback so those maps do not grow across the run.
+    _recorded_exec_ids: set[int]
     _keep_graph: bool
     # User hooks fired by capture_end / instantiate (see register_*_hook).
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -213,6 +217,7 @@ class CUDAGraph(_CUDAGraph):
         instance._tracker = None
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
+        instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_end_hooks = OrderedDict()
@@ -231,6 +236,22 @@ class CUDAGraph(_CUDAGraph):
         # stream off it without pinning the graph.
         self._retained = _RetainedCallbacks()
         self._retained_finalizer = weakref.finalize(self, self._retained.fire)
+        # When a consumer (e.g. the CUPTI monitor) has registered graph-destroy
+        # handlers, arm the per-graph annotation/dependency purge for this capture
+        # cycle. The callback captures the exec-id SET OBJECT (empty now, filled as
+        # this graph records/instantiates) and the module fan-out function, never
+        # self and never a handler: a closure reachable to the graph would pin it
+        # past collection so it never fires. reset() re-arms a fresh holder, so this
+        # re-registers per cycle; a graph that records nothing just fires on an empty
+        # set (a no-op).
+        from torch.cuda._graph_annotations import (
+            graph_destroy_handlers_active,
+            run_graph_destroy_handlers,
+        )
+
+        if graph_destroy_handlers_active():
+            exec_ids = self._recorded_exec_ids
+            self.register_destroy_callback(lambda: run_graph_destroy_handlers(exec_ids))
 
     def register_capture_end_hook(
         self, hook: Callable[[CUDAGraph], None]
@@ -370,6 +391,24 @@ class CUDAGraph(_CUDAGraph):
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
         remap_to_exec_graph(self)
+        if self._remapped_exec_id is not None:
+            self._recorded_exec_ids.add(self._remapped_exec_id)
+
+    def _maybe_record_graph_dependencies(self) -> None:
+        # Record the exec graph's node dependency edges for the profiler's graph node->node
+        # dependency arrows. Gated on _capture_graph_id like _maybe_remap_annotations: a stamp
+        # is present only when annotations were enabled at capture (enable_annotations=True), so
+        # recording follows the same profiling opt-in (mark_kernels scopes are still not
+        # required). Needs keep_graph=True: get_graph_data() reads the live template. Called
+        # from instantiate() (not per replay); record_graph_dependencies is exception-safe and
+        # keyed by the fresh exec graph id, so no dedup is needed.
+        if not self._keep_graph or self._capture_graph_id is None:
+            return
+        from torch.cuda._graph_annotations import record_graph_dependencies
+
+        exec_graph_id = record_graph_dependencies(self)
+        if exec_graph_id is not None:
+            self._recorded_exec_ids.add(exec_graph_id)
 
     def _release_python_resources(self) -> None:
         # Single source of truth for GC-critical Python resources released by
@@ -479,6 +518,7 @@ class CUDAGraph(_CUDAGraph):
         """
         super().instantiate()
         self._maybe_remap_annotations()
+        self._maybe_record_graph_dependencies()
         for hook in list(self._post_instantiate_hooks.values()):
             hook(self)
 
@@ -517,6 +557,9 @@ class CUDAGraph(_CUDAGraph):
         self._retained.fire()
         if self._retained_finalizer is not None:
             self._retained_finalizer.detach()
+        # Start a fresh id set BEFORE re-arming: _arm_retained captures it into the
+        # next cycle's destroy callback. The just-fired holder dropped the old one.
+        self._recorded_exec_ids = set()
         self._arm_retained()
         # Reset-only state: scrubbed here because the object is reused after
         # reset(); on death these ints die with the object.
