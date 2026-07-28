@@ -34,7 +34,7 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
 
     @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_init_sharded_tensor_with_uniform(self):
         """Test torch.nn.init.uniform_(ShardedTensor, a, b)"""
 
@@ -67,7 +67,7 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
 
     @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_init_sharded_tensor_with_normal(self):
         """Test torch.nn.init.normal_(ShardedTensor, mean, std)"""
 
@@ -100,7 +100,7 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
 
     @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_init_sharded_tensor_with_kaiming_uniform(self):
         """Test torch.nn.init.kaiming_uniform_(ShardedTensor, a, mode, nonlinearit)"""
 
