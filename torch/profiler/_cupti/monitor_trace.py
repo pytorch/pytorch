@@ -209,38 +209,6 @@ def _driver_requires_flow(name: str) -> bool:
     return name in _DRIVER_FLOW_NAMES
 
 
-_RUNTIME_DROPPED_CBIDS: frozenset[int] | None = None
-_DRIVER_KEPT_CBIDS: frozenset[int] | None = None
-
-
-def runtime_dropped_cbids() -> frozenset[int]:
-    """cbids of RUNTIME APIs the trace drops (names in the blocklist), so the decoder can
-    filter the noise (e.g. cudaGetDevice/GetLastError) out of the window before it is
-    built/merged. CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under
-    user-defined records, so it cannot be done in CUPTI; this is the post-decode
-    equivalent, drop-set-identical to the merge's name blocklist."""
-    global _RUNTIME_DROPPED_CBIDS
-    if _RUNTIME_DROPPED_CBIDS is None:
-        names = _load_cbid_names(Runtime_api_trace_cbid)
-        _RUNTIME_DROPPED_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _RUNTIME_BLOCKLIST
-        )
-    return _RUNTIME_DROPPED_CBIDS
-
-
-def driver_kept_cbids() -> frozenset[int]:
-    """cbids of DRIVER APIs the trace keeps (names in the registered allowlist); the
-    decoder drops every other driver record (the driver kind is an allowlist, unlike the
-    runtime blocklist). Keep-set-identical to the merge's allowlist."""
-    global _DRIVER_KEPT_CBIDS
-    if _DRIVER_KEPT_CBIDS is None:
-        names = _load_cbid_names(Driver_api_trace_cbid)
-        _DRIVER_KEPT_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _DRIVER_REGISTERED
-        )
-    return _DRIVER_KEPT_CBIDS
-
-
 def _trace_window_entries(
     trace_window: dict[str, object],
     *,
@@ -315,6 +283,7 @@ def _trace_window_entries(
     trace_events: list[dict[str, object]] = []
     seen_devices: dict[int, int] = {}
     seen_streams: set[tuple[int, int]] = set()
+    lane_names: dict[tuple[int, int], str] = {}
     seen_cpu_processes: dict[int, int] = {}
     seen_cpu_threads: set[tuple[int, int]] = set()
     need_overhead_metadata = False
@@ -389,6 +358,8 @@ def _trace_window_entries(
                 c["dst_kind"].tolist(),
             )
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -408,6 +379,8 @@ def _trace_window_entries(
                         "src kind": _MEMORY_KIND_NAMES.get(sk_l[i], sk_l[i]),
                         "dst kind": _MEMORY_KIND_NAMES.get(dk_l[i], dk_l[i]),
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -417,6 +390,8 @@ def _trace_window_entries(
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -435,6 +410,8 @@ def _trace_window_entries(
                         "value": val_l[i],
                         "memory kind": mk_l[i],
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -447,30 +424,59 @@ def _trace_window_entries(
         ann_l = c["annotation"].tolist()
         meta_col = c.get("metadata")
         meta_l = meta_col.tolist() if meta_col is not None else None
+        # Pluggable lane assignment: a graph lane resolver (if installed) supplies per-op
+        # (logical_lane, lane_name) columns; a graphed op whose logical lane differs from
+        # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops on
+        # whatever streams the graph executor placed them on -- often hundreds of distinct
+        # streams -- which scatters one logical replay across a wall of stream lanes and makes
+        # for a very confusing profile (the ops don't overlap or disappear, there are just far
+        # too many lanes). The resolver collapses them onto a few meaningful logical lanes.
+        # Baking the move into this export pass (tid + args["stream"] moved, the op's CUDA
+        # stream kept as original_stream) means consumers need no read/reassign/rewrite round
+        # trip. Absent a resolver, ops render on their CUDA stream lane.
+        lane_col = c.get("logical_lane")
+        lane_name_col = c.get("lane_name")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        lane_name_l = lane_name_col.tolist() if lane_name_col is not None else None
+        display_tid_l = tid_l
         if (
             gid.any()
             or gnid.any()
-            or any(a is not None for a in ann_l)
+            or any(ann_l)  # any non-empty annotation (None / empty skip)
             or meta_l is not None
+            or lane_l is not None
         ):
             gid_l = gid.tolist()
             gnid_l = gnid.tolist()
+            display_tid_l = list(tid_l)
             for i, ev in enumerate(events):
                 a = ev["args"]
                 if gid_l[i]:
                     a["graph id"] = gid_l[i]
                 if gnid_l[i]:
-                    a["graph node id"] = gnid_l[i]
+                    # Upper 32 bits are the graph id (emitted separately above); keep only the
+                    # lower 32-bit node id here rather than the full 9-digit packed value.
+                    a["graph node id"] = gnid_l[i] & 0xFFFFFFFF
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
+                if gnid_l[i] and lane_l is not None and lane_l[i] != str_l[i]:
+                    lane_id = lane_l[i]
+                    lane = _export_tid(lane_id)
+                    ev["tid"] = lane
+                    a["stream"] = lane_id
+                    a["original_stream"] = str_l[i]
+                    display_tid_l[i] = lane
+                    seen_streams.add((dev_l[i], lane_id))
+                    if lane_name_l is not None and lane_name_l[i] is not None:
+                        lane_names[(dev_l[i], lane_id)] = lane_name_l[i]
         trace_events.extend(events)
         trace_events.extend(
             {
                 "ph": "f",
                 "id": corr_l[i],
                 "pid": dev_l[i],
-                "tid": tid_l[i],
+                "tid": display_tid_l[i],
                 "ts": ts_l[i],
                 "cat": _FLOW_CATEGORY,
                 "name": _FLOW_CATEGORY,
@@ -657,11 +663,10 @@ def _trace_window_entries(
 
     for did, rid in sorted(seen_streams):
         ts_us = 0.0
+        lane_name = lane_names.get((did, rid), f"stream {rid} ")
         metadata_events.extend(
             [
-                _metadata_event(
-                    "thread_name", ts_us, did, rid, "name", f"stream {rid} "
-                ),
+                _metadata_event("thread_name", ts_us, did, rid, "name", lane_name),
                 _metadata_event(
                     "thread_sort_index", ts_us, did, rid, "sort_index", rid
                 ),
@@ -725,16 +730,35 @@ def _gpu_user_annotation_events(
         return []
 
     span_map: dict[tuple[int, int, int], dict[str, int]] = {}
+    # (device, stream) lanes that still render real GPU work after lane reassignment. A graphed
+    # op the resolver moved to a logical lane no longer displays on its capture stream (mirrors
+    # the display rule in _trace_window_entries); a span stranded on such a stream is dropped
+    # below.
+    streams_with_display: set[tuple[int, int]] = set()
     for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
         c = columns.get(ks)
         if not c or not len(c["correlation_id"]):
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
+        # Keep the annotation on the kernel's real capture stream; do not follow graphed
+        # ops onto the synthetic logical lanes assigned by the lane resolver.
         str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
+        lane_col = c.get("logical_lane")
+        gnid_col = c.get("graph_node_id")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        gnid_l = gnid_col.tolist() if gnid_col is not None else None
         for i in range(len(corr_l)):
+            reassigned = (
+                lane_l is not None
+                and gnid_l is not None
+                and gnid_l[i]
+                and lane_l[i] != str_l[i]
+            )
+            if not reassigned:
+                streams_with_display.add((dev_l[i], str_l[i]))
             external_id = correlation_to_user_external.get(corr_l[i])
             if external_id is None:
                 continue
@@ -752,6 +776,10 @@ def _gpu_user_annotation_events(
     for (external_id, device_id, stream_id), span in sorted(span_map.items()):
         name = user_annotations.get(external_id)
         if not isinstance(name, str):
+            continue
+        # Orphaned span: the capture stream's ops all moved to logical lanes, so it would sit
+        # alone on an empty lane divorced from its kernels -- drop it instead.
+        if (device_id, stream_id) not in streams_with_display:
             continue
         start_us = max((span["start_ns"] - base_ns) / 1000.0 - 0.001, 0.0)
         dur_us = max((span["end_ns"] - span["start_ns"]) / 1000.0 + 0.002, 0.0)

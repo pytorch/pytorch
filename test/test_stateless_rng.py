@@ -6,9 +6,15 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import floating_types_and
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
@@ -245,6 +251,87 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         result = random.fold_in(key, 1)
         key0 = torch.tensor([42, 0], dtype=torch.uint64, device=device)
         self.assertEqual(result, random.fold_in(key0, 0))
+
+    def test_data_above_int64_max(self, device):
+        # data is interpreted as uint64; values above int64 max must be accepted.
+        data = (1 << 64) - 1
+        key0 = torch.tensor([42, 0], dtype=torch.uint64, device=device)
+        key_shifted = torch.tensor([42, data], dtype=torch.uint64, device=device)
+        self.assertEqual(random.fold_in(key0, data), random.fold_in(key_shifted, 0))
+
+    @parametrize(
+        "data",
+        [
+            subtest(-1, name="neg_one"),
+            subtest(-12345, name="mid"),
+            subtest(-(1 << 63), name="int64_min"),
+        ],
+    )
+    def test_data_negative_reinterpreted_as_uint64(self, device, data):
+        # Negative data is remapped per the docstring: 2**64 + data.
+        key = random.key(42, device=device)
+        expected = random.fold_in(key, (1 << 64) + data)
+        self.assertEqual(random.fold_in(key, data), expected)
+
+    def test_error_invalid_data(self, device):
+        key = random.key(42, device=device)
+        # int out of the [-2**63, 2**64 - 1] range
+        for bad in (1 << 64, -(1 << 63) - 1):
+            with self.assertRaisesRegex(ValueError, "data must be in"):
+                random.fold_in(key, bad)
+        # tensor with the wrong dtype
+        with self.assertRaisesRegex(RuntimeError, "data must have dtype uint64"):
+            random.fold_in(key, torch.tensor(7, dtype=torch.int64, device=device))
+        # tensor with more than one value
+        with self.assertRaisesRegex(RuntimeError, "data must be a single value"):
+            random.fold_in(key, torch.tensor([1, 2], dtype=torch.uint64, device=device))
+        # tensor on a different device than the key
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected all tensors to be on the same device"
+        ):
+            random.fold_in(key, torch.tensor(7, dtype=torch.uint64))  # CPU
+
+    @parametrize(
+        "data",
+        [
+            subtest(0, name="zero"),
+            subtest(7, name="small"),
+            subtest(1 << 63, name="int64_max_plus_one"),
+            subtest((1 << 64) - 1, name="uint64_max"),
+        ],
+    )
+    def test_tensor_data_matches_int(self, device, data):
+        key = random.split(random.key(42, device=device), 4)  # (4, 2) batched
+        expected = random.fold_in(key, data)
+        # Both a 0-dim scalar and a (1,) tensor are accepted as a single value.
+        scalar = torch.tensor(data, dtype=torch.uint64, device=device)
+        one_d = torch.tensor([data], dtype=torch.uint64, device=device)
+        self.assertEqual(random.fold_in(key, scalar), expected)
+        self.assertEqual(random.fold_in(key, one_d), expected)
+
+    @onlyCUDA
+    def test_tensor_data_cuda_graph(self, device):
+        # A tensor data is not baked into the graph: mutating it and replaying
+        # produces the result for the new value.
+        key = random.key(42, device=device)
+        data = torch.zeros((), dtype=torch.uint64, device=device)
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                random.fold_in(key, data)
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = random.fold_in(key, data)
+
+        for value in (5, 99):
+            data.fill_(value)
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(out, random.fold_in(key, value))
 
 
 class TestStatelessRNGDistribution(TestCase):
@@ -505,6 +592,17 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(f(key), random.fold_in(key, 7))
 
+    def test_fold_in_tensor_fullgraph(self, device):
+        key = random.key(42, device=device)
+        # data as a graph input (not a constant) exercises the Tensor overload.
+        data = torch.tensor(7, dtype=torch.uint64, device=device)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(key, data):
+            return random.fold_in(key, data)
+
+        self.assertEqual(f(key, data), random.fold_in(key, data))
+
     def test_uniform_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -582,6 +680,24 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(result, gen(key, shape))
         self.assertLess(extra, 1.5 * out_bytes)  # no extra full-size clone
+
+    @onlyAccelerator
+    def test_generation_no_corruption_from_buffer_reuse(self, device):
+        # Regression test for Inductor buffer reuse corrupting generation.
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        # Keep all generations live until the final sum, exercising whether
+        # Inductor reuses an in-place generation's buffer while it is still live.
+        def f(key, x):
+            rs = [random.uniform(random.fold_in(key, i), x.shape) for i in range(4)]
+            for r in rs:
+                x = x + r
+            return x
+
+        key = random.key(0, device=device)
+        x = torch.randn(16, device=device)
+        self.assertEqual(torch.compile(f, dynamic=False)(key, x), f(key, x))
 
 
 instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cuda",))

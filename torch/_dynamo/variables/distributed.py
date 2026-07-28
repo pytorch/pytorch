@@ -30,7 +30,7 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, GuardedIdentitySource
 from .base import VariableTracker
 
 
@@ -138,7 +138,9 @@ class WorldMetaClassVariable(DistributedVariable):
                 )
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return VariableTracker.build(tx, self.value.WORLD, source)
+            return VariableTracker.build(
+                tx, self.value.WORLD, GuardedIdentitySource(source)
+            )
         elif name == "NON_GROUP_MEMBER":
             if not self.source:
                 raise AssertionError(
@@ -146,7 +148,9 @@ class WorldMetaClassVariable(DistributedVariable):
                 )
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
+            return VariableTracker.build(
+                tx, self.value.NON_GROUP_MEMBER, GuardedIdentitySource(source)
+            )
         return super().getattro_impl(tx, name)
 
 

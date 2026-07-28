@@ -9,6 +9,7 @@ from typing import Any
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
@@ -501,12 +502,24 @@ class BatchLinearLHSFusion(BatchFusion):
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
+            weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
+            # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
+            # fuse() calls torch.cat on the weight example_values, which fails for
+            # subclasses lacking aten.cat dispatch.  Probe it here so subclasses that
+            # do implement aten.cat (e.g. future torchao versions) still get fused.
+            weight_val = weight.meta.get("example_value", weight.meta.get("val"))
+            if weight_val is not None and type(weight_val) not in (
+                torch.Tensor,
+                FakeTensor,
+            ):
+                try:
+                    _ = torch.cat([weight_val[:1], weight_val[:1]], dim=0)
+                except (RuntimeError, TypeError):
+                    return None
             bias_tensor = None
             if bias is not None:
-                bias_tensor = bias.meta.get("val")
-                if bias_tensor is None:
-                    bias_tensor = bias.meta.get("example_value")
+                bias_tensor = bias.meta.get("val", bias.meta.get("example_value"))
             bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
             group_key = ("batch_linear_lhs", bias_dim, input)
         else:
@@ -1297,7 +1310,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
 class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch simple match related ops such as nan_to_num in pre grad pass.
+    Batch simple math related ops such as nan_to_num in pre grad pass.
     """
 
     def __init__(self, op, **kwargs):

@@ -151,7 +151,7 @@ try:
 
         # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+    from torch._subclasses.fake_tensor import is_fake
 except ImportError:
     pass
 
@@ -803,7 +803,7 @@ def dynamo_timed(
 
     cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
-        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        wc_name = waitcounter_name_override or key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
@@ -1340,7 +1340,7 @@ def lazily_unpack(
     iterable: VariableTracker,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+    from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
@@ -1349,7 +1349,7 @@ def lazily_unpack(
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -3062,6 +3062,8 @@ tuple_iterator: type[Iterator[Any]] = type(iter(()))
 # pyrefly: ignore [bad-assignment]
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
+deque_iterator = type(iter(collections.deque()))
+deque_rev_iterator = type(reversed(collections.deque()))
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
@@ -3575,9 +3577,9 @@ def same(
             raise AssertionError(f"elements mismatch {set(ref)} == {set(res)}")
         return True
     elif isinstance(ref, (torch.Tensor, float)):
-        if isinstance(ref, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(ref):
             raise AssertionError("ref should not be a FakeTensor")
-        if isinstance(res, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(res):
             raise AssertionError("res should not be a FakeTensor")
 
         def to_tensor(t: Any) -> torch.Tensor:
@@ -3894,6 +3896,8 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
 
 
 def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
+    from torch._subclasses.fake_tensor import maybe_get_fake_mode
+
     if maybe_get_fake_mode(e) is not tx.fake_mode:
         raise AssertionError(
             f"Expected fake mode of e to be tx.fake_mode, got {maybe_get_fake_mode(e)} vs {tx.fake_mode}"
@@ -4042,7 +4046,10 @@ def _get_fake_value_impl(
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
-        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+        if (
+            is_lazy_module(nnmodule)
+            and inspect.getattr_static(nnmodule, "_initialize_hook", None) is not None
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
@@ -4066,7 +4073,9 @@ def _get_fake_value_impl(
         )
 
     try:
-        with fake_mode, enable_python_dispatcher():
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
+        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -4187,20 +4196,24 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
-                gb_type="RuntimeError when making fake tensor call",
-                context="",
-                explanation=msg,
-                hints=[*graph_break_hints.USER_ERROR],
-                from_exc=cause,
-            )
+        from .exc import (
+            FakeTensorObservedException,
+            ObservedException,
+            raise_observed_exception,
         )
-        raise AssertionError("should not reachable") from None
+
+        if not node.users:
+            tx.output.graph.erase_node(node)
+        try:
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        except ObservedException as e:
+            raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # type: ignore[unbound-name]
         )
 
     if (
@@ -4797,7 +4810,9 @@ def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
 
 
 def defake(x: Any) -> Any:
-    if not isinstance(x, FakeTensor):
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
+    if not is_fake_tensor(x):
         return x
     size: torch._prims_common.ShapeType
     stride: torch._prims_common.StrideType
@@ -5615,6 +5630,21 @@ def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
 
 def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
     return torch._C.Event(*args, **kwargs)
+
+
+class FrameState(enum.Enum):
+    FRAME_CREATED = -3
+    FRAME_SUSPENDED = -2
+    FRAME_SUSPENDED_YIELD_FROM = -1
+    FRAME_EXECUTING = 0
+    FRAME_COMPLETED = 1
+    FRAME_CLEARED = 4
+
+
+class PySendResult(enum.Enum):
+    PYGEN_RETURN = 0
+    PYGEN_ERROR = -1
+    PYGEN_NEXT = 1
 
 
 class CompileTimeInstructionCounter:

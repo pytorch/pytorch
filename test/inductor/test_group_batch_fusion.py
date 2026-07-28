@@ -878,6 +878,51 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    def test_batch_linear_lhs_skips_tensor_subclass_weights(self):
+        """batch_linear_lhs match() must return None when weight is a tensor subclass.
+
+        Regression test for incompatibility with torchao W8A8 quantization:
+        fuse() calls torch.cat on the weight example_values, which raises
+        NotImplementedError for subclasses that don't implement aten.cat
+        (e.g. torchao Int8Tensor). The fix guards match() to skip subclasses.
+        See: https://github.com/pytorch/ao/pull/4560
+        """
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        class _SubclassWeight(torch.Tensor):
+            """Minimal subclass that raises on aten.cat to detect the bug."""
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.cat.default:
+                    raise AssertionError(
+                        "aten.cat called on _SubclassWeight — "
+                        "batch_linear_lhs should have been skipped"
+                    )
+                return func(*args, **(kwargs or {}))
+
+        fusion = BatchLinearLHSFusion()
+        z = 4
+
+        # Build a minimal FX graph: F.linear(x, w) with a subclass weight.
+        graph = torch.fx.Graph()
+        x_node = graph.placeholder("x")
+        w_node = graph.placeholder("w")
+        x_node.meta["example_value"] = torch.randn(2, z)
+        w_node.meta["example_value"] = torch.randn(z, z).as_subclass(_SubclassWeight)
+        linear_node = graph.call_function(
+            torch.nn.functional.linear, args=(x_node, w_node)
+        )
+        linear_node.meta["example_value"] = torch.randn(2, z)
+        graph.output(linear_node)
+
+        # match() must return None (skip) for a subclass weight.
+        result = fusion.match(linear_node)
+        self.assertIsNone(
+            result,
+            "batch_linear_lhs should skip (return None) when weight is a tensor subclass",
+        )
+
 
 class _TestBMMFusionModule(torch.nn.Module):
     def __init__(self) -> None:

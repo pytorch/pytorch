@@ -106,6 +106,9 @@ TORCH_API std::vector<FileLineFunc> prepareCallstack(
     const std::vector<jit::StackEntry>& cs);
 TORCH_API std::vector<std::string> callstackStr(
     const std::vector<FileLineFunc>& cs);
+TORCH_API std::string joinStacks(
+    const std::vector<std::string>& stacks,
+    const char* delim);
 TORCH_API std::string stacksToStr(
     const std::vector<std::string>& stacks,
     const char* delim);
@@ -115,6 +118,12 @@ TORCH_API std::vector<std::vector<int64_t>> inputSizes(
 TORCH_API std::string variantShapesToStr(const std::vector<shape>& shapes);
 TORCH_API std::string shapesToStr(
     const std::vector<std::vector<int64_t>>& shapes);
+TORCH_API std::vector<shape> variantShapesTruncated(
+    const std::vector<shape>& shapes);
+TORCH_API std::vector<shape> shapesToInputShapes(
+    const std::vector<std::vector<int64_t>>& shapes);
+TORCH_API std::vector<std::string> concreteInputsToStrList(
+    const std::vector<c10::IValue>& inputs);
 TORCH_API std::string strListToStr(const std::vector<std::string>& types);
 TORCH_API std::string inputOpIdsToStr(
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);

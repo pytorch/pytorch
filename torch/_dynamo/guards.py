@@ -78,6 +78,7 @@ from torch._C._dynamo.guards import (
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
+    GuardedIdentitySource,
     IndexedSource,
     is_from_flatten_script_object_source,
     is_from_optimizer_source,
@@ -98,7 +99,6 @@ from torch._guards import (
     Source,
     StorageOverlap,
 )
-from torch._inductor.utils import IndentedBuffer
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
@@ -111,6 +111,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -128,6 +129,7 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    ContextVarGetSource,
     CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
@@ -236,6 +238,24 @@ def _sequence_length(value: Any) -> int:
     if isinstance(value, frozenset):
         return frozenset.__len__(value)
     return len(value)
+
+
+_COW_TENSOR_UNSUPPORTED = object()
+
+
+def _try_is_cow_tensor(value: Any) -> bool | object:
+    if not isinstance(value, torch.Tensor):
+        return _COW_TENSOR_UNSUPPORTED
+    if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
+        return _COW_TENSOR_UNSUPPORTED
+    return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
+
+
+def _cow_tensor_matches(value: Any, expected: Any) -> bool:
+    if not isinstance(expected, bool):
+        return False
+    actual = _try_is_cow_tensor(value)
+    return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
 
 
 dunder_attrs_assumed_constants = (
@@ -796,6 +816,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
+            "___cow_tensor_matches": _cow_tensor_matches,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1966,6 +1987,24 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, ContextVarGetSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            if source.has_default:
+                default_val = source.default_value
+                out = base_guard_manager.lambda_manager(
+                    python_lambda=lambda x, d=default_val: x.get(d),
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+            else:
+                out = base_guard_manager.lambda_manager(
+                    python_lambda=lambda x: x.get(),
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, FloatTensorSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2054,6 +2093,10 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, GuardedIdentitySource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager
         elif istype(source, DynamicScalarSource):
             if not base_guard_manager:
                 raise AssertionError("base_guard_manager must not be None")
@@ -2269,7 +2312,12 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
-        if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
+        if (
+            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                value, torch._subclasses.FakeTensor
+            )
+            and value.pytype
+        ):
             t = value.pytype
         else:
             t = type(value)
@@ -2451,6 +2499,26 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_false_match_guard(
                 get_verbose_code_parts(code, guard), guard.user_stack
             )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _try_is_cow_tensor(value),
+        eval_fn=lambda value, metadata: _cow_tensor_matches(value, metadata),
+    )
+    def COW_TENSOR_MATCH(self, guard: Guard) -> None:
+        expected = _try_is_cow_tensor(self.get(guard))
+        if not isinstance(expected, bool):
+            raise AssertionError("COW_TENSOR_MATCH requires a plain Tensor")
+
+        def guard_fn(x: Any) -> bool:
+            return _cow_tensor_matches(x, expected)
+
+        code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
@@ -3548,7 +3616,9 @@ class GuardBuilder(GuardBuilderBase):
 
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
-            if isinstance(value, torch._subclasses.FakeTensor):
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                value, torch._subclasses.FakeTensor
+            ):
                 if value.pytype is not None:
                     pytype = value.pytype
                 if value.dispatch_keys is not None:
@@ -4189,7 +4259,9 @@ class GuardsStatePickler(pickle.Pickler):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            if isinstance(obj, torch._subclasses.FakeTensor):
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                obj, torch._subclasses.FakeTensor
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
 
             return type(self)._unpickle_tensor, (
@@ -5111,7 +5183,7 @@ class CheckFunctionManager:
 
 
 def build_guard_function(code_parts: list[str], closure_args: str) -> tuple[str, str]:
-    from torch._inductor.utils import IndentedBuffer
+    from torch.utils._indented_buffer import IndentedBuffer
 
     csepass = PyExprCSEPass()
     try:

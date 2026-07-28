@@ -31,6 +31,7 @@ from _common import download, write_env_exports
 
 # Pin numpy by Python version. Matches the legacy table in setup_build.bat.
 NUMPY_PINS: list[tuple[str, str]] = [
+    ("cp315", "2.5.1"),
     ("cp314", "2.3.2"),
     ("cp313", "2.1.2"),
 ]
@@ -49,7 +50,7 @@ PIP_PACKAGES: list[str] = [
     "ninja",
     "typing_extensions",
     "setuptools==78.1.1",
-    "scikit-build-core",
+    "scikit-build-core==1.0.0",
     "spin==0.17",
 ]
 
@@ -104,11 +105,42 @@ def install_libuv(workdir: Path, python_prefix: Path) -> Path:
     return libuv_root
 
 
+def provide_stdalign_shim() -> None:
+    """Work around a missing C11 <stdalign.h> for the cp315 numpy source build.
+
+    numpy has no cp315 wheel on any index, so it is built from source, and
+    numpy/_core/src/common/simd/simd.h includes <stdalign.h>. The Windows CI
+    UCRT (Windows SDK 10.0.19041) predates that header (added ~10.0.20348), so
+    MSVC fails with "C1083: Cannot open include file: 'stdalign.h'". Drop a
+    minimal C11-compliant shim on INCLUDE for the cp315-only source build; in C,
+    alignas/alignof are macros for the _Alignas/_Alignof operators. Remove once
+    numpy ships cp315 Windows wheels or the runner SDK is >= 10.0.20348.
+    """
+    if sys.version_info[:2] != (3, 15):
+        return
+    shim_dir = WIN_CI_DIR / "stdalign_shim"
+    shim_dir.mkdir(exist_ok=True)
+    (shim_dir / "stdalign.h").write_text(
+        "#ifndef _STDALIGN_H\n"
+        "#define _STDALIGN_H\n"
+        "#ifndef __cplusplus\n"
+        "#define alignas _Alignas\n"
+        "#define alignof _Alignof\n"
+        "#endif\n"
+        "#define __alignas_is_defined 1\n"
+        "#define __alignof_is_defined 1\n"
+        "#endif\n"
+    )
+    os.environ["INCLUDE"] = f"{shim_dir}{os.pathsep}{os.environ.get('INCLUDE', '')}"
+    print(f"Added <stdalign.h> shim for cp315 numpy source build: {shim_dir}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
+    provide_stdalign_shim()
     pip_install("-q", f"numpy=={numpy_pin()}")
     pip_install("-q", *PIP_PACKAGES)
 
