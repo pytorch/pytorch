@@ -161,7 +161,7 @@ class SetVariable(VariableTracker):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         if not self.items:
-            return VariableTracker.build(tx, "set()")
+            return VariableTracker.build(tx, f"{self.python_type_name()}()")
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
         return VariableTracker.build(tx, "{" + items + "}")
 
@@ -818,7 +818,7 @@ class OrderedSetVariable(SetVariable):
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
-        return VariableTracker.build(tx, f"OrderedSet([{items}])")
+        return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def as_python_constant(self) -> OrderedSet[Any]:
         return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
@@ -917,9 +917,9 @@ class FrozensetVariable(SetVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         if not self.items:
-            return VariableTracker.build(tx, "frozenset()")
+            return VariableTracker.build(tx, f"{self.python_type_name()}()")
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
-        return VariableTracker.build(tx, f"frozenset({{{items}}})")
+        return VariableTracker.build(tx, f"{self.python_type_name()}({{{items}}})")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(

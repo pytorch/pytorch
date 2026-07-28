@@ -328,7 +328,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # list_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L335-L351
         # tuple_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/tupleobject.c#L421-L430
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
@@ -771,8 +771,10 @@ class RangeVariable(BaseListVariable):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
-        return VariableTracker.build(tx, self.range_count(item))
+        # range_contains: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/rangeobject.c#L482-L490
+        if maybe_get_python_type(item) in (int, bool):
+            return VariableTracker.build(tx, bool(self.range_count(item)))
+        return iter_contains(self.unpack_var_sequence(tx), item, tx)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
@@ -791,7 +793,7 @@ class RangeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # range_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L405-L416
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript (range_subscript), no slices.
         index = key.as_python_constant()
         return self.apply_index(tx, index)
@@ -1435,7 +1437,7 @@ class DequeVariable(CommonListMethodsVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # deque_item: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1888
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
         try:
@@ -1534,10 +1536,10 @@ class DequeVariable(CommonListMethodsVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
-            return VariableTracker.build(tx, f"deque([{items}])")
+            return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
             tx,
-            f"deque([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
+            f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
     def as_python_constant(self) -> collections.deque[Any]:

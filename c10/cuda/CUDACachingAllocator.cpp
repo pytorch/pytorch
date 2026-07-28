@@ -78,6 +78,16 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
+static int get_self_pid() {
+#ifdef _WIN32
+  return _getpid();
+#else
+  return getpid();
+#endif // _WIN32
+}
+#endif // defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
+
 namespace Native {
 
 //
@@ -438,6 +448,11 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
 
+#ifdef _WIN32
+    // No Win32 IPC handle type implemented; share() still errors clearly
+    // for cross-process use.
+    constexpr bool enable_ipc_handles = false;
+#else
     // In fbcode, IPC handle types for expandable segments are disabled by
     // default because some jobs were failing (see
     // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
@@ -452,6 +467,7 @@ struct ExpandableSegment {
     static const bool enable_ipc_handles =
         c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
             .value_or(default_enable_ipc);
+#endif // _WIN32
 
     // Determine IPC handle type upfront based on config and device capability.
     // Resolve once per segment lifetime: fromShared() pre-sets handle_type_
@@ -584,11 +600,7 @@ struct ExpandableSegment {
     // thereby ensuring that the handle can be correctly matched in
     // ipcMemHandle_to_devptr.
     ShareHeader header{};
-#ifdef _WIN32
-    header.pid = _getpid();
-#else
-    header.pid = getpid();
-#endif
+    header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
     header.handle_type = handle_type_;
@@ -755,6 +767,9 @@ struct ExpandableSegment {
 #ifdef USE_ROCM
       TORCH_INTERNAL_ASSERT(
           false, "expandable segment with fabric handle not supported");
+#elif defined(_WIN32)
+      TORCH_CHECK(
+          false, "IPC expandable segments are not supported on Windows");
 #else
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
@@ -939,7 +954,11 @@ struct ExpandableSegment {
 #endif
       if (h.shareable_handle) {
 #ifndef _WIN32
-        close(std::get<int>(*h.shareable_handle));
+        // shareable_handle also holds CUmemFabricHandle for fabric segments;
+        // std::get_if skips those (no fd to close) instead of throwing.
+        if (auto* fd = std::get_if<int>(&*h.shareable_handle)) {
+          close(*fd);
+        }
 #endif
       }
 #ifdef USE_ROCM
@@ -1326,9 +1345,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     return "";
   }
   static bool nvml_init [[maybe_unused]] = []() {
-    TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
-    return true;
+    return NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_();
   }();
+  if (!nvml_init) {
+    TORCH_WARN_ONCE(
+        "nvmlInit_v2 failed; omitting per-process memory info from CUDA "
+        "out-of-memory messages.");
+    return "";
+  }
 
   // NOLINTNEXTLINE(*-c-arrays)
   char pci_id[80];
@@ -1341,10 +1365,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
       prop.pciDeviceID);
 
   nvmlDevice_t nvml_device = nullptr;
-  TORCH_INTERNAL_ASSERT(
-      NVML_SUCCESS ==
+  if (NVML_SUCCESS !=
       DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
-          pci_id, &nvml_device));
+          pci_id, &nvml_device)) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetHandleByPciBusId failed; omitting per-process memory "
+        "info from CUDA out-of-memory messages.");
+    return "";
+  }
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
@@ -1354,9 +1382,15 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
-  unsigned int self_pid = getpid();
+  if (NVML_SUCCESS != r) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetComputeRunningProcesses failed; omitting per-process "
+        "memory info from CUDA out-of-memory messages. This is expected on "
+        "platforms with partial NVML support such as Tegra/Jetson.");
+    return "";
+  }
+  unsigned int self_pid = get_self_pid();
   std::stringstream ss;
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
   for (auto i : c10::irange(size)) {
     auto& proc = procs[i];
@@ -1561,6 +1595,19 @@ class DeviceCachingAllocator {
 
   std::string getUserMetadata() {
     return user_metadata;
+  }
+
+  void annotateMemory(Block* block, const std::string& metadata) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    record_trace(
+        TraceEntry::ANNOTATE,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        block->pool->owner_MempoolId(),
+        maybeGatherContext(RecordContext::ALLOC),
+        metadata);
   }
 
   bool checkPoolLiveAllocations(
@@ -1902,10 +1949,12 @@ class DeviceCachingAllocator {
           format_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
-          " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
-          " fragmentation.  See documentation for Memory Management "
-          " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
+          CUDAAllocatorConfig::expandable_segments()
+              ? ""
+              : " If reserved but unallocated memory is large try setting"
+                " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+                " fragmentation.  See documentation for Memory Management "
+                " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
     }
 
     bool split_remainder = should_split(
@@ -4390,7 +4439,8 @@ class DeviceCachingAllocator {
       cudaStream_t stream,
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::shared_ptr<GatheredContext> context) {
+      std::shared_ptr<GatheredContext> context,
+      std::optional<std::string> metadata_override = std::nullopt) {
     if (!record_history && trace_trackers_.empty())
       return;
     std::string compile_string = "N/A";
@@ -4407,7 +4457,7 @@ class DeviceCachingAllocator {
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
         compile_string,
-        user_metadata);
+        metadata_override ? std::move(*metadata_override) : user_metadata);
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {
@@ -4716,6 +4766,13 @@ class NativeCachingAllocator : public CUDAAllocator {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return device_allocator[device]->getUserMetadata();
+  }
+
+  void annotateMemory(const void* ptr, const std::string& metadata) override {
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(
+        block, "annotateMemory: no live allocation found at pointer ", ptr);
+    device_allocator[block->device]->annotateMemory(block, metadata);
   }
 
   bool isHistoryEnabled() override {

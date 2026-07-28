@@ -565,9 +565,11 @@ enable_trace_unittest = False
 # Enable tracing LOAD_BUILD_CLASS bytecode
 enable_trace_load_build_class = False
 
-# Enable tracing generator functions lazily. If False, Dynamo will exhaust
-# generators upon first execution. And if True, the generator will be accessed lazily
-enable_faithful_generator_behavior = True
+enable_faithful_generator_behavior = Config(  # type: ignore[var-annotated]
+    default=True,
+    deprecated=True,
+    deprecation_message="does not do anything, generators are always traced lazily",
+)
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
