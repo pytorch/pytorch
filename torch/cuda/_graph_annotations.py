@@ -45,14 +45,13 @@ from __future__ import annotations
 
 import importlib.metadata
 from collections import defaultdict, OrderedDict
-from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from logging import getLogger
 from typing import Any, TYPE_CHECKING, TypeAlias
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
 import torch
 
