@@ -82,7 +82,10 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
 
 def _inline_module(
-    gm: torch.fx.GraphModule, inline_mod_name: str, run_dce: bool = True
+    gm: torch.fx.GraphModule,
+    inline_mod_name: str,
+    run_dce: bool = True,
+    is_impure_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> dict[torch.fx.Node, torch.fx.Node]:
     """
     Given `gm` and some graph module which is called with target name `inline_mod_name`,
@@ -166,7 +169,7 @@ def _inline_module(
     # this module is unneeded as it's just inlined back to main graph.
     gm.graph.erase_node(call_mod_node_to_replace)
     if run_dce:
-        gm.graph.eliminate_dead_code()
+        gm.graph.eliminate_dead_code(is_impure_node=is_impure_node)
 
     return replacement_mapping
 
@@ -195,6 +198,7 @@ def split_const_subgraphs(
     module: torch.nn.Module | torch.fx.GraphModule,
     skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
     device_for_folded_attrs: str = "cpu",
+    is_impure_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> FoldedGraphModule:
     """
     Looks through `module` for any nodes that have all constant attribute inputs
@@ -209,6 +213,11 @@ def split_const_subgraphs(
     skipped. Predicates must therefore be node-local; one that needs to resolve a
     node's `target` to a submodule must use `node.graph.owning_module` rather than
     a captured top-level module.
+
+    `is_impure_node`, if provided, is forwarded to `eliminate_dead_code` so DCE
+    preserves nodes the caller considers impure beyond the default
+    `Node.is_impure()` check (e.g. out-variant ops that write a pre-allocated
+    buffer via an `out=` kwarg not declared mutable in their schema).
     """
 
     import sympy
@@ -435,9 +444,9 @@ def split_const_subgraphs(
     # This is so that the original caller who may have passed in a graph module will
     # get back out a graph module whose graph is traced to the same granularity.
     if hasattr(split, non_const_mod_name):
-        _inline_module(split, non_const_mod_name)
+        _inline_module(split, non_const_mod_name, is_impure_node=is_impure_node)
 
-    split.graph.eliminate_dead_code()
+    split.graph.eliminate_dead_code(is_impure_node=is_impure_node)
 
     return FoldedGraphModule(
         split,
