@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import textwrap
+from typing import Any
 
 import pandas as pd
 
@@ -16,16 +17,18 @@ flaky_models = {
 }
 
 
-def get_field(csv, model_name: str, field: str):
+def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
     try:
         return csv.loc[csv["name"] == model_name][field].item()
     except Exception:
         return None
 
 
-def check_graph_breaks(actual_csv, expected_csv, expected_filename):
-    failed = []
-    improved = []
+def check_graph_breaks(
+    actual_csv: pd.DataFrame, expected_csv: pd.DataFrame, expected_filename: str
+) -> tuple[list[str], str]:
+    failed: list[str] = []
+    improved: list[str] = []
 
     if "rocm" in expected_filename:
         flaky_models.update(
@@ -63,6 +66,9 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         )
 
     for model in actual_csv["name"]:
+        num_graphs = get_field(actual_csv, model, "unique_graphs")
+        dynamo_called = num_graphs is not None and int(num_graphs) != 0
+
         graph_breaks = get_field(actual_csv, model, "graph_breaks")
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
         flaky = model in flaky_models
@@ -70,6 +76,9 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         if expected_graph_breaks is None:
             status = "MISSING:"
             improved.append(model)
+        elif not dynamo_called:
+            print(f"{model:34}  EAGER_FAILED")
+            continue
         elif graph_breaks == expected_graph_breaks:
             status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")

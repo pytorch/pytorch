@@ -69,7 +69,11 @@ namespace {
 // Promote inputs to FFT functions
 // * Integers are promoted to the default floating type
 // * If require_complex=True, all types are promoted to complex
-// * Raises an error for half-precision dtypes to allow future support
+// * float16/bfloat16 on XPU: promoted to float32 (no native XPU FFT kernel)
+// * float16 on CUDA: passed through; cuFFT handles natively (SM53+, pow2)
+// * bfloat16 on CUDA: passed through; cuFFT handles natively (SM80+, pow2)
+//   or falls back to float32 promotion for older hardware
+// * Raises an error for half-precision types on CPU
 ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
     return type;
@@ -85,7 +89,19 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     device.is_cuda() || device.is_meta() || device.is_xpu()
   );
   if (maybe_support_half) {
-    TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    // XPU has no native float16 or bfloat16 FFT kernel; promote both to float32.
+    // ROCm (hipFFT) has no native bfloat16 FFT kernel; promote to float32.
+    // On CUDA, cuFFT handles them natively (see CuFFTPlanCache.h for constraints),
+    // so we leave them unchanged here and let the cuFFT planner decide.
+    if ((type == kHalf || type == kBFloat16) && device.is_xpu()) {
+      type = kFloat;
+    }
+    // ROCm/hipFFT does not support bfloat16; promote to float32
+    if (type == kBFloat16 && device.is_cuda() && at::globalContext().hasROCM()) {
+      type = kFloat;
+    }
+    TORCH_CHECK(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
+                "Unsupported dtype ", type);
   } else {
     TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
   }
@@ -99,6 +115,9 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   case kHalf: return kComplexHalf;
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
+  // bfloat16 on CUDA: cuFFT produces CUDA_C_16BF which is upcast to ComplexFloat.
+  // Returning kComplexFloat keeps output-tensor allocation consistent.
+  case kBFloat16: return kComplexFloat;
   default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
   }
 }
@@ -573,7 +592,7 @@ static Tensor fft_hfftn_impl(
     auto c2c_dims = IntArrayRef(desc.dim).slice(0, desc.dim.size() - 1);
     tmp = at::_fft_c2c(x, c2c_dims, norm, /*forward=*/true);
   } else {
-    tmp = x;
+    tmp = std::move(x);
   }
 
   const auto last_dim = desc.dim.back();
@@ -882,12 +901,12 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor of floating point or complex values";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D or 2D tensor";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   Tensor input = self;
   if (self.dim() == 1) {
@@ -912,24 +931,24 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < n_fft < " << len
              << ", but got n_fft=" << win_length;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (hop_length <= 0) {
     std::ostringstream ss;
     REPR(ss) << ": expected hop_length > 0, but got hop_length=" << hop_length;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (win_length <= 0 || win_length > n_fft) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
              << win_length;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (window.defined() && (window.dim() != 1 || window.size(0) != win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D window tensor of size equal to win_length="
              << win_length << ", but got window with size " << window.sizes();
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   #undef REPR
   auto window_ = window;
@@ -1075,17 +1094,17 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   if (input.numel() == 0) {
     std::ostringstream ss;
     REPR(ss) << ": input tensor cannot be empty.";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (input_dim != 3 && input_dim != 4) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor with 3 or 4 dimensions, but got " << input_dim;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (input.size(-1) != 2) {
     std::ostringstream ss;
     REPR(ss) << ": expected the last dimension to be 2 (corresponding to real and imaginary parts), but got " << self.size(-1);
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 
   const bool onesided = onesidedOpt.value_or(fft_size != n_fft);
@@ -1093,32 +1112,32 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
     if (n_fft / 2 + 1 != fft_size) {
       std::ostringstream ss;
       REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft / 2 + 1 when onesided=True, but got " << fft_size;
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   } else {
     if (n_fft != fft_size) {
       std::ostringstream ss;
       REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft when onesided=False, but got " << fft_size;
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
 
   if (!(0 < hop_length && hop_length <= win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < hop_length <= win_length";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 
   if (!(0 < win_length && win_length <= n_fft)) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (window.defined()) {
     if (window.dim() != 1 || window.size(0) != win_length) {
       std::ostringstream ss;
       REPR(ss) << ": Invalid window shape. window has to be 1D and length of `win_length`";
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
 
@@ -1187,7 +1206,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   if (at::is_scalar_tensor_true(window_envelop_lowest)) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 
   y = (y / window_envelop);  // size: (channel, expected_output_signal_len)

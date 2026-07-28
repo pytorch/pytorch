@@ -9,11 +9,15 @@
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
+#include <c10/metal/common.h>
 #include <fmt/format.h>
 #include <torch/library.h>
+#include <limits>
+#include <type_traits>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -45,9 +49,8 @@ struct MPSScalar {
   union {
     float f; // MPS doesn't support 'double'
     at::Half h;
-    int64_t i;
+    int64_t i; // also used for bool and all narrower signed/unsigned integrals
     uint64_t u;
-    bool b;
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
@@ -76,6 +79,28 @@ static inline std::string scalarToMetalTypeString(const TensorBase& t) {
 static inline std::string scalarToMetalTypeString(const std::optional<Tensor>& t) {
   return t.has_value() ? scalarToMetalTypeString(t.value()) : "void";
 }
+
+// True iff every tensor's max element offset fits in Offset32 (signed -> 2^31, unsigned -> 2^32).
+template <typename Offset32, typename... Tensors>
+inline bool offsetsFitIn(const Tensors&... tensors) {
+  constexpr int64_t kMaxOffset = std::numeric_limits<Offset32>::max();
+  return (... && at::native::canUse32BitIndexMath(tensors, kMaxOffset));
+}
+
+inline std::string_view mtlIdxSuffix(bool use32) {
+  return use32 ? "_u32" : "_u64";
+}
+
+// Lower the runtime use32 bool to a compile-time offset type and pass it to fn as a std::type_identity tag.
+template <typename Offset32, typename Offset64, typename Fn>
+inline void mtlDispatchByIndexWidth(bool use32, Fn&& fn) {
+  if (use32) {
+    fn(std::type_identity<Offset32>{});
+  } else {
+    fn(std::type_identity<Offset64>{});
+  }
+}
+
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
@@ -262,14 +287,14 @@ struct MPSKernelCache {
     __block MPSCachedKernel* cachedKernel = nil;
     MPSCacheKey hash = std::hash<std::string>{}(key);
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      if (cache_.contains(hash)) {
-        auto& entry = cache_.at(hash);
+      auto it = cache_.find(hash);
+      if (it != cache_.end()) {
+        auto& entry = it->second;
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
         cachedKernel = entry.cachedKernel_;
       } else {
         cachedKernel = createCacheBlock();
-        CacheEntry entry(key, cachedKernel);
-        cache_.emplace(hash, entry);
+        cache_.try_emplace(hash, key, cachedKernel);
       }
     });
     return cachedKernel;
@@ -284,8 +309,9 @@ struct MPSKernelCache {
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      if (cache_.count(hash) != 0) {
-        auto& entry = cache_.at(hash);
+      auto it = cache_.find(hash);
+      if (it != cache_.end()) {
+        auto& entry = it->second;
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
         cachedKernel = entry.cachedKernel_;
       }
@@ -360,15 +386,15 @@ struct MPSGraphCache {
 
     dispatch_sync_with_rethrow(serialQueue_, ^() {
       // verify the cached entry doesn't already exist
-      if (cache_.count(hash) != 0) {
-        auto& entry = cache_.at(hash);
+      auto it = cache_.find(hash);
+      if (it != cache_.end()) {
+        auto& entry = it->second;
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
         cachedGraph = entry.cachedGraph_;
       } else {
         cachedGraph = createCacheBlock();
-        CacheEntry entry(key, cachedGraph);
-        cache_.emplace(hash, entry);
-        profileCachedGraph(entry);
+        auto inserted = cache_.try_emplace(hash, key, cachedGraph).first;
+        profileCachedGraph(inserted->second);
       }
     });
     return cachedGraph;
@@ -385,8 +411,9 @@ struct MPSGraphCache {
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
     dispatch_sync(serialQueue_, ^() {
-      if (cache_.count(hash) != 0) {
-        auto& entry = cache_.at(hash);
+      auto it = cache_.find(hash);
+      if (it != cache_.end()) {
+        auto& entry = it->second;
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
         cachedGraph = entry.cachedGraph_;
         profileCachedGraph(entry);
@@ -474,7 +501,7 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
         [encoder setBytes:&val length:sizeof(val) atIndex:idx];
         return;
       }
-      [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
+      [encoder setBytes:t.const_data_ptr() length:t.element_size() atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
     }
@@ -547,6 +574,10 @@ template <>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const std::optional<Tensor>& val, unsigned idx) {
   if (val.has_value()) {
     mtl_setBuffer(encoder, val.value(), idx);
+  } else {
+    // Clear the slot so the kernel sees a null pointer instead of a stale
+    // binding left at this index on the shared command encoder.
+    [encoder setBuffer:nil offset:0 atIndex:idx];
   }
 }
 
@@ -661,7 +692,7 @@ inline bool supportedFloatingOrComplexType(const TensorBase& t) {
 }
 
 inline bool needsGather(const TensorBase& t) {
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset());
 }
 
@@ -669,12 +700,13 @@ template <typename T>
 void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
                                                        const std::string& name,
                                                        T params,
-                                                       const std::string& params_type_name) {
+                                                       const std::string& params_type_name,
+                                                       const std::optional<uint32_t> ilp_threshold) {
   using namespace at::mps;
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel_with_params(sub_iter, name, params, params_type_name);
+      exec_unary_kernel_with_params(sub_iter, name, params, params_type_name, ilp_threshold);
     }
     return;
   }
@@ -685,9 +717,16 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
   if (length == 0) {
     return;
   }
+  // ILP is opt-in per call site (mirrors exec_unary_kernel's opt-in castout
+  // ILP): callers that know their functor is cheap enough to be
+  // bandwidth-bound pass a crossover threshold; everyone else keeps the
+  // one-thread-per-element dense kernel.
+  const bool dense_ilp = iter.is_contiguous() && ilp_threshold.has_value() && length >= ilp_threshold.value();
   auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
-                                 iter.is_contiguous() ? "dense" : "strided",
+                                 dense_ilp                  ? "dense_ilp"
+                                     : iter.is_contiguous() ? "dense"
+                                                            : "strided",
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  fmt::format("_{}", params_type_name));
@@ -711,6 +750,10 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
         const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
         const auto outer = static_cast<NSUInteger>(length) / inner;
         mtl_dispatch2DJob(computeEncoder, cplState, inner, outer);
+      } else if (dense_ilp) {
+        mtl_setBytes(computeEncoder, length, 3);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
       } else {
         mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
