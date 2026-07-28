@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -181,6 +182,94 @@ class Repro(torch.nn.Module):
         relu = torch.relu(sin_19);  sin_19 = None
         return (relu,)""",
         )
+
+
+class TestAfterDynamoExecutionStateRepro(MinifierTestBase):
+    def _generate_repro_code(self):
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        args = (torch.randn(2),)
+        return generate_dynamo_fx_repro_string(gm, args, "eager", stable_output=True)
+
+    def _run_backend_error_and_read_launcher(self, context_manager):
+        run_code = f"""\
+@torch.compile(backend="relu_compile_error_TESTING_ONLY")
+def inner(x):
+    return torch.relu(x)
+
+with {context_manager}:
+    inner(torch.randn(2))
+"""
+        proc, repro_dir = self._run_test_code(
+            self._gen_test_code(run_code, "dynamo", 2),
+            isolate=False,
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIsNotNone(repro_dir)
+        with open(os.path.join(repro_dir, "minifier_launcher.py")) as f:
+            return f.read()
+
+    def test_repro_preserves_no_grad(self):
+        with torch.no_grad():
+            code = self._generate_repro_code()
+
+        self.assertIn("with torch.no_grad():", code)
+
+    def test_repro_default_state_has_no_context(self):
+        code = self._generate_repro_code()
+
+        self.assertNotIn("with torch.no_grad():", code)
+        self.assertNotIn("with torch.inference_mode():", code)
+
+    def test_repro_preserves_inference_mode(self):
+        with torch.inference_mode():
+            code = self._generate_repro_code()
+
+        self.assertIn("with torch.inference_mode():", code)
+
+    def test_repro_preserves_grad_enabled_in_inference_mode(self):
+        with torch.inference_mode(), torch.enable_grad():
+            code = self._generate_repro_code()
+
+        self.assertIn("with torch.inference_mode(), torch.enable_grad():", code)
+
+    def test_backend_error_repro_preserves_inference_mode(self):
+        code = self._run_backend_error_and_read_launcher("torch.inference_mode()")
+
+        self.assertIn("with torch.inference_mode():", code)
+
+    def test_backend_error_repro_preserves_grad_enabled_in_inference_mode(self):
+        code = self._run_backend_error_and_read_launcher(
+            "torch.inference_mode(), torch.enable_grad()"
+        )
+
+        self.assertIn("with torch.inference_mode(), torch.enable_grad():", code)
+
+    def test_reentrant_preserve_global_state_uses_outer_user_state(self):
+        from torch._dynamo.convert_frame import preserve_global_state
+        from torch._dynamo.utils import (
+            get_current_execution_state,
+            preserve_user_execution_state,
+        )
+
+        with torch.inference_mode(), torch.enable_grad():
+            outer_user_state = get_current_execution_state()
+
+        @preserve_global_state
+        def generate_in_nested_compile_context():
+            return self._generate_repro_code()
+
+        with (
+            # Compiler-normalized state must not override the outer user state.
+            preserve_user_execution_state(outer_user_state),
+            torch.inference_mode(False),
+            torch.no_grad(),
+        ):
+            code = generate_in_nested_compile_context()
+
+        self.assertIn("with torch.inference_mode(), torch.enable_grad():", code)
 
 
 class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
