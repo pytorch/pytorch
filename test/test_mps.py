@@ -10293,10 +10293,11 @@ class TestMPS(TestCaseMPS):
     # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
     # the nonzero OpInfo; only the large-tensor paths are MPS-specific and can't
     # be reached through OpInfo, so they live here.
-    # ~11 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
-    # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
+    # ~3 GiB unified memory needed: the input bool tensor is ~2.2 GiB; the
+    # intra-block prefixes are recomputed in the scatter kernel rather than
+    # stored, so there is no per-element scratch buffer.
     @serialTest()
-    @largeTensorTest("11GB", device="mps")
+    @largeTensorTest("3GB", device="mps")
     def test_nonzero_multichunk_above_int32(self):
         # (1<<31)+1024 elements: above INT_MAX, and above the 2^31 per-dispatch
         # chunk size, so it exercises the multi-chunk count/scatter path and the
@@ -10308,10 +10309,10 @@ class TestMPS(TestCaseMPS):
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
 
-    # ~22 GiB unified memory needed (input bool ~4 GiB + int32 prefix ~16 GiB);
+    # ~5 GiB unified memory needed (input bool ~4 GiB; no per-element scratch);
     # skips on machines/CI without enough memory.
     @serialTest()
-    @largeTensorTest("22GB", device="mps")
+    @largeTensorTest("5GB", device="mps")
     def test_nonzero_above_uint32(self):
         # More than 2^32 elements: the flat index and the count/scatter dispatch
         # both exceed Metal's 32-bit thread_position_in_grid, so this exercises
