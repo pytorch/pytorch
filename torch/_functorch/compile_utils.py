@@ -24,9 +24,9 @@ aten = torch.ops.aten
 
 
 def _normalize_cse_arg(val: Any) -> Any:
+    """Key floats and complex by IEEE 754 bit pattern for consistent hashing."""
     # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
     # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
-    """Key floats and complex by IEEE 754 bit pattern for consistent hashing."""
     if isinstance(val, float):
         return ("__CSE_FLOAT__", struct.pack(">d", val))
     if isinstance(val, complex):
