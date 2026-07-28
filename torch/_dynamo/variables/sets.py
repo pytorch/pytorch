@@ -37,7 +37,7 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import Method, ValueMutationNew, VariableTracker
+from .base import Member, Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -45,7 +45,6 @@ from .hashable import HashableTracker, is_hashable
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._dynamo.variables.builtin import BuiltinVariable
 
 
 # [Adding a new supported class within the keys of SetVariable]
@@ -599,9 +598,6 @@ class SetVariable(VariableTracker):
         "clear": Method(clear, "clear"),
     }
 
-    def python_type_var(self) -> "BuiltinVariable":
-        return variables.BuiltinVariable(set)
-
     def getitem_const(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
@@ -834,6 +830,21 @@ class OrderedSetClassVariable(VariableTracker):
 class OrderedSetVariable(SetVariable):
     _cpython_type = OrderedSet
 
+    def method_flags_type(self) -> type:
+        # OrderedSet is pure-Python (no C ml_flags); its named methods mirror
+        # set's arities, so derive MethodFlags from set to enforce them.
+        return set
+
+    def _get_internal_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # OrderedSet is backed by a dict (self._dict). Expose it so inlined
+        # OrderedSet methods (e.g. __contains__ -> `elem in self._dict`) trace
+        # natively instead of graph-breaking on an unmodeled attribute.
+        from .dicts import ConstDictVariable
+
+        return ConstDictVariable(self.items, mutation_type=ValueMutationNew())  # type: ignore[bad-argument-type]
+
+    tp_members = {"_dict": Member(_get_internal_dict, None)}
+
     def debug_repr(self) -> str:
         if not self.items:
             return "OrderedSet([])"
@@ -853,10 +864,6 @@ class OrderedSetVariable(SetVariable):
 
     def python_type(self) -> type[OrderedSet[Any]]:
         return OrderedSet
-
-    # pyrefly: ignore[bad-override]
-    def python_type_var(self) -> OrderedSetClassVariable:
-        return OrderedSetClassVariable()
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -936,9 +943,6 @@ class FrozensetVariable(SetVariable):
     def python_type(self) -> type:
         return frozenset
 
-    def python_type_var(self) -> "BuiltinVariable":
-        return variables.BuiltinVariable(frozenset)
-
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
@@ -971,13 +975,6 @@ class FrozensetVariable(SetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if args or kwargs:
-            raise_args_mismatch(
-                tx,
-                "copy",
-                "0 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         if type(self) is FrozensetVariable:
             return self
         return SetVariable.copy(self, tx, args, kwargs)

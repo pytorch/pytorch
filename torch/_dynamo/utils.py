@@ -803,7 +803,7 @@ def dynamo_timed(
 
     cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
-        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        wc_name = waitcounter_name_override or key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
@@ -1340,7 +1340,7 @@ def lazily_unpack(
     iterable: VariableTracker,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+    from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
@@ -1349,7 +1349,7 @@ def lazily_unpack(
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -3303,6 +3303,51 @@ def raise_args_mismatch(
     )
 
 
+def check_positional(
+    tx: InstructionTranslatorBase,
+    funcname: str,
+    nargs: int,
+    min_args: int,
+    max_args: int,
+) -> None:
+    # Mirrors CPython _PyArg_CheckPositional (Python/getargs.c): enforce
+    # min_args <= nargs <= max_args with CPython's exact TypeError text. Used
+    # for METH_FASTCALL methods, whose positional count MethodFlags (derived
+    # from ml_flags) cannot check.
+    from torch._dynamo.exc import raise_type_error
+
+    if nargs < min_args:
+        rel = "" if min_args == max_args else "at least "
+        s = "" if min_args == 1 else "s"
+        raise_type_error(tx, f"{funcname} expected {rel}{min_args} argument{s}, got {nargs}")
+    if nargs > max_args:
+        rel = "" if min_args == max_args else "at most "
+        s = "" if max_args == 1 else "s"
+        raise_type_error(tx, f"{funcname} expected {rel}{max_args} argument{s}, got {nargs}")
+
+
+def no_positional(
+    tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoPositional (Python/getargs.c).
+    from torch._dynamo.exc import raise_type_error
+
+    if args:
+        raise_type_error(tx, f"{funcname}() takes no positional arguments")
+
+
+def no_keywords(
+    tx: InstructionTranslatorBase, funcname: str, kwargs: dict[str, VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoKeywords / _PyArg_NoKwnames (Python/getargs.c).
+    # For methods reached via tp_methods, MethodFlags already rejects kwargs;
+    # use this only where MethodFlags does not run (e.g. tp_init constructors).
+    from torch._dynamo.exc import raise_type_error
+
+    if kwargs:
+        raise_type_error(tx, f"{funcname}() takes no keyword arguments")
+
+
 def iter_contains(
     items: Iterable[VariableTracker],
     search: VariableTracker,
@@ -4046,7 +4091,10 @@ def _get_fake_value_impl(
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
-        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+        if (
+            is_lazy_module(nnmodule)
+            and inspect.getattr_static(nnmodule, "_initialize_hook", None) is not None
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
@@ -4193,20 +4241,24 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
-                gb_type="RuntimeError when making fake tensor call",
-                context="",
-                explanation=msg,
-                hints=[*graph_break_hints.USER_ERROR],
-                from_exc=cause,
-            )
+        from .exc import (
+            FakeTensorObservedException,
+            ObservedException,
+            raise_observed_exception,
         )
-        raise AssertionError("should not reachable") from None
+
+        if not node.users:
+            tx.output.graph.erase_node(node)
+        try:
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        except ObservedException as e:
+            raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # type: ignore[unbound-name]
         )
 
     if (
