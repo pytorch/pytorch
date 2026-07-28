@@ -2223,11 +2223,9 @@ def _tdm_operand_compatible(
 
 def use_triton_tdm_template(
     *matrices: IRNode,
-    output_layout: Layout | None = None,
     add_guards: bool = False,
 ) -> bool:
     """Return whether dense MM operands may use the gfx1250 TDM template."""
-    del output_layout
     if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
         return False
     if not all(
@@ -2243,11 +2241,9 @@ def use_triton_tdm_template(
 
 def use_triton_tdm_scaled_template(
     *matrices: IRNode,
-    output_layout: Layout | None = None,
     add_guards: bool = False,
 ) -> bool:
     """Return whether scaled FP8 MM operands may use gfx1250 TDM descriptors."""
-    del output_layout
     if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
         return False
     if not all(

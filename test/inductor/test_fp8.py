@@ -2274,7 +2274,7 @@ class TestTDMScaled(TestCase):
             self.assertTrue(
                 mm_kernel._use_scaled_descriptor_template(mat_a, mat_b, layout)
             )
-            tdm_gate.assert_called_once()
+            tdm_gate.assert_called_once_with(mat_a, mat_b, add_guards=True)
 
     def test_tdm_scaled_config_policy(self):
         from torch._inductor.heuristics.template.triton import (
