@@ -2080,7 +2080,12 @@ _METHOD_TYPES = (
 
 
 def _is_method_type(type_attr: object) -> bool:
-    return isinstance(type_attr, _METHOD_TYPES)
+    # pybind11 methods appear as `instancemethod` descriptors in the type
+    # __dict__, not as MethodDescriptorType. Treat them as methods so VTs with a
+    # custom call_method (e.g. DispatchKeySetVariable) dispatch through it.
+    return isinstance(
+        type_attr, _METHOD_TYPES
+    ) or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
 
 
 def _has_custom_call_method(obj: VariableTracker) -> bool:
