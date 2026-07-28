@@ -9,7 +9,7 @@ import numpy
 
 import torch
 from torch.testing._internal.common_dtype import floating_types
-from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_TORCHINDUCTOR
+from torch.testing._internal.common_utils import TEST_SCIPY
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     ErrorInput,
