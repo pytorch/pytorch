@@ -34,7 +34,7 @@
     tile_id_c = start_pid - NUM_SMS
     num_pid_in_group = GROUP_M * grid_n
 
-    {%- if USE_META_WS is defined and USE_META_WS %}
+    {%- if USE_META_WS %}
     for tile_id in tl.range(
         start_pid,
         num_tiles,
