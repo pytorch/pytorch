@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import importlib
+import logging
 import math
 import sys
 import unittest
@@ -3454,6 +3455,142 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         self.assertIsNone(grouped_tensor_layout((4, 5, group), (4, 8)))
         self.assertEqual(shape_env.guards, [])
+
+    def test_flex_gemm_debug_report(self):
+        from torch._inductor.kernel.flex_gemm.debug import (
+            flex_gemm_log,
+            format_flex_gemm_analysis,
+            format_flex_gemm_analysis_details,
+            format_flex_gemm_config_key,
+            log_flex_gemm_artifact,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b):
+            acc = torch.mm(a, b)
+            return torch.relu(acc), (acc * acc).view(4, -1, 32).sum(-1)
+
+        graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 64))
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+        analysis_report = format_flex_gemm_analysis(analysis)
+        analysis_details = format_flex_gemm_analysis_details(analysis)
+        config_report = format_flex_gemm_config_key(
+            (
+                ("tile_m", 256),
+                ("tile_n", 128),
+                ("tile_k", None),
+                ("cluster_m", 2),
+                ("cluster_n", 1),
+                ("cluster_k", 1),
+                ("swap_ab", False),
+            )
+        )
+
+        self.assertIn("outputs:\n  main: relu: shape=(4, 64)", analysis_report)
+        self.assertIn("auxiliary: (none)", analysis_report)
+        self.assertIn("main_transform: none", analysis_report)
+        self.assertIn("value: sum_1", analysis_report)
+        self.assertIn("dataflow: view -> sum(dim=[-1], keepdim=False)", analysis_report)
+        self.assertIn("geometry: axis=N, group=32", analysis_report)
+        self.assertIn("consumers: returned", analysis_report)
+        self.assertIn("output_layout: dense", analysis_report)
+        self.assertIn("config_constraints:\n  axis=N, group=32", analysis_report)
+        self.assertNotIn("recognized_dataflow:", analysis_report)
+        self.assertNotIn("structural_forms:", analysis_report)
+        self.assertIn("structural_forms:\n  view: FlexGemmViewForm", analysis_details)
+        self.assertIn("sum_1: FlexGemmReductionForm", analysis_details)
+        self.assertIn("local_reduce_matches:\n  sum_1:", analysis_details)
+        self.assertIn("tile_m: 256", config_report)
+        self.assertIn("tile_k: auto", config_report)
+        self.assertIn("cluster_m: 2", config_report)
+        with self.assertLogs(flex_gemm_log, level="INFO") as records:
+            log_flex_gemm_artifact("analysis", lambda: analysis_report)
+            log_flex_gemm_artifact(
+                "analysis_details", lambda: analysis_details, verbose=True
+            )
+        self.assertEqual(len(records.output), 1)
+        self.assertIn(
+            "FLEXGEMM LOWERING\n ===== ANALYSIS =====\noutputs:\n  main: relu",
+            records.output[0],
+        )
+
+        with self.assertLogs(flex_gemm_log, level="DEBUG") as records:
+            log_flex_gemm_artifact(
+                "analysis_details", lambda: analysis_details, verbose=True
+            )
+        self.assertIn(" ===== ANALYSIS DETAILS =====", records.output[0])
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_emits_flex_gemm_debug_report(self):
+        from torch._inductor.kernel.flex_gemm.debug import flex_gemm_log
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        with (
+            mock.patch.object(sys.stderr, "isatty", return_value=True),
+            self.assertLogs(flex_gemm_log, level="DEBUG") as records,
+        ):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        self.assertEqual(actual, torch.relu(a @ b))
+        report = "\n".join(
+            record.getMessage()
+            for record in records.records
+            if record.levelno == logging.INFO
+        )
+        phases = (
+            " ===== PROBLEM =====",
+            " ===== ANALYSIS =====",
+            " ===== LOWERING PLAN =====",
+            " ===== SELECTION =====",
+        )
+        positions = tuple(report.index(phase) for phase in phases)
+        self.assertEqual(positions, tuple(sorted(positions)))
+        self.assertIn("gemm_op: aten.mm.default", report)
+        self.assertIn("outputs:\n  main: relu", report)
+        self.assertNotIn("structural_forms:", report)
+        self.assertNotIn("GENERATED EPILOGUE", report)
+        self.assertNotIn("CONFIG CANDIDATES", report)
+        self.assertIn("\x1b[", report)
+        self.assertIn("FLEXGEMM LOWERING [flex_gemm_body_graph_", report)
+        self.assertIn("mode: fixed", report)
+        self.assertIn("lowering_approved_candidates: 1", report)
+        self.assertIn("template: cutedsl_flex_gemm_epilogue_", report)
+        self.assertIn('analysis/codegen: TORCH_LOGS="+flex_gemm"', report)
+
+        verbose_report = "\n".join(
+            record.getMessage()
+            for record in records.records
+            if record.levelno == logging.DEBUG
+        )
+        verbose_phases = (
+            " ===== ANALYSIS DETAILS =====",
+            " ===== GENERATED EPILOGUE =====",
+            " ===== CONFIG CANDIDATES =====",
+        )
+        verbose_positions = tuple(
+            verbose_report.index(phase) for phase in verbose_phases
+        )
+        self.assertEqual(verbose_positions, tuple(sorted(verbose_positions)))
+        self.assertIn("structural_forms:", verbose_report)
+        self.assertIn("@cute.jit", verbose_report)
+        self.assertIn("candidate 0:", verbose_report)
 
     def test_grouped_main_output_recognizer_only_mutates_analysis_on_match(self):
         """Rejected recognitions must not leak grouped layouts or guards."""
