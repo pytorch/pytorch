@@ -1452,6 +1452,16 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, "default")
 
     @make_dynamo_test
+    def test_next_non_iterator_raises_type_error(self):
+        with self.assertRaisesRegex(TypeError, "'list' object is not an iterator"):
+            next([1, 2])
+
+    @make_dynamo_test
+    def test_next_non_iterator_with_default_raises_type_error(self):
+        with self.assertRaisesRegex(TypeError, "'list' object is not an iterator"):
+            next([1, 2], "default")
+
+    @make_dynamo_test
     def test_error_on_dict_keys_mutation_during_iteration(self):
         """Test that mutating a dict during iteration raises RuntimeError"""
         d = {"a": 1, "b": 2, "c": 3}

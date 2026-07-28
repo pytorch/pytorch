@@ -20,7 +20,7 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune
+from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -59,6 +59,7 @@ from ..utils import (
 )
 from .mm_common import (
     _is_static_problem,
+    _use_small_mm_pointwise,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -207,6 +208,17 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
+
+
+def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
+    torch._check(
+        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
+        lambda: "input dtypes must be the same",
+    )
+    torch._check(
+        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
+        lambda: "all inputs must be on the same device",
+    )
 
 
 def decomposeK(a, b, k_splits):
@@ -378,6 +390,18 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
+
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
+        counters["inductor"]["decompose_mm_pointwise"] += 1
+        # Clone both to force contiguous strides (#189401): unrolled sum
+        # reduction computes wrong indices for transposed views. Clone both
+        # rather than detecting the transposed side; scheduler fuses the copy.
+        mat1 = L.clone(mat1)
+        mat2 = L.clone(mat2)
+        mat1 = L.unsqueeze(mat1, -1)
+        mat2 = L.unsqueeze(mat2, 0)
+        return L.sum_(L.mul(mat1, mat2), axis=1)
+
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"
 
@@ -613,8 +637,27 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if beta == 0 and mat1.get_device().type == "cuda":
+        _check_addmm_input_metadata(inp, mat1, mat2)
+        if alpha == 0:
+            _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+            return lowerings[aten.full](
+                layout.size,
+                0,
+                dtype=layout.dtype,
+                device=layout.device,
+            )
+        if layout is not None:
+            result = lowerings[aten.mm](mat1, mat2, layout=layout)
+        else:
+            result = lowerings[aten.mm](mat1, mat2)
+        if alpha != 1:
+            result = lowerings[aten.mul](alpha, result)
+        return result
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
+            _check_addmm_input_metadata(inp, mat1, mat2)
             arg1 = 0
         else:
             arg1 = lowerings[aten.mul](beta, inp)
@@ -723,6 +766,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             alpha=alpha,
             beta=beta,
             input_reorder=[2, 0, 1],
+        )
+
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
+        from ..codegen.nv_universal_gemm import add_nv_universal_addmm_choices
+
+        # inp is the original (un-expanded) bias, so a 1D row vector routes to
+        # the row-broadcast epilogue impl.
+        add_nv_universal_addmm_choices(
+            choices, layout, kernel_inputs, inp, alpha=alpha, beta=beta
         )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
@@ -927,11 +979,33 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
-    # Swizzling is not yet wired into any Inductor template or extern choice
-    # here. Rather than failing compilation, defer swizzled scale layouts
-    # (e.g. blockwise MXFP8/NVFP4 on Blackwell) to the eager op so they still
-    # produce correct results.
-    if any(s != 0 for s in swizzle_a) or any(s != 0 for s in swizzle_b):
+
+    # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
+    # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,
+    # RowWise, and DeepSeek BlockWise1x128/128x128). Everything else has no
+    # template or extern choice here, so defer to the eager _scaled_mm_v2 op:
+    #   - swizzled scale layouts (e.g. CUDA/Blackwell MXFP8/NVFP4)
+    #   - the blockwise MX/NVFP4 recipes BlockWise1x32/1x16 (also how XPU
+    #     expresses MX/NVFP4, with NO_SWIZZLE)
+    #   - multi-level scales (two-level NVFP4)
+    #   - any non-fp32 block scale
+    # The eager op is called directly so it keeps its native v2 scale_b
+    # convention, unlike the v1 aten__fp8_mm choice used on the supported path.
+    def check_supported_recipe(recipe: list[int]) -> bool:
+        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
+        return all(ScalingType(r) not in disallowed for r in recipe)
+
+    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
+    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
+        recipe_b
+    )
+    if (
+        any(s != 0 for s in swizzle_a)
+        or any(s != 0 for s in swizzle_b)
+        or not supported_recipe
+        or not is_single_level_scale
+        or scale_a[0].dtype != torch.float32
+    ):
         # contraction_dim is a non-optional int[] in the schema (default []);
         # this lowering defaults it to None, so coerce before the eager call.
         fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
@@ -967,20 +1041,6 @@ def tuned_scaled_mm_v2(
     name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
 
-    if not (len(scale_a) >= 1 and len(scale_b) >= 1):
-        raise AssertionError("scale_a and scale_b must each have at least one entry")
-
-    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
-
-    def check_supported_recipe(recipe: list[int]) -> bool:
-        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
-        return all(ScalingType(r) not in disallowed for r in recipe)
-
-    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
-        recipe_b
-    )
-
-    # Only handle single-level scales (no MX/NV)
     scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
 
     input_nodes: list[Any]
@@ -1096,15 +1156,6 @@ def tuned_scaled_mm_v2(
             input_nodes,
             kernel_inputs=kernel_inputs,
         )
-
-    # Early return for MX variants
-    if (
-        scale_a[0].dtype != torch.float32
-        or (not supported_recipe)
-        or (not is_single_level_scale)
-    ):
-        node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
-        return node
 
     if (
         is_nonzero
