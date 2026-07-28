@@ -1763,6 +1763,7 @@ _dsl_checker = LazyDSLCheck()
 # Lazy constants to avoid import-time overhead
 TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
 TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
+TEST_HELION_DSL = LazyVal(lambda: _dsl_checker.is_available('helion'))
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1774,6 +1775,7 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 # DSL skip decorators (following existing pattern)
 skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
 skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
+skipIfNoHelionDSL = unittest.skipIf(not TEST_HELION_DSL, "Helion DSL not available")
 
 def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
     """Skip test if specific DSL is not available"""
@@ -2594,7 +2596,7 @@ def setBlasBackendsToDefaultFinally(fn):
             if torch.backends.cuda.is_built():
                 torch._C._cuda_resetCublasWorkspaceSize()
                 torch._C._cuda_resetCublasLtWorkspaceSize()
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
     return _fn
 
 def setSdpaBackendsToDefaultFinally(fn):
@@ -3034,7 +3036,7 @@ class CudaMemoryLeakCheck:
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
                 torch.cuda.empty_cache()
                 break
 
@@ -3052,17 +3054,17 @@ class CudaMemoryLeakCheck:
 
         self.testcase.before_cuda_memory_leak_check()
         gc.collect()
-        torch._C._cuda_clearCublasWorkspaces()
+        num_devices = torch.cuda.device_count()
+        torch.cuda._clear_cublas_workspaces()
         torch.cuda.empty_cache()
 
         # Compares caching allocator before/after statistics
         # An increase in allocated memory is a discrepancy indicating a possible
         #   memory leak
         discrepancy_detected = False
-        num_devices = torch.cuda.device_count()
+        # avoid counting cublasWorkspace allocations
+        torch.cuda._clear_cublas_workspaces()
         for i in range(num_devices):
-            # avoid counting cublasWorkspace allocations
-            torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
@@ -3076,7 +3078,7 @@ class CudaMemoryLeakCheck:
         # Validates the discrepancy persists after garbage collection and
         #   is confirmed by the driver API
 
-        # NOTE: driver API iscrepancies alone are ignored because with the jiterator
+        # NOTE: driver API discrepancies alone are ignored because with the jiterator
         #   some tests may permanently increase the CUDA context size and
         #   that will appear as a driver memory leak but is the expected behavior.
 
@@ -5161,7 +5163,7 @@ class TestCase(expecttest.TestCase):
         Args:
             file (pathlib.Path): The path to the checkpoint to load.
             import_string (str): import string to add to the script
-            exected_failure_message (str, optional): The expected failure message if the
+            expected_failure_message (str, optional): The expected failure message if the
                 checkpoint fails to load. If None, the test will pass
         """
         script = f"import torch;{import_string}torch.load(r'{file}', weights_only=True)"
