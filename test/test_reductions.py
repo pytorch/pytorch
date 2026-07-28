@@ -1465,6 +1465,7 @@ class TestReductions(TestCase):
 
     @onlyCPU
     @dtypes(torch.bool, torch.double)
+    @skipIfTorchDynamo("tracing sum() over a 200k-element .tolist() takes ~10 min/run")
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:
             pylist = tensor.reshape(-1).tolist()
