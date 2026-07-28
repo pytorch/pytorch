@@ -66,14 +66,23 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
-    cmp_name_to_op_mapping,
     identity,
     istype,
     proxy_args_kwargs,
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    GetSet,
+    getset_build,
+    getset_read,
+    Member,
+    Method,
+    NO_SUCH_SUBOBJ,
+    unsupported_attr,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .object_protocol import generic_str
@@ -441,18 +450,14 @@ class FrameSummaryVariable(VariableTracker):
     def python_type(self) -> type:
         return traceback.FrameSummary
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "lineno":
-            return VariableTracker.build(tx, self.frame_summary.lineno)
-        elif name == "filename":
-            return VariableTracker.build(tx, self.frame_summary.filename)
-        elif name == "name":
-            return VariableTracker.build(tx, self.frame_summary.name)
-        elif name == "line":
-            return VariableTracker.build(tx, self.frame_summary.line)
-        return super().getattro_impl(tx, name)
+    # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
+    # each slot is exposed as a read-only member_descriptor.
+    tp_members = {
+        "lineno": Member(getset_build(lambda s: s.frame_summary.lineno)),
+        "filename": Member(getset_build(lambda s: s.frame_summary.filename)),
+        "name": Member(getset_build(lambda s: s.frame_summary.name)),
+        "line": Member(getset_build(lambda s: s.frame_summary.line)),
+    }
 
 
 class TracebackVariable(VariableTracker):
@@ -504,44 +509,40 @@ class TracebackVariable(VariableTracker):
     def python_type(self) -> type[types.TracebackType]:
         return types.TracebackType
 
-    def call_setattr(
-        self,
-        tx: "InstructionTranslatorBase",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker:
-        name = name_var.as_python_constant()
-        if name == "tb_next":
-            if not self.is_valid_traceback(val):
-                raise_observed_exception(TypeError, tx)
-            if not isinstance(val, (TracebackVariable, ConstantVariable)):
-                raise AssertionError(
-                    f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
-                )
-            if self.has_reference_cycle(val) or (
-                istype(val, TracebackVariable) and val.has_reference_cycle(self)
-            ):
-                raise_observed_exception(ValueError, tx)
-            self.tb_next = val
+    def _get_tb_next(self, tx: "InstructionTranslatorBase"):
+        return self.tb_next
+
+    def _set_tb_next(self, tx: "InstructionTranslatorBase", val):
+        if not self.is_valid_traceback(val):
+            raise_observed_exception(TypeError, tx)
+        if not isinstance(val, (TracebackVariable, ConstantVariable)):
+            raise AssertionError(
+                f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
+            )
+        if self.has_reference_cycle(val) or (
+            istype(val, TracebackVariable) and val.has_reference_cycle(self)
+        ):
+            raise_observed_exception(ValueError, tx)
+        self.tb_next = val
         return variables.ConstantVariable.create(None)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "tb_next":
-            return self.tb_next
-        elif name == "tb_lineno":
-            return self.frame_summary.getattro_impl(tx, "lineno")
-        elif name == "frame_summary":
-            return self.frame_summary
-        elif name == "tb_lasti":
-            unimplemented(
-                gb_type="traceback.tb_lasti not supported",
-                context=f"{self} accessing 'tb_lasti'",
-                explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return super().getattro_impl(tx, name)
+    def _get_tb_lineno(self, tx: "InstructionTranslatorBase"):
+        return self.frame_summary.getattro_impl(tx, "lineno")
+
+    # ref: CPython Objects/traceback.c tb_getsetters. `tb_next` is a getset with
+    # getter+setter (tb_next_get / tb_next_set, which runs a reference-cycle
+    # check); `tb_lineno` is a get-only getset. `frame_summary` is dynamo-internal
+    # (not a real CPython traceback attribute).
+    tp_getset = {
+        "tb_next": GetSet(_get_tb_next, _set_tb_next),
+        "tb_lineno": GetSet(_get_tb_lineno, None),
+        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
+    }
+
+    # ref: CPython Objects/traceback.c tb_memberlist.
+    tp_members = {
+        "tb_lasti": Member(unsupported_attr("tb_lasti")),
+    }
 
     def richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -558,7 +559,20 @@ class TracebackVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            return self.call_setattr(tx, *args)
+            attr = args[0].as_python_constant()
+            # Writable attributes route through their tp_getset setter.
+            getset = self.tp_getset.get(attr)
+            if getset is not None and getset.setter is not None:
+                result = getset.setter(self, tx, args[1])
+                if result is not None:
+                    return result
+            unimplemented(
+                gb_type="Unsupported attribute assignment on traceback object",
+                context=f"call_setattr {self} {attr}",
+                explanation="Dynamo does not support setting the attribute "
+                f"'{attr}' on tracked traceback objects. Only `tb_next` is supported.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -645,91 +659,110 @@ class ExceptionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            name = args[0].as_python_constant()
-            val = args[1]
-            if name == "__context__":
-                # Constant can be either an Exceptior or None
-                if not (
-                    val.is_constant_none()
-                    or isinstance(
-                        val,
-                        (
-                            variables.ExceptionVariable,
-                            variables.UserDefinedExceptionClassVariable,
-                            variables.UserDefinedExceptionObjectVariable,
-                        ),
-                    )
-                ):
-                    raise AssertionError(f"{val} is not a valid exception context")
-                self.set_context(val)
-            elif name == "__cause__":
-                if val.is_constant_none() or isinstance(
-                    val,
-                    (
-                        variables.BuiltinVariable,
-                        variables.ExceptionVariable,
-                        variables.UserDefinedExceptionClassVariable,
-                        variables.UserDefinedExceptionObjectVariable,
-                    ),
-                ):
-                    self.__cause__ = val
-                    self.__suppress_context__ = variables.ConstantVariable.create(True)
-                else:
-                    raise_type_error(
-                        tx, "exception cause must be None or derive from BaseException"
-                    )
-            elif name == "__suppress_context__":
-                if val.is_constant_match(True, False):
-                    self.__suppress_context__ = val
-                else:
-                    raise_type_error(
-                        tx, "exception cause must be None or derive from BaseException"
-                    )
-            elif name == "__traceback__":
-                if not TracebackVariable.is_valid_traceback(val):
-                    raise_type_error(
-                        tx, "__traceback__ must be a traceback object or None"
-                    )
-                self.__traceback__ = val
-            else:
-                unimplemented(
-                    gb_type="Unsupported attribute assignment on Exception object",
-                    context=f"call_setattr {self} {name}",
-                    explanation="Dynamo does not support setting the attribute "
-                    f"'{name}' on tracked exception objects. Only `__context__`, "
-                    "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            return variables.ConstantVariable.create(None)
-        elif name == "with_traceback":
-            [tb] = args
-            if not TracebackVariable.is_valid_traceback(tb):
-                raise_type_error(tx, "__traceback__ must be a traceback object or None")
-            self.__traceback__ = tb
-            return self
-        else:
-            return super().call_method(tx, name, args, kwargs)
-
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "__class__":
-            return VariableTracker.build(tx, self.exc_type)
-        elif name == "__context__":
-            return self.__context__
-        elif name == "__cause__":
-            return self.__cause__
-        elif name == "__suppress_context__":
-            return self.__suppress_context__
-        elif name == "__traceback__":
-            return self.__traceback__
-        elif name == "args":
-            return VariableTracker.build(
-                tx,
-                tuple(self.args),
-                source=self.source and AttrSource(self.source, "args"),
+            attr = args[0].as_python_constant()
+            # Writable attributes route through their tp_getset/tp_members setter.
+            getset = self.lookup_tp_getset_member(attr)
+            if getset is not None and getset.setter is not None:
+                result = getset.setter(self, tx, args[1])
+                if result is not None:
+                    return result
+            unimplemented(
+                gb_type="Unsupported attribute assignment on Exception object",
+                context=f"call_setattr {self} {attr}",
+                explanation="Dynamo does not support setting the attribute "
+                f"'{attr}' on tracked exception objects. Only `__context__`, "
+                "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return super().getattro_impl(tx, name)
+        return super().call_method(tx, name, args, kwargs)
+
+    def _set_context(self, tx: "InstructionTranslatorBase", val):
+        # Constant can be either an Exception or None
+        if not (
+            val.is_constant_none()
+            or isinstance(
+                val,
+                (
+                    variables.ExceptionVariable,
+                    variables.UserDefinedExceptionClassVariable,
+                    variables.UserDefinedExceptionObjectVariable,
+                ),
+            )
+        ):
+            raise AssertionError(f"{val} is not a valid exception context")
+        self.set_context(val)
+        return variables.ConstantVariable.create(None)
+
+    def _set_cause(self, tx: "InstructionTranslatorBase", val):
+        if val.is_constant_none() or isinstance(
+            val,
+            (
+                variables.BuiltinVariable,
+                variables.ExceptionVariable,
+                variables.UserDefinedExceptionClassVariable,
+                variables.UserDefinedExceptionObjectVariable,
+            ),
+        ):
+            self.__cause__ = val
+            self.__suppress_context__ = variables.ConstantVariable.create(True)
+        else:
+            raise_type_error(
+                tx, "exception cause must be None or derive from BaseException"
+            )
+        return variables.ConstantVariable.create(None)
+
+    def _set_suppress_context(self, tx: "InstructionTranslatorBase", val):
+        if val.is_constant_match(True, False):
+            self.__suppress_context__ = val
+        else:
+            raise_type_error(
+                tx, "exception cause must be None or derive from BaseException"
+            )
+        return variables.ConstantVariable.create(None)
+
+    def _set_traceback(self, tx: "InstructionTranslatorBase", val):
+        if not TracebackVariable.is_valid_traceback(val):
+            raise_type_error(tx, "__traceback__ must be a traceback object or None")
+        self.__traceback__ = val
+        return variables.ConstantVariable.create(None)
+
+    def with_traceback(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        [tb] = args
+        if not TracebackVariable.is_valid_traceback(tb):
+            raise_type_error(tx, "__traceback__ must be a traceback object or None")
+        self.__traceback__ = tb
+        return self
+
+    tp_methods = {
+        "with_traceback": Method(with_traceback, "with_traceback"),
+    }
+
+    def _get_args(self, tx: "InstructionTranslatorBase"):
+        return VariableTracker.build(
+            tx,
+            tuple(self.args),
+            source=self.source and AttrSource(self.source, "args"),
+        )
+
+    tp_getset = {
+        "__class__": GetSet(getset_build(lambda s: s.exc_type)),
+        "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
+        "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
+        "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
+        "args": GetSet(_get_args, None),
+    }
+    # __suppress_context__ is a writable PyMemberDef on BaseException, not a
+    # getset, so it lives in tp_members.
+    tp_members = {
+        "__suppress_context__": Member(
+            getset_read(lambda s: s.__suppress_context__), _set_suppress_context
+        ),
+    }
 
     def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
@@ -776,12 +809,10 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "value":
-            return self.value
-        return super().getattro_impl(tx, name)
+    # ref: StopIteration_members in CPython Objects/exceptions.c
+    tp_members = {
+        "value": Member(getset_read(lambda s: s.value)),
+    }
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -804,13 +835,6 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name in self._attrs:
-            return self._attrs[name]
-        return super().getattro_impl(tx, name)
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
         for name, val in self._attrs.items():
@@ -824,11 +848,16 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
 class AttributeErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#AttributeError
     _kwarg_attrs = ("name", "obj")
+    tp_members = {
+        "name": Member(getset_read(lambda s: s._attrs["name"])),
+        "obj": Member(getset_read(lambda s: s._attrs["obj"])),
+    }
 
 
 class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
+    tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
 
 
 class UnknownVariable(VariableTracker):
@@ -1824,11 +1853,6 @@ class TypingVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
 
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.value, name))
-            )
-
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
@@ -2597,12 +2621,8 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if name == "name":
-            return ConstantVariable.create(self.cv_obj.name)
-        return super().getattro_impl(tx, name)
+    # contextvars.ContextVar.name is a read-only member.
+    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
 
 
 class RandomClassVariable(VariableTracker):
@@ -2736,90 +2756,156 @@ class RandomVariable(VariableTracker):
         RandomVariable.check_state(state_obj)
         return state_obj
 
-    def call_method(
+    def seed(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "seed":
-            tx.output.side_effects.mutation(self)
-            self.random.seed(
-                *[x.as_python_constant() for x in args],
-                **{key: val.as_python_constant() for key, val in kwargs.items()},
-            )
-            return variables.ConstantVariable.create(None)
-        elif name == "getstate":
-            return self.wrap_state(self.random.getstate())
-        elif name == "setstate":
-            tx.output.side_effects.mutation(self)
-            self.random.setstate(self.unwrap_state(args[0]))
-            return variables.ConstantVariable.create(None)
-        elif name == "shuffle":
-            if len(args) != 1 or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            seq = args[0].realize()
-            tx.output.side_effects.mutation(self)
-            # shuffle's permutation depends only on the sequence length and the
-            # RNG state, not on the elements, so shuffle a list of indices to
-            # both advance the symbolic RNG and obtain the permutation to apply.
-            if not hasattr(seq, "items"):
-                raise AssertionError(
-                    "shuffle only supports ListVariable and TupleVariable"
-                )
-            perm = list(range(len(seq.items)))
-            self.random.shuffle(perm)
-            tx.output.side_effects.mutation(seq)
-            seq.items[:] = [seq.items[i] for i in perm]
-            return variables.ConstantVariable.create(None)
-        elif name == "sample":
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            elems = unpack_iterable(tx, args[0])
-            k = args[1].as_python_constant()
-            if not isinstance(k, int) or k < 0 or k > len(elems):
-                raise_value_error(
-                    tx,
-                    "Sample larger than population or is negative",
-                )
-            tx.output.side_effects.mutation(self)
-            # Like shuffle, sample's selected positions depend only on the
-            # population length and RNG state, so sample over an index range to
-            # advance the symbolic RNG and pick the population elements to keep.
-            indices = self.random.sample(range(len(elems)), k)
-            return variables.ListVariable(
-                [elems[i] for i in indices],
-                mutation_type=variables.base.ValueMutationNew(),
-            )
-        elif name in self._supported_fn_names:
-            tx.output.side_effects.mutation(self)
-            state = self.random.getstate()
+        tx.output.side_effects.mutation(self)
+        self.random.seed(
+            *[x.as_python_constant() for x in args],
+            **{key: val.as_python_constant() for key, val in kwargs.items()},
+        )
+        return variables.ConstantVariable.create(None)
 
-            def call_random_meth(*args: Any, **kwargs: Any) -> Any:
-                r = random.Random()
-                r.setstate(state)
-                return getattr(r, name)(*args, **kwargs)
+    def getstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.wrap_state(self.random.getstate())
 
-            # self.random state not actually updated by call_random_meth, so update here
-            # by calling the method
-            getattr(self.random, name)(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
+    def setstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        tx.output.side_effects.mutation(self)
+        self.random.setstate(self.unwrap_state(args[0]))
+        return variables.ConstantVariable.create(None)
+
+    def shuffle(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        name = "shuffle"
+        if len(args) != 1 or kwargs:
+            raise_args_mismatch(
+                tx,
+                name,
+                "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
             )
+        seq = args[0].realize()
+        tx.output.side_effects.mutation(self)
+        # shuffle's permutation depends only on the sequence length and the
+        # RNG state, not on the elements, so shuffle a list of indices to
+        # both advance the symbolic RNG and obtain the permutation to apply.
+        if not hasattr(seq, "items"):
+            raise AssertionError("shuffle only supports ListVariable and TupleVariable")
+        perm = list(range(len(seq.items)))
+        self.random.shuffle(perm)
+        tx.output.side_effects.mutation(seq)
+        seq.items[:] = [seq.items[i] for i in perm]
+        return variables.ConstantVariable.create(None)
 
-            return call_random_fn(tx, call_random_meth, args, kwargs)
-        return super().call_method(tx, name, args, kwargs)
+    def sample(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        name = "sample"
+        if kwargs or len(args) != 2:
+            raise_args_mismatch(
+                tx,
+                name,
+                "2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elems = unpack_iterable(tx, args[0])
+        k = args[1].as_python_constant()
+        if not isinstance(k, int) or k < 0 or k > len(elems):
+            raise_value_error(
+                tx,
+                "Sample larger than population or is negative",
+            )
+        tx.output.side_effects.mutation(self)
+        # Like shuffle, sample's selected positions depend only on the
+        # population length and RNG state, so sample over an index range to
+        # advance the symbolic RNG and pick the population elements to keep.
+        indices = self.random.sample(range(len(elems)), k)
+        return variables.ListVariable(
+            [elems[i] for i in indices],
+            mutation_type=variables.base.ValueMutationNew(),
+        )
+
+    def _call_random(self, tx, name, args, kwargs):
+        tx.output.side_effects.mutation(self)
+        state = self.random.getstate()
+
+        def call_random_meth(*args: Any, **kwargs: Any) -> Any:
+            r = random.Random()
+            r.setstate(state)
+            return getattr(r, name)(*args, **kwargs)
+
+        # self.random state not actually updated by call_random_meth, so update here
+        # by calling the method
+        getattr(self.random, name)(
+            *[x.as_python_constant() for x in args],
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+
+        return call_random_fn(tx, call_random_meth, args, kwargs)
+
+    def _random(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "random", args, kwargs)
+
+    def _randint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "randint", args, kwargs)
+
+    def _randrange(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "randrange", args, kwargs)
+
+    def _uniform(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "uniform", args, kwargs)
+
+    tp_methods = {
+        "seed": Method(seed, "seed"),
+        "getstate": Method(getstate, "getstate"),
+        "setstate": Method(setstate, "setstate"),
+        "shuffle": Method(shuffle, "shuffle"),
+        "sample": Method(sample, "sample"),
+        "random": Method(_random, "random"),
+        "randint": Method(_randint, "randint"),
+        "randrange": Method(_randrange, "randrange"),
+        "uniform": Method(_uniform, "uniform"),
+    }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
