@@ -10,6 +10,7 @@ The first call to get_kernel_by_name() loads all kernels from cutlass.operators
 dict for O(1) lookup (~0.1 μs).
 """
 
+import dataclasses
 import functools
 import logging
 import threading
@@ -340,18 +341,36 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     cheaper than the manifest. Falls back to the manifest if the provider is
     unavailable or nothing matches (e.g. a future non-block-scaled scaled dtype).
     """
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+        VendoredDenseBlockScaledGemmEFC,
+        VendoredDenseBlockScaledGemmKernel,
+    )
+
     manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
     if manifest.operators:
-        metadata_filter = (
-            (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
-        )
         out = manifest.filter_operators(
             args=args,
-            metadata_filter=metadata_filter,
             target_sm=f"{cc}a",
         )
         if out:
-            return out
+            efc = []
+            for op in out:
+                if op.metadata.operator_class is not VendoredDenseBlockScaledGemmKernel:
+                    continue
+                metadata = dataclasses.replace(
+                    op.metadata,
+                    operator_name=op.metadata.operator_name.replace(
+                        "VendoredDenseBlockScaledGemmKernel",
+                        "VendoredDenseBlockScaledGemmEFC",
+                        1,
+                    ),
+                    operator_class=VendoredDenseBlockScaledGemmEFC,
+                )
+                efc.append(VendoredDenseBlockScaledGemmEFC(metadata))
+            if efc:
+                return efc if efc_only else [*out, *efc]
+            if not efc_only:
+                return out
     return _manifest_candidates(args, cc, efc_only)
 
 
@@ -455,6 +474,26 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
         # setdefault: keep an already-cached (possibly already-compiled) object
         # rather than replacing it with a fresh instance from this query.
         _ops_by_name.setdefault(op.metadata.operator_name, op)
+    if (
+        kernel_name not in _ops_by_name
+        and "VendoredDenseBlockScaledGemmEFC" in kernel_name
+    ):
+        from cutlass.operators.arguments import GemmArguments
+
+        base_args = GemmArguments(
+            args.A,
+            args.B,
+            args.out,
+            accumulator_type=args.accumulator_type,
+        )
+        scaled_ops = _scaled_candidates(base_args, cc, efc_only=False)
+        log.debug(
+            "Scaled by-name fallback found %d candidates for %s",
+            len(scaled_ops),
+            kernel_name,
+        )
+        for op in scaled_ops:
+            _ops_by_name.setdefault(op.metadata.operator_name, op)
     return _ops_by_name.get(kernel_name)
 
 
