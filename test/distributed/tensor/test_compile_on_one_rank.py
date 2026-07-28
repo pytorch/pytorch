@@ -9,8 +9,10 @@ import torch
 import torch.distributed as dist
 import torch.distributed.config as dist_config
 import torch.nn as nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -21,6 +23,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -407,6 +410,101 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         code0, code1 = code_on(0), code_on(1)
         self.assertEqual(code0, code1)
         self.assertNotIn("cuda:", code0)
+
+
+def _baked_pg_constants(gm):
+    """get_attr nodes that resolve to a torchbind ProcessGroup baked onto the gm.
+
+    These are unserializable: torch.classes.c10d.ProcessGroup has no
+    __getstate__, so GraphPickler.dumps fails on them.
+    """
+    out = []
+    for node in gm.graph.nodes:
+        if node.op != "get_attr":
+            continue
+        val = gm
+        for part in node.target.split("."):
+            val = getattr(val, part)
+        if isinstance(val, torch.ScriptObject) and "ProcessGroup" in val._type().name():
+            out.append(node.target)
+    return out
+
+
+def _call_targets(gm):
+    return [str(n.target) for n in gm.graph.nodes if n.op == "call_function"]
+
+
+# GraphPickler metadata filter mirroring graph_trainer's distributed filter:
+# distributed ops (mesh_get_process_group) keep a real ProcessGroup in
+# node.meta["val"]/["eager_input_vals"], which is not picklable and not needed.
+def _drop_distributed_meta(key):
+    return key not in (
+        "val",
+        "eager_input_vals",
+        "source_fn_stack",
+        "nn_module_stack",
+        "fwd_source_fn_stack",
+    )
+
+
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+class TestCompileOnOneRankLegacyCollective(TestCase):
+    """Legacy in-place c10d collectives (dist.all_reduce) under compile_on_one_rank.
+
+    The in-place op ``c10d.allreduce_`` binds the ProcessGroup directly, so make_fx
+    bakes it onto the GraphModule as a torchbind constant that GraphPickler cannot
+    serialize. Under compile_on_one_rank two things change so the group flows into
+    the graph from the (input) mesh instead of being baked in:
+      - DeviceMesh.get_group() emits a mesh_get_process_group op, and
+      - legacy collectives are remapped to functional collectives that take the
+        group as an op argument.
+    Single process with a fake PG -- this is the failing precompile CI step.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.store = FakeStore()
+        dist.init_process_group(backend="fake", store=self.store, rank=0, world_size=2)
+        self.mesh = init_device_mesh("cpu", (2,))
+
+    def tearDown(self):
+        dist.destroy_process_group()
+        super().tearDown()
+
+    @staticmethod
+    def _fn(t, mesh):
+        t = t.clone()
+        dist.all_reduce(t, op=dist.ReduceOp.MAX, group=mesh.get_group())
+        return t + 1
+
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_legacy_all_reduce_serializes_under_coor(self):
+        gm = make_fx(self._fn, tracing_mode="fake")(torch.arange(4.0), self.mesh)
+        targets = _call_targets(gm)
+
+        # Legacy in-place collective is remapped to a functional collective whose
+        # group comes from the mesh in-graph; nothing is baked.
+        self.assertIn("_dtensor.mesh_get_process_group.default", targets)
+        self.assertIn("_c10d_functional.all_reduce.default", targets)
+        self.assertNotIn("c10d.allreduce_.default", targets)
+        self.assertEqual(_baked_pg_constants(gm), [])
+
+        mgpg = [n for n in gm.graph.nodes if "mesh_get_process_group" in str(n.target)]
+        self.assertTrue(mgpg and all(n.users for n in mgpg))
+
+        # Serializes once the distributed node metadata is stripped (the actual
+        # failure mode: a baked torchbind ProcessGroup would raise here).
+        GraphPickler.dumps(
+            gm,
+            Options(ops_filter=None, node_metadata_key_filter=_drop_distributed_meta),
+        )
+
+    def test_default_path_bakes_pg(self):
+        # Without compile_on_one_rank the legacy in-place op is unchanged and bakes
+        # the ProcessGroup as a torchbind constant (the gated-against behavior).
+        gm = make_fx(self._fn, tracing_mode="fake")(torch.arange(4.0), self.mesh)
+        self.assertIn("c10d.allreduce_.default", _call_targets(gm))
+        self.assertTrue(_baked_pg_constants(gm))
 
 
 if __name__ == "__main__":
