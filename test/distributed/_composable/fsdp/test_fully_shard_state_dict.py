@@ -141,14 +141,14 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             )
         else:
             model = model.cpu()
-            model = model.cuda()
+            model = model.to(device_type)
             self.assertTrue(
                 sd["weight"]._local_tensor.untyped_storage().data_ptr()
                 != model.weight._local_tensor.untyped_storage().data_ptr()
             )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.rand(mlp_dim, mlp_dim, device="cuda")
+        inp = torch.rand(mlp_dim, mlp_dim, device=device_type.type)
         for _ in range(5):
             optim.zero_grad()
             loss = model(inp).sum()

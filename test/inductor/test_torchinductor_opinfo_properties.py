@@ -889,6 +889,14 @@ class TestOpInfoProperties(TestCase):
     @parametrize("backend", BACKENDS)
     def test_eager_equivalence(self, device, dtype, op, backend):
         """Test bitwise equivalence with eager execution."""
+        if (
+            op.name == "nn.functional.gelu"
+            and dtype == torch.float32
+            and backend == "inductor_default"
+        ):
+            # Disabled due to CI failures; see
+            # https://github.com/pytorch/pytorch/issues/190242
+            self.skipTest("disabled due to CI failures; see #190242")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 

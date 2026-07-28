@@ -91,6 +91,14 @@ def fx_graph_cse(
 
         return True
 
+    def custom_context_key(node: fx.Node) -> tuple[int, int | None, int | None]:
+        custom = node.meta.get("custom", {})
+        return (
+            custom.get("stream", 0),
+            custom.get("mempool"),
+            custom.get("mempool_device"),
+        )
+
     output_storages = {
         StorageWeakRef(n.meta["val"].untyped_storage())
         for n in output_node.all_input_nodes
@@ -149,6 +157,7 @@ def fx_graph_cse(
             n.op == "placeholder"
             or n.op == "output"
             or n.op == "get_attr"
+            or n.is_impure()
             or get_aten_target(n) in rand_ops
             # aten.empty is non-deterministic, so don't CSE it.
             # Also, aten.empty is almost always fusible into its consumer,
@@ -202,6 +211,7 @@ def fx_graph_cse(
                 "args_spec": args_spec,
                 "kwargs": kwargs,
                 "kwargs_spec": kwargs_spec,
+                "custom_context": custom_context_key(n),
             }
 
             # hash substituted args to a number, do not hash specs because specs are not hashable
