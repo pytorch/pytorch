@@ -44,12 +44,19 @@ def _validate_num_effect_tokens(num_effect_tokens, num_carries=None):
 def _graph_has_effects(gm):
     from torch._higher_order_ops.effects import has_effects, with_effects
 
-    for node in gm.graph.nodes:
-        if node.op == "call_function":
-            nested_tokens = node.kwargs.get("num_effect_tokens", 0)
-            _validate_num_effect_tokens(nested_tokens)
-            if nested_tokens or node.target is with_effects or has_effects(node.target):
-                return True
+    for submodule in gm.modules():
+        if not isinstance(submodule, torch.fx.GraphModule):
+            continue
+        for node in submodule.graph.nodes:
+            if node.op == "call_function":
+                nested_tokens = node.kwargs.get("num_effect_tokens", 0)
+                _validate_num_effect_tokens(nested_tokens)
+                if (
+                    nested_tokens
+                    or node.target is with_effects
+                    or has_effects(node.target)
+                ):
+                    return True
     return False
 
 
@@ -705,20 +712,23 @@ def while_loop_func(
         functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        checked_graphs = {}
         for fn, fn_name in [
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
+            checked_graphs[fn_name] = _check_alias_and_mutation(
+                fn, unwrapped_inputs, fn_name, pre_dispatch
+            )
 
         body_has_effect = False
         if not num_effect_tokens:
 
-            def _probe_effects(fn):
+            def _discover_effect_tokens(fn):
                 tokens_before = dict(mode._tokens) if mode is not None else {}
                 probed_tokens = {}
                 try:
-                    gm = materialize_as_graph(fn, unwrapped_inputs)
+                    materialize_as_graph(fn, unwrapped_inputs)
                     if mode is not None:
                         probed_tokens = dict(mode._tokens)
                 finally:
@@ -726,13 +736,12 @@ def while_loop_func(
                 if mode is not None and mode._allow_token_discovery:
                     for key, token in probed_tokens.items():
                         mode._tokens.setdefault(key, token)
-                return _graph_has_effects(gm)
 
-            if _probe_effects(functional_cond_fn):
+            if _graph_has_effects(checked_graphs["cond_fn"]):
                 raise NotImplementedError(
                     "effects in while_loop cond_fn are unsupported"
                 )
-            body_has_effect = _probe_effects(functional_body_fn)
+            body_has_effect = _graph_has_effects(checked_graphs["body_fn"])
             if stack_output and body_has_effect:
                 raise NotImplementedError(
                     "effects in while_loop_stack_output are unsupported"
@@ -749,6 +758,8 @@ def while_loop_func(
                 raise NotImplementedError(
                     "effects in while_loop are unsupported during export"
                 )
+            if body_has_effect:
+                _discover_effect_tokens(functional_body_fn)
 
         active_mode = mode if body_has_effect else None
         if active_mode is not None:
