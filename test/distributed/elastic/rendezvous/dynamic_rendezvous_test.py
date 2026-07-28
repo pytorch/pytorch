@@ -37,6 +37,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _DistributedRendezvousOpExecutor,
     _NodeDesc,
     _NodeDescGenerator,
+    _natural_sort_key,
     _RendezvousCloseOp,
     _RendezvousContext,
     _RendezvousExitOp,
@@ -117,6 +118,55 @@ class NodeDescTest(TestCase):
 
         self.assertIn(desc1, descs)
         self.assertIn(desc2, descs)
+
+
+class NodeDescNaturalSortKeyTest(TestCase):
+    def test_ranks_follow_numeric_host_order(self) -> None:
+        addrs = ["node66", "node7", "node70", "node8"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            [node.addr for node in ordered], ["node7", "node8", "node66", "node70"]
+        )
+
+    def test_zero_padded_hostnames_keep_lexicographic_order(self) -> None:
+        addrs = ["node070", "node007", "node066", "node008"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        self.assertEqual(sorted(nodes, key=_natural_sort_key), sorted(nodes))
+
+    def test_heterogeneous_addresses_do_not_raise(self) -> None:
+        addrs = ["10.0.0.7", "10.0.0.66", "gpu-a", "gpu-10", "gpu-2", "ip-10-0-1-5"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(
+            ordered,
+            ["10.0.0.7", "10.0.0.66", "gpu-2", "gpu-10", "gpu-a", "ip-10-0-1-5"],
+        )
+
+    def test_processes_on_same_host_stay_grouped_and_ordered(self) -> None:
+        nodes = [
+            _NodeDesc("node9", 7, 1),
+            _NodeDesc("node10", 3, 1),
+            _NodeDesc("node9", 3, 2),
+            _NodeDesc("node9", 3, 1),
+        ]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            ordered,
+            [
+                _NodeDesc("node9", 3, 1),
+                _NodeDesc("node9", 3, 2),
+                _NodeDesc("node9", 7, 1),
+                _NodeDesc("node10", 3, 1),
+            ],
+        )
 
 
 class NodeDescGeneratorTest(TestCase):
