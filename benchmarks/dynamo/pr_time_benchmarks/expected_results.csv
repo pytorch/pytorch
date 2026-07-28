@@ -143,3 +143,35 @@ runtime_overhead_eager_cpu,instruction_count,158800,0.1
 
 
 runtime_overhead_eager,instruction_count,170100,0.1
+
+
+
+runtime_overhead_inductor,instruction_count,215500,0.1
+
+
+
+runtime_overhead_inductor_dynamic,instruction_count,206700,0.1
+
+
+
+runtime_overhead_inductor_inference_mode,instruction_count,230100,0.1
+
+
+
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,221900,0.1
+
+
+
+runtime_overhead_inductor_requires_grad,instruction_count,308200,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,304600,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_backward,instruction_count,124900,0.1
+
+
+
+runtime_overhead_inductor_requires_grad_backward_dynamic,instruction_count,125400,0.1
