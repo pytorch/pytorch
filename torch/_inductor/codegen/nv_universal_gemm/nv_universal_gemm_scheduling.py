@@ -27,7 +27,7 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import GemmReductionConfig
+from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
 from ...kernel.gemm_epilogue_ir import (
     GemmEpilogueIRAnalysis,
     grouped_reduction_ir,
@@ -263,17 +263,22 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         store = GemmEpilogueIRAnalysis.store_from_buffer(node)
         classified = (
-            grouped_reduction_ir(store, gemm_node.get_name(), group)
+            grouped_reduction_ir(
+                store, gemm_node.get_name(), group, gemm_node.get_dtype()
+            )
             if store is not None
             else None
         )
         if classified is None:
             return None
         reduction_type, source_type = classified
-        if (
-            reduction_type not in ("sum", "mean", "prod", "max", "min")
-            or source_type not in ("identity", "square")
-        ):
+        if reduction_type not in (
+            "sum",
+            "mean",
+            "prod",
+            "max",
+            "min",
+        ) or source_type not in ("identity", "square"):
             return None
         if (
             isinstance(node.data, Reduction)
@@ -439,10 +444,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if not isinstance(node, ComputedBuffer):
                 log.debug("NVGEMM epilogue fusion: %s is not a ComputedBuffer", node)
                 return False
-            if (
-                not isinstance(node.data, Pointwise)
-                and s_node not in reduction_nodes
-            ):
+            if not isinstance(node.data, Pointwise) and s_node not in reduction_nodes:
                 log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
                 return False
 
@@ -463,9 +465,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         # the trial EVT trace below remains the final capability check.
         gemm_size = ir_node.get_size()
         name_to_buf = V.graph.name_to_buffer | V.graph.graph_inputs
-        internal_names = OrderedSet([ir_node.get_name()]) | OrderedSet([
-            s_node.get_name() for s_node in plan.nodes
-        ])
+        internal_names = OrderedSet([ir_node.get_name()]) | OrderedSet(
+            [s_node.get_name() for s_node in plan.nodes]
+        )
         epilogue_inputs: OrderedSet[str] = OrderedSet()
         for s_node in plan.nodes:
             for rd in s_node.read_writes.reads:
@@ -486,18 +488,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         rd.name,
                     )
                     return False
-                padded_size = [1] * (len(gemm_size) - len(read_size)) + list(
-                    read_size
-                )
+                padded_size = [1] * (len(gemm_size) - len(read_size)) + list(read_size)
                 supported_shapes = (
                     gemm_size,
                     [1, gemm_size[1]],
                     [gemm_size[0], 1],
                 )
                 if not any(
-                    V.graph.sizevars.statically_known_list_equals(
-                        padded_size, shape
-                    )
+                    V.graph.sizevars.statically_known_list_equals(padded_size, shape)
                     for shape in supported_shapes
                 ):
                     log.debug(
@@ -679,7 +677,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         epilogue_reads: list[str] = []
         epilogue_writes: list[str] = []
         epilogue_var_renames: dict[str, Any] = {}
-        local_reduce: tuple[str, int, int, str, str, str] | None = None
+        local_reduce: GemmReductionPlan | None = None
 
         if epilogue_nodes:
             scheduler = V.graph.scheduler
@@ -691,13 +689,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                 if plan.reductions:
                     reduction = plan.reductions[0]
-                    local_reduce = (
-                        reduction.output_name,
-                        reduction.group,
-                        reduction.axis,
-                        reduction.reduction_type,
-                        reduction.source_type,
-                        original_buffer_name,
+                    local_reduce = GemmReductionPlan(
+                        reduction_output=reduction.output_name,
+                        group=reduction.group,
+                        axis=reduction.axis,
+                        reduction_type=reduction.reduction_type,
+                        source_type=reduction.source_type,
+                        primary_output=original_buffer_name,
                     )
                 evt_nodes = plan.evt_nodes
                 fused_buffer_names: OrderedSet[str] = OrderedSet(
@@ -728,7 +726,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 if not only_gen_src_code:
                     write_bufs = OrderedSet(epilogue_writes)
                     if local_reduce is not None:
-                        write_bufs.add(local_reduce[0])
+                        write_bufs.update(local_reduce.auxiliary_outputs)
                     for node in epilogue_nodes:
                         node_name = node.get_name()
                         if node_name in write_bufs:

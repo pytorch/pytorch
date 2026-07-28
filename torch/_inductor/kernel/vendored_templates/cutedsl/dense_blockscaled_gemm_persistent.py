@@ -497,6 +497,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         c_tensor = cute.make_tensor(
             c_tensor.iterator, cute.select(c_tensor.layout, [1, 2, 0])
         )
+
         def epilogue_tensor_to_mnl(tensor: cute.Tensor) -> cute.Tensor:
             tensor = add_batch_mode(tensor)
             return cute.make_tensor(
@@ -1644,9 +1645,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         coord_flt = cute.filter_zeros(tDcC)
 
                     epilogue_values = []
-                    if cutlass.const_expr(
-                        has_epilogue_tensors or has_epilogue_outputs
-                    ):
+                    if cutlass.const_expr(has_epilogue_tensors or has_epilogue_outputs):
                         output_m = cute.size(mC_mnl, mode=[0])
                         output_n = cute.size(mC_mnl, mode=[1])
                     if cutlass.const_expr(has_epilogue_tensors):
@@ -1676,14 +1675,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         + col_idx
                                     )
                                     tensor_m = (
-                                        0
-                                        if cutlass.const_expr(kind == 2)
-                                        else global_m
+                                        0 if cutlass.const_expr(kind == 2) else global_m
                                     )
                                     tensor_n = (
-                                        0
-                                        if cutlass.const_expr(kind == 3)
-                                        else global_n
+                                        0 if cutlass.const_expr(kind == 3) else global_n
                                     )
                                     fragment[i] = tensor[0, 0, 0]
                                     if global_m < output_m and global_n < output_n:
@@ -1743,17 +1738,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             global_n,
                                             mma_tile_coord_mnl[2],
                                         ] = fragment_flt[i]
-                        acc_vec = epilogue_result[
-                            self.primary_epilogue_output
-                        ].to(self.c_dtype)
+                        acc_vec = epilogue_result[self.primary_epilogue_output].to(
+                            self.c_dtype
+                        )
                     else:
                         acc_vec = epilogue_result.to(self.c_dtype)
 
                     if cutlass.const_expr(local_reduce_tensor is not None):
                         group = cutlass.const_expr(self.local_reduce_group)
-                        mReduce = local_reduce_tensor[
-                            mma_tile_coord_mnl[2], None, None
-                        ]
+                        mReduce = local_reduce_tensor[mma_tile_coord_mnl[2], None, None]
                         if cutlass.const_expr(self.local_reduce_axis == 1):
                             fragment_n = cutlass.const_expr(
                                 cute.size(acc_vec.shape, mode=[0])
@@ -1803,8 +1796,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             )
                             limit_m = min(
                                 cute.size(local_reduce_tensor, mode=[1])
-                                - mma_tile_coord_mnl[0]
-                                * self.cta_tile_shape_mnk[0],
+                                - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
                                 self.cta_tile_shape_mnk[0],
                             )
                             limit_groups = cute.size(local_reduce_tensor, mode=[2])
@@ -1815,8 +1807,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 n_idx = coord_flt[i][1]
                                 group_idx = n_idx // group
                                 global_group_idx = (
-                                    mma_tile_coord_mnl[1] * groups_per_cta
-                                    + group_idx
+                                    mma_tile_coord_mnl[1] * groups_per_cta + group_idx
                                 )
                                 if (
                                     n_idx % group == 0
@@ -1845,9 +1836,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 while rows > 0:
                                     other = cute.arch.shuffle_sync_bfly(
                                         reduced_flt[i],
-                                        offset=cute.crd2idx(
-                                            (rows, 0), lane_layout_mn
-                                        ),
+                                        offset=cute.crd2idx((rows, 0), lane_layout_mn),
                                     )
                                     if cutlass.const_expr(
                                         self.local_reduce_type in ("sum", "mean")
@@ -1869,9 +1858,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             reduced_flt[i], other
                                         )
                                     rows = rows // 2
-                                if cutlass.const_expr(
-                                    self.local_reduce_type == "mean"
-                                ):
+                                if cutlass.const_expr(self.local_reduce_type == "mean"):
                                     reduced_flt[i] /= group
                             groups_per_cta = cutlass.const_expr(
                                 self.cta_tile_shape_mnk[0] // group
@@ -1883,8 +1870,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             )
                             limit_n = min(
                                 cute.size(local_reduce_tensor, mode=[2])
-                                - mma_tile_coord_mnl[1]
-                                * self.cta_tile_shape_mnk[1],
+                                - mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1],
                                 self.cta_tile_shape_mnk[1],
                             )
                             limit_groups = cute.size(local_reduce_tensor, mode=[1])
@@ -1895,8 +1881,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 n_idx = coord_flt[i][1]
                                 group_idx = row_idx // group
                                 global_group_idx = (
-                                    mma_tile_coord_mnl[0] * groups_per_cta
-                                    + group_idx
+                                    mma_tile_coord_mnl[0] * groups_per_cta + group_idx
                                 )
                                 if (
                                     row_idx % group == 0

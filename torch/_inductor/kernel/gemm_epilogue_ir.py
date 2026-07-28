@@ -8,6 +8,7 @@ from typing import Any
 
 import sympy
 
+import torch
 from torch._inductor.ir import ComputedBuffer
 from torch._inductor.ops_handler import DefaultHandler
 from torch._inductor.virtualized import V
@@ -159,8 +160,25 @@ def operation_names_ir(store: GemmEpilogueIRStore) -> frozenset[str]:
     return frozenset(expr.op for expr in _walk(store.value))
 
 
-def _source_transform(expr: Any, source_name: str) -> str | None:
-    expr = _strip_conversions(expr)
+def _source_transform(
+    expr: Any,
+    source_name: str,
+    allowed_conversion_dtypes: frozenset[torch.dtype] | None = None,
+) -> str | None:
+    if allowed_conversion_dtypes is None:
+        expr = _strip_conversions(expr)
+    else:
+        while isinstance(expr, GemmEpilogueIRExpression) and expr.args:
+            if expr.op == "identity":
+                expr = expr.args[0]
+            elif expr.op == "to_dtype":
+                if len(expr.args) < 2 or expr.args[1] not in allowed_conversion_dtypes:
+                    return None
+                expr = expr.args[0]
+            elif expr.op == "to_dtype_bitcast":
+                return None
+            else:
+                break
     if not isinstance(expr, GemmEpilogueIRExpression):
         return None
     if expr.op == "load":
@@ -168,13 +186,15 @@ def _source_transform(expr: Any, source_name: str) -> str | None:
     if expr.op == "abs":
         return (
             "abs"
-            if _source_transform(expr.args[0], source_name) == "identity"
+            if _source_transform(expr.args[0], source_name, allowed_conversion_dtypes)
+            == "identity"
             else None
         )
     if expr.op == "mul" and expr.args[0] == expr.args[1]:
         return (
             "square"
-            if _source_transform(expr.args[0], source_name) == "identity"
+            if _source_transform(expr.args[0], source_name, allowed_conversion_dtypes)
+            == "identity"
             else None
         )
     if expr.op == "pow":
@@ -182,7 +202,8 @@ def _source_transform(expr: Any, source_name: str) -> str | None:
         return (
             "square"
             if exponent == 2
-            and _source_transform(expr.args[0], source_name) == "identity"
+            and _source_transform(expr.args[0], source_name, allowed_conversion_dtypes)
+            == "identity"
             else None
         )
     return None
@@ -198,14 +219,20 @@ def _flatten_associative(expr: Any, op: str) -> list[Any]:
 
 
 def grouped_reduction_ir(
-    store: GemmEpilogueIRStore, source_name: str, group: int
+    store: GemmEpilogueIRStore,
+    source_name: str,
+    group: int,
+    source_dtype: torch.dtype,
 ) -> tuple[str, str] | None:
     """Classify a primitive or unrolled grouped reduction loop body."""
+    allowed_conversion_dtypes = frozenset((source_dtype, torch.float32))
     candidates = [expr for expr in _walk(store.value) if expr.op == "reduction"]
     if candidates:
         reduction = candidates[0]
         reduction_type = str(reduction.args[2])
-        source_type = _source_transform(reduction.args[3], source_name)
+        source_type = _source_transform(
+            reduction.args[3], source_name, allowed_conversion_dtypes
+        )
         if source_type is not None:
             return reduction_type, source_type
 
@@ -217,7 +244,10 @@ def grouped_reduction_ir(
     ):
         if root.op == "truediv" and _constant_value(root.args[1]) == group:
             terms = _flatten_associative(root.args[0], "add")
-            transforms = [_source_transform(term, source_name) for term in terms]
+            transforms = [
+                _source_transform(term, source_name, allowed_conversion_dtypes)
+                for term in terms
+            ]
             if (
                 len(terms) == group
                 and len(frozenset(transforms)) == 1
@@ -225,13 +255,19 @@ def grouped_reduction_ir(
             ):
                 return "mean", transforms[0]
         terms = _flatten_associative(root, root.op)
-        transforms = [_source_transform(term, source_name) for term in terms]
+        transforms = [
+            _source_transform(term, source_name, allowed_conversion_dtypes)
+            for term in terms
+        ]
         if len(terms) == group and len(frozenset(transforms)) == 1 and transforms[0]:
             return ("sum" if root.op == "add" else "prod"), transforms[0]
         break
     for op, reduction_type in (("maximum", "max"), ("minimum", "min")):
         terms = _flatten_associative(root, op)
-        transforms = [_source_transform(term, source_name) for term in terms]
+        transforms = [
+            _source_transform(term, source_name, allowed_conversion_dtypes)
+            for term in terms
+        ]
         if len(terms) == group and len(frozenset(transforms)) == 1 and transforms[0]:
             return reduction_type, transforms[0]
     return None
