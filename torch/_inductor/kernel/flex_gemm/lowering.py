@@ -21,6 +21,8 @@ from torch._higher_order_ops.flex_gemm import (
 )
 from torch.utils._ordered_set import OrderedSet
 
+from ...utils import has_free_symbols
+
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, full, process_subgraph_nodes, register_lowering
@@ -234,7 +236,7 @@ def flex_gemm_config_keys(
     """
     if main_transform is not None:
         main_transform.validate_quack(torch.cuda.get_device_capability(device)[0])
-        if isinstance(n, sympy.Expr) and n.free_symbols:
+        if has_free_symbols((n,)):
             raise NotImplementedError(
                 "FlexGEMM grouped main outputs require statically known physical N"
             )
@@ -320,25 +322,24 @@ def flex_gemm_config_keys(
         ):
             return (default_key,)
 
-    configs = (
-        candidate_configs
-        if main_transform is None
-        else tuple(
+    if main_transform is None:
+        configs = candidate_configs
+    else:
+        configs = tuple(
             config
             for config in candidate_configs
             if grouped_main_output_config_supported(config, n)
         )
-    )
-    if main_transform is not None and not configs:
-        if explicit_config is not None:
+        if not configs:
+            if explicit_config is not None:
+                raise NotImplementedError(
+                    "FlexGEMM explicit QUACK config constraints are incompatible "
+                    "with grouped main output"
+                )
             raise NotImplementedError(
-                "FlexGEMM explicit QUACK config constraints are incompatible with "
-                "grouped main output"
+                "FlexGEMM grouped main output physical N is smaller than every "
+                "validated QuACK tile_n"
             )
-        raise NotImplementedError(
-            "FlexGEMM grouped main outputs require statically known physical N "
-            "large enough for a single-CTA QuACK tile"
-        )
     for geometry in local_reduce_geometries:
         configs = tuple(
             config

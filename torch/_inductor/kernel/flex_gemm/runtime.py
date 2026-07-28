@@ -335,17 +335,6 @@ def validate_runtime_local_reduce(
     validate_local_reduce_out_shape(local_reduce_out.shape, expected_local_reduce_shape)
 
 
-def blocked_local_reduce_carrier(
-    output: torch.Tensor, logical_shape: tuple[int, ...]
-) -> torch.Tensor:
-    """View flat blocked storage as the carrier consumed by QuACK.
-
-    This host-side shape exposes padded block counts and the 512-element atom.
-    QuACK constructs the actual swizzled ``cute.Layout`` inside CuTeDSL.
-    """
-    return output.view(blocked_128x4_carrier_shape(logical_shape))
-
-
 def local_reduce_callback_key(callback: Any, fallback_key: str) -> str:
     """Use a generated callback cache key when present, otherwise its caller key."""
     cache_key = getattr(callback, "__cache_key__", None)
@@ -394,14 +383,19 @@ def register_runtime_output_layout(
     from torch._inductor.kernel.flex_gemm.output_layout_cutedsl import (
         blocked_128x4_output_layout_key,
         blocked_128x4_output_shape,
-        blocked_128x4_output_tensor_for_orientation,
+        blocked_128x4_output_tensor,
+        blocked_128x4_transposed_output_tensor,
     )
     from torch._vendor.quack.gemm_act import register_output_layout
 
     layout_key = blocked_128x4_output_layout_key(transposed)
     register_output_layout(
         layout_key,
-        blocked_128x4_output_tensor_for_orientation(transposed),
+        (
+            blocked_128x4_transposed_output_tensor
+            if transposed
+            else blocked_128x4_output_tensor
+        ),
         blocked_128x4_output_shape,
         4,
     )
@@ -509,8 +503,9 @@ def dispatch_gemm_act(
     )
     if local_reduce is not None and quack_local_reduce_out is not None:
         if blocked_local_reduce_shape is not None:
-            quack_local_reduce_out = blocked_local_reduce_carrier(
-                quack_local_reduce_out, blocked_local_reduce_shape
+            # QuACK builds the swizzled cute.Layout over this padded carrier.
+            quack_local_reduce_out = quack_local_reduce_out.view(
+                blocked_128x4_carrier_shape(blocked_local_reduce_shape)
             )
         elif quack_local_reduce_out.ndim == 2:
             quack_local_reduce_out = quack_local_reduce_out.unsqueeze(0)

@@ -93,16 +93,16 @@ def _group_count_matches_selected_dim(
     group_count: Any,
     selected_size: Any,
     group: int,
-    *,
-    require_exact: bool = False,
+    kept_size: Any,
 ) -> bool:
     match group_count:
         case -1:
             return True
         case _:
-            exact = statically_known_equal(group_count * group, selected_size)
-            return exact or (
-                not require_exact
+            return statically_known_equal(
+                group_count * group, selected_size
+            ) or (
+                kept_size != -1
                 and statically_known_equal(group_count, selected_size // group)
             )
 
@@ -125,15 +125,11 @@ def _grouped_layout_matches_source_shape(
         case 1, (kept_m, group_count, group) if group == layout.group:
             return _kept_dim_matches_source(
                 kept_m, m
-            ) and _group_count_matches_selected_dim(
-                group_count, n, group, require_exact=kept_m == -1
-            )
+            ) and _group_count_matches_selected_dim(group_count, n, group, kept_m)
         case 0, (group_count, group, kept_n) if group == layout.group:
             return _kept_dim_matches_source(
                 kept_n, n
-            ) and _group_count_matches_selected_dim(
-                group_count, m, group, require_exact=kept_n == -1
-            )
+            ) and _group_count_matches_selected_dim(group_count, m, group, kept_n)
         case _:
             return False
 
