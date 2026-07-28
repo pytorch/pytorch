@@ -7689,6 +7689,69 @@ class TestCachingHostAllocatorConfig(TestCase):
             self.assertLess(allocated, 256 * 1024 * 1024)
             self.assertGreaterEqual(allocated, size_bytes)
 
+    def test_max_round_threshold_does_not_reuse_undersized_block(self):
+        kib = 1024
+
+        with caching_host_allocator_max_round_threshold_and_max_cached_size(1, None):
+            small = torch.empty(1300 * kib, dtype=torch.uint8, pin_memory=True)
+            small_ptr = small.data_ptr()
+            del small
+            gc.collect()
+
+            host = torch.empty(1900 * kib, dtype=torch.uint8, pin_memory=True)
+            self.assertNotEqual(host.data_ptr(), small_ptr)
+            host.fill_(0x5A)
+
+            device = host.cuda(non_blocking=True)
+            torch.cuda.synchronize()
+            host.zero_()
+            host.copy_(device, non_blocking=True)
+            torch.cuda.synchronize()
+
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(stats["allocations.current"], 2)
+            self.assertEqual(stats["allocated_bytes.current"], 3200 * kib)
+            self.assertEqual(host[0], 0x5A)
+            self.assertEqual(host[-1], 0x5A)
+
+    def test_max_round_threshold_reuses_larger_block(self):
+        kib = 1024
+
+        with caching_host_allocator_max_round_threshold_and_max_cached_size(1, None):
+            large = torch.empty(1900 * kib, dtype=torch.uint8, pin_memory=True)
+            large_ptr = large.data_ptr()
+            del large
+            gc.collect()
+
+            small = torch.empty(1300 * kib, dtype=torch.uint8, pin_memory=True)
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(small.data_ptr(), large_ptr)
+            self.assertEqual(stats["allocations.current"], 1)
+            self.assertEqual(stats["active_bytes.current"], 1900 * kib)
+
+    def test_max_round_threshold_uses_best_fit_block(self):
+        kib = 1024
+
+        with caching_host_allocator_max_round_threshold_and_max_cached_size(1, None):
+            small = torch.empty(1300 * kib, dtype=torch.uint8, pin_memory=True)
+            large = torch.empty(1900 * kib, dtype=torch.uint8, pin_memory=True)
+            small_ptr = small.data_ptr()
+            large_ptr = large.data_ptr()
+            del small
+            gc.collect()
+            del large
+            gc.collect()
+
+            smaller_request = torch.empty(
+                1290 * kib, dtype=torch.uint8, pin_memory=True
+            )
+            larger_request = torch.empty(1800 * kib, dtype=torch.uint8, pin_memory=True)
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(smaller_request.data_ptr(), small_ptr)
+            self.assertEqual(larger_request.data_ptr(), large_ptr)
+            self.assertEqual(stats["allocations.current"], 2)
+            self.assertEqual(stats["active_bytes.current"], 3200 * kib)
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182111"
     )

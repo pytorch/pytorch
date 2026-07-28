@@ -12,8 +12,10 @@
 #include <iostream>
 #include <optional>
 
+#include <algorithm>
 #include <atomic>
 #include <deque>
+#include <iterator>
 #include <vector>
 #include <mutex>
 #include <shared_mutex>
@@ -694,12 +696,29 @@ struct CachingHostAllocatorImpl {
   virtual B* get_free_block(size_t size, BlockPool& pool) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-    if (!pool.free_list_[index].list_.empty()) {
-      B* block = pool.free_list_[index].list_.back();
-      pool.free_list_[index].list_.pop_back();
+    auto& free_list = pool.free_list_[index].list_;
+    auto best = free_list.end();
+    if (!free_list.empty() && free_list.back()->size_ == size) {
+      best = std::prev(free_list.end());
+    } else {
+      best = std::find_if(free_list.begin(), free_list.end(), [size](B* block) {
+        return block->size_ >= size;
+      });
+    }
+    for (auto it = best; best != free_list.end() && it != free_list.end(); ++it) {
+      if ((*it)->size_ >= size && (*it)->size_ < (*best)->size_) {
+        best = it;
+      }
+    }
+    if (best != free_list.end()) {
+      B* block = *best;
+      if (best != std::prev(free_list.end())) {
+        std::iter_swap(best, std::prev(free_list.end()));
+      }
+      free_list.pop_back();
       block->allocated_.store(true, std::memory_order_relaxed);
       stats_.active_bucket_stats[index].increase(1);
-      stats_.active_bytes_bucket_stats[index].increase(size);
+      stats_.active_bytes_bucket_stats[index].increase(block->size_);
       return block;
     }
     return nullptr;
