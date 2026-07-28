@@ -1265,6 +1265,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout);
 
+  // A synchronous barrier host-blocks the CPU thread in synchronizeInternal(),
+  // matching stock ProcessGroupNCCL; async barriers stay stream-ordered.
+  work->hostBlocking_ = !async_op;
+
   // Record start event before NCCL operation
   work->recordStart("barrier");
 
