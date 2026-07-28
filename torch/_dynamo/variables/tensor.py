@@ -775,7 +775,10 @@ class TensorVariable(VariableTracker):
                 # actual type for dynamically-added methods (e.g. distributed
                 # wait) and subclass methods.
                 static_attr = getattr(self.class_type, name, None)
-            if static_attr is not None and callable(static_attr):
+            # `wait` is a synthetic method that call_method traces (functional
+            # collectives wait_tensor); it is not a real torch.Tensor attribute
+            # but must still resolve to a method call to match eager.
+            if (static_attr is not None and callable(static_attr)) or name == "wait":
                 return CallMethodVariable(
                     self, name, source=self.source and AttrSource(self.source, name)
                 )
