@@ -759,5 +759,74 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         self.assertEqual(comm.finalize_calls, 1)
 
 
+class TestC10dTorchCommsBackendConfig(TestCase):
+    def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: True
+        c10d._torchcomms_is_backend_registered = lambda backend: backend == backend_name
+        c10d._torchcomms_is_backend_built = lambda backend: False
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.CUSTOM,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
+
+    def test_unregistered_device_qualified_backend_with_torchcomms_keeps_gloo_type(
+        self,
+    ):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: True
+        c10d._torchcomms_is_backend_registered = lambda backend: False
+        c10d._torchcomms_is_backend_built = lambda backend: False
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
+
+    def test_registered_device_qualified_backend_without_torchcomms_keeps_gloo_type(
+        self,
+    ):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: False
+        c10d._torchcomms_is_backend_registered = lambda backend: backend == backend_name
+        c10d._torchcomms_is_backend_built = lambda backend: True
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
+
+
 if __name__ == "__main__":
     run_tests()
