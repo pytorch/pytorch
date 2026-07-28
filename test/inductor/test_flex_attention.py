@@ -648,44 +648,6 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
                 use_flex_tdm_descriptor(good, good, good, block_shapes=bad_block_shapes)
             )
 
-    def test_flex_tdm_helper_preserves_num_stages(self):
-        from torch._inductor.kernel.flex.common import apply_gfx1250_tdm_descriptor
-
-        opts = {"num_stages": 2}
-        q, k, v = object(), object(), object()
-        block_shapes = [(128, 64), (128, 64), (128, 64)]
-        with mock.patch(
-            "torch._inductor.utils.use_flex_tdm_descriptor", return_value=True
-        ) as gate:
-            apply_gfx1250_tdm_descriptor(opts, q, k, v, block_shapes=block_shapes)
-        gate.assert_called_once_with(q, k, v, block_shapes=block_shapes)
-        self.assertTrue(opts["USE_TDM"])
-        self.assertEqual(opts["num_stages"], 2)
-
-    def test_flex_tdm_helper_negative_gate_overrides_stale_flag(self):
-        from torch._inductor.kernel.flex.common import apply_gfx1250_tdm_descriptor
-
-        opts = {"num_stages": 2, "USE_TDM": True}
-        with mock.patch(
-            "torch._inductor.utils.use_flex_tdm_descriptor", return_value=False
-        ):
-            apply_gfx1250_tdm_descriptor(opts, object(), object())
-        self.assertFalse(opts["USE_TDM"])
-        self.assertEqual(opts["num_stages"], 2)
-
-    def test_flex_decode_can_gate_only_kv(self):
-        from torch._inductor.kernel.flex.common import apply_gfx1250_tdm_descriptor
-
-        key, value = object(), object()
-        block_shapes = [(128, 64), (128, 64)]
-        with mock.patch(
-            "torch._inductor.utils.use_flex_tdm_descriptor", return_value=True
-        ) as gate:
-            opts = {}
-            apply_gfx1250_tdm_descriptor(opts, key, value, block_shapes=block_shapes)
-        gate.assert_called_once_with(key, value, block_shapes=block_shapes)
-        self.assertTrue(opts["USE_TDM"])
-
     def test_flex_templates_gate_descriptors_on_tma_or_tdm(self):
         from torch._inductor.kernel.flex.common import load_flex_template
 

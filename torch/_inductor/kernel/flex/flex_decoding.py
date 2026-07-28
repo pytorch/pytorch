@@ -19,11 +19,10 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
-    apply_gfx1250_tdm_descriptor,
     can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
@@ -406,8 +405,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             cur_kernel_options["USE_TMA"] = False
 
         if not cur_kernel_options["USE_TMA"]:
-            apply_gfx1250_tdm_descriptor(
-                cur_kernel_options,
+            cur_kernel_options["USE_TDM"] = use_flex_tdm_descriptor(
                 key,
                 value,
                 block_shapes=[
