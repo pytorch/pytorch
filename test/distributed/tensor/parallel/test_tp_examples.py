@@ -551,7 +551,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                             else:
                                 y.backward()
                                 dist_y.backward()
-                            self.assertEqual(comm_mode.get_total_counts(), 0)
+                            # The log_softmax backward now performs one
+                            # all-reduce (sum of grad_output over the class dim).
+                            self.assertEqual(comm_mode.get_total_counts(), 1)
+                            self.assertEqual(
+                                comm_mode.get_comm_counts()[c10d_functional.all_reduce],
+                                1,
+                            )
                             self.assertTrue(
                                 dist_x.grad.placements[0].is_shard(shard_dim)
                             )
@@ -565,6 +571,72 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                             dist_y = F.cross_entropy(
                                 dist_x, target, reduction=reduction
                             )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_standalone_log_softmax_backward(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/190746.
+
+        A ``log_softmax`` inside ``loss_parallel()`` that does NOT feed
+        ``nll_loss`` (e.g. the DPO/ORPO log-probability term
+        ``(log_softmax(logits) * weights).sum()``) must receive the correct
+        ``log_softmax`` Jacobian (``I - softmax(x) 1^T``), not the identity
+        gradient that the fused cross-entropy path relies on.
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Class dim = -1 (last), sharded across the TP mesh.
+        x = torch.randn(4, 8, 512, device=self.device_type, requires_grad=True)
+        c = torch.randn(4, 8, 512, device=self.device_type)
+
+        dist_x = distribute_tensor(x, device_mesh, [Shard(2)]).requires_grad_(True)
+        dist_c = distribute_tensor(c, device_mesh, [Shard(2)])
+
+        # Reference: plain (non-distributed) log_softmax backward.
+        ref = (F.log_softmax(x, dim=-1) * c).sum()
+        ref.backward()
+        x_grad_ref = x.grad.clone()
+
+        dist_x._local_tensor.requires_grad_(True)
+        with loss_parallel():
+            (F.log_softmax(dist_x, dim=-1) * dist_c).sum().backward()
+
+        dist_grad = dist_x.grad.full_tensor()
+
+        # The buggy no-op backward returns grad_output (== c) unchanged; the
+        # true gradient differs from c by softmax(x) * c.sum(class_dim).
+        self.assertFalse(
+            torch.equal(dist_grad, c),
+            "log_softmax backward must not be the identity (grad_output) - "
+            "the fused no-op backward leaked into a non-cross-entropy consumer.",
+        )
+        self.assertEqual(dist_grad, x_grad_ref)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_cross_entropy_still_correct(self):
+        """Cross-entropy backward must remain correct after the log_softmax
+        backward fix (it now goes through the unfused Jacobian path)."""
+        device_mesh = self.build_device_mesh()
+        channel_size, channel_dim = 16, 1
+        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self.device_type)
+        weight = torch.rand(channel_size, device=self.device_type)
+
+        for reduction in ("none", "mean", "sum"):
+            dist_x = distribute_tensor(x, device_mesh, [Shard(channel_dim)])
+            y = F.cross_entropy(x, target, weight, reduction=reduction)
+            with loss_parallel():
+                dist_y = F.cross_entropy(dist_x, target, weight, reduction=reduction)
+                if reduction == "none":
+                    y.sum().backward()
+                    dist_y.sum().backward()
+                else:
+                    y.backward()
+                    dist_y.backward()
+                self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+            x.grad = None
+            dist_x.grad = None
 
     @with_comms
     @skip_if_lt_x_gpu(4)

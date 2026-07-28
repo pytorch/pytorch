@@ -254,16 +254,61 @@ def _log_softmax_handler(
     )
 
 
-# NOTE: As explained below at _nll_loss_and_log_softmax_backward, the
-# _log_softmax_backward_handler does not actually do any computation.
+# NOTE: This computes the true distributed log_softmax backward for ALL consumers
+# (not just the fused cross-entropy path). The standard log_softmax backward is
+#   grad_input = grad_output - softmax(output) * grad_output.sum(dim, keepdim=True)
+# where output = log_softmax(x) and softmax(output) = exp(output). In the
+# distributed case the reduction over the sharded class dim is partial on each
+# rank, so an all-reduce (sum) across the TP mesh dim is required to make it
+# globally correct. The fused cross-entropy backward in
+# _nll_loss_and_log_softmax_backward now returns only the nll_loss contribution
+# (grad_input * grad_output); this handler then applies the log_softmax Jacobian
+# to it, which yields the same result as the previous fully-fused formula while
+# also being correct for standalone log_softmax consumers (e.g. DPO/ORPO) that
+# do not feed nll_loss.
 def _log_softmax_backward_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
+    output = cast(DTensor, args[1])
+    dim = cast(int, args[2])
     input_dtype = cast(torch.dtype, args[3])
-    return grad_output.to(input_dtype)
+
+    spec = grad_output._spec
+    dim = normalize_dim(dim, grad_output.dim())
+    mesh_dim = _find_all_reduce_mesh_dim(spec.placements, dim)
+
+    output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)
+
+    grad_output_local = grad_output._local_tensor
+    output_local = output._local_tensor
+
+    # grad_input = grad_output - softmax(output) * grad_output.sum(dim, keepdim=True)
+    # The sum over the sharded class dim is partial on each rank, so all-reduce
+    # (sum) across the TP mesh dim to make it globally correct.
+    grad_output_sum = grad_output_local.sum(dim, keepdim=True)
+    grad_output_sum = funcol.all_reduce(
+        grad_output_sum, reduceOp=c10d.ReduceOp.SUM.name, group=(spec.mesh, mesh_dim)
+    )
+    grad_input_local = grad_output_local - torch.exp(output_local) * grad_output_sum
+    grad_input_local = grad_input_local.to(input_dtype)
+
+    res_spec = DTensorSpec(
+        spec.mesh,
+        spec.placements,
+        tensor_meta=output_tensor_meta,
+    )
+
+    # pyrefly: ignore [bad-argument-type]
+    return DTensor(
+        # pyrefly: ignore [bad-argument-count]
+        grad_input_local,
+        res_spec,
+        # pyrefly: ignore [unexpected-keyword]
+        requires_grad=grad_input_local.requires_grad,
+    )
 
 
 # NOTE: The implementation follows torch._decomp.decomposition._nll_loss_forward,
@@ -511,11 +556,14 @@ def _nll_loss_and_log_softmax_backward(
 
     grad_output = torch.where(target != ignore_index, grad_output, 0)
 
-    # NOTE: Instead of directly returning the grad_input as grad_output for log_softmax,
-    # here we perform backward computation for log_softmax altogether to avoid the
-    # otherwise extra all_gather communication.
-    # return grad_input * grad_output
-    return (grad_input + torch.exp(x)) * grad_output
+    # NOTE: The log_softmax backward is now applied separately by
+    # _log_softmax_backward_handler (which computes the correct distributed
+    # Jacobian for all consumers, not just cross-entropy). Here we return only
+    # the nll_loss contribution (grad_input * grad_output); the log_softmax
+    # Jacobian term is applied by the log_softmax backward handler. This adds
+    # one all-reduce to the cross-entropy backward but makes standalone
+    # log_softmax consumers correct.
+    return grad_input * grad_output
 
 
 def _nll_loss_backward_handler(
