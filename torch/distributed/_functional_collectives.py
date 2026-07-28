@@ -2063,6 +2063,7 @@ def _remap_traceable_collective(
     bound = dict(inspect.signature(func).bind(*args, **(kwargs or {})).arguments)
     if func in (
         torch.distributed.all_reduce,
+        torch.distributed.reduce_scatter,
         torch.distributed.reduce_scatter_single,
         torch.distributed.reduce_scatter_tensor,
         torch.distributed._reduce_scatter_base,
