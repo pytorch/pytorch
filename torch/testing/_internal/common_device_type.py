@@ -2366,6 +2366,10 @@ def skipXPU(fn):
     return skipXPUIf(True, "test doesn't work on XPU backend")(fn)
 
 
+def skipCUDA(fn):
+    return skipCUDAIf(True, "test doesn't work on CUDA backend")(fn)
+
+
 def skipPRIVATEUSE1(fn):
     return skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn)
 

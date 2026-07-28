@@ -27,10 +27,9 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCPU,
-    onlyCUDA,
     onlyMPS,
     onlyNativeDeviceTypes,
+    skipCUDA,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -41,6 +40,7 @@ from torch.testing._internal.common_nn import (
 )
 from torch.testing._internal.common_utils import (
     gcIfJetson,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
@@ -53,6 +53,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestAvgPool(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _sum_pool2d(self, x, kernel_size):
         windows = torch.nn.functional.unfold(
             x, kernel_size=kernel_size, stride=kernel_size
@@ -129,6 +131,8 @@ class TestAvgPool(TestCase):
 
 
 class TestAvgPoolDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_avg_pool1d_ceil_mode(self, device):
         # Regression test for gh-36977
         x = 10 * torch.randn((1, 16, 4), device=device)
@@ -160,6 +164,7 @@ class TestAvgPoolDeviceType(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -407,8 +412,17 @@ class TestPoolingNN(NNTestCase):
                 input, (1, 1, 1), (1, 1, 1), (0, 0, 0), (-3, 1, 1)
             )
 
+    def test_LPPool1d_kernel_size_overflow_large(self):
+        avgpool = torch.nn.LPPool1d(-1.38119e150, 7879455037536781369, ceil_mode=True)
+        inp = torch.randn(3, 15)
+
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
+            avgpool(inp)
+
 
 class TestPoolingNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
@@ -519,33 +533,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         out = avg_pool(input)
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
-
-    @onlyCUDA
-    @largeTensorTest("10GB", device="cuda")
-    def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
-        height = 32769
-        width = 65536
-        channels = 2
-        output_width = 1024
-        input = torch.as_strided(
-            torch.empty((1,), dtype=torch.half, device=device),
-            (1, channels, height, width),
-            (0, 0, 0, 0),
-        )
-        self.assertGreater(input.numel(), torch.iinfo(torch.int32).max)
-        grad_output = torch.ones(
-            (1, channels, height, output_width), dtype=torch.half, device=device
-        )
-
-        grad_input = torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
-        sample = grad_input[
-            0,
-            [0, 0, 1],
-            [0, height - 1, height - 1],
-            [0, 0, width - 1],
-        ]
-        expected = torch.full_like(sample, 1 / (width // output_width))
-        self.assertEqual(sample, expected)
 
     @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float, torch.double)
@@ -934,16 +921,6 @@ torch.cuda.synchronize()
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
 
-    @onlyCPU
-    def test_LPPool1d_kernel_size_overflow_large(self, device):
-        avgpool = torch.nn.LPPool1d(
-            -1.38119e150, 7879455037536781369, ceil_mode=True
-        ).to(device)
-        inp = torch.randn(3, 15, device=device)
-
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            avgpool(inp)
-
     def test_lp_pool_norm_type_zero(self, device):
         err = "norm_type must be a non-zero value"
         x1 = torch.randn(1, 4, 8, device=device)
@@ -1247,7 +1224,6 @@ torch.cuda.synchronize()
         helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
         helper(2, 16, 10, 10, 10, 3, stride=2)
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_max_pool1d_corner_cases(self, device, dtype):
         def check(x, args, expected):
@@ -1268,7 +1244,6 @@ torch.cuda.synchronize()
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
 
-    @onlyCPU
     @dtypes(torch.float16, torch.float32)
     def test_max_pool_indices_corner_cases(self, device, dtype):
         def check_indices(x, args, expected, op):
@@ -1314,7 +1289,6 @@ torch.cuda.synchronize()
                 torch.nn.AdaptiveMaxPool3d,
             )
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_max_pool1d(self, device, dtype):
         # FIXME For now compare against max_pool1d with indices
@@ -1418,7 +1392,7 @@ torch.cuda.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
-    @onlyCPU
+    @skipCUDA  # CUDA MaxPool2d does not support int32/int64 dtypes
     @dtypes(torch.int32, torch.int64)
     def test_max_pool2d_corner_cases(self, device, dtype):
         def check(x, args, expected, memory_format):
@@ -1526,7 +1500,6 @@ torch.cuda.synchronize()
         helper(1, 79, 4, 4, 4, 3, stride=2)
         helper(0, 79, 4, 4, 4, 3, stride=2)
 
-    @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
     def test_max_pool_bfloat16_half(self, device, dtype):
         def helper(shape, kernel_size, stride, memory_format, dtype):
@@ -1619,7 +1592,6 @@ torch.cuda.synchronize()
                 indices,
             )
 
-    @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
     def test_avg_pool2d_reduced_floating(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, memory_format):
@@ -2297,6 +2269,37 @@ torch.cuda.synchronize()
         imgs = torch.randint(low=0, high=256, size=(3, Id, Ih, Iw), dtype=torch.float)
         F.adaptive_avg_pool3d(imgs, (Od, Oh, Ow))
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
+
+
+class TestPoolingNNCUDA(NNTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @largeTensorTest("10GB", device="cuda")
+    def test_adaptive_avg_pool2d_backward_large_index_offsets(self):
+        device = "cuda"
+        height = 32769
+        width = 65536
+        channels = 2
+        output_width = 1024
+        input = torch.as_strided(
+            torch.empty((1,), dtype=torch.half, device=device),
+            (1, channels, height, width),
+            (0, 0, 0, 0),
+        )
+        self.assertGreater(input.numel(), torch.iinfo(torch.int32).max)
+        grad_output = torch.ones(
+            (1, channels, height, output_width), dtype=torch.half, device=device
+        )
+
+        grad_input = torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+        sample = grad_input[
+            0,
+            [0, 0, 1],
+            [0, height - 1, height - 1],
+            [0, 0, width - 1],
+        ]
+        expected = torch.full_like(sample, 1 / (width // output_width))
+        self.assertEqual(sample, expected)
 
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
