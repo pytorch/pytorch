@@ -705,7 +705,8 @@ torch_tensor_to_pyobject(AtenTensorHandle ath, void* py_type, void** ret) {
     TORCH_CHECK(ath != nullptr, "ath must not be null");
     TORCH_CHECK(ret != nullptr, "ret must not be null");
     // py_type is really a PyTypeObject*, which libtorch can't name. A
-    // PyTypeObject is a PyObject, so it crosses as PyObject* (impl casts it).
+    // PyTypeObject is a PyObject, so it crosses as PyObject* and
+    // libtorch_python casts it back.
     *ret = torch::detail::getPyObjectConversionImpl().tensor_to_pyobject(
         *torch::aot_inductor::tensor_handle_to_tensor_pointer(ath),
         static_cast<PyObject*>(py_type));
