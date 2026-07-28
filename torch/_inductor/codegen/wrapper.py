@@ -456,6 +456,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
+    """Escape src for a '''...''' literal, optionally nested in an r\"\"\"...\"\"\" block."""
     src = src.replace("\\", "\\\\")
     if config.cpp_wrapper:
         # With cpp_wrapper + autotune_at_compile_time=False, the source is

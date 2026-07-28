@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import ast
 import contextlib
 import unittest
 from types import SimpleNamespace
@@ -114,17 +115,20 @@ def helper(x):
     return x
 """
 
-        with inductor_config.patch("cpp_wrapper", False):
-            escaped = _escape_triton_kernel_source_for_wrapper(source)
-            self.assertIn("slash \\\\\\\\", escaped)
-            self.assertIn("\\'\\'\\'quoted\\'\\'\\'", escaped)
-            self.assertIn('"""doc"""', escaped)
+        for cpp_wrapper in (False, True):
+            with inductor_config.patch("cpp_wrapper", cpp_wrapper):
+                escaped = _escape_triton_kernel_source_for_wrapper(source)
 
-        with inductor_config.patch("cpp_wrapper", True):
-            escaped = _escape_triton_kernel_source_for_wrapper(source)
-            self.assertIn("slash \\\\\\\\", escaped)
-            self.assertIn("\\'\\'\\'quoted\\'\\'\\'", escaped)
-            self.assertIn('\\"\\"\\"doc\\"\\"\\"', escaped)
+            wrapper_src = f"async_compile.triton('helper', '''{escaped}''')"
+            compile(wrapper_src, "<test-wrapper-source>", "exec")
+
+            if cpp_wrapper:
+                nested_src = f'wrapper_src = r"""{wrapper_src}"""'
+                compile(nested_src, "<test-nested-wrapper-source>", "exec")
+                wrapper_src = ast.literal_eval(ast.parse(nested_src).body[0].value)
+
+            call = ast.parse(wrapper_src).body[0].value
+            self.assertEqual(ast.literal_eval(call.args[1]), source)
 
     def test_persistent_reduction_choice_two_arg_override(self):
         seen_scores = []
