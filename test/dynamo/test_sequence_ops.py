@@ -1418,6 +1418,83 @@ class TestRangeContains(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), (True, False, True, False, True, True))
 
 
+class TestListSubclassConstruction(torch._dynamo.test_case.TestCase):
+    # list subclass construction via list.__new__/list.__init__ mirrors CPython:
+    # list.__new__ ignores extra args/kwargs; list.__init__ tolerates (ignores)
+    # keyword args only when the type overrides __new__ (Argument Clinic guard).
+
+    def test_subclass_plain(self):
+        class subclass(list):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            u = subclass([1, 2])
+            return type(u) is subclass, list(u)
+
+        self.assertEqual(fn(), (True, [1, 2]))
+
+    def test_subclass_plain_kwarg_raises(self):
+        class subclass(list):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            try:
+                subclass(sequence=())
+                return "no_error"
+            except TypeError:
+                return "type_error"
+
+        self.assertEqual(fn(), "type_error")
+
+    def test_subclass_with_init(self):
+        class subclass_with_init(list):
+            def __init__(self, seq, newarg=None):
+                super().__init__(seq)
+                self.newarg = newarg
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            u = subclass_with_init([1, 2], newarg=3)
+            return type(u) is subclass_with_init, list(u), u.newarg
+
+        self.assertEqual(fn(), (True, [1, 2], 3))
+
+    def test_subclass_with_new(self):
+        class subclass_with_new(list):
+            def __new__(cls, seq, newarg=None):
+                self = super().__new__(cls, seq)
+                self.newarg = newarg
+                return self
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            u = subclass_with_new([1, 2], newarg=3)
+            return type(u) is subclass_with_new, list(u), u.newarg
+
+        self.assertEqual(fn(), (True, [1, 2], 3))
+
+    def test_plain_list_kwarg_raises(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            seq = [1]
+            try:
+                list(seq, other=2)
+                return "no_error"
+            except TypeError:
+                return "type_error"
+
+        self.assertEqual(fn(), "type_error")
+
+    def test_new_ignores_multiple_extra_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return list.__new__(list, 1, 2, 3)
+
+        self.assertEqual(fn(), [])
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

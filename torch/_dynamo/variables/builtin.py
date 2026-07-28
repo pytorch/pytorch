@@ -3613,14 +3613,20 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if len(args) == 1 and not kwargs:
+            if args:
+                # list.__new__ (tp_new) ignores extra args and kwargs - only
+                # the first arg (the type) matters, so a list subclass with a
+                # custom __new__ calling super().__new__(cls, seq) yields an
+                # empty instance.  Pass init_args=[] so reconstruction emits
+                # base_cls.__new__(cls) without extras.
+                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1289-L1300
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
                 if isinstance(args[0], ListBuiltinVariable):
                     return list_vt
                 return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
-                    args[1:],
+                    [],
                     tx=tx,
                 )
 
