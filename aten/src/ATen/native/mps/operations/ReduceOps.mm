@@ -859,8 +859,9 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 // Unified host-side dispatch for value-preserving reductions on MPS, shared
 // by sum/nansum/mean/count_nonzero and min/max/all/any. Kernel name pattern
 // is always `{prefix}reduction_{variant}_{TI}_{TO}` with variant in
-// `""/"outer"/"inner"/"inner_chunk"/"flat"/"strided"`; every op/dtype pair
-// with a base kernel also has every variant. Selects among these code paths:
+// `""/"outer"/"inner"/"inner_strided"/"inner_chunk"/"flat"/"strided"`; every
+// op/dtype pair with a base kernel also has every variant. Selects among
+// these code paths:
 //   1. Last-dim kernels, for contiguous input or a strided view whose batch
 //      dims collapse to one row stride: inner_chunk for short rows, split-K
 //      two-pass for skinny-M/huge-K, inner otherwise.
@@ -922,8 +923,11 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
                                   std::optional<float> divisor,
                                   uint32_t elem_stride,
                                   uint32_t row_stride) {
-    auto kname =
-        fmt::format("{}reduction_inner_{}_{}", prefix, scalarToMetalTypeString(in_dt), scalarToMetalTypeString(out_dt));
+    auto kname = fmt::format("{}reduction_inner{}_{}_{}",
+                             prefix,
+                             elem_stride == 1 ? "" : "_strided",
+                             scalarToMetalTypeString(in_dt),
+                             scalarToMetalTypeString(out_dt));
     constexpr uint32_t TG_SIZE = 256;
     const auto num_tgs = c10::metal::ceil_div(num_rows, TG_SIZE / 32);
     id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
@@ -1023,7 +1027,13 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         max_offset <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
       const auto elem_stride32 = static_cast<uint32_t>(elem_stride);
       const auto row_stride32 = static_cast<uint32_t>(row_stride);
-      if (row_len <= 256u) {
+      // Tensors too small to fill the GPU gain nothing from packing rows
+      // into simdgroups; keep them on the inner kernel below (the pre-chunk
+      // routing, whose enqueue floor measures ~10% lower there). Strided
+      // inputs always take the chunk path: their alternative is the generic
+      // kernel, which is far slower, not the inner one.
+      const bool tiny_contig = elem_stride32 == 1u && row_stride32 == row_len && num_rows * row_len < 65536u;
+      if (row_len <= 256u && !tiny_contig) {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           @autoreleasepool {
             encode_chunk(input_orig,
