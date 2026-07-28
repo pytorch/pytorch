@@ -704,6 +704,10 @@ torch_tensor_to_pyobject(AtenTensorHandle ath, void* py_type, void** ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(ath != nullptr, "ath must not be null");
     TORCH_CHECK(ret != nullptr, "ret must not be null");
+    // py_type is really a PyTypeObject*, but libtorch only has the PyObject
+    // forward-decl (python_stub.h), not Python.h. A PyTypeObject is a PyObject,
+    // so PyObject* is the closest denotation here; the libtorch_python impl
+    // reinterprets it to PyTypeObject*.
     *ret = torch::detail::getPyObjectConversionImpl().tensor_to_pyobject(
         *torch::aot_inductor::tensor_handle_to_tensor_pointer(ath),
         static_cast<PyObject*>(py_type));

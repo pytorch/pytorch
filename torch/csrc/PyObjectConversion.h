@@ -25,7 +25,7 @@
 //   3. torch/csrc/PyObjectConversionPythonImpl.cpp - the concrete impl using
 //      THPVariable_*; in libtorch_python, registers itself at load.
 //   4. torch/csrc/shim_common.cpp - the stable C shims that call through the
-//      vtable; the only place AtenTensorHandle appears.
+//      vtable; in libtorch.
 
 namespace torch::detail {
 
