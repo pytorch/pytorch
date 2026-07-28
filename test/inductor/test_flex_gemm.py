@@ -272,6 +272,61 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             )
         )
 
+    def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
+        from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
+        from torch._inductor.fx_passes.post_grad import is_valid_addmm_fusion
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        graph_module = make_fx(lambda a, b, bias: torch.mm(a, b) + bias)(
+            torch.randn(4, 8), torch.randn(8, 16), torch.randn(16)
+        )
+        placeholders = [
+            node for node in graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        match = SimpleNamespace(
+            args=tuple(placeholders[:2]),
+            kwargs={"inp": placeholders[2]},
+            nodes=list(graph_module.graph.nodes),
+        )
+        self.assertTrue(is_valid_addmm_fusion(match))
+
+        mark_flex_gemm_body_gemm_node(graph_module, torch.ops.aten.mm.default)
+        self.assertFalse(is_valid_addmm_fusion(match))
+
+    def test_epilogue_graph_classifies_structural_nodes_once(self):
+        import operator
+
+        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueGraph
+        from torch._inductor.kernel.flex_gemm.quack_reductions import (
+            FlexGemmGetItemForm,
+            FlexGemmReductionForm,
+            FlexGemmSqueezeForm,
+            FlexGemmUnsupportedReductionForm,
+            FlexGemmViewForm,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(x):
+            grouped = x.view(4, 2, 4)
+            reduced = grouped.sum(dim=-1, keepdim=True)
+            maximum = torch.max(grouped, dim=-1).values
+            return reduced.squeeze(-1), maximum, grouped.var(dim=-1)
+
+        graph_module = make_fx(body)(torch.randn(4, 8))
+        forms = FlexGemmEpilogueGraph.from_graph_module(graph_module).structural_forms
+        expected = {
+            torch.ops.aten.view.default: FlexGemmViewForm,
+            torch.ops.aten.sum.dim_IntList: FlexGemmReductionForm,
+            torch.ops.aten.squeeze.dim: FlexGemmSqueezeForm,
+            operator.getitem: FlexGemmGetItemForm,
+            torch.ops.aten.var.correction: FlexGemmUnsupportedReductionForm,
+        }
+        for target, form_type in expected.items():
+            node = next(
+                node for node in graph_module.graph.nodes if node.target is target
+            )
+            self.assertIsInstance(forms[node], form_type)
+
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
@@ -1363,7 +1418,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
         match = FlexGemmLocalReduceMatch(aux, geometry)
-        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}))
+        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}, {}))
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):

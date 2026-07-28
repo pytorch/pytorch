@@ -11,13 +11,11 @@ epilogue and physical reduction callbacks.
 
 import dataclasses
 import hashlib
-import operator
 from typing import Any
 
 from sympy import Max, Min
 
 import torch
-from torch._inductor import inductor_prims
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
@@ -58,7 +56,15 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_op_name,
     _keepdim_and_broadcast,
     _local_reduce_store_arg,
+    flex_gemm_structural_form,
+    FlexGemmGetItemForm,
     FlexGemmPhysicalReduction,
+    FlexGemmPrepareSoftmaxForm,
+    FlexGemmReductionForm,
+    FlexGemmSqueezeForm,
+    FlexGemmStructuralForm,
+    FlexGemmUnsupportedReductionForm,
+    FlexGemmViewForm,
     grouped_tensor_layout,
     GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
@@ -69,11 +75,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_squeeze,
     lower_tensorssa_reduce,
     lower_view_or_reshape,
-    reduction_from_node,
-    squeeze_source_node,
     tensor_meta_shape,
-    unsupported_reduction_from_node,
-    view_or_reshape_args,
 )
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -311,14 +313,19 @@ class FlexGemmOutputPlan:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueGraph:
-    """Index transitive dependencies between nodes in an epilogue FX graph.
+    """Index dependencies and canonical structural forms in an epilogue graph.
 
     Attributes:
         dependencies: Every FX node mapped to all of its direct and transitive
             input nodes.
+        structural_forms: Structural nodes parsed once for shared analysis and
+            emission.
     """
 
     dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]]
+    structural_forms: dict[torch.fx.Node, FlexGemmStructuralForm] = dataclasses.field(
+        default_factory=dict
+    )
 
     @classmethod
     def from_graph_module(
@@ -326,13 +333,16 @@ class FlexGemmEpilogueGraph:
     ) -> "FlexGemmEpilogueGraph":
         """Build transitive dependencies in the graph's topological order."""
         dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]] = {}
+        structural_forms: dict[torch.fx.Node, FlexGemmStructuralForm] = {}
         for node in graph_module.graph.nodes:
             node_dependencies: OrderedSet[torch.fx.Node] = OrderedSet()
             for input_node in iter_fx_node_inputs((node.args, node.kwargs)):
                 node_dependencies.add(input_node)
                 node_dependencies.update(dependencies.get(input_node, ()))
             dependencies[node] = frozenset(node_dependencies)
-        return cls(dependencies)
+            if (form := flex_gemm_structural_form(node)) is not None:
+                structural_forms[node] = form
+        return cls(dependencies, structural_forms)
 
     def depends_on(self, value: Any, target: torch.fx.Node) -> bool:
         """Return whether a value is or transitively depends on the target node."""
@@ -381,57 +391,41 @@ class FlexGemmLocalReduceAnalysis:
         """Record grouped layouts and local-reduction matches for one FX node."""
         if node.op != "call_function":
             return
-        view_args = view_or_reshape_args(node)
-        if view_args is not None:
-            source_node, shape = view_args
-            if self.propagate_local_reduce_match(node, source_node):
+        form = self.graph.structural_forms.get(node)
+        if isinstance(form, FlexGemmViewForm):
+            if self.propagate_local_reduce_match(node, form.source):
                 return
-            if self.bind_grouped_layout(node, shape, source_node):
+            if self.bind_grouped_layout(node, form):
                 return
-        reduction = reduction_from_node(node)
-        if reduction is not None:
-            input_node, dim, _, dtype, _ = reduction
-            if self.bind_grouped_reduction(node, input_node, dim, dtype):
+        elif isinstance(form, FlexGemmReductionForm):
+            if self.bind_grouped_reduction(node, form.source, form.dim, form.dtype):
                 return
-        if node.target is inductor_prims.prepare_softmax_online:
-            input_node = node.args[0]
-            dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        elif isinstance(form, FlexGemmPrepareSoftmaxForm):
             if self.bind_grouped_reduction(
-                node, input_node, dim, raise_invalid_dims=False
+                node, form.source, form.dim, raise_invalid_dims=False
             ):
                 return
-        unsupported_reduction = unsupported_reduction_from_node(node)
-        if unsupported_reduction is not None:
-            input_node = node.args[0]
-            if (
-                isinstance(input_node, torch.fx.Node)
-                and input_node in self.grouped_tensors
-            ):
-                raise local_reduce_unsupported_tensorssa_error(unsupported_reduction)
-        if self.propagate_local_reduce_match(node, squeeze_source_node(node)):
-            return
-        if node.target is operator.getitem and self.propagate_local_reduce_match(
-            node, node.args[0]
-        ):
-            return
+        elif isinstance(form, FlexGemmUnsupportedReductionForm):
+            if form.source in self.grouped_tensors:
+                raise local_reduce_unsupported_tensorssa_error(form.target)
+        elif isinstance(form, (FlexGemmSqueezeForm, FlexGemmGetItemForm)):
+            if self.propagate_local_reduce_match(node, form.source):
+                return
         if is_shape_preserving_pointwise_node(node):
             self.propagate_pointwise_match(node, LOCAL_REDUCE_MIXED_MATCH_ERROR)
 
-    def bind_grouped_layout(self, node: torch.fx.Node, shape: Any, source: Any) -> bool:
+    def bind_grouped_layout(self, node: torch.fx.Node, form: FlexGemmViewForm) -> bool:
         """Attach a grouped TensorSSA layout introduced by a reshape."""
-        source_shape = (
-            tensor_meta_shape(source) if isinstance(source, torch.fx.Node) else None
-        )
-        layout = grouped_tensor_layout(shape, source_shape)
-        if layout is None or not isinstance(source, torch.fx.Node):
+        layout = grouped_tensor_layout(form.shape, tensor_meta_shape(form.source))
+        if layout is None:
             return False
         self.grouped_tensors[node] = layout
         return True
 
-    def propagate_local_reduce_match(self, node: torch.fx.Node, source: Any) -> bool:
+    def propagate_local_reduce_match(
+        self, node: torch.fx.Node, source: torch.fx.Node
+    ) -> bool:
         """Copy a matched local-reduction value through an FX wrapper."""
-        if not isinstance(source, torch.fx.Node):
-            return False
         match = self.matches.get(source)
         if match is None:
             return False
@@ -441,15 +435,13 @@ class FlexGemmLocalReduceAnalysis:
     def bind_grouped_reduction(
         self,
         node: torch.fx.Node,
-        input_node: Any,
+        input_node: torch.fx.Node,
         dim: Any,
         dtype: Any = None,
         *,
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
-        if not isinstance(input_node, torch.fx.Node):
-            return False
         layout = self.grouped_tensors.get(input_node)
         if layout is None:
             return False
@@ -522,17 +514,17 @@ class FlexGemmLocalReduceAnalysis:
         """Find the grouped reduction that produces a broadcast value."""
         if not isinstance(value, torch.fx.Node):
             return None
-        reduction = reduction_from_node(value)
-        if reduction is not None:
-            input_node, dim, keepdim, dtype, _ = reduction
-            if input_node is not grouped_source:
+        form = self.graph.structural_forms.get(value)
+        if isinstance(form, FlexGemmReductionForm):
+            if form.source is not grouped_source:
+                input_node = form.source
                 if self.graph.depends_on(input_node, grouped_source):
                     raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             if (
-                dtype is not None
-                or not keepdim
-                or not layout.matches_reduction_dim(dim)
+                form.dtype is not None
+                or not form.keepdim
+                or not layout.matches_reduction_dim(form.dim)
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             return FlexGemmLocalReduceMatch(
@@ -585,9 +577,9 @@ class FlexGemmLocalReduceAnalysis:
         if value in seen:
             return
         seen.add(value)
-        reduction = reduction_from_node(value)
-        if reduction is not None:
-            self.validate_hidden_feed_main_reduction_input(reduction[0], grouped_source)
+        form = self.graph.structural_forms.get(value)
+        if isinstance(form, FlexGemmReductionForm):
+            self.validate_hidden_feed_main_reduction_input(form.source, grouped_source)
         for arg in iter_fx_node_inputs((value.args, value.kwargs)):
             self.validate_feed_main_source_reductions(
                 arg, grouped_source, selected_reduction, seen
@@ -601,10 +593,10 @@ class FlexGemmLocalReduceAnalysis:
         """Preserve the one-physical-value ABI across recursive source matching."""
         if match is None:
             return None
-        reduction = reduction_from_node(match.value_node)
-        if reduction is not None and isinstance(reduction[0], torch.fx.Node):
+        form = self.graph.structural_forms.get(match.value_node)
+        if isinstance(form, FlexGemmReductionForm):
             self.validate_feed_main_source_reductions(
-                source, reduction[0], match.value_node
+                source, form.source, match.value_node
             )
         return match
 
@@ -631,16 +623,15 @@ class FlexGemmLocalReduceAnalysis:
         """Return whether a candidate contains a grouped feed-main reduction."""
         if not isinstance(value, torch.fx.Node):
             return False
-        reduction = reduction_from_node(value)
-        if reduction is not None:
-            input_node, dim, keepdim, dtype, _ = reduction
+        form = self.graph.structural_forms.get(value)
+        if isinstance(form, FlexGemmReductionForm):
             return (
-                dtype is None
-                and bool(keepdim)
-                and layout.matches_reduction_dim(dim)
+                form.dtype is None
+                and bool(form.keepdim)
+                and layout.matches_reduction_dim(form.dim)
                 and (
-                    input_node is grouped_source
-                    or self.graph.depends_on(input_node, grouped_source)
+                    form.source is grouped_source
+                    or self.graph.depends_on(form.source, grouped_source)
                 )
             )
         if not is_shape_preserving_pointwise_node(value):
@@ -661,13 +652,11 @@ class FlexGemmLocalReduceAnalysis:
             value, torch.fx.Node
         ):
             return None
-        view_args = view_or_reshape_args(grouped_source)
-        if view_args is None:
+        form = self.graph.structural_forms.get(grouped_source)
+        if not isinstance(form, FlexGemmViewForm):
             return None
-        source_node, input_shape = view_args
-        if not isinstance(source_node, torch.fx.Node):
-            return None
-        layout = grouped_tensor_layout(input_shape, tensor_meta_shape(source_node))
+        source_node = form.source
+        layout = grouped_tensor_layout(form.shape, tensor_meta_shape(source_node))
         if layout is None:
             return None
         if layout.axis != 0:
@@ -731,12 +720,9 @@ class FlexGemmLocalReduceAnalysis:
         output: torch.fx.Node,
     ) -> FlexGemmLocalReduceMatch | None:
         """Match feed-main reductions through trailing pointwise nodes."""
-        view_args = view_or_reshape_args(output)
-        if view_args is not None:
-            source, _ = view_args
-            if not isinstance(source, torch.fx.Node):
-                return None
-            return self.match_feed_main_source(source, output.meta.get("val"))
+        form = self.graph.structural_forms.get(output)
+        if isinstance(form, FlexGemmViewForm):
+            return self.match_feed_main_source(form.source, output.meta.get("val"))
         if not is_shape_preserving_pointwise_node(output):
             return None
         matches = [
@@ -871,9 +857,9 @@ def output_plan(
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
     feed_main_plan = local_reduce.feed_main_output_plan(output_value)
-    return (
-        FlexGemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
-    )
+    if feed_main_plan is not None:
+        return feed_main_plan
+    return FlexGemmOutputPlan(output_value)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -989,6 +975,7 @@ class FlexGemmEpilogueEmitter:
         self.fast_math = fast_math
         self.gemm = gemm_node(graph_module, gemm_op)
         self.outputs = analysis.outputs
+        self.graph = analysis.local_reduce.graph
         self.kernel = FlexGemmCuteDSLKernel()
         self.env: dict[torch.fx.Node, Any] = {
             self.gemm: CuteDSLCSEVariable(
@@ -1011,10 +998,10 @@ class FlexGemmEpilogueEmitter:
                 match=local_reduce_match, store=store, feeds_main=True
             ):
                 self.feed_main = local_reduce_match.value_node
-                reduction = reduction_from_node(local_reduce_match.value_node)
-                if reduction is None or not isinstance(reduction[0], torch.fx.Node):
+                form = self.graph.structural_forms.get(local_reduce_match.value_node)
+                if not isinstance(form, FlexGemmReductionForm):
                     raise AssertionError("feed-main plans require a matched reduction")
-                self.feed_main_input = reduction[0]
+                self.feed_main_input = form.source
                 self.aux = None if store is None else store.node
             case FlexGemmOutputLocalReducePlan(
                 store=FlexGemmLocalReduceStore(node=store_node)
@@ -1069,12 +1056,10 @@ class FlexGemmEpilogueEmitter:
         if self.feed_main is not None:
             return False
         source = node.all_input_nodes[0]
-        reduction = reduction_from_node(source)
-        if reduction is None:
+        form = self.graph.structural_forms.get(source)
+        if not isinstance(form, FlexGemmReductionForm):
             return False
-        reduction_input = reduction[0]
-        if not isinstance(reduction_input, torch.fx.Node):
-            return False
+        reduction_input = form.source
         layout = self.grouped_tensors.get(reduction_input)
         if layout is None:
             return False
@@ -1160,55 +1145,60 @@ class FlexGemmEpilogueEmitter:
         if lowered is not None:
             self.env[node] = lowered
             return
-        lowered = lower_squeeze(node, self.env, self.store_sources)
-        if lowered is not None:
-            self.env[node] = lowered
-            self.propagate_physical_reduction(node, node.args[0])
-            return
-        lowered = lower_getitem(node, self.env, self.store_sources)
-        if lowered is not None:
-            self.env[node] = lowered
-            self.propagate_physical_reduction(node, node.args[0])
-            return
-        lowered = lower_prepare_softmax_online(
-            node,
-            self.env,
-            self.kernel,
-            self.grouped_tensors,
-            self.store_sources,
-        )
-        if lowered is not None:
-            self.env[node] = lowered
-            return
-        lowered = lower_view_or_reshape(
-            node,
-            self.env,
-            self.kernel,
-            self.grouped_tensors,
-            self.active_grouped_layouts,
-            self.store_sources,
-            node is self.feed_main_input,
-        )
-        if lowered is not None:
-            self.env[node] = lowered
-            self.propagate_physical_reduction(node, node.args[0])
-            return
-        lowered = lower_tensorssa_reduce(
-            node,
-            self.env,
-            self.kernel,
-            self.grouped_tensors,
-            self.store_sources,
-            self.physical_reductions,
-        )
-        if lowered is not None:
-            self.bind_reduction(node, lowered)
-            return
-        unsupported_reduction = unsupported_reduction_from_node(node)
-        if unsupported_reduction is not None:
-            raise local_reduce_unsupported_tensorssa_error(
-                unsupported_reduction, value_only=True
+        form = self.graph.structural_forms.get(node)
+        if isinstance(form, FlexGemmSqueezeForm):
+            lowered = lower_squeeze(node, form, self.env, self.store_sources)
+            if lowered is not None:
+                self.env[node] = lowered
+                self.propagate_physical_reduction(node, form.source)
+                return
+        elif isinstance(form, FlexGemmGetItemForm):
+            lowered = lower_getitem(node, form, self.env, self.store_sources)
+            if lowered is not None:
+                self.env[node] = lowered
+                self.propagate_physical_reduction(node, form.source)
+                return
+        elif isinstance(form, FlexGemmPrepareSoftmaxForm):
+            self.env[node] = lower_prepare_softmax_online(
+                node,
+                form,
+                self.env,
+                self.kernel,
+                self.grouped_tensors,
+                self.store_sources,
             )
+            return
+        elif isinstance(form, FlexGemmViewForm):
+            lowered = lower_view_or_reshape(
+                node,
+                form,
+                self.env,
+                self.kernel,
+                self.grouped_tensors,
+                self.active_grouped_layouts,
+                self.store_sources,
+                node is self.feed_main_input,
+            )
+            if lowered is not None:
+                self.env[node] = lowered
+                self.propagate_physical_reduction(node, form.source)
+                return
+        elif isinstance(form, FlexGemmReductionForm):
+            self.bind_reduction(
+                node,
+                lower_tensorssa_reduce(
+                    node,
+                    form,
+                    self.env,
+                    self.kernel,
+                    self.grouped_tensors,
+                    self.store_sources,
+                    self.physical_reductions,
+                ),
+            )
+            return
+        elif isinstance(form, FlexGemmUnsupportedReductionForm):
+            raise local_reduce_unsupported_tensorssa_error(form.target, value_only=True)
         is_shape_preserving = is_shape_preserving_pointwise_node(node)
         if is_shape_preserving and self.feed_main is None:
             if self.aux is None and any(
