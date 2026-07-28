@@ -793,7 +793,13 @@ class GraphLowering(torch.fx.Interpreter):
             return True
 
         conv_nodes = [
-            n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
+            n
+            for n in gm.graph.nodes
+            if n.target
+            in (
+                torch.ops.aten.convolution.default,
+                torch.ops.aten.convolution_backward.default,
+            )
         ]
 
         for n in gm.graph.nodes:
@@ -834,22 +840,35 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return False
 
+        def _weight_node(n: torch.fx.Node) -> torch.fx.Node:
+            if n.target is torch.ops.aten.convolution_backward.default:
+                return n.args[2]  # type: ignore[union-attr, return-value]
+            return n.args[1]  # type: ignore[union-attr, return-value]
+
+        def _groups_arg(n: torch.fx.Node) -> Any:
+            if n.target is torch.ops.aten.convolution_backward.default:
+                return n.args[-3]  # type: ignore[union-attr, operator]
+            return n.args[-1]  # type: ignore[union-attr, operator]
+
         def is_grouped(n: Any) -> bool:
-            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
+            meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
             if not isinstance(meta_val, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(meta_val)}")
-            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
+            groups = _groups_arg(n)
+            return (isinstance(groups, int) and groups > 1) and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
+            meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
             return (
-                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)  # type: ignore[union-attr, operator]
-                and n.args[1].meta["val"].size(2) > 1  # type: ignore[union-attr, operator]
+                meta_val.size(0) * 2 <= meta_val.size(1)
+                and meta_val.size(2) > 1
             )
 
         def is_small_channel(n: torch.fx.Node) -> bool:
+            meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
             return (
-                n.args[1].meta["val"].size(0) <= 64  # type: ignore[union-attr, operator]
-                and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr, operator]
+                meta_val.size(0) <= 64
+                and meta_val.size(1) <= 64
             )
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
