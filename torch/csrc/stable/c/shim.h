@@ -312,8 +312,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_tensor_from_pyobject(
 
 // Wrap an AtenTensorHandle as a Python torch.Tensor. If py_type is non-null, it
 // is used as the result's exact PyTypeObject* (e.g. torch.nn.Parameter); null
-// means the default torch.Tensor type. On failure from THPVariable_Wrap the
-// Python error indicator is left set.
+// means the default torch.Tensor type.
 AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
     AtenTensorHandle ath,
     void* py_type,
