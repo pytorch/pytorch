@@ -4945,6 +4945,24 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(NotImplementedError, msg):
             torch.compile(fn, fullgraph=True)(a, b)
 
+    def test_bmm_cpu_decompose_preserves_integer_output_dtype(self):
+        # The CPU mul+sum bmm decomposition (mat1 M==1 or mat2 N==1) must keep
+        # aten.bmm's output dtype for integer inputs instead of leaking the
+        # int64 accumulator dtype.
+        if self.device != "cpu":
+            self.skipTest("CPU-specific decomposition branch")
+
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        for dtype in (torch.int8, torch.int32, torch.int64, torch.float32):
+            a = torch.ones(1, 1, 2, device=self.device, dtype=dtype)
+            b = torch.ones(1, 2, 2, device=self.device, dtype=dtype)
+            expected = fn(a, b)
+            actual = torch.compile(fn, fullgraph=True, dynamic=False)(a, b)
+            self.assertEqual(actual.dtype, expected.dtype)
+            self.assertEqual(actual, expected)
+
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_mixed_mm(self):

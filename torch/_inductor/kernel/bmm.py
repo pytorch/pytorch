@@ -128,7 +128,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
             mat1 = L.unsqueeze(mat1, -1)
             mat2 = L.unsqueeze(mat2, 1)
-            return L.sum_(L.mul(mat1, mat2), axis=2)
+            # The reduction accumulates integers at the compute type (int64),
+            # but aten.bmm promises the input dtype, so cast back.
+            return L.to_dtype(L.sum_(L.mul(mat1, mat2), axis=2), dtype)
 
         def is_valid_to_require_contiguous(t):
             if not ir.is_storage_and_layout(t):
