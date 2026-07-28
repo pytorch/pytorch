@@ -2,7 +2,7 @@
 import importlib
 from collections.abc import Callable
 from typing import Any
-from unittest import skipIf, skipUnless
+from unittest import skipIf
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,19 +17,12 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
+    requires_block_ptr,
     requires_gpu,
 )
-from torch.utils._triton import has_triton_block_ptr
 
 
 importlib.import_module("filelock")
-
-
-# Tests that assert block-pointer codegen only run on Triton builds that still
-# provide the block-pointer frontend API (removed in triton-lang/triton#10833).
-requires_block_ptr = skipUnless(
-    has_triton_block_ptr(), "requires Triton block-pointer API"
-)
 
 
 @instantiate_parametrized_tests
