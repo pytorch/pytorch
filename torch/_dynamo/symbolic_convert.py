@@ -52,6 +52,7 @@ import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import (
+    FakeTensorObservedException,
     get_dynamo_observed_exception,
     ObservedException,
     TensorifyScalarRestartAnalysis,
@@ -194,11 +195,13 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
-    generic_bool,
-    generic_contains,
+    generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_is_true,
+    generic_setitem,
     pyiter_send,
+    pysequence_contains,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -956,7 +959,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():
                 if truth_fn(result.as_python_constant()):
                     if push:
@@ -995,7 +998,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif not value.is_tensor():
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if truth_fn(result):
                 if push:
                     self.push(value)
@@ -2868,6 +2871,20 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
+            if isinstance(raised_exception, FakeTensorObservedException):
+                from .exc import format_graph_break_message
+
+                msg = format_graph_break_message(
+                    "RuntimeError when making fake tensor call",
+                    "",
+                    str(raised_exception),
+                    [*graph_break_hints.USER_ERROR],
+                )
+                e = exc.TorchRuntimeError(
+                    msg, getattr(raised_exception, "real_stack", None)
+                )
+                raise e.with_traceback(raised_exception.__traceback__) from None
+
             curr_exc = self.exn_vt_stack.get_raised_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
@@ -3961,7 +3978,7 @@ class InstructionTranslatorBase(
     )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
-        obj.call_method(self, "__setitem__", [key, val], {})
+        generic_setitem(self, obj, key, val)
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
@@ -3969,7 +3986,7 @@ class InstructionTranslatorBase(
         # only. We avoid call_method("__getitem__") because it can execute
         # user code and add unwanted graph nodes.
         self._maybe_sync_dealloc_subscr(obj, key)
-        obj.call_method(self, "__delitem__", [key], {})
+        generic_delitem(self, obj, key)
 
     def _maybe_sync_dealloc_subscr(
         self, obj: VariableTracker, key: VariableTracker
@@ -4109,7 +4126,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected isinstance(obj, ConstDictVariable) to be true"
             )
-        obj.call_method(self, "__setitem__", (k, v), {})  # type: ignore[arg-type]
+        generic_setitem(self, obj, k, v)
 
     def SET_ADD(self, inst: Instruction) -> None:
         v = self.pop()
@@ -4201,9 +4218,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
@@ -4429,7 +4444,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
+        self.push(pysequence_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 
@@ -4977,12 +4992,7 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.call_method(
-                self,  # pyrefly: ignore[bad-argument-type]
-                "__setattr__",
-                [ConstantVariable.create("__annotations__"), attr],
-                {},
-            )
+            fn.annotations = attr
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -4997,9 +5007,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:

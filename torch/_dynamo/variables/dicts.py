@@ -42,12 +42,12 @@ from ..source import (
 )
 from ..utils import (
     _item_debug_repr,
+    check_positional,
     cmp_name_to_op_mapping,
     dict_items,
     dict_keys,
     dict_values,
     istype,
-    raise_args_mismatch,
     tracked_repr,
     unpack_iterable,
 )
@@ -66,9 +66,9 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
+    generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
-    vt_getitem,
 )
 
 
@@ -562,8 +562,7 @@ class ConstDictVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if len(args) not in (1, 2):
-            raise_args_mismatch(tx, "get", "1 or 2 args", f"{len(args)} args")
+        check_positional(tx, "get", len(args), 1, 2)
         if args[0] not in self:
             self.install_dict_contains_guard(tx, args)
             if len(args) == 1:
@@ -581,8 +580,7 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if len(args) not in (1, 2):
-            raise_args_mismatch(tx, "pop", "1 or 2 args", f"{len(args)} args")
+        check_positional(tx, "pop", len(args), 1, 2)
         if args[0] not in self:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, args)
@@ -602,10 +600,8 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        # dict.popitem() takes no args. OrderedDict.popitem(last=) is
-        # handled by OrderedDictVariable.call_method.
-        if len(args):
-            raise_args_mismatch(tx, "popitem")
+        # dict.popitem() takes no args (arity enforced by MethodFlags NOARGS).
+        # OrderedDict.popitem(last=) is handled by OrderedDictVariable.call_method.
         if not self.items:
             raise_observed_exception(
                 KeyError,
@@ -643,8 +639,7 @@ class ConstDictVariable(VariableTracker):
         # kwargs are always merged on top.
         # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/dictobject.c#L3571
         self.install_dict_keys_match_guard()
-        if len(args) > 1:
-            raise_args_mismatch(tx, "update", "at most 1 args", f"{len(args)} args")
+        check_positional(tx, "update", len(args), 0, 1)
         if args or kwargs:
             tx.output.side_effects.mutation(self)
         if args:
@@ -663,7 +658,7 @@ class ConstDictVariable(VariableTracker):
             ):
                 keys = other.call_method(tx, "keys", [], {})
                 for key in unpack_iterable(tx, keys):
-                    self.items[HashableTracker(key)] = vt_getitem(tx, other, key)
+                    self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
             else:
                 for idx, item in enumerate(unpack_iterable(tx, other)):
                     pair = unpack_iterable(tx, item)
@@ -689,21 +684,8 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if len(args) not in (1, 2):
-            raise_args_mismatch(
-                tx,
-                "setdefault",
-                "1 or 2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        check_positional(tx, "setdefault", len(args), 1, 2)
         self.install_dict_keys_match_guard()
-        if kwargs or len(args) > 2:
-            raise_args_mismatch(
-                tx,
-                "setdefault",
-                "at most 2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
         value = self.maybe_getitem_const(args[0])
         if value is not None:
             return value
