@@ -453,6 +453,9 @@ class CUDAGraph(_CUDAGraph):
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
         remap_to_exec_graph(self)
+        # Record the exec id we remapped to so the destroy callback (armed in
+        # capture_end_post) hands it to the graph-destroy hooks for per-graph state
+        # cleanup. A re-instantiate mints a fresh exec id, so the set accumulates each.
         if self._remapped_exec_id is not None:
             self._recorded_exec_ids.add(self._remapped_exec_id)
 
