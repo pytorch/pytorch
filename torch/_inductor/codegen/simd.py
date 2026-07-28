@@ -2056,6 +2056,48 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
+    def get_tiling_and_memory_scores(
+        self, nodes: Sequence[scheduler.BaseSchedulerNode]
+    ) -> scheduler.TilingAndMemoryScores | None:
+        from torch._inductor.tiling_utils import analyze_memory_coalescing_for_nodes
+
+        if (
+            not nodes
+            or not config.triton.coalesce_tiling_analysis
+            or config.triton.prefer_nd_tiling
+        ):
+            return None
+
+        nodes = [subnode for node in nodes for subnode in node.get_nodes()]
+        if not all(isinstance(node, scheduler.SchedulerNode) for node in nodes):
+            return None
+
+        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+        analysis = analyze_memory_coalescing_for_nodes(nodes)
+        if analysis is None:
+            return None
+
+        selected_tiling, tiling_scores = self.get_tiling_and_scores(
+            node_schedule, numel, rnumel, analysis
+        )
+        if tiling_scores is None:
+            return None
+
+        total_score = sum(analysis.coalesced_by_var.values()) + sum(
+            analysis.uncoalesced_addrs.values()
+        )
+        selected_score = V.graph.sizevars.optimization_hint(
+            sum(tiling_scores.get(name, 0) for name in selected_tiling),
+            fallback=0,
+        )
+        return scheduler.TilingAndMemoryScores(
+            selected_tiling=selected_tiling,
+            tiling_scores=tiling_scores,
+            coalesced_memory_score=selected_score,
+            uncoalesced_memory_score=max(total_score - selected_score, 0),
+        )
+
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
