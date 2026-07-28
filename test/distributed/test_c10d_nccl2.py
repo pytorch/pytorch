@@ -49,22 +49,13 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_options_config_roundtrip(self) -> None:
+    def test_shared_options_type(self) -> None:
+        self.assertIs(dist.ProcessGroupNCCL2.Options, dist.ProcessGroupNCCL.Options)
         opts = dist.ProcessGroupNCCL2.Options()
         opts.config.cga_cluster_size = 2
         opts.config.max_ctas = 4
-        opts.max_event_pool_size = 128
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
-        self.assertEqual(opts.max_event_pool_size, 128)
-
-        # A stock NCCLConfig can be handed over wholesale.
-        stock = dist.ProcessGroupNCCL.Options()
-        stock.config.min_ctas = 3
-        stock.config.net_name = "Socket"
-        opts.config = stock.config
-        self.assertEqual(opts.config.min_ctas, 3)
-        self.assertEqual(opts.config.net_name, "Socket")
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
@@ -96,25 +87,6 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
 class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def opts(cls, high_priority_stream=False):
-        opts = dist.ProcessGroupNCCL2.Options()
-        opts.config.cga_cluster_size = 2
-        opts.config.max_ctas = 4
-        opts.max_event_pool_size = 128
-        return opts
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_collective_with_config(self) -> None:
-        backend = dist.get_backend_impl(device=self.device)
-        self.assertEqual(backend.options.config.cga_cluster_size, 2)
-        self.assertEqual(backend.options.config.max_ctas, 4)
-        self.assertEqual(backend.options.max_event_pool_size, 128)
-        self._check_all_reduce()
-
-
-class ProcessGroupNCCL2StockOptionsTest(_ProcessGroupNCCL2OptionsTest):
-    @classmethod
-    def opts(cls, high_priority_stream=False):
         opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts.config.cga_cluster_size = 2
         opts.config.max_ctas = 4
@@ -122,7 +94,7 @@ class ProcessGroupNCCL2StockOptionsTest(_ProcessGroupNCCL2OptionsTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_stock_nccl_options_honored(self) -> None:
+    def test_collective_with_config(self) -> None:
         backend = dist.get_backend_impl(device=self.device)
         self.assertEqual(backend.options.config.cga_cluster_size, 2)
         self.assertEqual(backend.options.config.max_ctas, 4)

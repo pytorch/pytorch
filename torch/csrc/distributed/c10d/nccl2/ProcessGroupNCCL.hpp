@@ -34,6 +34,7 @@
 #include <nccl.h>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
@@ -94,27 +95,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
  public:
   static constexpr std::string_view kBackendName = "nccl2";
 
-  // c10d Backend options for this backend (a c10d::Backend::Options subclass,
-  // like ProcessGroupNCCL::Options); surfaced to Python via the Options pybind.
-  struct TORCH_API Options : ::c10d::Backend::Options {
-    bool abort_process_on_timeout_or_error{true};
-    bool is_high_priority_stream{false};
-    // Communicator config, same type as ProcessGroupNCCL::Options::config.
-    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-    size_t max_event_pool_size{kDefaultMaxEventPoolSize};
-    // Stringly-typed config used by the torchcomms API. Applied on top of the
-    // typed members above, i.e. a hint wins over the equivalent config field.
-    std::unordered_map<std::string, std::string> hints;
-
-    explicit Options(bool is_high_priority_stream = false)
-        : ::c10d::Backend::Options(std::string(kBackendName)),
-          is_high_priority_stream(is_high_priority_stream) {}
-
-    static c10::intrusive_ptr<Options> create(
-        bool is_high_priority_stream = false) {
-      return c10::make_intrusive<Options>(is_high_priority_stream);
-    }
-  };
+  using Options = ::c10d::ProcessGroupNCCL::Options;
 
   // c10d-style constructor: the NCCL communicator is bootstrapped lazily, on
   // the first collective (or via eagerConnectSingleDevice / bound_device_id),
@@ -548,6 +529,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::mutex timeout_mutex_;
 
   bool is_high_priority_stream_{false};
+  bool abort_process_on_timeout_or_error_{true};
   std::string name_;
 
   c10::intrusive_ptr<Options> options_c10d_;

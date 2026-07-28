@@ -684,20 +684,16 @@ def _create_nccl_process_group(
     return backend_class
 
 
-def _nccl2_options(backend_options: object | None) -> "ProcessGroupNCCL2.Options":
-    """
-    Resolve the options for an nccl2 backend: a ProcessGroupNCCL2.Options is
-    used as-is, a stock ProcessGroupNCCL.Options has its communicator config
-    carried over, anything else falls back to defaults.
-    """
-    if isinstance(backend_options, ProcessGroupNCCL2.Options):
-        return backend_options
-
-    pg_options = ProcessGroupNCCL2.Options()
-    if isinstance(backend_options, ProcessGroupNCCL.Options):
-        pg_options.is_high_priority_stream = backend_options.is_high_priority_stream
-        pg_options.config = backend_options.config
-    return pg_options
+def _nccl2_options(
+    backend_options: object | None,
+) -> "ProcessGroupNCCL.Options":
+    if backend_options is None:
+        return ProcessGroupNCCL.Options()
+    if not isinstance(backend_options, ProcessGroupNCCL.Options):
+        raise AssertionError(
+            "Expected backend_options argument to be of type ProcessGroupNCCL.Options"
+        )
+    return backend_options
 
 
 def _create_nccl2_process_group(

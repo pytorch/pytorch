@@ -74,9 +74,7 @@ ncclUniqueId NCCLBootstrap::exchangeUniqueId(std::string_view name) {
   return uniqueId;
 }
 
-// TorchComm-layer hint keys that are consumed by the backend init code
-// (ProcessGroupNCCL::init), not by ncclConfig.  Skip them here to avoid
-// spurious "unsupported hint" warnings.
+// TorchComm-layer hint keys that are not part of ncclConfig.
 static const std::set<std::string> kLayerHints = {
     "is_high_priority_stream",
     std::string(kHintMaxEventPoolSize),
@@ -169,8 +167,7 @@ void populateNcclConfigFromHints(
 
 ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
-    const ncclConfig_t& base_config,
-    const std::unordered_map<std::string, std::string>& hints) {
+    const ncclConfig_t& base_config) {
   c10::cuda::CUDAGuard gpuGuard(device_);
   ncclUniqueId uniqueId;
   ncclComm_t nccl_comm = nullptr;
@@ -184,9 +181,6 @@ ncclComm_t NCCLBootstrap::createNcclComm(
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name.c_str();
 #endif
-
-  // Populate NCCL config from user-provided hints
-  populateNcclConfigFromHints(config, hints, name);
 
   ncclResult_t ncclErr = nccl_api_->commInitRankConfig(
       &nccl_comm, comm_size_, uniqueId, rank_, &config);
