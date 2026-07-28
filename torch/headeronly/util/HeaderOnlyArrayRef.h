@@ -66,9 +66,11 @@ class HeaderOnlyArrayRef {
 
   template <
       typename Container,
-      typename U = decltype(std::declval<Container>().data())>
-  requires(std::is_same_v<U, T*> || std::is_same_v<U, T const*>)
-      /* implicit */ HeaderOnlyArrayRef(const Container& container)
+      typename U = decltype(std::declval<Container>().data()),
+      // NOLINTNEXTLINE(modernize-use-constraints)
+      typename = std::enable_if_t<
+          (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
+  /* implicit */ HeaderOnlyArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::vector.
@@ -217,22 +219,27 @@ class HeaderOnlyArrayRef {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  requires std::is_same_v<U, T>
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  std::enable_if_t<std::is_same_v<U, T>, HeaderOnlyArrayRef<T>>& operator=(
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-      HeaderOnlyArrayRef<T>& operator=(U&& Temporary) = delete;
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  requires std::is_same_v<U, T> HeaderOnlyArrayRef<T>& operator=(
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  std::enable_if_t<std::is_same_v<U, T>, HeaderOnlyArrayRef<T>>& operator=(
       std::initializer_list<U>) = delete;
 
   /// @}
   /// @name Expensive Operations
   /// @{
   std::vector<T> vec() const {
+    if (this->empty()) {
+      return {};
+    }
     return std::vector<T>(this->Data, this->Data + this->Length);
   }
 
@@ -259,3 +266,15 @@ namespace torch::headeronly {
 using c10::HeaderOnlyArrayRef;
 using IntHeaderOnlyArrayRef = HeaderOnlyArrayRef<int64_t>;
 } // namespace torch::headeronly
+
+#if __cplusplus >= 202002L
+#include <ranges>
+// HeaderOnlyArrayRef is a non-owning view; iterators remain valid after the
+// HeaderOnlyArrayRef is destroyed. Opt in to the ranges borrowed-range
+// contract so that algorithms like std::ranges::find return real iterators
+// rather than std::ranges::dangling for temporary HeaderOnlyArrayRefs.
+namespace std::ranges {
+template <typename T>
+inline constexpr bool enable_borrowed_range<c10::HeaderOnlyArrayRef<T>> = true;
+} // namespace std::ranges
+#endif

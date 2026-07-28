@@ -1051,15 +1051,6 @@ In-place version of :meth:`~Tensor.ceil`
 )
 
 add_docstr_all(
-    "cholesky",
-    r"""
-cholesky(upper=False) -> Tensor
-
-See :func:`torch.cholesky`
-""",
-)
-
-add_docstr_all(
     "cholesky_solve",
     r"""
 cholesky_solve(input2, upper=False) -> Tensor
@@ -1169,6 +1160,13 @@ Args:
     non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect. Default: ``False``
+
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the copy is issued on a
+    non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
 """,
 )
 
@@ -2521,7 +2519,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to accumulate into,
         should have dtype either `torch.int64` or `torch.int32`
     source (FloatTensor): the tensor containing values to accumulate
     reduce (str): the reduction operation to apply
@@ -3596,52 +3594,9 @@ See :func:`torch.nonzero`
 add_docstr_all(
     "nonzero_static",
     r"""
-nonzero_static(input, *, size, fill_value=-1) -> Tensor
+nonzero_static(*, size, fill_value=-1) -> LongTensor
 
-Returns a 2-D tensor where each row is the index for a non-zero value.
-The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
-
-Args:
-    input (Tensor): the input tensor to count non-zero elements.
-
-Keyword args:
-    size (int): the size of non-zero elements expected to be included in the out
-        tensor. Pad the out tensor with `fill_value` if the `size` is larger
-        than total number of non-zero elements, truncate out tensor if `size`
-        is smaller. The size must be a non-negative integer.
-    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
-        than the total number of non-zero elements. Default is `-1` to represent
-        invalid index.
-
-Example::
-
-    # Example 1: Padding
-    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
-    >>> static_size = 4
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([[  0,   0],
-            [  1,   0],
-            [  1,   1],
-            [  -1, -1]], dtype=torch.int64)
-
-    # Example 2: Truncating
-    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
-    >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([[  0,   0],
-            [  1,   0]], dtype=torch.int64)
-
-    # Example 3: 0 size
-    >>> input_tensor = torch.tensor([10])
-    >>> static_size = 0
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([], size=(0, 1), dtype=torch.int64)
-
-    # Example 4: 0 rank input
-    >>> input_tensor = torch.tensor(10)
-    >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([], size=(2, 0), dtype=torch.int64)
+See :func:`torch.nonzero_static`
 """,
 )
 
@@ -3846,15 +3801,6 @@ put(input, index, source, accumulate=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.put_`.
 `input` corresponds to `self` in :meth:`torch.Tensor.put_`.
-""",
-)
-
-add_docstr_all(
-    "qr",
-    r"""
-qr(some=True) -> (Tensor, Tensor)
-
-See :func:`torch.qr`
 """,
 )
 
@@ -5236,6 +5182,13 @@ Here are the ways to call ``to``:
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the conversion is issued on
+    a non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
+
 Example::
 
     >>> tensor = torch.randn(2, 2)  # Initially dtype=float32, device=cpu
@@ -6263,6 +6216,12 @@ expanded to a larger size by setting the ``stride`` to 0. Any dimension
 of size 1 can be expanded to an arbitrary value without allocating new
 memory.
 
+.. note::
+
+    Operations on an expanded view may still allocate memory if they need to
+    materialize the expanded values. For example, changing dtype after
+    :meth:`expand` can allocate memory for the full expanded shape.
+
 Args:
     *size (torch.Size or int...): the desired expanded size
 
@@ -6816,7 +6775,7 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 
 .. warning::
-    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    The use of :attr:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
     is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
     to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
     the dimensions of a tensor.
