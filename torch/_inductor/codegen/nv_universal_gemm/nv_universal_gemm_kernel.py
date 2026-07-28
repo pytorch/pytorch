@@ -1338,7 +1338,7 @@ class NVUniversalGemmKernel(Kernel):
             # Build epilogue args if needed (user-specific variable names)
             epi_args_expr = "None"
             epi_source_expr = '""'
-            aux_tensors_expr = "()"
+            aux_tensors: list[str] = []
             if self.epilogue_fn_code:
                 epilogue_kwargs = self._render_epilogue_kwargs()
                 if feed_main:
@@ -1351,8 +1351,7 @@ class NVUniversalGemmKernel(Kernel):
                 code.writeline(f"epi_args = EpilogueArguments({epi_kwargs_str})")
                 epi_args_expr = "epi_args"
                 epi_source_expr = "_EPILOGUE_FN_SOURCE"
-                if self.epilogue_reads:
-                    aux_tensors_expr = "(" + ", ".join(self.epilogue_reads) + ",)"
+                aux_tensors.extend(self.epilogue_reads)
 
             run_variant_kwargs = "_VARIANT_KWARGS"
             if self.local_reduce is not None:
@@ -1392,17 +1391,13 @@ class NVUniversalGemmKernel(Kernel):
                     f"'local_reduce_secondary_feed_type': {reduction.secondary_feed_type!r}"
                     "}"
                 )
-                aux_tensors = [
+                aux_tensors.extend(
                     ptr
-                    for ptr in (
-                        reduce_ptr,
-                        feed_ptr,
-                        secondary_feed_ptr,
-                    )
+                    for ptr in (reduce_ptr, feed_ptr, secondary_feed_ptr)
                     if ptr != "None"
-                ]
-                if aux_tensors:
-                    aux_tensors_expr = f"({', '.join(aux_tensors)},)"
+                )
+
+            aux_tensors_expr = f"({', '.join(aux_tensors)},)" if aux_tensors else "()"
 
             code.writeline("_nvgemm_run(")
             with code.indent():
