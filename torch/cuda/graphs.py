@@ -45,6 +45,11 @@ __all__ = [
     "make_graphed_callables",
     "export_dot",
     "export_graph_data",
+    "register_graph_instantiate_hook",
+    "run_graph_instantiate_hooks",
+    "register_graph_destroy_hook",
+    "run_graph_destroy_hooks",
+    "graph_destroy_hooks_active",
 ]
 
 
