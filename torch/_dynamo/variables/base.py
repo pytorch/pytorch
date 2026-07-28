@@ -838,7 +838,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
         #
-        # Returns None when the type has no nb_bool, causing generic_bool to
+        # Returns None when the type has no nb_bool, causing generic_is_true to
         # fall through to length check, then truthy default.
         return None
 
@@ -1198,7 +1198,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        # vt_getitem handles dispatch and raises TypeError for non-subscriptable
+        # generic_getitem handles dispatch and raises TypeError for non-subscriptable
         # objects.  This base fallback fires for types with mp_subscript at the
         # C level but no Dynamo override yet.
         unimplemented(
@@ -1215,7 +1215,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
-        # Key has already been converted to int via nb_index_impl by vt_getitem.
+        # Key has already been converted to int via nb_index_impl by generic_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
             context=f"sq_item_impl {self} {key}",
@@ -1304,9 +1304,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         if name == "__getitem__":
             if len(args) == 1 and not kwargs:
-                from .object_protocol import vt_getitem
+                from .object_protocol import generic_getitem
 
-                return vt_getitem(tx, self, args[0])
+                return generic_getitem(tx, self, args[0])
             raise_args_mismatch(
                 tx,
                 name,
@@ -1336,9 +1336,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         elif name == "__len__" and not (args or kwargs):
-            from .object_protocol import generic_len
+            from .object_protocol import generic_size
 
-            return generic_len(tx, self)
+            return generic_size(tx, self)
         elif name == "__str__" and not (args or kwargs):
             from .object_protocol import generic_str
 
