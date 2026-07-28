@@ -92,15 +92,10 @@ def running_on_tdm_device() -> bool:
     if not torch.version.hip or not HAS_GPU:
         return False
     try:
-        from torch._inductor.utils import is_gfx1250_arch
-        from torch.utils._triton import has_triton_amd_tdm_device
+        from torch._inductor.utils import _gfx1250_device_prereqs
 
-        match = re.match(r"(\d+)\.(\d+)", torch.version.hip)
-        if match is None or (int(match.group(1)), int(match.group(2))) < (7, 14):
-            return False
-        props = torch.cuda.get_device_properties(torch.cuda.current_device())
-        arch = getattr(props, "gcnArchName", "")
-        return is_gfx1250_arch(arch) and has_triton_amd_tdm_device(arch)
+        device = torch.device("cuda", torch.cuda.current_device())
+        return _gfx1250_device_prereqs(device)
     except Exception:
         return False
 
