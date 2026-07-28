@@ -76,7 +76,9 @@ Test_Cases = [
 ]
 Factory_Test_Cases = [FactoryFunctionCall, MutationFactory]
 Devices = ["cpu"]
-device_type = getattr(torch.accelerator.current_accelerator(), "type", None)
+device_type = getattr(
+    torch.accelerator.current_accelerator(check_available=True), "type", None
+)
 if device_type and device_type not in Devices:
     Devices.append(device_type)
 
