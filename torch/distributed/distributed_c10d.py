@@ -192,13 +192,19 @@ _XCCL_AVAILABLE = True
 try:
     try:
         # pyrefly: ignore [missing-import]
-        from torchcomms._comms import _BackendWrapper
+        from torchcomms._comms import (
+            _BackendWrapper,
+            _is_backend_registered as _torchcomms_is_backend_registered,
+        )
     except ImportError:
         # pyrefly: ignore [missing-import]
         from torchcomms._backend_wrapper import _BackendWrapper
 
+        def _torchcomms_is_backend_registered(backend: str) -> bool:
+            return False
+
     # pyrefly: ignore [missing-import]
-    from torchcomms import new_comm
+    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
 
     # pyrefly: ignore [missing-import]
     from torchcomms.hooks import FlightRecorderHook
@@ -207,10 +213,23 @@ try:
 except ImportError:
     _TORCHCOMM_AVAILABLE = False
 
+    def _torchcomms_is_backend_built(backend: str) -> bool:
+        return False
+
+    def _torchcomms_is_backend_registered(backend: str) -> bool:
+        return False
+
 
 def _use_torchcomms_enabled() -> bool:
     """Check if torchcomms is enabled via config."""
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
+
+
+def _is_torchcomms_backend(backend: str) -> bool:
+    return _use_torchcomms_enabled() and (
+        _torchcomms_is_backend_registered(backend)
+        or _torchcomms_is_backend_built(backend)
+    )
 
 
 def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
@@ -961,6 +980,27 @@ def _parse_backend_string(
             f"or use one of: {sorted(Backend.default_device_backend_map.values())}"
         )
     return dict.fromkeys(device_types, backend)
+
+
+def _get_default_backend_type_for_backend_config(
+    backend_config: BackendConfig,
+) -> ProcessGroup.BackendType:
+    if Backend.NCCL in backend_config.device_backend_map.values():
+        return ProcessGroup.BackendType.NCCL
+
+    custom_backend = next(
+        (
+            backend
+            for backend in backend_config.device_backend_map.values()
+            if Backend.backend_type_map.get(str(backend))
+            == ProcessGroup.BackendType.CUSTOM
+            or _is_torchcomms_backend(str(backend))
+        ),
+        None,
+    )
+    if custom_backend is not None:
+        return ProcessGroup.BackendType.CUSTOM
+    return ProcessGroup.BackendType.GLOO
 
 
 class _reduce_op:
@@ -2635,22 +2675,9 @@ def _new_process_group_helper(
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
     if not pg_backend_set:
-        if Backend.NCCL in backend_config.device_backend_map.values():
-            pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-        else:
-            custom_backend = next(
-                (
-                    backend
-                    for backend in backend_config.device_backend_map.values()
-                    if Backend.backend_type_map.get(str(backend))
-                    == ProcessGroup.BackendType.CUSTOM
-                ),
-                None,
-            )
-            if custom_backend is not None:
-                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+        pg._set_default_backend(
+            _get_default_backend_type_for_backend_config(backend_config)
+        )
 
     if device_id:
         pg.bound_device_id = device_id
