@@ -2557,11 +2557,14 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defined]
-            var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defined]
-                value._dynamo_static_input_type
-            )
+            # A tensor-subclass parameter (e.g. under torch.nn.utils.parametrize)
+            # can be tracked as a UserDefinedObjectVariable, which has no graph
+            # proxy node to annotate. mark_static_address above still marks it,
+            # so only stamp the metadata when there is a real tensor proxy node.
+            if isinstance(var, TensorVariable):
+                var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
+                    value._dynamo_static_input_type  # type: ignore[attr-defined]
+                )
 
     def wrap_module(self, value: torch.nn.Module) -> VariableTracker:
         from ..eval_frame import OptimizedModule

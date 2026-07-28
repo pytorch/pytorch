@@ -1701,6 +1701,46 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             # Recompile 2 times, first with dim 0 become Dynamic, second with dim 1 becomes Dynamic.
             test_automatic_dynamic(f, [x, b, z], dim_dynamic, 3, 3)
 
+    def test_parametrized_subclass_param_nested_graph_break(self):
+        # Regression test: under nested graph breaks, realizing the value stack
+        # for a partial subgraph routes a module with a tensor-subclass parameter
+        # through wrap_module -> mark_static_input. The subclass param is tracked
+        # as a UserDefinedObjectVariable (no graph proxy node), which previously
+        # crashed with "'UserDefinedObjectVariable' object has no attribute 'proxy'".
+        from torch.nn.utils.parametrize import (
+            register_parametrization,
+            remove_parametrizations,
+        )
+        from torch.testing._internal.common_subclass import (
+            subclass_db,
+            WrapperTensorWithCustomSizes,
+        )
+
+        create_fn = subclass_db[WrapperTensorWithCustomSizes].create_fn
+
+        def body():
+            class MyModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(create_fn((3, 3)))
+
+                def forward(self, x):
+                    return self.weight + x
+
+            class MyParametrization(torch.nn.Module):
+                def forward(self, X):
+                    return -X
+
+            m = MyModule()
+            register_parametrization(m, "weight", MyParametrization())
+            out = m(create_fn((3, 3)))
+            remove_parametrizations(m, "weight", leave_parametrized=True)
+            return out
+
+        self.assertTrue(torch._dynamo.config.nested_graph_breaks)
+        out = torch._dynamo.optimize("eager")(body)()
+        self.assertIsInstance(out, WrapperTensorWithCustomSizes)
+
     def test_compile_with_functionalization(self):
         x = torch.randn([3, 4])
         x_clone = x.clone()
@@ -2543,6 +2583,40 @@ class GraphModule(torch.nn.Module):
         out_ref = f(x)
         out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(out_ref, out_test)
+
+    def test_wrapper_subclass_hasattr_tensor_flatten(self):
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            if is_traceable_wrapper_subclass(x):
+                return torch.add(x, 1)
+            return torch.mul(x, 2)
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        result = f(x)
+        expected = torch.add(x, 1)
+        self.assertEqual(result._data, expected._data)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_wrapper_subclass_hasattr(self):
+        # Exercise TensorVariable.call_obj_hasattr for a wrapper subclass:
+        # an existing dunder (__tensor_flatten__, previously wrongly False),
+        # an existing instance attr, and a genuinely-absent attr (must be
+        # False, not True). Compare against eager hasattr.
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return (
+                hasattr(x, "__tensor_flatten__"),
+                hasattr(x, "_data"),
+                hasattr(x, "definitely_not_an_attr"),
+            )
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        self.assertEqual(f(x), (True, True, False))
 
     def test_support_bases(self):
         import torch.fx._symbolic_trace
