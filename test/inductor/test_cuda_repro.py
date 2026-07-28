@@ -55,14 +55,10 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
-from torch.utils._triton import has_triton_block_ptr
-
-
-# Tests that assert block-pointer codegen only run on Triton builds that still
-# provide the block-pointer frontend API (removed in triton-lang/triton#10833).
-requires_block_ptr = unittest.skipUnless(
-    has_triton_block_ptr(), "requires Triton block-pointer API"
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_block_ptr,
 )
 
 

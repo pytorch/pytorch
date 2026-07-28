@@ -140,7 +140,6 @@ from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.utils._triton import has_triton_block_ptr
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -162,6 +161,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MULTIGPU,
     HAS_TPU,
     IS_BIG_GPU,
+    requires_block_ptr,
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
@@ -1262,13 +1262,6 @@ def skip_if_not_triton(fn):
         return fn(self, *args, **kwargs)
 
     return wrapper
-
-
-# Tests that assert block-pointer codegen only run on Triton builds that still
-# provide the block-pointer frontend API (removed in triton-lang/triton#10833).
-requires_block_ptr = unittest.skipUnless(
-    has_triton_block_ptr(), "requires Triton block-pointer API"
-)
 
 
 def skip_if_dynamic(fn):

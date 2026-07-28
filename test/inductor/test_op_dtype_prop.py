@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.utils._triton import has_triton_block_ptr
 
 
 # Make the helper files in test/ importable
@@ -222,8 +223,12 @@ class TestCase(InductorTestCase):
                     re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
                 )
                 self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
-                # The output downcast is implicit in tl.store, so there is no
-                # explicit .to(<low-precision>) to assert on the default path.
+                # With block pointers the atan output carries an explicit
+                # downcast; on the default (masked) path that downcast is folded
+                # into tl.store, so only assert it where the block-pointer API is
+                # available (this test forces triton.use_block_ptr=True).
+                if convert_output and has_triton_block_ptr():
+                    self.assertIn(f".to({tl_dtype_str})", code)
                 return
 
             # Search the code with a regex.
