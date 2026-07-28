@@ -197,8 +197,8 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
 def _cute_scale_expr(
     op_name: str,
     source: Any,
-    max_value: float = 448.0,
-    rounding: str | None = None,
+    max_value: float,
+    rounding: str,
     *,
     tensorssa: bool = False,
 ) -> str:
@@ -213,7 +213,9 @@ def _cute_scale_expr(
                     f"cute.where({scale} < 0.015625, 0.015625, "
                     f"cute.where({scale} > 448.0, 448.0, {scale}))"
                 )
-                return f"({clamped}).to(cutlass.Float8E4M3FN).to(cutlass.Float32)"
+                return (
+                    f"({clamped}).to(cutlass.Float8E4M3FN).to(cutlass.Float32)"
+                )
             return (
                 f"cutlass.Float32(cutlass.max(cutlass.min({scale}, 448.0), 0.015625))"
             )
@@ -321,10 +323,9 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
     if op_name in ("mx_e8m0_scale", "nvfp4_e4m3_scale"):
         return _cute_scale_call(op_name, args, kwargs)
     if op_name == "nvfp4_pack":
-        source = args[0]
         return V.kernel.cse.generate(
             V.kernel.body,
-            f"nvfp4_pack_intrinsic({source})",
+            f"nvfp4_pack_intrinsic({args[0]})",
             dtype=torch.uint8,
         )
     try:

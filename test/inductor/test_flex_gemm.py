@@ -3822,6 +3822,25 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             with self.assertRaisesRegex(InductorError, "do not compose"):
                 torch.compile(captured, backend="inductor", fullgraph=True)(a, b, scale)
 
+        with self.subTest("chunked_contiguous_b"):
+            torch._dynamo.reset()
+
+            def chunked(a, b):
+                def epilogue(acc):
+                    gate, up = acc.chunk(2, dim=-1)
+                    return gate - up
+
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue,
+                    kernel_options={"backend": "QUACK"},
+                )
+
+            b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
+            with self.assertRaisesRegex(InductorError, "non-contiguous"):
+                torch.compile(chunked, backend="inductor", fullgraph=True)(a, b)
+
         with self.subTest("dynamic_n"):
             torch._dynamo.reset()
 
@@ -4472,6 +4491,37 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         FileCheck().check(code_check).check_not("local_reduce_finalize_fn").run(code)
         self.assertLocalReduceAuxCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_nvfp4_fragment_scale_feeds_main_with_e4m3_rounding(self):
+        m = n = 64
+        group = 16
+
+        def epilogue_fn(acc):
+            x = (acc.float() + 7.0).view(m, -1, group)
+            scale = nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True))
+            return (x * scale.float().reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, epilogue_fn(a @ b))
+        FileCheck().check("cutlass.Float8E4M3FN").check_not(
+            "local_reduce_finalize_fn"
+        ).run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

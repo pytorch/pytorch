@@ -468,12 +468,7 @@ def dispatch_gemm_act(
     local_reduce_output_layout = register_runtime_output_layout(
         local_reduce_layout, transposed=config.swap_ab
     )
-    quack_out, quack_aux_outs, quack_local_reduce_out, quack_c = (
-        out,
-        aux_outs,
-        None if local_reduce is None else local_reduce.out,
-        C,
-    )
+    quack_out, quack_aux_outs, quack_c = out, aux_outs, C
     if config.swap_ab:
         if main_transform is not None:
             raise NotImplementedError(
@@ -482,7 +477,6 @@ def dispatch_gemm_act(
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
         local_reduce = swap_local_reduce_plan(local_reduce)
-        quack_local_reduce_out = None if local_reduce is None else local_reduce.out
         quack_aux_outs = tuple(aux_out.mT for aux_out in aux_outs)
         quack_c = None if C is None else C.mT
         row_args, col_args = col_args, row_args
@@ -490,6 +484,8 @@ def dispatch_gemm_act(
         epilogue_arg_kinds = tuple(
             _SWAPPED_ARG_KIND[kind] for kind in epilogue_arg_kinds
         )
+
+    quack_local_reduce_out = None if local_reduce is None else local_reduce.out
 
     # QuACK expects a leading batch dim; 2-D (non-batched) operands get one here.
     quack_a = quack_a.unsqueeze(0) if quack_a.ndim == 2 else quack_a
