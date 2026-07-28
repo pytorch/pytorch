@@ -6158,6 +6158,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         part_names: Sequence[str],
     ) -> None:
         dtype = value.dtype
+        assert dtype is not None  # noqa: S101
         is_float8 = dtype in TRITON_FLOAT8_DTYPES
         value_expr = str(value)
         if is_float8:
@@ -6191,9 +6192,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         is_float8 = dtype in TRITON_FLOAT8_DTYPES
         if is_float8:
             value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
-        reshaped = self._reshape_expr(
-            value, pre_broadcast_shape, value_expr=value_expr
-        )
+        reshaped = self._reshape_expr(value, pre_broadcast_shape, value_expr=value_expr)
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
