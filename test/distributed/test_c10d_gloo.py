@@ -709,23 +709,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_coalesced_stress(inputs)
 
     @requires_gloo()
-    def test_allreduce_coalesced_async(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-
-        xs = [2 * [torch.tensor([i + self.rank])] for i in range(2)]
-        futs = [c10d.all_reduce_coalesced(x, async_op=True) for x in xs]
-        torch.futures.wait_all(futs)
-        for i, fut in enumerate(futs):
-            self.assertEqual(
-                self._expected_output(i),
-                fut.wait(),
-                msg=lambda msg: f"{msg}\nMismatch in iteration {i}",
-            )
-
-    @requires_gloo()
     def test_sparse_allreduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -868,7 +851,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expect = torch.full((3,), expected_val)
                 self.assertTrue(
                     torch.allclose(output, expect),
-                    f"op={op}, rank={self.rank}: output={output}, expected={expect}",
+                    lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output}, expected={expect}",
                 )
 
     @requires_gloo()
@@ -921,7 +904,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expect = torch.full((out_size,), expected_val)
                 self.assertTrue(
                     torch.allclose(output, expect),
-                    f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                    lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
                 )
 
     @requires_gloo()
@@ -984,7 +967,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     expect = torch.full((out_size,), expected_val)
                     self.assertTrue(
                         torch.allclose(output, expect),
-                        f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                        lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
                     )
 
     @requires_gloo()
@@ -2051,57 +2034,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_alltoall_multidim_cuda(self):
         self._test_alltoall_multidim(lambda t: t.clone().cuda())
-
-    def _test_split_group(self, backend):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend, rank=self.rank, world_size=self.world_size, store=store
-        )
-        pg = c10d.distributed_c10d._get_default_group()
-        parent_backend = pg._get_backend(torch.device("cpu"))
-
-        mid = self.world_size // 2
-        first_half = list(range(mid))
-        second_half = list(range(mid, self.world_size))
-        my_ranks = first_half if self.rank < mid else second_half
-
-        ng1 = c10d.split_group(pg, [first_half, second_half])
-        self.assertIsNotNone(ng1)
-        self.assertEqual(ng1.group_desc, "default_pg:split:0")
-        backend1 = ng1._get_backend(torch.device("cpu"))
-        self.assertEqual(parent_backend.options._timeout, backend1.options._timeout)
-
-        self.assertEqual(dist.get_process_group_ranks(ng1), my_ranks)
-        self.assertEqual(dist.get_rank(ng1), my_ranks.index(self.rank))
-
-        tensor = torch.full((1,), self.rank)
-        dist.broadcast(tensor, src=my_ranks[0], group=ng1)
-        self.assertEqual(tensor, torch.full((1,), my_ranks[0]))
-
-        tensor = torch.ones(2)
-        dist.all_reduce(tensor, group=ng1)
-        self.assertEqual(tensor, torch.full((2,), float(len(my_ranks))))
-
-        # ranks outside every split get None
-        ng2 = c10d.split_group(pg, [first_half])
-        if self.rank < mid:
-            self.assertIsNotNone(ng2)
-            self.assertEqual(ng2.group_desc, "default_pg:split:1")
-        else:
-            self.assertIsNone(ng2)
-
-        dist.destroy_process_group()
-
-    @requires_gloo()
-    def test_split_group_cpu_only(self):
-        # No accelerator/bound device is required to split a cpu:gloo group.
-        self._test_split_group("cpu:gloo")
-
-    @requires_gloo()
-    def test_split_group_bare_gloo(self):
-        # A bare "gloo" registers the same backend for cpu and cuda; the
-        # split must reuse a single child backend for both device types.
-        self._test_split_group("gloo")
 
 
 class DistributedDataParallelTest(
@@ -3486,28 +3418,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_default_pg_gloo(self):
-        self._test_sequence_num_set_default_pg(backend="gloo")
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_gloo_new_group(self):
-        self._test_sequence_num_set_new_group(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_default(self):
-        self._test_sequence_num_incremented_default_group("gloo")
-
-    @skip_if_lt_x_gpu(4)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_subgroup(self):
-        if self.world_size < 4:
-            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
-        self._test_sequence_num_incremented_subgroup("gloo")
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()

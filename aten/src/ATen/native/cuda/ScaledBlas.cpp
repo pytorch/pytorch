@@ -16,6 +16,7 @@
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/StringUtil.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
@@ -77,7 +78,10 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
         "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
-        "gfx950"
+        "gfx950",
+#endif
+#if ROCM_VERSION >= 71400
+        "gfx1250",
 #endif
     };
     return at::detail::getCUDAHooks().isGPUArch(archs);
@@ -96,6 +100,19 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 bool _scaled_mm_is_fnuz() {
     return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
+
+#if ROCM_VERSION >= 70000
+static void check_blockwise_e8m0fnu_arch_supported() {
+  std::vector<std::string> mx_archs{"gfx950"};
+#if ROCM_VERSION >= 71400
+  mx_archs.push_back("gfx1250");
+#endif
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      at::detail::getCUDAHooks().isGPUArch(mx_archs),
+      "Block-wise scaling for Float8_e8m0fnu is only supported on ",
+      c10::Join(",", mx_archs));
+}
+#endif
 #endif
 
 /*
@@ -367,8 +384,17 @@ _scaled_gemm(
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
           Tensor& out,
+          const std::optional<Tensor>& scale_result = std::nullopt,
           const std::optional<Tensor>& alpha = std::nullopt) {
-  cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
+  cublasCommonArgs args(
+      mat1,
+      mat2,
+      out,
+      scale_a,
+      scale_b,
+      isFloat8Type(out.scalar_type()) ? scale_result : std::nullopt,
+      scaling_choice_a,
+      scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
   if (_scaled_mm_allowed_device(true, false)) {
@@ -623,9 +649,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
   else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
 #ifdef USE_ROCM
-    #if ROCM_VERSION >= 70000
-    TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+#if ROCM_VERSION >= 70000
+    check_blockwise_e8m0fnu_arch_supported();
 
     int packed_factor = 1;
     if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
@@ -646,7 +671,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #endif
   }
 
-  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
+  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out, scale_result);
 }
 
 Tensor
@@ -1069,8 +1094,7 @@ _scaled_mxfp8_mxfp8(
 
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  check_blockwise_e8m0fnu_arch_supported();
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
@@ -1156,8 +1180,7 @@ _scaled_mxfp4_mxfp4(
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  check_blockwise_e8m0fnu_arch_supported();
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
@@ -1227,7 +1250,7 @@ _scaled_nvfp4_nvfp4(
 
   auto scaling_choice_a = ScalingType::BlockWise1x16;
   auto scaling_choice_b = ScalingType::BlockWise1x16;
-  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
+  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, std::nullopt, alpha);
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
 #endif

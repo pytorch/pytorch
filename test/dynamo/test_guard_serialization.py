@@ -574,16 +574,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "HINT: type",
                         verbose_str,
                         (
-                            "TYPE_MATCH guard should include 'HINT: type' "
-                            f"annotation.\nGuard: {verbose_str}"
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include 'HINT: type' "
+                                f"annotation.\nGuard: {verbose_str}"
+                            )
                         ),
                     )
                     self.assertIn(
                         "GlobalModule",
                         verbose_str,
                         (
-                            "TYPE_MATCH guard should include type name "
-                            f"'GlobalModule'.\nGuard: {verbose_str}"
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include type name "
+                                f"'GlobalModule'.\nGuard: {verbose_str}"
+                            )
                         ),
                     )
             for child_mgr in mgr.get_child_managers():
@@ -1525,7 +1531,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_ddp_module(self):
         import torch.distributed as dist
 

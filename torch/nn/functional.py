@@ -3323,7 +3323,7 @@ def gaussian_nll_loss(
             in the input (heteroscedastic), or a single one (homoscedastic),
             or a positive scalar value to be used for all expectations.
         full (bool, optional): Whether to include the constant term in the loss calculation. Default: ``False``.
-        eps (float, optional): Value added to var, for stability. Default: 1e-6.
+        eps (float, optional): Value used to clamp ``var`` to a minimum, for stability. Default: 1e-6.
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
@@ -5388,7 +5388,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
 
     Args:
         input (Tensor): input
-        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
 
@@ -5895,12 +5895,12 @@ Args:
 cosine_similarity = _add_docstr(
     torch.cosine_similarity,
     r"""
-cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
+cosine_similarity(x1, x2, dim=1, eps=1e-8, keepdim=False) -> Tensor
 
 Returns cosine similarity between ``x1`` and ``x2``, computed along dim. ``x1`` and ``x2`` must be broadcastable
-to a common shape. ``dim`` refers to the dimension in this common shape. Dimension ``dim`` of the output is
-squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 fewer dimension.
+to a common shape. ``dim`` refers to the dimension in this common shape. By default, dimension ``dim`` of the
+output is squeezed (see :func:`torch.squeeze`), resulting in the output tensor having 1 fewer dimension.
+When ``keepdim`` is ``True``, the output has the same number of dimensions as the inputs with size 1 at ``dim``.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2, \epsilon) \cdot \max(\Vert x_2 \Vert _2, \epsilon)}
@@ -5913,6 +5913,7 @@ Args:
     dim (int, optional): Dimension along which cosine similarity is computed. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
+    keepdim (bool, optional): Whether the output tensor retains :attr:`dim`. Default: False
 
 Example::
 
@@ -6470,8 +6471,9 @@ scaled_dot_product_attention = _add_docstr(
         For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
     For more information please see :doc:`/notes/numerical_accuracy`
 
-        Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention
-        and math kernel on CUDA tensor, and does not support Nested tensor.
+        Grouped Query Attention (GQA) is an experimental feature. It works with FlashAttention,
+        cuDNN attention, and the math kernel on CUDA tensors. Memory-efficient attention also supports
+        GQA on NVIDIA CUDA. GQA does not support Nested tensors.
         Constraints for GQA:
 
             - number_of_heads_query % number_of_heads_key_value == 0 and,
