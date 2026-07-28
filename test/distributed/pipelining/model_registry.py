@@ -4,6 +4,7 @@
 import torch
 from torch.autograd import Function
 from torch.distributed.pipelining import pipe_split, SplitPoint
+from torch.distributed.tensor import DTensor
 
 
 class ExampleCode(torch.nn.Module):
@@ -362,3 +363,34 @@ class MultiMLPWithDw(torch.nn.Module):
 
         for i in reversed(range(len(self.layers))):
             self.layers[i].compute_dW()
+
+
+class ConditionalGradBlock(torch.nn.Module):
+    def __init__(self, d_hid, conditional=True):
+        super().__init__()
+        self.conditional = conditional
+        self.lin = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x, flag):
+        local_flag = flag.to_local() if isinstance(flag, DTensor) else flag
+        if self.conditional and not bool(local_flag.flatten()[0].item()):
+            y = x.detach().requires_grad_(True)
+        else:
+            y = self.lin(x)
+        return y, flag
+
+
+class ConditionalGradStack(torch.nn.Module):
+    def __init__(self, d_hid, n_layers):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                ConditionalGradBlock(d_hid, conditional=i < n_layers - 1)
+                for i in range(n_layers)
+            ]
+        )
+
+    def forward(self, x, flag):
+        for layer in self.layers:
+            x, flag = layer(x, flag)
+        return x, flag

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from functools import lru_cache
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -27,6 +28,10 @@ log = logging.getLogger(__name__)
 # sympy.factor() in optimization_hint process for unbacked.
 # Factoring polynomials with many variables is expensive.
 SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
+
+# Maximum product of expression free symbols and non-symbol replacement count
+# before optimization_hint skips expensive SymPy subs() canonicalization.
+SYMPY_SUBS_MAX_SYMBOL_REPLACEMENT_PRODUCT = 1024
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -290,16 +295,40 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
     return shape_env._unbacked_replacements
 
 
+@lru_cache(maxsize=1024)
 def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
     """Substitute unbacked expressions with canonical equivalents.
-    Used by optimization_hint to maximize consistency when hinting unbacked symbols."""
+    Used by optimization_hint to maximize consistency when hinting unbacked symbols.
+    """
     replacements = _get_unbacked_replacements(shape_env)
+    symbol_replacements = {
+        k: v for k, v in replacements.items() if isinstance(k, sympy.Symbol)
+    }
+    expr_replacements = {
+        k: v for k, v in replacements.items() if not isinstance(k, sympy.Symbol)
+    }
 
     # consider making this threshold configurable
     sub_cnt_limit = 30
     sub_cnt = 0
     while sub_cnt < sub_cnt_limit:
-        new_expr = expr.subs(replacements)
+        if expr_replacements:
+            free_symbol_count = len(expr.free_symbols)
+            if (
+                free_symbol_count * len(expr_replacements)
+                <= SYMPY_SUBS_MAX_SYMBOL_REPLACEMENT_PRODUCT
+            ):
+                new_expr = expr.subs(replacements)
+            else:
+                new_expr = _sympy_subs(expr, symbol_replacements)
+                log.debug(
+                    "Skipping %d expensive unbacked expression substitutions "
+                    "over %d free symbols in optimization_hint",
+                    len(expr_replacements),
+                    free_symbol_count,
+                )
+        else:
+            new_expr = _sympy_subs(expr, symbol_replacements)
         if new_expr == expr:
             break
         if len(new_expr.free_symbols) <= SYMPY_FACTOR_MAX_FREE_SYMBOLS:
@@ -313,6 +342,67 @@ def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
     expr = _sympy_subs(expr, shape_env.backed_var_to_val)
     expr = _sympy_subs(expr, shape_env.var_to_hint_override)
     return expr
+
+
+def _hint_bounds_from_runtime_asserts(
+    shape_env: ShapeEnv, s: sympy.Symbol
+) -> tuple[int | None, int | None]:
+    """Concrete ``(lower, upper)`` bounds for an unbacked symbol derived from the
+    runtime asserts, with backed symbols replaced by their hint values.
+
+    Relational invariants such as ``u0 <= s44`` live only in
+    ``deferred_runtime_asserts`` -- ``var_to_range`` keeps the loose
+    ``[0, unbacked_symint_fallback]``. Feeding these bounds into the size hint keeps
+    it consistent with the graph: e.g. a reducing slice ``x[u0:]`` sized ``s44 - u0``
+    cannot hint negative, because ``u0`` is capped at ``s44``'s hint instead of the
+    generic fallback. Only linear single-symbol bounds (``c*s + k <= 0``) with
+    concrete integer coefficients are used, so this never tightens past what the
+    asserts prove; anything else is skipped.
+    """
+    lower: int | None = None
+    upper: int | None = None
+    backed = shape_env.backed_var_to_val
+    # Read only the asserts keyed to this symbol (bounds on an unbacked symbol
+    # only ever live there); guards constrain backed symbols and would just be a
+    # wasted scan.
+    try:
+        for ra in shape_env.deferred_runtime_asserts.get(s, ()):
+            ax = ra.expr
+            if not isinstance(ax, sympy.Basic):
+                continue
+            # Substitute backed hints, so e.g. ``u0 <= s44`` becomes ``u0 <= 16``.
+            ax = ax.xreplace(backed)
+            if s not in ax.free_symbols:
+                continue
+            # Normalize the relation to ``g < 0`` (strict) or ``g <= 0``.
+            if isinstance(ax, sympy.LessThan):
+                g, strict = ax.lhs - ax.rhs, False
+            elif isinstance(ax, sympy.StrictLessThan):
+                g, strict = ax.lhs - ax.rhs, True
+            elif isinstance(ax, sympy.GreaterThan):
+                g, strict = ax.rhs - ax.lhs, False
+            elif isinstance(ax, sympy.StrictGreaterThan):
+                g, strict = ax.rhs - ax.lhs, True
+            else:
+                continue
+            # Require g == c*s + k with concrete integer c, k (no other free syms).
+            c = g.coeff(s, 1)
+            k = g.coeff(s, 0)
+            if g - (c * s + k) != 0 or not (c.is_Integer and k.is_Integer):
+                continue
+            c, k = int(c), int(k)
+            if c == 0:
+                continue
+            thr = sympy.Rational(-k, c)  # c*s + k (<|<=) 0  ->  s (<|<=) thr, c>0
+            if c > 0:
+                bnd = int(sympy.ceiling(thr) - 1) if strict else int(sympy.floor(thr))
+                upper = bnd if upper is None else min(upper, bnd)
+            else:  # dividing by c<0 flips the inequality: s (>|>=) thr
+                bnd = int(sympy.floor(thr) + 1) if strict else int(sympy.ceiling(thr))
+                lower = bnd if lower is None else max(lower, bnd)
+    except Exception:
+        pass
+    return lower, upper
 
 
 def _optimization_hint_base(
@@ -414,23 +504,39 @@ def _optimization_hint_base(
         raise RuntimeError(f"Expected sympy Expr, got {type(expr)}: {expr}")
     free_symbols = expr.free_symbols
 
-    # Constrain fallback per-symbol based on var_to_range bounds
+    # Constrain fallback per-symbol based on var_to_range bounds, then tighten
+    # further with invariants that live only in the runtime asserts (e.g.
+    # u0 <= s44). Without the latter, an unbacked symbol keeps its generic
+    # fallback even when the graph proves it is bounded by a backed dim, so a
+    # size expression like s44 - u0 can hint negative and overflow downstream
+    # allocations (autotuning example tensors, buffer sizing).
     size_dict = {}
     for s in free_symbols:
-        sym_fallback = fallback
+        lower: int | None = None
+        upper: int | None = None
         vr = shape_env.var_to_range.get(s, None)
         if vr is not None:
             if isinstance(vr.lower, (int, sympy.Integer)):
-                sym_fallback = max(sym_fallback, int(vr.lower))
+                lower = int(vr.lower)
             if isinstance(vr.upper, (int, sympy.Integer)):
-                sym_fallback = min(sym_fallback, int(vr.upper))
+                upper = int(vr.upper)
+        ra_lower, ra_upper = _hint_bounds_from_runtime_asserts(shape_env, s)
+        if ra_lower is not None:
+            lower = ra_lower if lower is None else max(lower, ra_lower)
+        if ra_upper is not None:
+            upper = ra_upper if upper is None else min(upper, ra_upper)
+        sym_fallback = fallback
+        if lower is not None:
+            sym_fallback = max(sym_fallback, lower)
+        if upper is not None:
+            sym_fallback = min(sym_fallback, upper)
         size_dict[s] = sym_fallback
 
     try:
-        final_result = expr.subs(size_dict)
+        final_result = _sympy_subs(expr, size_dict)
     except ZeroDivisionError:
-        # Expressions like ModularIndexing(x, u1, 4) crash during subs()
-        # when u1 is substituted with 0, because sympy eagerly evaluates
+        # Expressions like ModularIndexing(x, u1, 4) crash during substitution
+        # when u1 is replaced with 0, because sympy eagerly evaluates
         # (x // 0) % 4.  This can happen when an unbacked symbol with
         # var_to_range lower=0 is used as a divisor (e.g. from
         # _dynamic_reshape_indexer) and the fallback also maps to 0.

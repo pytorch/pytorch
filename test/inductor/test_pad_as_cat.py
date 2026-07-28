@@ -72,7 +72,7 @@ class TestCatMultiConsumer(TestCase):
         self.assertEqual(
             metrics.num_bytes_accessed,
             expected_bytes,
-            f"Expected {expected_bytes} bytes, got {metrics.num_bytes_accessed}.",
+            lambda msg: f"{msg}\nExpected {expected_bytes} bytes, got {metrics.num_bytes_accessed}.",
         )
 
 
