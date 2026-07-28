@@ -14,7 +14,9 @@ from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.scheduler import (
+    _fuse_epilogue,
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
@@ -198,6 +200,28 @@ class TestScheduler(TestCase):
 
         self.assertEqual(
             groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
+        )
+
+    def test_fuse_epilogue_rejects_zero_unfused_occupancy(self):
+        device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            regs_per_multiprocessor=65536,
+            warp_size=32,
+        )
+
+        self.assertFalse(
+            _fuse_epilogue(
+                ms1=0.1,
+                ms2=0.3,
+                unfused_n_regs=1024,
+                fused_n_regs=1024,
+                fused_n_spills=0,
+                num_warps=4,
+                device_props=device_props,
+            )
         )
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
