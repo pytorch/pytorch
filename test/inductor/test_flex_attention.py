@@ -2069,6 +2069,230 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_mps
+    # Wider R coverage lives in test_score_mod_contraction_matches_unfused, which
+    # does not need the eager reference's [B, H, M, N, R] intermediate.
+    @common_utils.parametrize("R", [16, 17])
+    @common_utils.parametrize("causal", [False, True])
+    # Only the fused forward computes the contraction with a tl.dot; the backward
+    # still unrolls it, so it needs the threshold above the contracted extent.
+    @torch._inductor.config.patch(unroll_reductions_threshold=129)
+    def test_score_mod_contraction(self, device, R: int, causal: bool):
+        """MLA's decoupled rope term: score + dot(q_rope[b, h, m], k_rope[b, h, n])."""
+        dtype = torch.float16
+        Sq = 128
+        # float32 operands: the fused dot accumulates in float32 while the eager
+        # reference the golden is measured against would sum in the capture dtype,
+        # so float16 operands would make the golden the least accurate of the three.
+        # They also pin the dot's input_precision, which tf32 would degrade.
+        scale = R**-0.25
+        q_rope = torch.randn(B, H, Sq, R, device=device) * scale
+        k_rope = torch.randn(B, H, Sq, R, device=device) * scale
+
+        # Spelled as mul + sum rather than torch.dot so the eager reference, which
+        # calls score_mod with broadcast index tensors, can run it too.
+        def rope_bias(score, b, h, m, n):
+            return score + (q_rope[b, h, m] * k_rope[b, h, n]).sum(-1)
+
+        block_mask = None
+        if causal:
+            block_mask = create_block_mask(
+                lambda b, h, m, n: m >= n, B, H, Sq, Sq, device=device
+            )
+        self.run_test(
+            rope_bias, dtype, device=device, Q_S=Sq, KV_S=Sq, block_mask=block_mask
+        )
+
+    def _contraction_score_mod(self, device, R, spelling):
+        dtype = torch.float16
+        # Scaled like a real rope term, so the bias stays O(1) instead of O(sqrt(R))
+        # and does not drive the softmax somewhere unrepresentative.
+        scale = R**-0.25
+        q_rope = torch.randn(B, H, S, R, device=device, dtype=dtype) * scale
+        k_rope = torch.randn(B, H, S, R, device=device, dtype=dtype) * scale
+
+        def dot(score, b, h, m, n):
+            return score + torch.dot(q_rope[b, h, m], k_rope[b, h, n])
+
+        def mul_sum(score, b, h, m, n):
+            return score + (q_rope[b, h, m] * k_rope[b, h, n]).sum(-1)
+
+        return dot if spelling == "dot" else mul_sum
+
+    def _contraction_qkv(self, device, Sq):
+        q = torch.randn(B, H, Sq, D, device=device, dtype=torch.float16)
+        k, v = (
+            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+            for _ in range(2)
+        )
+        return q, k, v
+
+    def _compile_flex(self, qkv, score_mod, fuse, **kwargs):
+        q, k, v = qkv
+        torch._dynamo.reset()
+        with torch.no_grad(), config.patch(flex_fuse_score_mod_contraction=fuse):
+            out, code = run_and_get_code(
+                torch.compile(flex_attention), q, k, v, score_mod=score_mod, **kwargs
+            )
+        return out, "\n".join(code)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    # R below tl.dot's minimum contracted extent, not a power of two, and above
+    # BLOCK_N; both spellings of the dot.
+    @common_utils.parametrize(
+        "R,spelling", [(8, "dot"), (48, "mul_sum"), (64, "dot"), (128, "dot")]
+    )
+    @torch._inductor.config.patch(unroll_reductions_threshold=129)
+    def test_score_mod_contraction_matches_unfused(self, device, R: int, spelling: str):
+        score_mod = self._contraction_score_mod(device, R, spelling)
+        qkv = self._contraction_qkv(device, S)
+        fused_out, fused_code = self._compile_flex(qkv, score_mod, True)
+        unfused_out, unfused_code = self._compile_flex(qkv, score_mod, False)
+
+        self.assertIn("qk_extra = tl.dot", fused_code)
+        self.assertNotIn("qk_extra = tl.dot", unfused_code)
+        # One dot for qk, one for the contraction, one for the pv accumulation.
+        self.assertEqual(fused_code.count("tl.dot"), 3)
+        # The unrolled form loads every contracted element separately.
+        self.assertLess(fused_code.count("tl.load"), unfused_code.count("tl.load"))
+        torch.testing.assert_close(fused_out, unfused_out, atol=2e-3, rtol=2e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    # Two of these still hold a reduction after the detector rejects them, so they
+    # only compile at all with the threshold above the contracted extent.
+    @torch._inductor.config.patch(unroll_reductions_threshold=17)
+    def test_score_mod_contraction_not_fused_when_unsupported(self, device):
+        dtype = torch.float16
+        R = 16
+        q_rope = torch.randn(B, H, S, R, device=device, dtype=dtype)
+        k_rope = torch.randn(B, H, S, R, device=device, dtype=dtype)
+        bias = torch.randn(B, H, S, S, device=device, dtype=dtype)
+        head_scale = torch.randn(H, device=device, dtype=dtype)
+
+        # Both operands indexed by the query position: not a q-by-kv term.
+        def q_by_q(s, b, h, m, n):
+            return s + torch.dot(q_rope[b, h, m], k_rope[b, h, m])
+
+        # A transformed head index would need its own broadcast handling.
+        def shared_heads(s, b, h, m, n):
+            return s + torch.dot(q_rope[b, h, m], k_rope[b, h // 2, n])
+
+        unsupported = {
+            "full bias": lambda s, b, h, m, n: s + bias[b, h, m, n],
+            "scalar capture": lambda s, b, h, m, n: s + head_scale[h],
+            "no capture": lambda s, b, h, m, n: s * 2.0,
+            "q by q": q_by_q,
+            "shared heads": shared_heads,
+        }
+        qkv = self._contraction_qkv(device, S)
+        for name, score_mod in unsupported.items():
+            with self.subTest(score_mod=name):
+                fused_out, fused_code = self._compile_flex(qkv, score_mod, True)
+                unfused_out, _ = self._compile_flex(qkv, score_mod, False)
+                self.assertNotIn("qk_extra", fused_code, f"{name} should not fuse")
+                self.assertEqual(fused_out, unfused_out)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # uses Triton max_autotune (no autotuning on MPS)
+    @patch.object(torch._inductor.config, "max_autotune", True)
+    @torch._inductor.config.patch(unroll_reductions_threshold=17)
+    def test_score_mod_contraction_max_autotune(self, device):
+        """Autotuning benchmarks each choice with materialized tensors, so it is
+        the path that would catch the operands being passed in the wrong order."""
+        R = 16
+        # A capture that is not part of the contraction, and comes before the two
+        # that are, so the operand order cannot come out right by accident.
+        head_scale = torch.rand(H, device=device, dtype=torch.float16) + 0.5
+        q_rope = torch.randn(B, H, S, R, device=device, dtype=torch.float16)
+        k_rope = torch.randn(B, H, S, R, device=device, dtype=torch.float16)
+
+        def rope_bias(score, b, h, m, n):
+            return score * head_scale[h] + torch.dot(q_rope[b, h, m], k_rope[b, h, n])
+
+        qkv = self._contraction_qkv(device, S)
+        fused_out, fused_code = self._compile_flex(qkv, rope_bias, True)
+        unfused_out, _ = self._compile_flex(qkv, rope_bias, False)
+        self.assertIn("qk_extra = tl.dot", fused_code)
+        torch.testing.assert_close(fused_out, unfused_out, atol=2e-3, rtol=2e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @torch._inductor.config.patch(unroll_reductions_threshold=17)
+    def test_score_mod_contraction_short_query_falls_back(self, device):
+        """A decode tile spans several query heads, so the kv operand differs per
+        row of the tile and the contraction is not a single matmul there."""
+        dtype = torch.float16
+        R, Sq = 16, 8
+        q_rope = torch.randn(B, H, Sq, R, device=device, dtype=dtype)
+        k_rope = torch.randn(B, H, S, R, device=device, dtype=dtype)
+
+        def rope_bias(score, b, h, m, n):
+            return score + torch.dot(q_rope[b, h, m], k_rope[b, h, n])
+
+        qkv = self._contraction_qkv(device, Sq)
+        outs = []
+        for fuse in (True, False):
+            out, code = self._compile_flex(qkv, rope_bias, fuse)
+            self.assertNotIn("qk_extra", code)
+            outs.append(out)
+        self.assertEqual(outs[0], outs[1])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @torch._inductor.config.patch(unroll_reductions_threshold=17)
+    def test_score_mod_contraction_backward_unchanged(self, device):
+        """Fusing the forward must not change what the backward does, including
+        for captures that require grad (which the backward cannot handle yet)."""
+        dtype = torch.float16
+        R = 16
+
+        def outcome(fuse: bool, captures_require_grad: bool):
+            torch.manual_seed(0)
+            rope = functools.partial(
+                torch.randn,
+                B,
+                H,
+                S,
+                R,
+                device=device,
+                dtype=dtype,
+                requires_grad=captures_require_grad,
+            )
+            q_rope, k_rope = rope(), rope()
+            qkv = functools.partial(
+                torch.randn, B, H, S, D, device=device, dtype=dtype, requires_grad=True
+            )
+            q, k, v = qkv(), qkv(), qkv()
+
+            def rope_bias(score, b, h, m, n):
+                return score + torch.dot(q_rope[b, h, m], k_rope[b, h, n])
+
+            torch._dynamo.reset()
+            with config.patch(flex_fuse_score_mod_contraction=fuse):
+                try:
+                    out = torch.compile(flex_attention)(q, k, v, score_mod=rope_bias)
+                    out.sum().backward()
+                except Exception as e:
+                    return type(e).__name__, None
+            return None, (q.grad, k.grad, v.grad)
+
+        for captures_require_grad in (False, True):
+            with self.subTest(captures_require_grad=captures_require_grad):
+                fused_exc, fused_grads = outcome(True, captures_require_grad)
+                ref_exc, ref_grads = outcome(False, captures_require_grad)
+                self.assertEqual(fused_exc, ref_exc)
+                if fused_grads is not None:
+                    self.assertEqual(fused_grads, ref_grads, atol=2e-3, rtol=2e-3)
+
+    @supported_platform
+    @skip_on_cpu
     @expected_not_implemented_on_mps
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """

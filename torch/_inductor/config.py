@@ -1034,6 +1034,11 @@ force_pointwise_cat = False
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
+# In flex attention, compute a q-by-kv contraction in score_mod (MLA's decoupled
+# rope term, say) with an extra tl.dot on the score tile instead of unrolling it
+# into one multiply-add per contracted element.
+flex_fuse_score_mod_contraction = True
+
 # Add extra comments to output code (causes compile cache misses)
 comment_origin = False
 

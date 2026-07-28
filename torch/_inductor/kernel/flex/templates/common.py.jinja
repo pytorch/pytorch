@@ -16,6 +16,10 @@ def forward_block_mn(
     # Strides for K and V
     stride_kk, stride_kn, stride_vn, stride_vk,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
+    {%- if HAS_QK_CONTRACTION %}
+    # Operands of a contraction lifted out of score_mod
+    CONTRACT_Q=None, CONTRACT_KV=None,
+    {%- endif %}
 
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
@@ -50,6 +54,34 @@ def forward_block_mn(
     m = get_bounded_indices(offs_m, Q_LEN if CHECK_BLOCK_BOUNDARY else None)
     n = get_bounded_indices(offs_n, KV_LEN if CHECK_BLOCK_BOUNDARY else None)
 
+    {%- if HAS_QK_CONTRACTION %}
+    # -- compute a contraction the score_mod asked for over a trailing dim,
+    # dot(CONTRACT_Q[z, h, m, :], CONTRACT_KV[z, h, n, :]), as a tile matmul --
+    stride_cqz, stride_cqh, stride_cqm, stride_cqr = {{stride("CONTRACT_Q")}}
+    stride_ckz, stride_ckh, stride_ckn, stride_ckr = {{stride("CONTRACT_KV")}}
+    offs_r = tl.arange(0, CONTRACT_EXTENT_ROUNDED)
+    offs_cn = kv_base_offset + tl.arange(0, BLOCK_N)
+    # The rounded extent pads with masked-off lanes, which contribute 0 to the dot.
+    r_valid = offs_r[None, :] < CONTRACT_EXTENT
+    cq = tl.load(
+        CONTRACT_Q + off_z * stride_cqz + off_h * stride_cqh
+        + offs_m.to(INDEX_DTYPE) * stride_cqm + offs_r[None, :].to(INDEX_DTYPE) * stride_cqr,
+        mask=r_valid & (offs_m < Q_LEN),
+        other=0.0,
+    )
+    ck = tl.load(
+        CONTRACT_KV + off_z * stride_ckz + off_h * stride_ckh
+        + offs_cn[:, None].to(INDEX_DTYPE) * stride_ckn + offs_r[None, :].to(INDEX_DTYPE) * stride_ckr,
+        mask=r_valid & (offs_cn[:, None] < KV_LEN),
+        other=0.0,
+    )
+    # Not FLOAT32_PRECISION: score_mod spelled this as a reduction, not a matmul,
+    # so float32 operands must not silently lose mantissa bits to tf32.
+    qk_extra = tl.dot(cq, tl.trans(ck), input_precision="ieee")
+    {%- endif %}
+
+    {# qk_extra is only loaded by a score_mod whose contraction was fused, so it
+       costs nothing to hand it to every kernel. #}
     {{ modification(
         subgraph_number=0,
         output_name="post_mod_scores",
@@ -58,9 +90,11 @@ def forward_block_mn(
         h="off_h",
         m="m",
         n="n",
+        qk_extra="qk_extra",
         out="qk",
         input_shapes={
             "score": ("BLOCK_M", "BLOCK_N"),
+            "qk_extra": ("BLOCK_M", "BLOCK_N"),
             "m": ("BLOCK_M", "1"),
             "n": ("1", "BLOCK_N"),
         },
@@ -161,6 +195,10 @@ def forward_inner(
     # Strides for K and V
     stride_kk, stride_kn, stride_vn, stride_vk,
     IS_FULL_BLOCKS,
+    {%- if HAS_QK_CONTRACTION %}
+    # Operands of a contraction lifted out of score_mod
+    CONTRACT_Q=None, CONTRACT_KV=None,
+    {%- endif %}
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
@@ -191,6 +229,9 @@ def forward_inner(
                 # Strides for K and V
                 stride_kk, stride_kn, stride_vn, stride_vk,
                 IS_FULL_BLOCKS,
+                {%- if HAS_QK_CONTRACTION %}
+                CONTRACT_Q=CONTRACT_Q, CONTRACT_KV=CONTRACT_KV,
+                {%- endif %}
             )
         else:
             # Benchmark shows even we applied mod & mask to each block for non divisible seqlen,
@@ -211,6 +252,9 @@ def forward_inner(
                 # Strides for K and V
                 stride_kk, stride_kn, stride_vn, stride_vk,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
+                {%- if HAS_QK_CONTRACTION %}
+                CONTRACT_Q=CONTRACT_Q, CONTRACT_KV=CONTRACT_KV,
+                {%- endif %}
             )
 
 

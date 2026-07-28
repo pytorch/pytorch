@@ -1,4 +1,8 @@
+{%- if HAS_QK_CONTRACTION %}
+{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "CONTRACT_Q", "CONTRACT_KV")}}
+{%- else %}
 {{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+{%- endif %}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -161,6 +165,9 @@
         MATMUL_PRECISION,
         stride_kk, stride_kn, stride_vn, stride_vk,
         IS_FULL_BLOCKS=False,
+        {%- if HAS_QK_CONTRACTION %}
+        CONTRACT_Q=CONTRACT_Q, CONTRACT_KV=CONTRACT_KV,
+        {%- endif %}
     )
 
     # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -187,6 +194,9 @@
             MATMUL_PRECISION,
             stride_kk, stride_kn, stride_vn, stride_vk,
             IS_FULL_BLOCKS=True,
+            {%- if HAS_QK_CONTRACTION %}
+            CONTRACT_Q=CONTRACT_Q, CONTRACT_KV=CONTRACT_KV,
+            {%- endif %}
         )
 
 

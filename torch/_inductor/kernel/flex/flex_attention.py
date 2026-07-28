@@ -16,6 +16,7 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
+from ... import config
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
@@ -29,6 +30,7 @@ from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
     build_subgraph_buffer,
+    build_subgraph_module_buffer,
     can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
@@ -42,6 +44,11 @@ from .common import (
     realize_captures_for_cutedsl,
     set_head_dim_values,
     SubgraphResults,
+)
+from .contraction import (
+    CONTRACTION_INPUT_NAME,
+    NUM_SCORE_MOD_FIXED_ARGS,
+    rewrite_score_mod_for_contraction,
 )
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
@@ -115,6 +122,58 @@ def _check_flash_supported_scalar_captures(
             "Workarounds: use BACKEND='TRITON' or pass the value as a tensor "
             "on device instead of capturing a CPU scalar tensor."
         )
+
+
+def _fuse_score_mod_contraction(
+    subgraph,
+    score_mod_other_buffers,
+    placeholder_inps,
+    query,
+) -> tuple[SubgraphResults, list[TensorBox], dict[str, Any]] | None:
+    """Lift a q-by-kv contraction out of score_mod and into an extra tl.dot.
+
+    Returns the subgraph buffer rebuilt around a tile-valued input, the two
+    operands the template contracts, and the kernel options describing them.
+    None means the score_mod has no contraction we can fuse, in which case the
+    caller keeps the subgraph it already built.
+    """
+    rewritten = rewrite_score_mod_for_contraction(subgraph.graph_module)
+    if rewritten is None:
+        return None
+    fused_graph_module, contraction = rewritten
+
+    q_operand, kv_operand = maybe_realize(
+        [
+            score_mod_other_buffers[arg - NUM_SCORE_MOD_FIXED_ARGS]
+            for arg in (contraction.q_arg, contraction.kv_arg)
+        ]
+    )
+    # tl.dot wants one floating point dtype for both operands, and the two have to
+    # be distinct buffers to arrive as two distinct template arguments.
+    dtype = q_operand.get_dtype()
+    if dtype != kv_operand.get_dtype() or not dtype.is_floating_point:
+        return None
+    if q_operand.get_name() == kv_operand.get_name():
+        return None
+
+    tile = create_placeholder(
+        CONTRACTION_INPUT_NAME, contraction.out_dtype, query.get_device()
+    )
+    subgraph_buffer = build_subgraph_module_buffer(
+        placeholder_inps + list(score_mod_other_buffers) + [tile],
+        fused_graph_module,
+    )
+    freeze_irnodes(subgraph_buffer)
+
+    return (
+        subgraph_buffer,
+        [q_operand, kv_operand],
+        {
+            "HAS_QK_CONTRACTION": True,
+            "CONTRACT_EXTENT": contraction.contract_extent,
+            "CONTRACT_EXTENT_ROUNDED": contraction.contract_extent_rounded,
+        },
+    )
 
 
 @SymbolicGridFn
@@ -250,10 +309,31 @@ def flex_attention(
             ("n", torch.int32),
         ]
     ]
-    subgraph_buffer = build_subgraph_buffer(
-        placeholder_inps + list(score_mod_other_buffers), subgraph
+
+    def build_unfused_score_mod_buffer() -> SubgraphResults:
+        buffer = build_subgraph_buffer(
+            placeholder_inps + list(score_mod_other_buffers), subgraph
+        )
+        freeze_irnodes(buffer)
+        return buffer
+
+    # The contraction has to be lifted out before the subgraph is lowered: as a
+    # reduction it has no pointwise lowering at all, so lowering it is what fails
+    # today. Only the main Triton template has the mod point for it, so the paths
+    # dispatched to below rebuild the original subgraph.
+    contraction_operands: list[TensorBox] = []
+    contraction_options: dict[str, Any] = {}
+    fused = (
+        _fuse_score_mod_contraction(
+            subgraph, score_mod_other_buffers, placeholder_inps, query
+        )
+        if config.flex_fuse_score_mod_contraction
+        else None
     )
-    freeze_irnodes(subgraph_buffer)
+    if fused is not None:
+        subgraph_buffer, contraction_operands, contraction_options = fused
+    else:
+        subgraph_buffer = build_unfused_score_mod_buffer()
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -274,6 +354,9 @@ def flex_attention(
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    # Only the main Triton forward template can fuse a score_mod contraction, but
+    # the decode template shares the same block body, so define the flag for both.
+    kernel_options.setdefault("HAS_QK_CONTRACTION", False)
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
@@ -290,6 +373,8 @@ def flex_attention(
         )
 
     if use_decode:
+        if contraction_operands:
+            subgraph_buffer = build_unfused_score_mod_buffer()
         return create_flex_decoding_kernel(
             query,
             key,
@@ -338,6 +423,8 @@ def flex_attention(
         num_score_mod_placeholders=len(placeholder_inps),
         backend=backend,
     ):
+        if contraction_operands:
+            subgraph_buffer = build_unfused_score_mod_buffer()
         return create_flex_flash_attention_kernel(
             query,
             key,
@@ -364,6 +451,8 @@ def flex_attention(
 
     freeze_irnodes(score_mod_other_buffers)
     freeze_irnodes(mask_mod_other_buffers)
+
+    kernel_options.update(contraction_options)
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
@@ -523,6 +612,7 @@ def flex_attention(
                 kv_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
+                *contraction_operands,
             ],
             layout=layout,
             subgraphs=[
@@ -541,26 +631,29 @@ def flex_attention(
 
     # Let the active choices handler append any backend-specific flex-attention
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
-    choices = V.choices.append_flex_attention_choices(
-        choices,
-        configs,
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ],
-        [subgraph_buffer, mask_graph_buffer],
-        layout,
-        original_kernel_options,
-        SPARSE_Q_BLOCK_SIZE,
-        SPARSE_KV_BLOCK_SIZE,
-    )
+    # Those templates do not carry the contraction mod point, so a fused
+    # subgraph buffer would not be renderable against them.
+    if not contraction_operands:
+        choices = V.choices.append_flex_attention_choices(
+            choices,
+            configs,
+            [
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+            ],
+            [subgraph_buffer, mask_graph_buffer],
+            layout,
+            original_kernel_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -571,6 +664,8 @@ def flex_attention(
             SPARSE_KV_BLOCK_SIZE,
         )
 
+    # Deduplicated by buffer name downstream, so the contraction operands have to
+    # come in their kernel argument order: template inputs, then captures.
     inputs_for_autotuning = (
         [
             query,
@@ -582,6 +677,7 @@ def flex_attention(
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            *contraction_operands,
         ]
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
