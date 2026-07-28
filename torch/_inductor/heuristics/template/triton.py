@@ -2145,13 +2145,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
             allow_tf32 = torch.backends.mkldnn.allow_tf32
         elif device_type == "cuda":
-            # allow_tf32 alignment heuristics based on reverse engineering
-            # H100 CUDA 12.8 behavior
-            size_threshold = V.graph.sizevars.statically_known_true(
-                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-            )
+            # Use the size hint (statically_known_true is False for symbolic
+            # dims) so dynamic-but-large GEMMs still enable TF32.
+            m_hint, min_nk_hint = V.graph.sizevars.optimization_hints((m, Min(n, k)))
             allow_tf32 = (
-                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
+                torch.backends.cuda.matmul.fp32_precision == "tf32"
+                and m_hint >= 16
+                and min_nk_hint >= 512
             )
         else:
             allow_tf32 = False
