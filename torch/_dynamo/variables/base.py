@@ -1766,7 +1766,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
         #
-        # Returns None when the type has no nb_bool, causing generic_bool to
+        # Returns None when the type has no nb_bool, causing generic_is_true to
         # fall through to length check, then truthy default.
         return None
 
@@ -2126,7 +2126,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        # vt_getitem handles dispatch and raises TypeError for non-subscriptable
+        # generic_getitem handles dispatch and raises TypeError for non-subscriptable
         # objects.  This base fallback fires for types with mp_subscript at the
         # C level but no Dynamo override yet.
         unimplemented(
@@ -2143,7 +2143,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
-        # Key has already been converted to int via nb_index_impl by vt_getitem.
+        # Key has already been converted to int via nb_index_impl by generic_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
             context=f"sq_item_impl {self} {key}",
