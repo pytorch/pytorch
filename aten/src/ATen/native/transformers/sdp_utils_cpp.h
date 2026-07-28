@@ -374,6 +374,23 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
     }
     return false;
   }
+  // A zero key/value head count divides nothing, so it has to be rejected before
+  // the divisibility check below, which would otherwise be integer division by
+  // zero (SIGFPE).
+  if (k_num_heads == 0 || v_num_heads == 0) {
+    if (debug) {
+      TORCH_WARN(
+          "Both fused kernels require key and value to have a nonzero num_heads.",
+          "Got input Key sizes(): ",
+          params.key.sym_size(-3),
+          ", Value sizes(): ",
+          params.value.sym_size(-3),
+          ", Query sizes(): ",
+          params.query.sym_size(-3),
+          " instead.");
+    }
+    return false;
+  }
   // Check if grouped query attention is supported and validate the number of
   // heads
   if (q_num_heads % k_num_heads != 0 || (!requires_same_num_heads && (q_num_heads % v_num_heads != 0))) {

@@ -1598,6 +1598,23 @@ class TestTransformers(NNTestCase):
 
         torch.jit.script(mha)
 
+    def test_multi_head_attention_zero_num_head(self, device):
+        # num_head is a plain argument, and dividing the embedding dim by it used
+        # to abort the process with SIGFPE rather than raise for num_head=0.
+        embed_dim = 16
+        make_tensor = partial(torch.rand, device=device, dtype=torch.float32)
+        qkv = make_tensor((2, 8, 3 * embed_dim))
+        qkv_bias = make_tensor((3 * embed_dim,))
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten._transform_bias_rescale_qkv(qkv, qkv_bias, 0)
+
+        x = make_tensor((2, 8, embed_dim))
+        proj_weight, proj_bias = make_tensor((embed_dim, embed_dim)), make_tensor((embed_dim,))
+        with self.assertRaisesRegex(RuntimeError, "must divide evenly"):
+            torch.ops.aten._native_multi_head_attention(
+                x, x, x, embed_dim, 0, make_tensor((3 * embed_dim, embed_dim)), qkv_bias,
+                proj_weight, proj_bias, None, False, True, None)
+
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
     @torch.no_grad()
     def test_disable_fastpath(self, device):
@@ -1895,6 +1912,35 @@ class TestSDPAFailureModes(NNTestCase):
                                            "key and value to have"):
                     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0,
                                                    is_causal=False, enable_gqa=False)
+
+    @parametrize("key_heads", [0, 3])
+    def test_invalid_gqa_key_heads(self, device, key_heads):
+        # A zero key head count divides nothing, and used to reach an unguarded
+        # `q_num_heads % k_num_heads` that aborted the process with SIGFPE
+        # instead of raising. key_heads=3 is the ordinary non-divisible case.
+        make_tensor = partial(torch.rand, device=device, dtype=torch.float32)
+        q = make_tensor(SdpaShape(2, 4, 8, 16))
+        k = make_tensor(SdpaShape(2, key_heads, 8, 16))
+        v = make_tensor(SdpaShape(2, 4, 8, 16))
+        with self.assertRaisesRegex(RuntimeError, "must divide the number of heads in query"):
+            F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+
+    def test_gqa_empty_inputs_are_not_rejected(self, device):
+        # Rejecting zero key/value head counts must not reject shapes that are
+        # merely empty: all-zero head counts, and an empty key/value sequence.
+        make_tensor = partial(torch.rand, device=device, dtype=torch.float32)
+        empty_heads = make_tensor(SdpaShape(2, 0, 8, 16))
+        out = F.scaled_dot_product_attention(empty_heads, empty_heads, empty_heads, enable_gqa=True)
+        self.assertEqual(out.shape, torch.Size([2, 0, 8, 16]))
+
+        q = make_tensor(SdpaShape(2, 4, 8, 16))
+        empty_seq = make_tensor(SdpaShape(2, 4, 0, 16))
+        out = F.scaled_dot_product_attention(q, empty_seq, empty_seq, enable_gqa=True)
+        self.assertEqual(out, torch.zeros_like(out))
+
+        kv = make_tensor(SdpaShape(2, 2, 8, 16))
+        out = F.scaled_dot_product_attention(make_tensor(SdpaShape(2, 8, 8, 16)), kv, kv, enable_gqa=True)
+        self.assertEqual(out.shape, torch.Size([2, 8, 8, 16]))
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
@@ -2526,6 +2572,20 @@ class TestSDPA(NNTestCase):
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
+
+    def test_flash_attention_for_cpu_zero_kv_heads(self, device):
+        # The ops are reachable directly, so they need their own guard: the kernel
+        # divides the query head count by the key/value head count.
+        make_tensor = partial(torch.rand, device=device, dtype=torch.float32)
+        q = make_tensor(SdpaShape(2, 4, 8, 16))
+        kv = make_tensor(SdpaShape(2, 0, 8, 16))
+        with self.assertRaisesRegex(RuntimeError, "nonzero number of heads"):
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(q, kv, kv)
+
+        logsumexp = make_tensor((2, 8, 4))
+        with self.assertRaisesRegex(RuntimeError, "nonzero number of heads"):
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward(
+                q, q, kv, kv, q, logsumexp, 0.0, False)
 
     @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
@@ -4382,6 +4442,47 @@ class TestSDPACudaOnly(NNTestCase):
         if TEST_WITH_ROCM:
             atol = 9e-4 if dtype == torch.float16 else 9e-3
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
+    @parametrize("kv_heads", [(0, 0), (0, 4), (4, 0)])
+    def test_fused_kernel_eligibility_zero_kv_heads(self, device, kv_heads):
+        # Backend eligibility divides the query head count by the key/value head
+        # count, so a zero count used to abort the process with SIGFPE instead of
+        # reporting the backend as unusable.
+        key_heads, value_heads = kv_heads
+        make_tensor = partial(torch.rand, device=device, dtype=torch.float16)
+        q = make_tensor(SdpaShape(2, 4, 8, 16))
+        k = make_tensor(SdpaShape(2, key_heads, 8, 16))
+        v = make_tensor(SdpaShape(2, value_heads, 8, 16))
+        params = torch.backends.cuda.SDPAParams(q, k, v, None, 0.0, False, True)
+        self.assertFalse(torch.backends.cuda.can_use_flash_attention(params, False))
+        self.assertFalse(torch.backends.cuda.can_use_efficient_attention(params, False))
+        self.assertFalse(torch.backends.cuda.can_use_cudnn_attention(params, False))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support flash attention")
+    def test_flash_attention_zero_kv_heads(self, device):
+        # The ops are reachable directly, so they need their own guard: the kernel
+        # divides the query head count by the key/value head count.
+        make_tensor = partial(torch.rand, device=device, dtype=torch.float16)
+        with self.assertRaisesRegex(RuntimeError, "nonzero number of heads"):
+            torch.ops.aten._scaled_dot_product_flash_attention(
+                make_tensor(SdpaShape(2, 4, 8, 16)), make_tensor(SdpaShape(2, 0, 8, 16)),
+                make_tensor(SdpaShape(2, 0, 8, 16)))
+
+        # _flash_attention_forward takes (batch, seq_len, num_heads, head_dim) instead
+        with self.assertRaisesRegex(RuntimeError, "nonzero number of heads"):
+            torch.ops.aten._flash_attention_forward(
+                make_tensor((2, 8, 4, 16)), make_tensor((2, 8, 0, 16)), make_tensor((2, 8, 0, 16)),
+                None, None, 8, 8, 0.0, False, False)
+
+        q = make_tensor(SdpaShape(2, 4, 8, 16))
+        kv = make_tensor(SdpaShape(2, 0, 8, 16))
+        logsumexp = torch.rand(2, 4, 8, device=device)
+        philox = torch.zeros((), device=device, dtype=torch.int64)
+        cum_seq = torch.empty(0, device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "nonzero number of heads"):
+            torch.ops.aten._scaled_dot_product_flash_attention_backward(
+                q, q, kv, kv, q, logsumexp, cum_seq, cum_seq, 8, 8, 0.0, False, philox, philox)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("type", ["dense", "nested"])

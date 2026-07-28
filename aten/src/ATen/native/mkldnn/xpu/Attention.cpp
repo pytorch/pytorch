@@ -306,7 +306,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       query.size(3) == key.size(3),
       "scaled_dot_product_fused_attention_overrideable_xpu: Q/K should have the same head_dim");
   TORCH_INTERNAL_ASSERT(
-      query.size(1) % key.size(1) == 0,
+      key.size(1) > 0 && query.size(1) % key.size(1) == 0,
       "scaled_dot_product_fused_attention_overrideable_xpu: number of heads in K/V must divide number of heads in Q");
   TORCH_INTERNAL_ASSERT(
       dropout_p == 0.0,

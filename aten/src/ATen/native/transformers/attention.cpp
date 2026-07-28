@@ -247,7 +247,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   auto T = qkv_->size(1);
   auto _3D = qkv_->size(2);
   auto D = _3D / 3;
-  TORCH_CHECK(D % num_head == 0);
+  TORCH_CHECK(num_head > 0 && D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
   TORCH_CHECK(_3D % 3 == 0);
   const auto dim_per_head = D / num_head;
   auto q_k_v = at::empty({3, B, num_head, T, dim_per_head}, qkv_->options());
@@ -332,7 +332,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   TORCH_CHECK(
       qkv_bias.sizes()[0] == 3 * D,
       "expected `qkv_bias` first dim and first dim of query to be equal");
-  TORCH_CHECK(D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
+  TORCH_CHECK(num_head > 0 && D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
 
 #ifndef NDEBUG
   const auto B = query.is_nested()
@@ -666,10 +666,15 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
   const auto v_num_heads = value.sym_size(-3);
 
   bool all_equal = q_num_heads == k_num_heads && k_num_heads == v_num_heads;
-  bool key_divisible = q_num_heads % k_num_heads == 0;
-  bool value_divisible = q_num_heads % v_num_heads == 0;
+  // A zero key/value head count divides nothing, so it has to be rejected before
+  // the divisibility math below, which would otherwise be integer division by
+  // zero (SIGFPE) rather than a catchable error.
+  bool kv_num_heads_nonzero = k_num_heads > 0 && v_num_heads > 0;
+  bool key_divisible = kv_num_heads_nonzero && q_num_heads % k_num_heads == 0;
+  bool value_divisible = kv_num_heads_nonzero && q_num_heads % v_num_heads == 0;
   TORCH_CHECK(all_equal || (key_divisible && value_divisible),
-              "Number of heads in key and value must divide the number of heads in ");
+              "Number of heads in key and value must divide the number of heads in query, but got ",
+              q_num_heads, " query heads, ", k_num_heads, " key heads and ", v_num_heads, " value heads.");
 
   if (all_equal){
     return std::make_tuple(key, value);
@@ -954,6 +959,11 @@ _scaled_dot_product_flash_attention_cpu(
     "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
     "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
+  // A zero head count would be integer division by zero (SIGFPE) in the kernel's
+  // query-head grouping.
+  TORCH_CHECK(key.size(1) > 0 && value.size(1) > 0,
+    "scaled_dot_product_attention_flash_attention: K/V should have a nonzero number of heads, but got ",
+    key.size(1), " key heads and ", value.size(1), " value heads");
   TORCH_CHECK(!attn_mask.has_value() ||
           attn_mask.value().scalar_type() == at::kFloat ||
           dtype == attn_mask.value().scalar_type(),
@@ -991,6 +1001,11 @@ _scaled_dot_product_flash_attention_cpu_backward(
   if (!grad_out.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
+  // A zero head count would be integer division by zero (SIGFPE) in the kernel's
+  // query-head grouping.
+  TORCH_CHECK(key.size(1) > 0 && value.size(1) > 0,
+    "scaled_dot_product_attention_flash_attention_backward: K/V should have a nonzero number of heads, but got ",
+    key.size(1), " key heads and ", value.size(1), " value heads");
   auto grad_out_t = grad_out.transpose(1, 2);
   auto q_t = query.transpose(1, 2);
   auto k_t = key.transpose(1, 2);

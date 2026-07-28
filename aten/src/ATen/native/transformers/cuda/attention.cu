@@ -524,6 +524,12 @@ _flash_attention_forward_impl(
       cumulative_sequence_length_q.has_value() ==
           cumulative_sequence_length_k.has_value(),
       "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
+  // Both paths lay key/value out as (..., num_heads, head_dim). A zero head count
+  // would be integer division by zero (SIGFPE) in the kernel's query-head grouping.
+  TORCH_CHECK(
+      key.size(-2) > 0 && value.size(-2) > 0,
+      "Key and Value must have a nonzero number of heads, but got ",
+      key.size(-2), " key heads and ", value.size(-2), " value heads");
   Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
       philox_seed, philox_offset, debug_attn_mask;
   if (cumulative_sequence_length_q.has_value()) {
@@ -631,7 +637,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
   }
   auto _3D = qkv_bias.size(0);
   auto D = _3D / 3;
-  TORCH_CHECK(D % num_head == 0);
+  TORCH_CHECK(num_head > 0 && D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
   const auto dim_per_head = D / num_head;
   auto q_k_v = at::empty({3, B, num_head, T, dim_per_head}, qkv_bias.options());
 #define CALL_KERNEL(assume_aligned)                                        \
@@ -775,7 +781,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   TORCH_CHECK(
       qkv_bias.sizes()[0] == 3 * D,
       "expected `qkv_bias` first dim and first dim of query to be equal");
-  TORCH_CHECK(D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
+  TORCH_CHECK(num_head > 0 && D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
 
 #ifndef NDEBUG
   const auto B = query.is_nested()

@@ -118,6 +118,12 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
+  // key/value are (batch, seq_len, num_heads, head_dim) here. A zero head count
+  // would be integer division by zero (SIGFPE) in the kernel's query-head grouping.
+  TORCH_CHECK(
+      key.size(-2) > 0 && value.size(-2) > 0,
+      "Key and Value must have a nonzero number of heads, but got ",
+      key.size(-2), " key heads and ", value.size(-2), " value heads");
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
