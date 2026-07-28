@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 import functools
 import itertools
 import logging
@@ -35,7 +36,27 @@ log = logging.getLogger(__name__)
 _ONES_ALPHA: dict = {}
 
 
-@functools.cache
+@dataclasses.dataclass(frozen=True)
+class _EpilogueABI:
+    inputs: tuple
+    input_kinds: tuple[int, ...]
+    outputs: tuple
+    output_count: int
+    primary_output: int
+
+    @classmethod
+    def from_args(cls, args, tensor_attr: str) -> _EpilogueABI:
+        outputs, output_count, primary_output = _epilogue_outputs(args, tensor_attr)
+        return cls(
+            _epilogue_tensors(args, tensor_attr),
+            _epilogue_tensor_kinds(args),
+            outputs,
+            output_count,
+            primary_output,
+        )
+
+
+@functools.lru_cache(maxsize=256)
 def _epilogue_signature(epilogue_fn) -> tuple[tuple[str, ...], tuple[str, ...]]:
     from cutlass.operators.fusion import trace_in_out
 
@@ -56,7 +77,7 @@ def _epilogue_tensors(args, attr: str) -> tuple:
         ()
         if epilogue is None
         else tuple(
-            getattr(epilogue.tensors[name], attr)
+            getattr(_epilogue_abi_tensor(epilogue.tensors[name]), attr)
             for name in _epilogue_input_names(epilogue.epilogue_fn)
         )
     )
@@ -65,17 +86,42 @@ def _epilogue_tensors(args, attr: str) -> tuple:
     return tensors + (None,) * (4 - len(tensors))
 
 
+def _epilogue_abi_tensor(tensor):
+    runtime_tensor = tensor.runtime_tensor
+    leading = runtime_tensor.shape[0]
+    if leading % 8 == 0:
+        return tensor
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    padded_shape = (leading + 7) // 8 * 8, *runtime_tensor.shape[1:]
+    import torch
+
+    padded = torch.empty(
+        padded_shape,
+        dtype=runtime_tensor.dtype,
+        device=runtime_tensor.device,
+    )
+    padded[:leading].copy_(runtime_tensor)
+    return TensorWrapper(padded)
+
+
 def _epilogue_tensor_kinds(args) -> tuple[int, ...]:
     epilogue = getattr(args, "epilogue", None)
     if epilogue is None:
         return (0, 0, 0, 0)
     kinds = []
+    output_m, output_n = args.out.shape[-2:]
     for name in _epilogue_input_names(epilogue.epilogue_fn):
         shape = epilogue.tensors[name].shape
         if shape[-1] == 1 and (len(shape) == 1 or shape[-2] == 1):
-            raise NotImplementedError(
-                "NVGEMM scaled epilogues do not support scalar tensor inputs"
-            )
+            if output_n == 1:
+                kinds.append(2)
+            elif output_m == 1:
+                kinds.append(3)
+            else:
+                raise NotImplementedError(
+                    "NVGEMM scaled epilogues do not support scalar tensor inputs"
+                )
         elif len(shape) == 1 or shape[-2] == 1:
             kinds.append(2)
         elif shape[-1] == 1:
@@ -120,6 +166,23 @@ def _ones_alpha():
         tw = TensorWrapper(torch.ones(4, dtype=torch.float32, device=f"cuda:{dev}"))
         _ONES_ALPHA[dev] = tw
     return tw
+
+
+def _epilogue_op_scope(cute):
+    def relu(x):
+        return cute.math.max(x, cute.full_like(x, 0.0))
+
+    def sigmoid(x):
+        return 1.0 / (1.0 + cute.math.exp(-x))
+
+    return {
+        "erf": cute.math.erf,
+        "exp": cute.math.exp,
+        "relu": relu,
+        "sigmoid": sigmoid,
+        "silu": lambda x: x * sigmoid(x),
+        "tanh": cute.math.tanh,
+    }
 
 
 try:
@@ -211,16 +274,10 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     for node in ast.parse(epilogue_op).body
                     if isinstance(node, ast.FunctionDef)
                 )
-                scope = {
-                    "relu": lambda x: cute.math.max(x, cute.full_like(x, 0.0))
-                }
+                scope = _epilogue_op_scope(cute)
                 exec(epilogue_op, scope)
                 epilogue_op = scope[fn_name]
-        epilogue_tensors = _epilogue_tensors(args, "compile_time_tensor")
-        epilogue_tensor_kinds = _epilogue_tensor_kinds(args)
-        epilogue_outputs, output_count, primary_output = _epilogue_outputs(
-            args, "compile_time_tensor"
-        )
+        epilogue = _EpilogueABI.from_args(args, "compile_time_tensor")
         local_reduce_out = getattr(args, "local_reduce_out", None)
         local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
         if local_reduce_out is not None or local_reduce_feeds_main:
@@ -236,20 +293,20 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 epilogue_op,
                 self.metadata.operands.out.dtype,
                 alpha,
-                *epilogue_tensors,
-                *epilogue_tensor_kinds,
-                *epilogue_outputs,
-                output_count,
-                primary_output,
+                *epilogue.inputs,
+                *epilogue.input_kinds,
+                *epilogue.outputs,
+                epilogue.output_count,
+                epilogue.primary_output,
                 (
                     local_reduce_out.compile_time_tensor
                     if local_reduce_out is not None
                     else None
                 ),
-                getattr(args, "local_reduce_group"),
-                getattr(args, "local_reduce_axis"),
-                getattr(args, "local_reduce_type"),
-                getattr(args, "local_reduce_source"),
+                args.local_reduce_group,
+                args.local_reduce_axis,
+                args.local_reduce_type,
+                args.local_reduce_source,
                 local_reduce_feeds_main,
                 target_sm=target_sm,
             )
@@ -265,11 +322,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             epilogue_op,
             self.metadata.operands.out.dtype,
             alpha,
-            *epilogue_tensors,
-            *epilogue_tensor_kinds,
-            *epilogue_outputs,
-            output_count,
-            primary_output,
+            *epilogue.inputs,
+            *epilogue.input_kinds,
+            *epilogue.outputs,
+            epilogue.output_count,
+            epilogue.primary_output,
             target_sm=target_sm,
         )
 
@@ -293,8 +350,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = _ones_alpha()
-        epilogue_tensors = _epilogue_tensors(args, "runtime_tensor")
-        epilogue_outputs, _, _ = _epilogue_outputs(args, "runtime_tensor")
+        epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
 
         local_reduce_out = getattr(args, "local_reduce_out", None)
         local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
@@ -308,8 +364,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 args.out.tensor,
                 stream,
                 alpha,
-                *epilogue_tensors,
-                *epilogue_outputs,
+                *epilogue.inputs,
+                *epilogue.outputs,
                 local_reduce_out.runtime_tensor if local_reduce_out is not None else None,
             )
             return
@@ -323,8 +379,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args.out.tensor,
             stream,
             alpha,
-            *epilogue_tensors,
-            *epilogue_outputs,
+            *epilogue.inputs,
+            *epilogue.outputs,
             None,
         )
 
@@ -341,8 +397,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if local_reduce_out is not None or getattr(
             args, "local_reduce_feeds_main", False
         ):
-            group = getattr(args, "local_reduce_group")
-            axis = getattr(args, "local_reduce_axis")
+            group = args.local_reduce_group
+            axis = args.local_reduce_axis
             m, n = args.out.shape[-2:]
             selected_size = n if axis == 1 else m
             max_group = self.mma_tiler_mn[axis] if axis == 1 else 16
