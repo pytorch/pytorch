@@ -708,9 +708,9 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
-        elif issubclass(user_cls, collections.OrderedDict):
-            variable_cls = variables.OrderedDictVariable
         elif issubclass(user_cls, dict):
+            # Includes collections.OrderedDict and its subclasses; the
+            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
