@@ -4780,6 +4780,32 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self._test_pass_nccl_options(pg_opts)
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_comm_name(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "comm_name"):
+            raise SkipTest(
+                "comm_name binding absent (PyTorch might be built against NCCL < 2.27.3)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        new_comm_name = "test_comm"
+        pg_opts.config.comm_name = new_comm_name
+        self.assertEqual(pg_opts.config.comm_name, new_comm_name)
+        os.environ["NCCL_DEBUG"] = "INFO"
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+            # Tests functionality when passing nccl config
+            self._test_pass_nccl_options(pg_opts)
+            nccl_debug_file_content = nccl_debug_file.read()
+        comm_name = re.search(
+            rb"Comm config Comm name set to (.*)|$", nccl_debug_file_content
+        ).group(1)
+        self.assertEqual(pg_opts.config.comm_name, comm_name.decode())
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -7484,6 +7510,41 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
         torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_if_lt_x_gpu(8)
+    def test_split_group_partial_then_2d_teardown(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190396.
+        # destroy_process_group() used to hang when collectives were run on child
+        # groups created by a partial split_group followed by additional splits.
+        # Root cause: _hash_ranks_to_str used len(_world.pg_names) as the
+        # uniqueness suffix, which diverges across ranks when non-member ranks
+        # don't register a partial split's PG. Co-participants in the same NCCL
+        # communicator then computed different PG names, causing inconsistent
+        # teardown ordering and circular ncclCommFinalize waits.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+
+        # Partial 5-rank group: ranks 5,6,7 are non-members.
+        partial = c10d.split_group(pg, [[0, 1, 2, 3, 4]])
+        if partial is not None:
+            dist.all_reduce(torch.ones(1, device=device), group=partial)
+
+        # 4 rank-pairs, all 8 ranks are members of one subgroup.
+        pairs = c10d.split_group(pg, [[0, 4], [1, 5], [2, 6], [3, 7]])
+        if pairs is not None:
+            dist.all_reduce(torch.ones(1, device=device), group=pairs)
+
+        # 2-D split, all 8 ranks are members of one subgroup.
+        half = c10d.split_group(pg, [[0, 1, 2, 3], [4, 5, 6, 7]])
+        if half is not None:
+            dist.all_reduce(torch.ones(1, device=device), group=half)
+
+        dist.barrier(pg)
+        torch.cuda.synchronize()
+        # This must not hang.
         dist.destroy_process_group()
 
 

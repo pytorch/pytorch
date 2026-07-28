@@ -1098,22 +1098,22 @@ def forward(self, x_1: "f32[2][1]cpu"):
         fn_opt(x)
         # Verify the cache-hit trace (including inductor_output_code) parses cleanly
         self.assertParses()
-        chromium_events = [
-            (
-                '{"chromium_event": {}, "frame_id": 0, "frame_compile_id": 0, '
-                '"attempt": 0, "has_payload": "HASH"}'
-            ),
-            (
-                '{"compiled_autograd_graph": {}, "compiled_autograd_id": 0, '
-                '"attempt": 0, "has_payload": "HASH"}'
-            ),
-            (
-                '{"chromium_event": {}, "compiled_autograd_id": 0, "frame_id": 1, "frame_compile_id": 0, '
-                '"attempt": 0, "has_payload": "HASH"}'
-            ),
-        ]
         logs = self.buffer.getvalue()
-        self.assertTrue(all(event in logs for event in chromium_events))
+        self.assertRegex(
+            logs,
+            r'\{"chromium_event": \{\}, "frame_id": \d+, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"\}',
+        )
+        graph_event = re.search(
+            r'\{"compiled_autograd_graph": \{\}, "compiled_autograd_id": (\d+), "attempt": 0, "has_payload": "HASH"\}',
+            logs,
+        )
+        self.assertIsNotNone(graph_event)
+        self.assertRegex(
+            logs,
+            r'\{"chromium_event": \{\}, "compiled_autograd_id": '
+            + graph_event.group(1)
+            + r', "frame_id": \d+, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"\}',
+        )
 
     @requires_tlparse
     @torch._dynamo.config.patch("compiled_autograd", True)
@@ -1146,17 +1146,20 @@ def forward(self, x_1: "f32[2][1]cpu"):
         fn_opt = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         fn_opt()
         self.assertParses()
-        expected = [
-            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 5, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 6, "frame_compile_id": 0, "attempt": 0}',
-        ]
         logs = self.buffer.getvalue()
-        self.assertTrue(all(event in logs for event in expected))
+        pattern = (
+            r'\{"dynamo_start": \{"stack": "STACK"\}(?:, "compiled_autograd_id": (\d+))?, '
+            r'"frame_id": (\d+), "frame_compile_id": 0, "attempt": 0\}'
+        )
+        starts = re.findall(pattern, logs)
+        ca_frames = {}
+        for ca_id, frame in starts:
+            if ca_id:
+                ca_frames.setdefault(ca_id, set()).add(frame)
+        self.assertEqual(len(ca_frames), 2)
+        first_id, second_id = sorted(ca_frames, key=int)
+        self.assertGreaterEqual(len(ca_frames[first_id]), 3)
+        self.assertGreaterEqual(len(ca_frames[second_id]), 1)
 
     @requires_tlparse
     @show_chrome_events

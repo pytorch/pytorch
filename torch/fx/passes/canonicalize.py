@@ -12,6 +12,7 @@ Provides two passes:
 import collections
 import heapq
 import itertools
+import operator
 from collections.abc import Callable
 
 import torch
@@ -176,12 +177,65 @@ def _sink_get_attr_nodes(order: list[fx.Node]) -> None:
         order.extend(remaining)
 
 
+def _group_getitem_nodes(order: list[fx.Node]) -> None:
+    """Move each getitem node to immediately after its producer, in index order.
+
+    Serialization does not store getitem nodes as free-standing nodes; the
+    deserializer reconstructs them right after their producer, index-ordered
+    (see ``generate_getitems`` in ``torch/_export/serde/serialize.py``).  If
+    canonicalization leaves getitems interleaved with other computation, the
+    serialize/deserialize roundtrip produces a different node order.  This pass
+    normalizes getitem placement to match the deserializer so the canonical
+    form is roundtrip-stable.  Nested getitems (from list-typed outputs) are
+    emitted depth-first, matching the recursive reconstruction.
+
+    Relies on each getitem's producer (``args[0]``) being a node present in
+    ``order``, and on a getitem sharing its producer's ``nn_module_stack``
+    scope (so pulling it adjacent stays within that scope).  Both hold for
+    graphs FX/export produce; the count assertion below guards against silent
+    node loss if they ever don't.
+    """
+    children: dict[fx.Node, list[fx.Node]] = collections.defaultdict(list)
+    getitems: set[fx.Node] = set()
+    for node in order:
+        if node.op == "call_function" and node.target is operator.getitem:
+            children[node.args[0]].append(node)  # type: ignore[index]
+            getitems.add(node)
+    if not getitems:
+        return
+
+    def _index(node: fx.Node) -> tuple[int, int, str]:
+        idx = node.args[1]
+        return (0, idx, "") if isinstance(idx, int) else (1, 0, str(idx))
+
+    for group in children.values():
+        group.sort(key=_index)
+
+    new_order: list[fx.Node] = []
+
+    def _emit(node: fx.Node) -> None:
+        new_order.append(node)
+        for child in children.get(node, ()):
+            _emit(child)
+
+    for node in order:
+        if node not in getitems:
+            _emit(node)
+    if len(new_order) != len(order):
+        raise AssertionError(
+            f"getitem grouping lost nodes: {len(new_order)} != {len(order)} "
+            "(a getitem's producer is missing from the order)"
+        )
+    order[:] = new_order
+
+
 def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
     is_safe_to_reorder: Callable[[fx.Node], bool],
     *,
     skip_rename_ops: frozenset[str] = frozenset(),
+    group_getitems: bool = False,
 ) -> dict[str, str]:
     """Reorder graph nodes into a canonical topological order and rename them.
 
@@ -203,6 +257,10 @@ def canonicalize_graph(
             pure nodes are confined to their barrier segment.
         skip_rename_ops: Node ops to skip renaming. Skipped nodes keep their
             original names.
+        group_getitems: If True, place getitem nodes immediately after their
+            producer (index-ordered) so the order matches what serialization's
+            deserializer reconstructs. Enable for graphs that get serialized
+            (e.g. export) to keep the serialize/deserialize roundtrip stable.
 
     Returns:
         A mapping from old node name to new node name for nodes that were
@@ -240,8 +298,12 @@ def canonicalize_graph(
     # The counter is a tiebreaker that prevents heapq from comparing
     # fx.Node objects (which have no __lt__). It only affects nodes with
     # identical canonical keys -- i.e., structurally equivalent operations
-    # (same target, same input indices). Those are CSE candidates and
-    # genuinely interchangeable, so any ordering between them is canonical.
+    # (same target, same input indices). These are usually CSE-equivalent and
+    # value-interchangeable, so the fallback to trace order is fine. This is
+    # best-effort canonical labeling: it does not refine equal-key nodes by
+    # their consumers' argument positions, so two graphs that are isomorphic
+    # only under swapping such nodes may still get different (but value-equal)
+    # labelings.
     counter = 0
     ready: list[tuple[object, int, fx.Node]] = []
     for node in graph.nodes:
@@ -274,6 +336,9 @@ def canonicalize_graph(
         )
 
     _sink_get_attr_nodes(canonical_order)
+
+    if group_getitems:
+        _group_getitem_nodes(canonical_order)
 
     # Purge erased nodes that are still physically in the linked list.
     # erase_node() sets _erased=True and unlinks the node, but stale

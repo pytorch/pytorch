@@ -3719,6 +3719,27 @@ class TestAutograd(TestCase):
         self.assertIs(next_functions[0][0], a.grad_fn)
         self.assertIs(next_functions[1][0], None)
 
+    def test_copy_slices_wrapped_node(self):
+        leaf = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        base = leaf.clone()
+        view = base[:2]
+        view_grad_fn = view.grad_fn
+        view.exp_()
+
+        copy_slices = base.grad_fn
+        wrapped_node = copy_slices._wrapped_node
+        self.assertIsInstance(copy_slices, torch._C._functions.CopySlices)
+        self.assertEqual(wrapped_node.name(), "ExpBackward0")
+        self.assertIs(copy_slices._wrapped_node, wrapped_node)
+        # exp_ saves its result after rebase_history creates CopySlices.
+        self.assertEqual(wrapped_node._saved_result, view)
+        self.assertEqual(wrapped_node._input_metadata[0].shape, view.shape)
+        self.assertIs(wrapped_node.next_functions[0][0], view_grad_fn)
+
+        base.sum().backward()
+        self.assertEqual(leaf.grad, torch.tensor([math.exp(1), math.exp(2), 1.0, 1.0]))
+        self.assertIsNone(copy_slices._wrapped_node)
+
     def test_inplace(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
@@ -15942,6 +15963,90 @@ class TestNestedCheckpoint(TestCase):
             expected_grads = torch.autograd.grad(out, (a, b))
             for actual, expected in zip(actual_grads, expected_grads):
                 self.assertTrue(torch.allclose(actual, expected))
+
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
+    def test_checkpoint_curried_kwargs_do_not_collide_with_checkpoint_kwargs(self):
+        def fn(
+            a,
+            preserve_rng_state,
+            use_reentrant,
+            context_fn,
+            determinism_check,
+            debug,
+            early_stop,
+        ):
+            return (
+                a.sin()
+                * preserve_rng_state
+                * use_reentrant
+                * context_fn
+                * determinism_check
+                * debug
+                * early_stop
+            )
+
+        a = torch.tensor(2.0, requires_grad=True)
+        wrapped_fn = checkpoint(use_reentrant=False, preserve_rng_state=False)(fn)
+        out = wrapped_fn(
+            a,
+            preserve_rng_state=2,
+            use_reentrant=3,
+            context_fn=5,
+            determinism_check=7,
+            debug=11,
+            early_stop=13,
+        )
+        actual_grad = torch.autograd.grad(out, (a,))
+
+        out = fn(
+            a,
+            preserve_rng_state=2,
+            use_reentrant=3,
+            context_fn=5,
+            determinism_check=7,
+            debug=11,
+            early_stop=13,
+        )
+        expected_grad = torch.autograd.grad(out, (a,))
+        self.assertEqual(actual_grad, expected_grad)
+
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
+    def test_checkpoint_zero_arg_function(self):
+        a = torch.tensor(2.0, requires_grad=True)
+
+        def fn():
+            return a.sin().exp()
+
+        old_out = checkpoint(fn, use_reentrant=False)
+        new_out = checkpoint(use_reentrant=False)(fn)()
+        expected_out = fn()
+        self.assertEqual(old_out, expected_out)
+        self.assertEqual(new_out, expected_out)
+
+        old_grad = torch.autograd.grad(old_out, (a,), retain_graph=True)
+        new_grad = torch.autograd.grad(new_out, (a,), retain_graph=True)
+        expected_grad = torch.autograd.grad(expected_out, (a,))
+        self.assertEqual(old_grad, expected_grad)
+        self.assertEqual(new_grad, expected_grad)
+
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
+    def test_checkpoint_curried_method(self):
+        class Model:
+            @checkpoint(use_reentrant=False)
+            def fn(self, x, scale):
+                return x.sin() * scale
+
+        x = torch.tensor(2.0, requires_grad=True)
+        scale = torch.tensor(3.0, requires_grad=True)
+        model = Model()
+
+        actual = model.fn(x, scale)
+        expected = x.sin() * scale
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual, (x, scale)),
+            torch.autograd.grad(expected, (x, scale)),
+        )
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint_same_graph(self, early_stop):
