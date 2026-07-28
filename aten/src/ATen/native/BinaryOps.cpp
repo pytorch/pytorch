@@ -100,6 +100,7 @@
 #include <ATen/ops/nextafter_native.h>
 #include <ATen/ops/not_equal_native.h>
 #include <ATen/ops/or_native.h>
+#include <ATen/ops/pow.h>
 #include <ATen/ops/remainder.h>
 #include <ATen/ops/remainder_native.h>
 #include <ATen/ops/rshift_native.h>
@@ -1559,6 +1560,16 @@ TORCH_IMPL_FUNC(heaviside_out) (
   heaviside_stub(device_type(), *this);
 }
 
+static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
+  const auto self_dtype = self.scalar_type();
+  // All integral types are promoted to float32
+  if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
+      return at::exp2(other);
+  }
+  // For double and reduced floating types do regular type promotion
+  return at::full({}, 2.0, self.options()).pow(other);
+}
+
 // This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
 // Both of these require floating types for 'self' and integer types for 'other'.
 static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -1584,7 +1595,7 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
     return _ldexp_int_exponent(self, other, result);
   }
 
-  return at::mul_out(result, self, at::exp2(other));
+  return at::mul_out(result, self, _pow2(self, other));
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
@@ -1595,7 +1606,7 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
     return _ldexp_int_exponent(self, other, result);
   }
 
-  return at::mul(self, at::exp2(other));
+  return at::mul(self, _pow2(self, other));
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
