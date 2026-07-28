@@ -2,6 +2,7 @@
 #define STABLE_TORCH_SHIM
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 
 #include <torch/csrc/stable/version.h>
 
@@ -296,13 +297,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 AOTI_TORCH_EXPORT AOTITorchError
 torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
 
-struct AOTIMetalKernelFunctionOpaque;
-using AOTIMetalKernelFunctionHandle = AOTIMetalKernelFunctionOpaque*;
-
 // Binds size bytes at ptr to buffer index idx of a Metal kernel, for
-// arguments that are neither tensors nor int64_t scalars. See
-// torch/csrc/inductor/aoti_torch/c/shim_mps.h for the other MPS set_arg
-// functions (aoti_torch_mps_set_arg_tensor, aoti_torch_mps_set_arg_int).
+// arguments that are neither tensors nor int64_t scalars (the other set_arg
+// functions live in aoti_torch/c/shim_mps.h). Call while encoding, i.e. from
+// a run_command_block callback. The bytes are copied right away, so ptr only
+// needs to live through the call. ptr must be non-null and size must be in
+// (0, 4096], the transient-data limit of Metal's setBytes:
+// https://developer.apple.com/documentation/metal/mtlcomputecommandencoder/1443159-setbytes
 AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
     AOTIMetalKernelFunctionHandle func,
     unsigned idx,

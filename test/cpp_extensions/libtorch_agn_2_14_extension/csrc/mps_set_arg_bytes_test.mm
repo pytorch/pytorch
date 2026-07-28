@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/headeronly/util/Exception.h>
@@ -49,6 +50,19 @@ void scale_negate_clamp_encode(
   TORCH_ERROR_CODE_CHECK(aoti_torch_mps_dispatch_single(func, args->numel));
 }
 
+AOTIMetalKernelFunctionHandle get_scale_negate_clamp_kernel() {
+  static AOTIMetalShaderLibraryHandle lib_handle = []() {
+    AOTIMetalShaderLibraryHandle handle = nullptr;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_mps_create_shader_library(SCALE_NEGATE_CLAMP_SHADER, &handle));
+    return handle;
+  }();
+  AOTIMetalKernelFunctionHandle func = nullptr;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_mps_get_kernel_function(lib_handle, "scale_negate_clamp", &func));
+  return func;
+}
+
 Tensor my_mps_scale_negate_clamp(
     Tensor input,
     double scale,
@@ -63,15 +77,7 @@ Tensor my_mps_scale_negate_clamp(
   Tensor input_ = torch::stable::contiguous(input);
   Tensor output = torch::stable::empty_like(input_);
 
-  static AOTIMetalShaderLibraryHandle lib_handle = []() {
-    AOTIMetalShaderLibraryHandle handle = nullptr;
-    TORCH_ERROR_CODE_CHECK(
-        aoti_torch_mps_create_shader_library(SCALE_NEGATE_CLAMP_SHADER, &handle));
-    return handle;
-  }();
-  AOTIMetalKernelFunctionHandle func = nullptr;
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_mps_get_kernel_function(lib_handle, "scale_negate_clamp", &func));
+  AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
 
   ScaleNegateClampArgs args{
       input_.get(),
@@ -85,13 +91,48 @@ Tensor my_mps_scale_negate_clamp(
   return output;
 }
 
+struct SetArgBytesInvalidArgs {
+  AtenTensorHandle input;
+  const void* ptr;
+  uint64_t size;
+};
+
+void set_arg_bytes_invalid_encode(
+    AOTIMetalKernelFunctionHandle func,
+    void* user_data) {
+  auto* args = static_cast<SetArgBytesInvalidArgs*>(user_data);
+  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(func));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 0, args->input));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_mps_set_arg_bytes(func, 2, args->ptr, args->size));
+}
+
+// STABLE_TORCH_ERROR_CODE_CHECK (not TORCH_ERROR_CODE_CHECK) here and in the
+// encode callback, so the shim's TORCH_CHECK message survives to Python for
+// assertRaisesRegex.
+Tensor my_mps_set_arg_bytes_invalid(Tensor input, int64_t size, bool null_ptr) {
+  Tensor input_ = torch::stable::contiguous(input);
+  AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
+
+  static const float dummy = 0.0f;
+  SetArgBytesInvalidArgs args{
+      input_.get(),
+      null_ptr ? nullptr : &dummy,
+      static_cast<uint64_t>(size)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_mps_run_command_block(func, &set_arg_bytes_invalid_encode, &args));
+  return torch::stable::empty_like(input_);
+}
+
 } // namespace
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_mps_scale_negate_clamp(Tensor input, float scale, bool negate, float low, float high) -> Tensor");
+  m.def("my_mps_set_arg_bytes_invalid(Tensor input, int size, bool null_ptr) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, MPS, m) {
   m.impl("my_mps_scale_negate_clamp", TORCH_BOX(&my_mps_scale_negate_clamp));
+  m.impl("my_mps_set_arg_bytes_invalid", TORCH_BOX(&my_mps_set_arg_bytes_invalid));
 }

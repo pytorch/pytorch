@@ -2190,6 +2190,7 @@ except RuntimeError as e:
     sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
     "Cpython limited API not available, see https://github.com/python/cpython/issues/111506",
 )
+@skipIfTorchVersionLessThan(2, 14)
 class TestLibtorchAgnosticMetal(TestCase):
     """MPS tests for versioned libtorch_agnostic extensions."""
 
@@ -2204,18 +2205,26 @@ class TestLibtorchAgnosticMetal(TestCase):
                 extension_root=base_dir / "libtorch_agn_2_14_extension"
             )
 
-    @skipIfTorchVersionLessThan(2, 14)
-    def test_mps_set_arg_bytes(self, device):
+    @parametrize("scale,negate", [(0.5, False), (2.0, True)])
+    def test_mps_set_arg_bytes(self, device, scale, negate):
         import libtorch_agn_2_14
 
         x = torch.randn(1000, device=device, dtype=torch.float32)
         low, high = -0.25, 0.9
-        for scale, negate in ((0.5, False), (2.0, True)):
-            out = libtorch_agn_2_14.ops.my_mps_scale_negate_clamp(
-                x, scale, negate, low, high
-            )
-            expected = (x * scale * (-1.0 if negate else 1.0)).clamp(low, high)
-            self.assertEqual(out, expected)
+        out = libtorch_agn_2_14.ops.my_mps_scale_negate_clamp(
+            x, scale, negate, low, high
+        )
+        expected = (x * scale * (-1.0 if negate else 1.0)).clamp(low, high)
+        self.assertEqual(out, expected)
+
+    @parametrize("size,null_ptr", [(4, True), (0, False), (4097, False)])
+    def test_mps_set_arg_bytes_invalid(self, device, size, null_ptr):
+        import libtorch_agn_2_14
+
+        x = torch.randn(8, device=device, dtype=torch.float32)
+        error_regex = "Pointer is null" if null_ptr else r"size must be in \(0, 4096\]"
+        with self.assertRaisesRegex(RuntimeError, error_regex):
+            libtorch_agn_2_14.ops.my_mps_set_arg_bytes_invalid(x, size, null_ptr)
 
 
 instantiate_device_type_tests(

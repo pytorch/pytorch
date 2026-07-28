@@ -1793,6 +1793,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
             "inductor/test_torchinductor_dynamic_shapes",
+            "cpp_extensions/test_libtorch_agnostic",
         ]
     else:
         # Exclude mps-only tests otherwise
