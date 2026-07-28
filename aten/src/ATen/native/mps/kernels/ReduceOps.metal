@@ -615,8 +615,7 @@ kernel void sum_reduction_inner(
   }
 }
 
-// uchar/char/bool have no vec4type_t; their chunk arms use the scalar
-// (kVec = false) specializations below.
+// uchar/char/bool have no vec4type_t; their chunk loads stay scalar.
 template <typename...>
 using chunk_void_t = void;
 template <typename T, typename = void>
@@ -677,167 +676,65 @@ struct ValueChunkOps {
   }
 };
 
-template <typename OPS, typename TA, typename TI>
-inline TA chunk_accum_scalar(
+// Consume the vec4-loadable prefix of a lane's row: lane t reads quads
+// t, t + L, ... of [k0, k1) and returns where its scalar loop should resume.
+// The caller's `ok` must be uniform across the simdgroup (rows that share a
+// simdgroup would otherwise diverge; measured 15% worse than all-scalar on
+// bf16 K = 33) and must guarantee element-4 alignment of the row start.
+// Types with no vec4 (uchar/char/bool) always take the scalar loop.
+template <
+    typename OPS,
+    typename TA,
+    typename TI,
+    ::metal::enable_if_t<chunk_has_vec4_v<TI>, bool> = true>
+inline uint chunk_quads(
     constant TI* input,
     uint base,
-    uint i,
-    uint iend,
-    uint sK,
-    TA acc) {
-  TA acc2 = OPS::identity();
-  for (; i + 2 <= iend; i += 2) {
-    acc = OPS::combine(acc, OPS::load(input[base + i * sK]));
-    acc2 = OPS::combine(acc2, OPS::load(input[base + (i + 1) * sK]));
+    uint k0,
+    uint k1,
+    uint L,
+    uint t,
+    bool ok,
+    thread TA& acc) {
+  const uint nq = (k1 - k0) / 4;
+  if (!ok || nq < 2) {
+    return k0 + t;
   }
-  if (i < iend) {
-    acc = OPS::combine(acc, OPS::load(input[base + i * sK]));
+  using V = vec4type_t<TI>;
+  constant V* vin = reinterpret_cast<constant V*>(input + base + k0);
+  for (uint q = t; q < nq; q += L) {
+    const V v = vin[q];
+#pragma unroll
+    for (uint c = 0; c < 4; c++) {
+      acc = OPS::combine(acc, OPS::load(v[c]));
+    }
   }
-  return OPS::combine(acc, acc2);
+  return k0 + nq * 4 + t;
 }
 
-template <typename OPS, typename TA, typename TI, bool kVec>
-struct ChunkAccum {
-  static inline TA run(
-      constant TI* input,
-      uint base,
-      uint i,
-      uint iend,
-      uint sK,
-      TA acc) {
-    return chunk_accum_scalar<OPS, TA>(input, base, i, iend, sK, acc);
-  }
-};
-
-template <typename OPS, typename TA, typename TI>
-struct ChunkAccum<OPS, TA, TI, true> {
-  static inline TA run(
-      constant TI* input,
-      uint base,
-      uint i,
-      uint iend,
-      uint sK,
-      TA acc) {
-    if (sK == 2) {
-      using V = vec4type_t<TI>;
-      for (; i < iend && ((base + i * 2) & 3u) != 0; i++) {
-        acc = OPS::combine(acc, OPS::load(input[base + i * 2]));
-      }
-      TA acc2 = OPS::identity();
-      constant V* vp = reinterpret_cast<constant V*>(input + base + i * 2);
-      for (; i + 3 <= iend; i += 2, vp++) {
-        const V v = *vp;
-        acc = OPS::combine(acc, OPS::load(v.x));
-        acc2 = OPS::combine(acc2, OPS::load(v.z));
-      }
-      for (; i < iend; i++) {
-        acc = OPS::combine(acc, OPS::load(input[base + i * 2]));
-      }
-      return OPS::combine(acc, acc2);
-    }
-    if (sK != 1) {
-      return chunk_accum_scalar<OPS, TA>(input, base, i, iend, sK, acc);
-    }
-    using V = vec4type_t<TI>;
-    for (; i < iend && ((base + i) & 3u) != 0; i++) {
-      acc = OPS::combine(acc, OPS::load(input[base + i]));
-    }
-    constant V* vp = reinterpret_cast<constant V*>(input + base + i);
-    for (; i + 4 <= iend; i += 4, vp++) {
-      const V v = *vp;
-#pragma unroll
-      for (uint k = 0; k < 4; k++) {
-        acc = OPS::combine(acc, OPS::load(v[k]));
-      }
-    }
-    for (; i < iend; i++) {
-      acc = OPS::combine(acc, OPS::load(input[base + i]));
-    }
-    return acc;
-  }
-};
-
-template <typename OPS, typename TA, typename TI, bool kVec>
-struct ChunkInterleaved {
-  static inline TA run(
-      constant TI* input,
-      uint base,
-      uint k0,
-      uint k1,
-      uint sK,
-      uint t,
-      TA acc) {
-    for (uint k = k0 + t; k < k1; k += 32) {
-      acc = OPS::combine(acc, OPS::load(input[base + k * sK]));
-    }
-    return acc;
-  }
-};
-
-template <typename OPS, typename TA, typename TI>
-struct ChunkInterleaved<OPS, TA, TI, true> {
-  static inline TA run(
-      constant TI* input,
-      uint base,
-      uint k0,
-      uint k1,
-      uint sK,
-      uint t,
-      TA acc) {
-    using V = vec4type_t<TI>;
-    if (sK == 1) {
-      const uint lead = min((4u - ((base + k0) & 3u)) & 3u, k1 - k0);
-      for (uint k = k0 + t; k < k0 + lead; k += 32) {
-        acc = OPS::combine(acc, OPS::load(input[base + k]));
-      }
-      const uint i = k0 + lead;
-      const uint nv = (k1 - i) / 4;
-      constant V* vp = reinterpret_cast<constant V*>(input + base + i);
-      for (uint p = t; p < nv; p += 32) {
-        const V v = vp[p];
-#pragma unroll
-        for (uint k = 0; k < 4; k++) {
-          acc = OPS::combine(acc, OPS::load(v[k]));
-        }
-      }
-      for (uint k = i + nv * 4 + t; k < k1; k += 32) {
-        acc = OPS::combine(acc, OPS::load(input[base + k]));
-      }
-      return acc;
-    }
-    if (sK == 2 && (base & 1u) == 0) {
-      const uint lead = min(((base + k0 * 2) & 3u) ? 1u : 0u, k1 - k0);
-      for (uint k = k0 + t; k < k0 + lead; k += 32) {
-        acc = OPS::combine(acc, OPS::load(input[base + k * 2]));
-      }
-      const uint i = k0 + lead;
-      const uint span = k1 - i;
-      const uint nv = (2 * span >= 5) ? ((2 * span - 5) / 4 + 1) : 0;
-      constant V* vp = reinterpret_cast<constant V*>(input + base + i * 2);
-      for (uint p = t; p < nv; p += 32) {
-        const V v = vp[p];
-        acc = OPS::combine(acc, OPS::load(v.x));
-        acc = OPS::combine(acc, OPS::load(v.z));
-      }
-      for (uint k = i + nv * 2 + t; k < k1; k += 32) {
-        acc = OPS::combine(acc, OPS::load(input[base + k * 2]));
-      }
-      return acc;
-    }
-    for (uint k = k0 + t; k < k1; k += 32) {
-      acc = OPS::combine(acc, OPS::load(input[base + k * sK]));
-    }
-    return acc;
-  }
-};
+template <
+    typename OPS,
+    typename TA,
+    typename TI,
+    ::metal::enable_if_t<!chunk_has_vec4_v<TI>, bool> = true>
+inline uint chunk_quads(
+    constant TI*,
+    uint,
+    uint k0,
+    uint,
+    uint,
+    uint t,
+    bool,
+    thread TA&) {
+  return k0 + t;
+}
 
 // Shared body of the *_inner_chunk kernels: each row of length K is split
-// across L lanes and 32 / L rows pack into one simdgroup (a shuffle tree of
-// depth log2(L) folds the per-lane partials). With G > 1 each row is further
-// cut into G segments producing [M, G] partials the host combines in a
-// second dispatch (split-K). Unlike the flat kernels, loads stay vectorized:
-// at L == 32 the lanes read interleaved positions, so scalar loads would
-// touch a cache line per lane (~10% slower measured).
+// across L lanes (32 / L rows share one simdgroup, a shuffle tree folds the
+// per-lane partials) and, when G > 1, into G segments per row producing
+// [M, G] partials the host combines with a second dispatch (split-K). Lane t
+// reads its row interleaved (k = t, t + L, ...), as vec4 quads when
+// chunk_quads allows and as chained scalar loads otherwise.
 template <typename OPS, typename TA, typename TI, typename TO>
 inline void chunk_reduce_impl(
     constant TI* input,
@@ -865,26 +762,37 @@ inline void chunk_reduce_impl(
   const uint C = ceil_div(K, G);
   const uint k0 = g * C;
   const uint k1 = min(k0 + C, K);
-  TA acc;
-  if (L == 32) {
-    acc = ChunkInterleaved<OPS, TA, TI, chunk_has_vec4_v<TI>>::run(
-        input, m * strides.y, k0, k1, strides.x, t, OPS::identity());
-  } else {
-    const uint span = k1 > k0 ? k1 - k0 : 0;
-    const uint chunk = ceil_div(span, L);
-    const uint i0 = k0 + min(t * chunk, span);
-    const uint i1 = min(i0 + chunk, k1);
-    acc = ChunkAccum<OPS, TA, TI, chunk_has_vec4_v<TI>>::run(
-        input, m * strides.y, i0, i1, strides.x, OPS::identity());
+  const uint sK = strides.x;
+  const uint base = m * strides.y;
+  metal::array<TA, 4> acc;
+  for (uint j = 0; j < 4; j++) {
+    acc[j] = OPS::identity();
   }
+  // Quads only pay off for the short-row lane counts (up to 10% for 2-byte
+  // dtypes); at L == 32 (split-K, combine passes) chained scalar loads
+  // measure equal or ahead. G == 1 with an element-4 aligned row stride
+  // makes every row start aligned, so the decision is simdgroup-uniform.
+  const bool quads_ok = sK == 1 && L < 32 && G == 1 && (strides.y & 3u) == 0;
+  uint k = chunk_quads<OPS>(input, base, k0, k1, L, t, quads_ok, acc[0]);
+  for (; k + 3 * L < k1; k += 4 * L) {
+#pragma unroll
+    for (uint j = 0; j < 4; j++) {
+      acc[j] = OPS::combine(acc[j], OPS::load(input[base + (k + j * L) * sK]));
+    }
+  }
+  for (; k < k1; k += L) {
+    acc[0] = OPS::combine(acc[0], OPS::load(input[base + k * sK]));
+  }
+  TA v =
+      OPS::combine(OPS::combine(acc[0], acc[1]), OPS::combine(acc[2], acc[3]));
   for (uint off = L >> 1; off > 0; off >>= 1) {
-    acc = OPS::combine(acc, chunk_shuffle_down(acc, static_cast<ushort>(off)));
+    v = OPS::combine(v, chunk_shuffle_down(v, static_cast<ushort>(off)));
   }
   if (t == 0) {
     if (divisor > 0) {
-      acc /= static_cast<TA>(divisor);
+      v /= static_cast<TA>(divisor);
     }
-    output[r] = static_cast<TO>(acc);
+    output[r] = static_cast<TO>(v);
   }
 }
 
