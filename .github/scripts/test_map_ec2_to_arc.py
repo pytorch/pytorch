@@ -261,6 +261,19 @@ def test_h100_multi_gpu_variants_force_mt():
     )
 
 
+def test_h100_fab_variant_forces_mt_overriding_lf():
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.aws.h100.fab.2" },
+    ]}"""
+    result = run(matrix, prefix="lf-")
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    check(
+        output["include"][0]["runner"] == "mt-l-x86iamx-44-450-h100-fab-2",
+        f"expected mt- override, got {output['include'][0]['runner']}",
+    )
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

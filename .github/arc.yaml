@@ -93,6 +93,7 @@ runner_mapping:
   linux.aws.h100: l-x86iamx-22-225-h100                             # 1 GPU
   linux.aws.h100.4: l-x86iamx-88-900-h100-4                         # 4 GPUs
   linux.aws.h100.8: l-bx86iamx-176-1800-h100-8                      # 8 GPUs (bare metal)
+  linux.aws.h100.fab.2: l-x86iamx-44-450-h100-fab-2                 # 2 GPUs (fabric/IMEX)
 
   # ---- x86 GPU — B200 (p6 family) ----
 
@@ -128,4 +129,5 @@ meta_only_runners:
   - linux.aws.h100
   - linux.aws.h100.4
   - linux.aws.h100.8
+  - linux.aws.h100.fab.2
   - linux.dgx.b200

@@ -47,6 +47,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "h100-symm-mem", shard: 1, num_shards: 1, runner: "linux.aws.h100.4" },
+          { config: "h100-fabric", shard: 1, num_shards: 1, runner: "linux.aws.h100.fab.2" },
         ]}
       python-version: "3.10"
       compiler: gcc11
