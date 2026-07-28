@@ -2618,6 +2618,14 @@ class CachingAutotuner(KernelInterface):
             if cu_function is None or num_warps is None:
                 return None
 
+            # The _FastCudaLauncher pre-zeros scratch slots and never fills them
+            # per launch, so it can only handle kernels whose scratch args are
+            # always null. Kernels that need a real global-scratch workspace
+            # (e.g. device-side TMA) must use the regular static launcher, which
+            # allocates it in run().
+            if getattr(kernel, "global_scratch_size", 0) > 0:
+                return None
+
             n_scratch = sum(
                 [
                     getattr(kernel, "has_global_scratch", False),

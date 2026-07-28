@@ -448,8 +448,10 @@ class StaticallyLaunchedTritonKernel:
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
-    # ROCm/HIP allocates global scratch itself at launch (see run()), so only
-    # enable explicit workspace allocation for CUDA.
+    # A non-empty global-scratch workspace comes from device-side TMA, which is
+    # NVIDIA-only; Triton's AMD backend has no global_scratch in its launch ABI,
+    # so it can't arise on ROCm. Keep the conservative bail there rather than
+    # shipping an untested, unreachable allocation path.
     supports_global_scratch: bool = not is_rocm()
 
     @cached_property

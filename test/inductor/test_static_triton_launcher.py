@@ -713,6 +713,12 @@ class TestStaticTritonCompileResult(TestCase):
         # can't be statically launched raises CannotStaticallyLaunchKernel, so a
         # clean run proves the TMA kernel was statically launched *and* that the
         # allocated scratch makes it produce correct results.
+        #
+        # We launch repeatedly: the _FastCudaLauncher is built after the first
+        # launch and used for subsequent ones. It pre-zeros scratch slots and
+        # never fills them, so it must NOT be used for kernels that need a real
+        # global-scratch workspace -- otherwise later launches get a null TMA
+        # workspace (illegal memory access / wrong results).
         # Regression test for https://github.com/pytorch/pytorch/issues/191124.
         @torch.compile
         def mm(a, b):
@@ -720,7 +726,9 @@ class TestStaticTritonCompileResult(TestCase):
 
         a = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
-        self.assertEqual(mm(a, b), a @ b)
+        expected = a @ b
+        for _ in range(3):
+            self.assertEqual(mm(a, b), expected)
 
     def test_any(self):
         def fn(x):
