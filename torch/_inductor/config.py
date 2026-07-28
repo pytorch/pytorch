@@ -1960,6 +1960,11 @@ class triton:
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
 
+    # Number of cudagraph-managed input pointer-change re-records allowed for
+    # a parent/function edge before future recordings copy that input instead
+    # of specializing on its graph-pool address.
+    cudagraph_managed_input_rerecord_limit = 3
+
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: int | None = 8
