@@ -129,10 +129,9 @@ def mx_e8m0_scale_intrinsic(
     """
     max_power = math.floor(math.log2(max_value))
     scaled = source / max_value if rounding == "rceil" else source * 2.0**-max_power
-    floor_inf_exponent = min(128 - max_power, 128)
     floor_inf_value = (
-        2.0**floor_inf_exponent
-        if rounding == "floor" and floor_inf_exponent < 128
+        2.0 ** (128 - max_power)
+        if rounding == "floor" and max_power > 0
         else None
     )
 
