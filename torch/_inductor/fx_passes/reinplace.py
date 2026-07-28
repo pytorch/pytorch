@@ -380,11 +380,9 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
         extra_check=should_reinplace_scatter,
     ),
     # Stateless Philox RNG: reinplace the functionalized clone onto the dead
-    # output buffer, so out-of-place uniform()/normal()/bits() don't pay an
-    # extra copy.
+    # output buffer, so out-of-place uniform()/normal() don't pay an extra copy.
     aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
     aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
-    aten._philox_bits.default: InplaceableOp(aten._philox_bits_.default, 0),
 }
 
 try:
@@ -783,7 +781,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
-                        # output atindex size(out)+i.
+                        # output at index size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
                         # if it was needed for inplaceable_triton_ops?
                         if user.target is operator.getitem and user.args[1] == arg:

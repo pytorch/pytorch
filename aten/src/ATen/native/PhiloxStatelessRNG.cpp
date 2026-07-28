@@ -70,9 +70,7 @@ inline std::array<double, 2> box_muller_double(std::array<uint32_t, 4> r) {
   return {radius * std::cos(TWO_PI * u2), radius * std::sin(TWO_PI * u2)};
 }
 
-// Distribution dispatch: iterates over chunks of elements per key,
-// calling sample_func to produce raw samples from a Philox call and
-// param_func to apply per-element parameter scaling.
+// Distribution dispatch for uniform/normal.
 template <typename scalar_t, typename sample_func_t, typename param_func_t>
 void philox_distribution_kernel(
     const char* op_name,
@@ -84,9 +82,6 @@ void philox_distribution_kernel(
   TORCH_CHECK(key.scalar_type() == kUInt64,
       op_name, ": key must have dtype uint64, got ",
       key.scalar_type());
-  TORCH_CHECK(self.device() == key.device(),
-      op_name, ": self and key must be on the same device, got ",
-      self.device(), " and ", key.device());
   TORCH_CHECK(key.dim() >= 1 && key.size(-1) == 2,
       op_name, ": key must have shape (2,) or (*batch, 2), got shape ",
       key.sizes());
@@ -104,69 +99,48 @@ void philox_distribution_kernel(
     return;
   }
 
-  auto output = self.contiguous();
-  scalar_t* out_ptr = output.mutable_data_ptr<scalar_t>();
-
-  constexpr int epc = elems_per_call<scalar_t>;
-
+  // Flatten keys + make them contiguous for simplicity.
+  int64_t num_keys = 1;
+  int64_t elems_per_key = self.numel();
+  Tensor key_flat;
   if (key.dim() == 1) {
-    auto key_contig = key.contiguous();
-    uint64_t seed = key_contig.const_data_ptr<uint64_t>()[0];
-    uint64_t offset = key_contig.const_data_ptr<uint64_t>()[1];
-    int64_t num_elems = self.numel();
-    int64_t num_full_chunks = num_elems / epc;
-
-    for (int64_t chunk = 0; chunk < num_full_chunks; chunk++) {
-      auto sample = sample_func(seed, offset + static_cast<uint64_t>(chunk));
-      for (int j = 0; j < epc; j++) {
-        out_ptr[chunk * epc + j] = param_func(sample[j]);
-      }
-    }
-    // Scalar tail for remaining elements.
-    int64_t tail_start = num_full_chunks * epc;
-    if (tail_start < num_elems) {
-      auto sample = sample_func(seed, offset + static_cast<uint64_t>(num_full_chunks));
-      for (int j = 0; j < num_elems - tail_start; j++) {
-        out_ptr[tail_start + j] = param_func(sample[j]);
-      }
-    }
+    key_flat = key.contiguous();
   } else {
-    // Batched key path: determine elems_per_key from trailing size-1 key dims.
-    int64_t elems_per_key = 1;
+    // Trailing key dims of size 1 broadcast over the output, so each key covers
+    // the product of those output dims.
     int64_t key_dims = self.dim();
+    elems_per_key = 1;
     for (int64_t i = self.dim() - 1; i >= 0; i--) {
       if (key.size(i) != 1) break;
       elems_per_key *= self.size(i);
       key_dims--;
     }
-    int64_t num_keys = self.numel() / elems_per_key;
+    num_keys = self.numel() / elems_per_key;
 
-    // Expand and flatten key to (num_keys, 2).
-    std::vector<int64_t> expand_sizes;
-    expand_sizes.reserve(key.dim());
-    for (int64_t i = 0; i < key_dims; i++) {
-      expand_sizes.push_back(self.size(i));
-    }
-    for (int64_t i = key_dims; i < self.dim(); i++) {
-      expand_sizes.push_back(1);
-    }
+    // Expand the leading (distinct-key) dims to the output shape, pad the
+    // broadcast dims with 1, then flatten to (num_keys, 2).
+    std::vector<int64_t> expand_sizes(
+        self.sizes().begin(), self.sizes().begin() + key_dims);
+    expand_sizes.resize(self.dim(), 1);
     expand_sizes.push_back(2);
-    auto key_flat = key.expand(expand_sizes).reshape({num_keys, 2}).contiguous();
-    const uint64_t* keys_ptr = key_flat.const_data_ptr<uint64_t>();
+    key_flat = key.expand(expand_sizes).reshape({num_keys, 2}).contiguous();
+  }
 
-    int64_t chunks_per_key = (elems_per_key + epc - 1) / epc;
-
-    for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
-      uint64_t seed = keys_ptr[key_idx * 2];
-      uint64_t offset = keys_ptr[key_idx * 2 + 1];
-
-      for (int64_t chunk = 0; chunk < chunks_per_key; chunk++) {
-        auto sample = sample_func(seed, offset + static_cast<uint64_t>(chunk));
-        int64_t base = key_idx * elems_per_key + chunk * epc;
-        int64_t remaining = std::min(static_cast<int64_t>(epc), elems_per_key - chunk * epc);
-        for (int64_t j = 0; j < remaining; j++) {
-          out_ptr[base + j] = param_func(sample[j]);
-        }
+  // Generate values; each chunk is one Philox call producing epc elements.
+  auto output = self.contiguous();
+  scalar_t* out_ptr = output.mutable_data_ptr<scalar_t>();
+  const uint64_t* keys_ptr = key_flat.const_data_ptr<uint64_t>();
+  constexpr int epc = elems_per_call<scalar_t>;
+  int64_t chunks_per_key = (elems_per_key + epc - 1) / epc;
+  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+    uint64_t seed = keys_ptr[key_idx * 2];
+    uint64_t offset = keys_ptr[key_idx * 2 + 1];
+    for (int64_t chunk = 0; chunk < chunks_per_key; chunk++) {
+      auto sample = sample_func(seed, offset + static_cast<uint64_t>(chunk));
+      int64_t base = key_idx * elems_per_key + chunk * epc;
+      int64_t remaining = std::min(static_cast<int64_t>(epc), elems_per_key - chunk * epc);
+      for (int64_t j = 0; j < remaining; j++) {
+        out_ptr[base + j] = param_func(sample[j]);
       }
     }
   }
@@ -189,24 +163,21 @@ Tensor _philox_key_split_cpu(const Tensor& key, int64_t num_splits) {
       "_philox_key_split: num_splits must be positive, got ",
       num_splits);
 
-  auto key_contig = key.contiguous();
-  int64_t num_keys = key.numel() / 2;
-
   auto output_sizes = key.sizes().vec();
   output_sizes.insert(output_sizes.begin(), num_splits);
   Tensor output = at::empty(output_sizes, key.options());
 
+  int64_t num_keys = key.numel() / 2;
   if (num_keys == 0) {
     return output;
   }
 
+  auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-
   for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
     uint64_t seed = input[key_idx * 2];
     uint64_t offset = input[key_idx * 2 + 1];
-
     for (int64_t split_idx = 0; split_idx < num_splits; split_idx++) {
       auto r = philox_4x32(seed, offset + static_cast<uint64_t>(split_idx));
       int64_t out = (split_idx * num_keys + key_idx) * 2;
@@ -217,7 +188,7 @@ Tensor _philox_key_split_cpu(const Tensor& key, int64_t num_splits) {
   return output;
 }
 
-Tensor _philox_key_fold_in_cpu(const Tensor& key, int64_t data) {
+static Tensor philox_key_fold_in_impl(const Tensor& key, uint64_t fold) {
   TORCH_CHECK(key.dim() >= 1 && key.size(-1) == 2,
       "_philox_key_fold_in: key must have shape (*batch, 2), got shape ",
       key.sizes());
@@ -225,47 +196,54 @@ Tensor _philox_key_fold_in_cpu(const Tensor& key, int64_t data) {
       "_philox_key_fold_in: key must have dtype uint64, got ",
       key.scalar_type());
 
-  auto key_contig = key.contiguous();
+  Tensor output = at::empty(key.sizes(), key.options());
   int64_t num_keys = key.numel() / 2;
-
-  Tensor output = at::empty_like(key_contig);
-
   if (num_keys == 0) {
     return output;
   }
 
+  auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-
   for (int64_t idx = 0; idx < num_keys; idx++) {
     uint64_t seed = input[idx * 2];
     uint64_t offset = input[idx * 2 + 1];
-
-    auto r = philox_4x32(seed, offset + static_cast<uint64_t>(data));
+    auto r = philox_4x32(seed, offset + fold);
     philox_derive_key(r, &out_ptr[idx * 2], &out_ptr[idx * 2 + 1]);
   }
-
   return output;
+}
+
+Tensor _philox_key_fold_in_cpu(const Tensor& key, int64_t data) {
+  // Reinterpret the int64 schema arg as uint64.
+  return philox_key_fold_in_impl(key, static_cast<uint64_t>(data));
+}
+
+Tensor _philox_key_fold_in_tensor_cpu(const Tensor& key, const Tensor& data) {
+  TORCH_CHECK(data.scalar_type() == kUInt64,
+      "_philox_key_fold_in: data must have dtype uint64, got ",
+      data.scalar_type());
+  // TODO: Relax this and allow for arbitrary data shape that broadcasts with
+  // batched keys?
+  TORCH_CHECK(data.numel() == 1,
+      "_philox_key_fold_in: data must be a single value, got ",
+      data.numel(), " elements");
+  return philox_key_fold_in_impl(key, data.const_data_ptr<uint64_t>()[0]);
 }
 
 Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double high) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
-    auto sample_func = []() {
+    auto sample_func = [](uint64_t seed, uint64_t offset) {
+      auto r = philox_4x32(seed, offset);
       if constexpr (std::is_same_v<scalar_t, double>) {
-        return [](uint64_t seed, uint64_t offset) -> std::array<uint64_t, 2> {
-          auto r = philox_4x32(seed, offset);
-          return {
+        return std::array<uint64_t, 2>{
             (static_cast<uint64_t>(r[0]) << 32) | r[1],
-            (static_cast<uint64_t>(r[2]) << 32) | r[3]
-          };
-        };
+            (static_cast<uint64_t>(r[2]) << 32) | r[3]};
       } else {
-        return [](uint64_t seed, uint64_t offset) {
-          return philox_4x32(seed, offset);
-        };
+        return r;
       }
-    }();
+    };
 
     auto lo = static_cast<scalar_t>(low);
     auto hi = static_cast<scalar_t>(high);
@@ -284,17 +262,13 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
-    auto sample_func = []() {
+    auto sample_func = [](uint64_t seed, uint64_t offset) {
       if constexpr (std::is_same_v<scalar_t, double>) {
-        return [](uint64_t seed, uint64_t offset) {
-          return box_muller_double(philox_4x32(seed, offset));
-        };
+        return box_muller_double(philox_4x32(seed, offset));
       } else {
-        return [](uint64_t seed, uint64_t offset) {
-          return box_muller_float(philox_4x32(seed, offset));
-        };
+        return box_muller_float(philox_4x32(seed, offset));
       }
-    }();
+    };
 
     auto mu = static_cast<compute_t>(mean);
     auto sigma = static_cast<compute_t>(stddev);

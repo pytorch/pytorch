@@ -154,14 +154,20 @@ class TestStatelessRNGKeySplit(TestCase):
         self.assertEqual(splits[1], random.fold_in(key0, 0))
         self.assertEqual(splits[2], random.fold_in(key0, 1))
 
-    @onlyCUDA
-    def test_cross_device_consistency(self, device):
+    @parametrize("batched", [False, True])
+    @onlyAccelerator
+    def test_cross_device_consistency(self, device, batched):
         key_cpu = random.key(42)
-        key_cuda = random.key(42, device=device)
+        key_dev = random.key(42, device=device)
+        if batched:
+            # Batched key exercises the multi-key path.
+            key_cpu = random.split(key_cpu, 4)  # (4, 2)
+            key_dev = random.split(key_dev, 4)
         self.assertEqual(
-            random.split(key_cpu, 100),
-            random.split(key_cuda, 100).cpu(),
+            random.split(key_cpu, 8),
+            random.split(key_dev, 8).cpu(),
         )
+
 
 class TestStatelessRNGKeyFoldIn(TestCase):
     def test_basic_shape_and_dtype(self, device):
@@ -277,7 +283,11 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         # tensor with more than one value
         with self.assertRaisesRegex(RuntimeError, "data must be a single value"):
             random.fold_in(key, torch.tensor([1, 2], dtype=torch.uint64, device=device))
-        # tensor on a different device than the key
+
+    @onlyAccelerator
+    def test_error_data_wrong_device(self, device):
+        key = random.key(42, device=device)
+        # A CPU data tensor with an accelerator key is a device mismatch.
         with self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device"
         ):
@@ -325,14 +335,27 @@ class TestStatelessRNGKeyFoldIn(TestCase):
             torch.cuda.synchronize()
             self.assertEqual(out, random.fold_in(key, value))
 
-    @onlyCUDA
-    def test_cross_device_consistency(self, device):
+    @parametrize("batched", [False, True])
+    @parametrize("tensor_data", [False, True])
+    @onlyAccelerator
+    def test_cross_device_consistency(self, device, batched, tensor_data):
         key_cpu = random.key(42)
-        key_cuda = random.key(42, device=device)
+        key_dev = random.key(42, device=device)
+        if batched:
+            # Batched key exercises the multi-key path.
+            key_cpu = random.split(key_cpu, 4)  # (4, 2)
+            key_dev = random.split(key_dev, 4)
+        if tensor_data:
+            # Tensor data exercises the .Tensor overload.
+            data_cpu = torch.tensor(7, dtype=torch.uint64)
+            data_dev = torch.tensor(7, dtype=torch.uint64, device=device)
+        else:
+            data_cpu = data_dev = 7
         self.assertEqual(
-            random.fold_in(key_cpu, 7),
-            random.fold_in(key_cuda, 7).cpu(),
+            random.fold_in(key_cpu, data_cpu),
+            random.fold_in(key_dev, data_dev).cpu(),
         )
+
 
 class TestStatelessRNGDistribution(TestCase):
     def _gen(self, gen_fn_name, *args, **kwargs):
@@ -572,32 +595,39 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertTrue(result.min().item() >= 2.0)
         self.assertTrue(result.max().item() <= 5.0)
 
-
     @dtypes(*all_floating_dtypes)
-    @onlyCUDA
-    def test_cross_device_uniform_consistency(self, device, dtype):
-        key_cpu = random.fold_in(random.key(42), 7)
-        key_cuda = random.fold_in(random.key(42, device=device), 7)
+    @parametrize("batched", [False, True])
+    @onlyAccelerator
+    def test_cross_device_uniform_consistency(self, device, dtype, batched):
+        if batched:
+            # Batched key exercises the multi-key path.
+            key_cpu = random.split(random.key(42), 4).unsqueeze(-2)  # (4, 1, 2)
+            key_dev = random.split(random.key(42, device=device), 4).unsqueeze(-2)
+            shape = (4, 100)
+        else:
+            key_cpu = random.fold_in(random.key(42), 7)
+            key_dev = random.fold_in(random.key(42, device=device), 7)
+            shape = (1000,)
         # Uniform generation uses no transcendentals, so results must be bitwise identical.
         self.assertEqual(
-            self._gen("uniform", key_cpu, (1000,), dtype=dtype),
-            self._gen("uniform", key_cuda, (1000,), dtype=dtype).cpu(),
+            self._gen("uniform", key_cpu, shape, dtype=dtype),
+            self._gen("uniform", key_dev, shape, dtype=dtype).cpu(),
             atol=0,
             rtol=0,
         )
 
     @dtypes(*all_floating_dtypes)
-    @onlyCUDA
+    @onlyAccelerator
     def test_cross_device_normal_consistency(self, device, dtype):
         key_cpu = random.fold_in(random.key(42), 7)
-        key_cuda = random.fold_in(random.key(42, device=device), 7)
+        key_dev = random.fold_in(random.key(42, device=device), 7)
         # Normal generation uses Box-Muller (log, sin, cos), and CUDA uses fast-math
         # intrinsics (__logf, __sincosf) that differ slightly from CPU std::log / std::sin /
         # std::cos. Results are approximately but not bitwise equal. assertEqual() by default
         # allows for some tolerance in the comparisons.
         self.assertEqual(
             self._gen("normal", key_cpu, (1000,), dtype=dtype),
-            self._gen("normal", key_cuda, (1000,), dtype=dtype).cpu(),
+            self._gen("normal", key_dev, (1000,), dtype=dtype).cpu(),
         )
 
 
@@ -639,16 +669,6 @@ class TestStatelessRNGCompile(TestCase):
             return random.uniform(key, (100,))
 
         self.assertEqual(f(key), random.uniform(key, (100,)))
-
-    @onlyCUDA  # bits() has no CPU kernel yet
-    def test_bits_fullgraph(self, device):
-        key = random.key(42, device=device)
-
-        @torch.compile(backend="aot_eager", fullgraph=True)
-        def f(key):
-            return random.bits(key, (100,), dtype=torch.uint64)
-
-        self.assertEqual(f(key), random.bits(key, (100,), dtype=torch.uint64))
 
     def test_normal_fullgraph(self, device):
         key = random.key(42, device=device)
@@ -738,83 +758,7 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(torch.compile(f, dynamic=False)(key, x), f(key, x))
 
 
-class TestStatelessRNGBits(TestCase):
-    @parametrize("dtype", [torch.uint32, torch.uint64])
-    def test_basic_shape_and_dtype(self, device, dtype):
-        key = random.key(42, device=device)
-        result = random.bits(key, (100,), dtype=dtype)
-        self.assertEqual(result.shape, (100,))
-        self.assertEqual(result.dtype, dtype)
-        self.assertEqual(result.device, torch.device(device))
-
-    def test_default_dtype_is_uint32(self, device):
-        key = random.key(42, device=device)
-        self.assertEqual(random.bits(key, (10,)).dtype, torch.uint32)
-
-    @parametrize("dtype", [torch.uint32, torch.uint64])
-    def test_determinism(self, device, dtype):
-        key = random.key(42, device=device)
-        a = random.bits(key, (1000,), dtype=dtype)
-        b = random.bits(key, (1000,), dtype=dtype)
-        self.assertEqual(a, b)
-
-    @parametrize("dtype", [torch.uint32, torch.uint64])
-    def test_different_keys_produce_different_bits(self, device, dtype):
-        a = random.bits(random.key(1, device=device), (1000,), dtype=dtype)
-        b = random.bits(random.key(2, device=device), (1000,), dtype=dtype)
-        self.assertNotEqual(a, b)
-
-    @parametrize("dtype", [torch.uint32, torch.uint64])
-    def test_batched_keys(self, device, dtype):
-        key = random.key(42, device=device)
-        keys = random.split(key, 4).unsqueeze(-2)  # (4, 1, 2)
-        result = random.bits(keys, (4, 100), dtype=dtype)
-        self.assertEqual(result.shape, (4, 100))
-        for i in range(4):
-            self.assertEqual(result[i], random.bits(keys[i], (100,), dtype=dtype))
-
-    @parametrize("dtype", [torch.uint32, torch.uint64])
-    def test_inplace(self, device, dtype):
-        key = random.key(42, device=device)
-        result = torch.empty(1000, dtype=dtype, device=device)
-        out = random.bits_(key, result)
-        self.assertIs(out, result)
-        self.assertEqual(result, random.bits(key, (1000,), dtype=dtype))
-
-    def test_uint64_packs_two_uint32(self, device):
-        # Each uint64 packs a consecutive pair of uint32 outputs:
-        # uint64[i] == (uint32[2i] << 32) | uint32[2i + 1]. In little-endian
-        # memory that reads back as the uint32 pairs swapped.
-        key = random.key(42, device=device)
-        n = 128
-        b32 = random.bits(key, (2 * n,), dtype=torch.uint32)
-        b64 = random.bits(key, (n,), dtype=torch.uint64)
-        self.assertEqual(b64.view(torch.uint32), b32.reshape(-1, 2).flip(-1).reshape(-1))
-
-    @parametrize("dtype", [torch.uint32, torch.uint64])
-    def test_statistically_uniform(self, device, dtype):
-        key = random.key(42, device=device)
-        result = random.bits(key, (100000,), dtype=dtype)
-        width = 32 if dtype == torch.uint32 else 64
-        normalized = result.double() / float(2**width)
-        self.assertTrue(abs(normalized.mean().item() - 0.5) < 0.01)
-
-    def test_error_wrong_self_dtype(self, device):
-        key = random.key(42, device=device)
-        result = torch.empty(100, dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(RuntimeError, "must have dtype uint32 or uint64"):
-            random.bits_(key, result)
-
-    def test_error_wrong_key_dtype(self, device):
-        key = torch.tensor([42, 0], dtype=torch.float32, device=device)
-        result = torch.empty(100, dtype=torch.uint32, device=device)
-        with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
-            random.bits_(key, result)
-
-
-instantiate_device_type_tests(
-    TestStatelessRNGKey, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cpu", "cuda"))
 instantiate_device_type_tests(
     TestStatelessRNGKeySplit, globals(), only_for=("cpu", "cuda")
 )
@@ -827,7 +771,6 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")
 )
-instantiate_device_type_tests(TestStatelessRNGBits, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":

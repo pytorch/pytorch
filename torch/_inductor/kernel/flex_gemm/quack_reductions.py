@@ -3,9 +3,9 @@
 
 FlexGEMM recognizes a narrow local-reduction contract inside the GEMM output
 tile: an epilogue reshapes the accumulator to expose contiguous groups along M
-or N, then reduces only that grouped dimension. N-axis groups that fit in one
-32-lane TensorSSA fragment lower as ordinary in-fragment TensorSSA reductions;
-larger N groups produce TensorSSA partials that QuACK combines physically.
+or N, then reduces only that grouped dimension. N-axis groups up to one 32-lane
+fragment lower as ordinary in-fragment TensorSSA reductions; larger N groups
+produce TensorSSA partials that QuACK combines physically.
 M-axis groups currently always use QuACK's physical row-lane/warp combine path,
 even when the group is small enough to fit in one fragment. Inductor owns the
 FX pattern matching and output contracts; these helpers describe the supported
@@ -68,21 +68,29 @@ class GroupedTensorSSALayout:
         dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
         return len(dims) == 1 and dims[0] in self.reduce_dims
 
-    @property
-    def fragment_group_size(self) -> int:
-        return min(self.group_size, 32)
-
-    @property
-    def tensorssa_shape(self) -> str:
-        if self.axis == 1:
-            return f"((1, {self.fragment_group_size}, {32 // self.fragment_group_size}), 1, 1)"
+    def fragment_group_size_expr(self, source: Any) -> str:
+        """Return the local group size available in this epilogue fragment."""
         return (
-            f"(({self.fragment_group_size}, 1, {32 // self.fragment_group_size}), 1, 1)"
+            f"cutlass.const_expr(min({self.group_size}, "
+            f"cute.size({source}.shape, mode=[0])))"
         )
 
-    @property
-    def keepdim_shape(self) -> str:
-        return f"((1, 1, {32 // self.fragment_group_size}), 1, 1)"
+    def fragment_repeat_expr(self, source: Any) -> str:
+        """Return the repeat count needed to cover the current epilogue fragment."""
+        return (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({self.group_size}, cute.size({source}.shape, mode=[0])))"
+        )
+
+    def tensorssa_shape(self, source: Any) -> str:
+        fragment_group_size = self.fragment_group_size_expr(source)
+        repeats = self.fragment_repeat_expr(source)
+        if self.axis == 1:
+            return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
+        return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
+
+    def keepdim_shape(self, source: Any) -> str:
+        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
 
     @property
     def needs_physical_combine(self) -> bool:
@@ -249,7 +257,7 @@ def _keepdim_and_broadcast(
 ) -> tuple[Any, Any]:
     """Materialize keepdim and store-shaped forms of a grouped reduction."""
     keepdim_source = _generate_like(
-        kernel, f"{reduced}.reshape({layout.keepdim_shape})", reduced
+        kernel, f"{reduced}.reshape({layout.keepdim_shape(source)})", reduced
     )
     return keepdim_source, _generate_like(
         kernel, f"{keepdim_source}.broadcast_to({source}.shape)", keepdim_source, source
@@ -383,7 +391,9 @@ def lower_view_or_reshape(
         if preserve_value_layout or grouped_layout not in active_grouped_layouts:
             return source
         return _generate_like(
-            kernel, f"{source}.reshape({grouped_layout.tensorssa_shape})", source
+            kernel,
+            f"{source}.reshape({grouped_layout.tensorssa_shape(source)})",
+            source,
         )
     if source_node in grouped_tensors:
         return source
@@ -554,7 +564,8 @@ def lower_tensorssa_reduce(
         f"value / {layout.group_size}.0" if reduction_type == "mean" else "value"
     )
     source = _cute_arg(input_node, env)
-    if layout.needs_physical_combine:
+    needs_physical_combine = layout.needs_physical_combine
+    if needs_physical_combine:
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
@@ -566,7 +577,7 @@ def lower_tensorssa_reduce(
         f"{source}.reduce({desc.cute_op}, init_val={desc.init_val}, reduction_profile={layout.reduction_profile})",
         source,
     )
-    if reduction_type == "mean" and not layout.needs_physical_combine:
+    if reduction_type == "mean" and not needs_physical_combine:
         reduced = _generate_like(
             kernel, f"{reduced} / {float(layout.group_size)!r}", reduced
         )
