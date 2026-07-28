@@ -1410,10 +1410,27 @@ backward() with non-leaf tensor
 
         x = torch.randn(2, 4)
         eager = fn(x)
-        cnt = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(compiled, eager)
-        self.assertEqual(cnt.frame_count, 1)
+
+    def test_requires_grad_setattr_leaked_output_graph_breaks(self):
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            y = x.detach()
+            y.requires_grad = True
+            return mod(y).sum()
+
+        x = torch.randn(2, 4)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        torch._dynamo.reset()
+        out = torch.compile(fn, backend="aot_eager")(x)
+        out.backward()
+        eager_out = fn(x)
+        eager_out.backward()
+        self.assertEqual(out, eager_out)
 
     def test_requires_grad_setattr_unsupported_value_graph_breaks(self):
         x = torch.randn(4)
