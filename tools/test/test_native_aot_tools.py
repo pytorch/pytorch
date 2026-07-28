@@ -546,6 +546,21 @@ class TestEndToEndGeneration(unittest.TestCase):
             with open(out) as f:
                 self.assertIn("fakeop_cuda_aot_kernel", f.read())
 
+    def test_main_tolerates_missing_artifacts_dir(self):
+        # Zero declarations: export creates no artifacts dir at all
+        # (stage 2 on a repo state with no ops). main() must no-op, not
+        # FileNotFoundError (regressed on the sm100 CI build of the
+        # commit before any op lands).
+        import sys
+
+        with tempfile.TemporaryDirectory() as d:
+            argv = sys.argv
+            sys.argv = ["gen_aot_lib.py", "--artifacts-dir", os.path.join(d, "absent")]
+            try:
+                gen_aot_lib.main()
+            finally:
+                sys.argv = argv
+
 
 @unittest.skipIf(shutil.which("zip") is None, "requires the zip CLI")
 class TestWheelPatch(unittest.TestCase):

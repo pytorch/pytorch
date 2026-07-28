@@ -326,6 +326,13 @@ def main() -> None:
             for d in decl.load_declarations(path):
                 by_id[decl.decl_id(d)] = d
 
+    if not os.path.isdir(args.artifacts_dir):
+        # Zero declarations => export wrote nothing and never created
+        # the dir. A normal artifacts-free build, not an error (the
+        # embedded glob in caffe2/CMakeLists.txt degrades the same way).
+        print(f"{args.artifacts_dir}: no artifacts, nothing to generate")
+        return
+
     for entry in sorted(os.listdir(args.artifacts_dir)):
         art_dir = os.path.join(args.artifacts_dir, entry)
         if not os.path.isdir(art_dir):
