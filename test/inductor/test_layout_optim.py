@@ -341,6 +341,100 @@ class TestLayoutOptim(TestCase):
         self.assertTrue(torch.allclose(ref, loss))
 
 
+    def test_decide_layout_opt_backward_graph(self):
+        from torch._inductor.graph import GraphLowering
+
+        g = torch.fx.Graph()
+        with torch._subclasses.FakeTensorMode():
+            grad = torch.empty(1, 128, 32, 32, device="cuda")
+            inp = torch.empty(1, 64, 32, 32, device="cuda")
+            weight = torch.empty(128, 64, 3, 3, device="cuda")
+            a = g.placeholder("grad_output")
+            a.meta["val"] = grad
+            b = g.placeholder("input")
+            b.meta["val"] = inp
+            c = g.placeholder("weight")
+            c.meta["val"] = weight
+
+            conv_backward = g.call_function(
+                torch.ops.aten.convolution_backward.default,
+                (
+                    a, b, c,
+                    None,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    [True, True, True],
+                ),
+            )
+            g.output((conv_backward,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertTrue(
+            result,
+            "decide_layout_opt should return True for backward graphs "
+            "with convolution_backward nodes",
+        )
+
+    def test_decide_layout_opt_forward_graph(self):
+        from torch._inductor.graph import GraphLowering
+
+        g = torch.fx.Graph()
+        with torch._subclasses.FakeTensorMode():
+            x = torch.empty(1, 128, 32, 32, device="cuda")
+            w = torch.empty(256, 128, 3, 3, device="cuda")
+            b = torch.empty(256, device="cuda")
+            a = g.placeholder("x")
+            a.meta["val"] = x
+            w_node = g.placeholder("w")
+            w_node.meta["val"] = w
+
+            conv = g.call_function(
+                torch.ops.aten.convolution.default,
+                (
+                    a, w_node, b,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                ),
+            )
+            g.output((conv,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertTrue(
+            result,
+            "decide_layout_opt should return True for forward graphs "
+            "with convolution.default nodes",
+        )
+
+    def test_decide_layout_opt_no_conv_graph(self):
+        from torch._inductor.graph import GraphLowering
+
+        g = torch.fx.Graph()
+        a = g.placeholder("x")
+
+        mm = g.call_function(
+            torch.ops.aten.mm.default,
+            (a, a),
+        )
+        g.output((mm,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertFalse(
+            result,
+            "decide_layout_opt should return False for graphs without conv nodes",
+        )
+
+
 if __name__ == "__main__":
     if HAS_GPU:
         run_tests()
