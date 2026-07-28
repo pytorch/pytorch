@@ -994,10 +994,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_getattribute(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
-        """Called for obj.__getattribute__(name).  The base delegates to
-        getattro_impl, which already implements GenericGetAttr without
-        __getattr__ fallback.  UDOV overrides to handle custom
-        __getattribute__ and to pass skip_getattr_fallback=True."""
+        """Polymorphic hook for obj.__getattribute__(name).
+
+        This is a distinct hook (not just a getattro_impl call at the caller)
+        because UDOV overrides it to give the correct __getattribute__
+        semantics: it dispatches to a user-defined __getattribute__ when one
+        exists, and passes skip_getattr_fallback=True so lookup never chains to
+        __getattr__ (only the normal obj.attr path in getattro_impl does that).
+        UDOV.getattro_impl differs -- it invokes the __getattr__ fallback -- so
+        inlining getattro_impl here would break __getattribute__ for UDOVs.
+
+        The base delegates to getattro_impl, which is equivalent for base VTs
+        since they have no __getattr__ (call_getattr_fallback returns None)."""
         return self.getattro_impl(tx, name)
 
     def getattro_impl(
@@ -1399,10 +1407,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             result = self.call_getattr_fallback(tx, attr_name)
             if result is not None:
                 return result
-            try:
-                type_name = self.python_type().__name__
-            except NotImplementedError:
-                type_name = type(self).__name__
+            type_name = self.python_type_name()
             raise_observed_exception(
                 AttributeError,
                 tx,
