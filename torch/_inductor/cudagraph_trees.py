@@ -348,6 +348,21 @@ def mark_step_begin() -> None:
     MarkStepBox.mark_step_counter -= 1
 
 
+def mark_warmup_incomplete() -> None:
+    """Request another warmup for the active CUDA Graph Trees function.
+
+    This is a no-op unless called synchronously from a function currently running
+    in CUDA Graph Trees warmup.
+    """
+    if not torch._C._is_key_in_tls("tree_manager_containers"):
+        return
+
+    for container in get_obj(local, "tree_manager_containers").values():
+        manager = container.tree_manager
+        if manager is not None:
+            manager.mark_warmup_incomplete()
+
+
 def reset_cudagraph_trees() -> None:
     "Clear all cudagraph trees"
     # see shutdown below for why this is necessary
@@ -2331,6 +2346,7 @@ class CUDAGraphTreeManager:
         # whether we the current node is in a state of warmup, recording, execution. If
         # there is no current node the state will be ExecutionState.None.
         self.path_state = ExecutionState.NONE
+        self.active_warmup_function: FunctionID | None = None
         self.device_index = device_index
 
         # the most recently invoked cudagraph wrapping of a function. Will be None
@@ -2702,7 +2718,14 @@ class CUDAGraphTreeManager:
         self.current_node = node
         self.path_state = ExecutionState.WARMUP
         self.update_generation()
-        return node.run(new_inputs)
+        self.active_warmup_function = function_id
+        result = node.run(new_inputs)
+        self.active_warmup_function = None
+        return result
+
+    def mark_warmup_incomplete(self) -> None:
+        if self.active_warmup_function is not None:
+            self.warmed_up_functions.discard(self.active_warmup_function)
 
     def new_graph_id(self) -> GraphID:
         return GraphID(next(self.graph_counter))
