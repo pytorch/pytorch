@@ -81,7 +81,7 @@ IS_ROCM = torch.version.hip is not None
 
 def _tdm_block_aligned(block: int, dtype_size: int) -> bool:
     if dtype_size <= 0:
-        return True
+        raise AssertionError(f"Expected positive dtype_size, got {dtype_size}")
     return (int(block) * dtype_size) % _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES == 0
 
 
