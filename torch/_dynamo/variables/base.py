@@ -331,21 +331,6 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
-def maybe_get_python_type(obj: VariableTracker) -> type:
-    try:
-        return obj.python_type()
-    except NotImplementedError:
-        unimplemented(
-            gb_type="Unsupported python_type() call",
-            context=f"{obj} does not implement python_type()",
-            explanation="This VariableTracker does not implement python_type(), "
-            "which is required for object protocol operations.",
-            hints=[
-                *graph_break_hints.DYNAMO_BUG,
-            ],
-        )
-
-
 # CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
 # deliberately mirrors the low four so the mapping is near-identity.
 _METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
@@ -377,9 +362,9 @@ def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
 
 
 def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
-    """Resolve the arity flags for method `name` from the VT's arity-reference
-    type (see VariableTracker.method_flags_type)."""
-    return _flags_from_ml_flags(vt.method_flags_type(), name)
+    """Resolve the arity flags for method `name` from the VT's runtime
+    python_type()."""
+    return _flags_from_ml_flags(maybe_get_python_type(vt), name)
 
 
 @dataclasses.dataclass(slots=True)
@@ -730,14 +715,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
-
-    def method_flags_type(self) -> type:
-        """Type whose CPython ml_flags define this VT's tp_methods arities
-        (see _derive_method_flags). Defaults to python_type(); a VT whose
-        python_type() is a pure-Python stand-in without C ml_flags (e.g.
-        OrderedSet) overrides this to the builtin whose method arities it
-        mirrors, so MethodFlags still enforces arity."""
-        return maybe_get_python_type(self)
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
