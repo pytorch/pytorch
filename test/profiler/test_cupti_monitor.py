@@ -621,6 +621,29 @@ class TestCuptiRecords(TestCase):
         # no recorded dependencies -> no flows
         self.assertEqual(_graph_dependency_flow_events(node_rows, {}, base_ns=0), [])
 
+        # Clock skew, small (<= 25% of the successor's execution): predecessor 13 ends at 3600,
+        # 100ns into successor 14 ([3500,4500], 1000ns). The successor landing (flow finish)
+        # clamps up to the predecessor end so the arrow renders forward.
+        small = [
+            (300, 13, 0, 7, 1000, 3600),
+            (300, 14, 0, 8, 3500, 4500),
+        ]
+        ev = _graph_dependency_flow_events(small, {14: [13]}, base_ns=0)
+        s = next(e for e in ev if e["ph"] == "s")
+        f = next(e for e in ev if e["ph"] == "f")
+        self.assertEqual(s["ts"], 3.6)  # flow start stays at the predecessor end
+        self.assertEqual(f["ts"], 3.6)  # successor clamped up to it -> forward
+        # Clock skew, large (> 25% of the successor's execution): predecessor 15 ends 500ns into
+        # successor 16 -- too much to clamp, so the finish is left at the successor start.
+        large = [
+            (400, 15, 0, 7, 1000, 4000),
+            (400, 16, 0, 8, 3500, 4500),
+        ]
+        ev = _graph_dependency_flow_events(large, {16: [15]}, base_ns=0)
+        s = next(e for e in ev if e["ph"] == "s")
+        f = next(e for e in ev if e["ph"] == "f")
+        self.assertEqual((s["ts"], f["ts"]), (4.0, 3.5))  # unclamped
+
     def test_pftrace_render_stages_reassign_lane(self):
         # The pftrace render-stage builder reassigns a graphed kernel onto its logical lane
         # (named by the resolver); a GPU annotation stays on its capture-stream lane (as

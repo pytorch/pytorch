@@ -543,7 +543,7 @@ void initCuptiMonitorBindings(py::module& m) {
           }
         }
 
-        std::string out;
+        std::string out{};
         {
           py::gil_scoped_release release;
           out = torch::profiler::impl::cuptiMonitorEncodePftrace(
