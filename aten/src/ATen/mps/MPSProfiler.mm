@@ -812,17 +812,28 @@ void MPSProfiler::startCapture(const std::string& name, MPSStream* stream) {
 }
 
 void MPSProfiler::stopCapture(MPSStream* stream) {
-  // Drain in-flight GPU work before stopping the capture, otherwise
-  // stopCapture can race with command buffers still executing on the captured
-  // object while Metal serializes the trace, which can crash natively.
+  // Metal only requires command buffers to be committed (not completed)
+  // before stopCapture, but stopping while work is still in flight
+  // intermittently segfaults in capture teardown on some macOS versions
+  // (suspected Metal capture race, see #191362). Defensively drain first.
   // A null stream means the capture was started on the whole device (see
   // startCapture), so drain every stream created so far.
-  if (stream) {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  } else {
-    synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
+  // The drain can surface a device-side error from captured kernels
+  // (checkLastError); always close the capture before propagating it.
+  std::exception_ptr drain_error;
+  try {
+    if (stream) {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    } else {
+      synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
+    }
+  } catch (...) {
+    drain_error = std::current_exception();
   }
   [captureManager stopCapture];
+  if (drain_error) {
+    std::rethrow_exception(drain_error);
+  }
 }
 
 } // namespace Profiler
