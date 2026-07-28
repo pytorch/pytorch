@@ -11,6 +11,7 @@ from ..scheduler import (
     FusedSchedulerNode,
     Scheduler,
     SchedulerNode,
+    TilingAndMemoryScores,
 )
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
@@ -56,6 +57,11 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
+
+    def get_tiling_and_memory_scores(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> TilingAndMemoryScores | None:
+        return self._triton_scheduling.get_tiling_and_memory_scores(nodes)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):

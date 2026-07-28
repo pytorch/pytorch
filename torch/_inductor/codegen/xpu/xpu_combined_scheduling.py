@@ -9,6 +9,7 @@ from torch._inductor.scheduler import (
     FusedSchedulerNode,
     Scheduler,
     SchedulerNode,
+    TilingAndMemoryScores,
 )
 
 from ..cutlass.scheduling import CUTLASSScheduling
@@ -46,6 +47,11 @@ class XPUCombinedScheduling(BaseScheduling):
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
+
+    def get_tiling_and_memory_scores(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> TilingAndMemoryScores | None:
+        return self._triton_scheduling.get_tiling_and_memory_scores(nodes)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):
