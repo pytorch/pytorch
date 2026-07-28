@@ -153,9 +153,7 @@ class TestShardedTensorMetadata(TestCase):
 
 
 class TestCreateTensorFromParams(TestCase):
-    @skip_but_pass_in_sandcastle_if(
-        not torch.accelerator.is_available(), "Accelerator is needed"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_ACCELERATOR, "Accelerator is needed")
     def test_empty(self):
         expected_dtype = torch.double
         tensor_properties = TensorProperties(
