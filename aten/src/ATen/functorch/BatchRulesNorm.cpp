@@ -642,7 +642,8 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
         normalized_shape,
         mean_value, mean_bdim,
         rstd_value, rstd_bdim);
-    grad_input = makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+    grad_input = makeBatched(
+        std::move(std::get<0>(results)), std::get<1>(results), cur_level);
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
