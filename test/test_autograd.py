@@ -11407,15 +11407,18 @@ for shape in [(1,), ()]:
         self.assertIs(nodes[1], d.grad_fn)
 
     def test_node_creation_hook_multi_output_fires_once(self):
+        AccumulateGrad = torch._C._functions.AccumulateGrad
         nodes = []
         a = torch.randn(6, requires_grad=True)
         # split() has multiple differentiable outputs that all share a single
         # grad_fn, so the hook fires exactly once regardless of output count.
+        # a's AccumulateGrad also fires (created on first use); ignore it here.
         with torch.autograd.graph.node_creation_hook(nodes.append):
             outs = a.split(2)
-        self.assertEqual(len(nodes), 1)
+        split_nodes = [n for n in nodes if not isinstance(n, AccumulateGrad)]
+        self.assertEqual(len(split_nodes), 1)
         for out in outs:
-            self.assertIs(nodes[0], out.grad_fn)
+            self.assertIs(split_nodes[0], out.grad_fn)
 
     def test_node_creation_hook_nesting(self):
         calls = []
@@ -11428,7 +11431,14 @@ for shape in [(1,), ()]:
                 lambda node: calls.append(("inner", node))
             ):
                 c = b.exp()
-        expected = [("outer", b.grad_fn), ("outer", c.grad_fn), ("inner", c.grad_fn)]
+        # b = a * 2 also creates a's AccumulateGrad, firing the outer hook.
+        acc = b.grad_fn.next_functions[0][0]
+        expected = [
+            ("outer", acc),
+            ("outer", b.grad_fn),
+            ("outer", c.grad_fn),
+            ("inner", c.grad_fn),
+        ]
         self.assertEqual(calls, expected)
 
     def test_node_creation_hook_custom_function(self):
@@ -11441,12 +11451,15 @@ for shape in [(1,), ()]:
             def backward(ctx, gO):
                 return gO * 2
 
+        AccumulateGrad = torch._C._functions.AccumulateGrad
         nodes = []
         a = torch.randn(2, requires_grad=True)
+        # a's AccumulateGrad also fires (created on first use); ignore it here.
         with torch.autograd.graph.node_creation_hook(nodes.append):
             out = Func.apply(a)
-        self.assertEqual(len(nodes), 1)
-        self.assertIs(nodes[0], out.grad_fn)
+        func_nodes = [n for n in nodes if not isinstance(n, AccumulateGrad)]
+        self.assertEqual(len(func_nodes), 1)
+        self.assertIs(func_nodes[0], out.grad_fn)
 
     def test_node_creation_hook_inplace(self):
         nodes = []
@@ -11474,9 +11487,15 @@ for shape in [(1,), ()]:
         a = torch.randn(2, requires_grad=True)
         b = torch.randn(2, requires_grad=True)
         saved = []
-        with torch.autograd.graph.node_creation_hook(
-            lambda node: saved.append((node._saved_self, node._saved_other))
-        ):
+
+        def hook(node):
+            # a and b's AccumulateGrad nodes also fire; only the mul node has
+            # saved tensors.
+            if isinstance(node, torch._C._functions.AccumulateGrad):
+                return
+            saved.append((node._saved_self, node._saved_other))
+
+        with torch.autograd.graph.node_creation_hook(hook):
             a * b
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0][0], a)
@@ -11496,9 +11515,14 @@ for shape in [(1,), ()]:
 
         a = torch.randn(2, requires_grad=True)
         saved = []
-        with torch.autograd.graph.node_creation_hook(
-            lambda node: saved.append(node.saved_tensors)
-        ):
+
+        def hook(node):
+            # a's AccumulateGrad also fires but has no saved_tensors.
+            if isinstance(node, torch._C._functions.AccumulateGrad):
+                return
+            saved.append(node.saved_tensors)
+
+        with torch.autograd.graph.node_creation_hook(hook):
             Func.apply(a)
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0], (a,))
@@ -11529,13 +11553,54 @@ for shape in [(1,), ()]:
         with torch.library._scoped_library("_test_nch_fallback", "FRAGMENT") as lib:
             lib.define("foo(Tensor a) -> (Tensor, Tensor)")
             lib.impl("foo", lambda a: (a.detach().clone(), a.detach().clone()), "CPU")
+            AccumulateGrad = torch._C._functions.AccumulateGrad
             a = torch.randn(2, requires_grad=True)
             nodes = []
+            # a's AccumulateGrad also fires (created on first use); ignore it.
             with torch.autograd.graph.node_creation_hook(nodes.append):
                 out1, out2 = torch.ops._test_nch_fallback.foo(a)
             self.assertIs(out1.grad_fn, out2.grad_fn)
-            self.assertEqual(len(nodes), 1)
-            self.assertIs(nodes[0], out1.grad_fn)
+            fallback_nodes = [n for n in nodes if not isinstance(n, AccumulateGrad)]
+            self.assertEqual(len(fallback_nodes), 1)
+            self.assertIs(fallback_nodes[0], out1.grad_fn)
+
+    def test_node_creation_hook_accumulate_grad(self):
+        # An AccumulateGrad node fires when created (a leaf's first use in the
+        # context) but not when the cached one is reused. Freeing the graph
+        # drops the node so it fires again on the next use.
+        AccumulateGrad = torch._C._functions.AccumulateGrad
+        a = torch.randn(2, requires_grad=True)
+        nodes = []
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            b = a * 2
+            # Reusing a while its AccumulateGrad is still alive does not refire.
+            c = a * 3
+        acc = [n for n in nodes if isinstance(n, AccumulateGrad)]
+        self.assertEqual(len(acc), 1)
+        self.assertIs(acc[0], b.grad_fn.next_functions[0][0])
+        self.assertIs(acc[0], c.grad_fn.next_functions[0][0])
+
+        # Freeing the graph drops the cached node, so it fires again next use.
+        # Drop every strong ref to the node (graph + our list) so it dies.
+        del b, c, acc
+        nodes.clear()
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            d = a * 4
+        self.assertEqual(len([n for n in nodes if isinstance(n, AccumulateGrad)]), 1)
+
+    def test_node_creation_hook_accumulate_grad_reuse_no_fire(self):
+        # An AccumulateGrad created before entering the context (and kept alive
+        # by an existing graph) is reused, not recreated, so it does not fire.
+        a = torch.randn(2, requires_grad=True)
+        b = a * 2
+        nodes = []
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            c = a * 3
+        self.assertEqual(
+            [n for n in nodes if isinstance(n, torch._C._functions.AccumulateGrad)],
+            [],
+        )
+        self.assertIs(b.grad_fn.next_functions[0][0], c.grad_fn.next_functions[0][0])
 
     def test_node_creation_hook_no_fire_outside_context(self):
         nodes = []
@@ -11544,8 +11609,8 @@ for shape in [(1,), ()]:
             pass
         b = a * 2
         self.assertEqual(nodes, [])
-        # AccumulateGrad is created lazily during backward, outside any
-        # context, and should not fire.
+        # a's AccumulateGrad was created by b = a * 2 outside any context, so
+        # it does not fire; backward reuses it and creates no new nodes here.
         b.sum().backward()
         self.assertEqual(nodes, [])
 
@@ -11599,13 +11664,16 @@ for shape in [(1,), ()]:
 
     def test_node_creation_hook_foreach(self):
         # Out-of-place foreach ops create one grad_fn shared by all outputs.
+        AccumulateGrad = torch._C._functions.AccumulateGrad
         nodes = []
         tensors = [torch.randn(2, requires_grad=True) for _ in range(3)]
+        # Each leaf's AccumulateGrad also fires (created on first use); ignore.
         with torch.autograd.graph.node_creation_hook(nodes.append):
             outs = torch._foreach_mul(tensors, 2)
-        self.assertEqual(len(nodes), 1)
+        foreach_nodes = [n for n in nodes if not isinstance(n, AccumulateGrad)]
+        self.assertEqual(len(foreach_nodes), 1)
         for out in outs:
-            self.assertIs(nodes[0], out.grad_fn)
+            self.assertIs(foreach_nodes[0], out.grad_fn)
 
     def test_node_creation_hook_foreach_inplace(self):
         nodes = []
@@ -11623,10 +11691,16 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.node_creation_hook(nodes.append):
             b = a * 2
             c = err_fn(b)
+        # b = a * 2 also creates a's AccumulateGrad, which fires first.
         self.assertEqual(
-            [n.name() for n in nodes], ["MulBackward0", "torch::autograd::Error"]
+            [n.name() for n in nodes],
+            [
+                "torch::autograd::AccumulateGrad",
+                "MulBackward0",
+                "torch::autograd::Error",
+            ],
         )
-        self.assertIs(nodes[1], c.grad_fn)
+        self.assertIs(nodes[2], c.grad_fn)
 
     def test_node_creation_hook_register_backward_hooks(self):
         # The motivating pattern: capture state at node creation, restore it

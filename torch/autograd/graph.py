@@ -511,12 +511,14 @@ class node_creation_hook:
         <MulBackward0 object at ...>
 
     .. note::
-        ``AccumulateGrad`` nodes never trigger this hook. They are created
-        on demand and cached on the leaf tensor, so their creation time
-        depends on the tensor's usage history rather than on the code
-        running inside the context. Use
-        :meth:`~torch.Tensor.register_post_accumulate_grad_hook` for
-        per-leaf instrumentation instead.
+        An ``AccumulateGrad`` node fires this hook when it is created, but
+        not when a previously created one is reused. The node is created on
+        demand the first time a leaf tensor is wired into a graph and is then
+        cached (via a weak reference) on the leaf, so it fires again only
+        after the old node has been freed. Since freeing the autograd graph
+        drops that node, code that frees the graph each iteration (the common
+        case) fires the hook consistently on each leaf's first use within the
+        context.
     """
 
     def __init__(self, hook: Callable[[Node], None]) -> None:
