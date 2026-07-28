@@ -7,7 +7,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLCCA.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -533,11 +533,11 @@ void ProcessGroupNCCL::returnEvent(std::unique_ptr<at::cuda::CUDAEvent> event) {
 }
 
 void ProcessGroupNCCL::attachMemoryHook() {
-  NcclCachingAllocatorHook::getInstance().registerComm(this);
+  NCCLCachingAllocatorHook::getInstance().registerComm(this);
 }
 
 void ProcessGroupNCCL::detachMemoryHook() {
-  NcclCachingAllocatorHook::getInstance().deregisterComm(this);
+  NCCLCachingAllocatorHook::getInstance().deregisterComm(this);
 }
 
 void ProcessGroupNCCL::register_address(void* addr, size_t len) {

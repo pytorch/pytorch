@@ -45,9 +45,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
+    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_XPU_AND_TRITON,
+    TRITON_HAS_CPU,
 )
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
@@ -4502,6 +4504,125 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
 
+    def test_tensormap_create_marks_descriptor_write(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op(
+                        "tt.experimental_tensormap_create",
+                        None,
+                        [Param(idx=0), Param(idx=1)],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            },
+        }
+
+        analyze_kernel_access.reset()
+        tensor_accesses = analyze_kernel_access(
+            functions,
+            "main",
+            2,
+            ("workspace", "global_ptr"),
+            frozenset({0, 1}),
+        )
+
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(write_names, ["workspace"])
+
+    def test_register_kernel_access_op_updates_direct_analysis_after_reset(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            get_tma_stores,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        custom_store = "custom_tma.cache_test_store"
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op(custom_store, None, [Param(idx=0)], Intermediate(idx=-1))
+                ],
+            },
+        }
+
+        try:
+            analyze_kernel_access.reset()
+            tensor_accesses = analyze_kernel_access(
+                functions,
+                "main",
+                1,
+                ("out_ptr",),
+                frozenset({0}),
+            )
+            self.assertEqual(len(tensor_accesses.read_writes.writes), 0)
+
+            tkw.register_kernel_access_op(custom_store, write_indexes=[0])
+            # identify_accessed_tensors resets production caches per invocation.
+            # Direct analyze_kernel_access callers must reset before re-analysis.
+            analyze_kernel_access.reset()
+            tensor_accesses = analyze_kernel_access(
+                functions,
+                "main",
+                1,
+                ("out_ptr",),
+                frozenset({0}),
+            )
+            write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+            self.assertListEqual(write_names, ["out_ptr"])
+        finally:
+            tkw.unregister_kernel_access_op(custom_store)
+            analyze_kernel_access.reset()
+            get_tma_stores.reset()
+
+    def test_register_kernel_access_op_rejects_ignore_with_indexes(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        msg = "custom_tma.invalid: ignore_if cannot be combined with read/write indexes"
+        with self.assertRaisesRegex(AssertionError, msg):
+            tkw.register_kernel_access_op(
+                "custom_tma.invalid", write_indexes=[0], ignore_if=lambda op: True
+            )
+
+    def test_kernel_access_op_can_read_and_write(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op("tt.atomic_rmw", None, [Param(idx=0)], Intermediate(idx=-1))
+                ],
+            },
+        }
+
+        analyze_kernel_access.reset()
+        tensor_accesses = analyze_kernel_access(
+            functions,
+            "main",
+            1,
+            ("in_out_ptr",),
+            frozenset({0}),
+        )
+        read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(read_names, ["in_out_ptr"])
+        self.assertListEqual(write_names, ["in_out_ptr"])
+
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
         "requires experimental TMA descriptor API",
@@ -4622,6 +4743,115 @@ class MutationTests(torch._inductor.test_case.TestCase):
         write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(read_names, ["in_ptr0", "in_ptr1"])
         self.assertListEqual(write_names, ["out_ptr"])
+
+    @unittest.skipUnless(
+        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
+        "requires gpu or triton cpu",
+    )
+    def test_custom_tma_descriptor_ops_keep_triton_launcher(self):
+        import triton
+
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            get_tma_stores,
+            identify_accessed_tensors,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        custom_store = "custom_tma.descriptor_store"
+        custom_load = "custom_tma.descriptor_load"
+        device = GPU_TYPE if HAS_GPU else "cpu"
+
+        functions = {
+            "mul2_kernel": {
+                Intermediate(idx=0): [
+                    Op(
+                        "tt.make_tensor_descriptor",
+                        None,
+                        [Param(idx=0)],
+                        Intermediate(idx=0),
+                    )
+                ],
+                Intermediate(idx=1): [
+                    Op(
+                        "tt.make_tensor_descriptor",
+                        None,
+                        [Param(idx=1)],
+                        Intermediate(idx=1),
+                    )
+                ],
+                Intermediate(idx=2): [
+                    Op(custom_load, None, [Intermediate(idx=0)], Intermediate(idx=2))
+                ],
+                Intermediate(idx=-1): [
+                    Op(
+                        custom_store,
+                        None,
+                        [Intermediate(idx=1), Intermediate(idx=2)],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            }
+        }
+
+        try:
+            tkw.register_kernel_access_op(
+                custom_store, write_indexes=[0], is_tma_store=True
+            )
+            tkw.register_kernel_access_op(custom_load, read_indexes=[0])
+            with (
+                mock.patch.object(
+                    tkw,
+                    "generate_ttir",
+                    return_value=(
+                        object(),
+                        ["in_ptr0", "out_ptr", "n_elements", "BLOCK_SIZE"],
+                    ),
+                ),
+                mock.patch.object(tkw, "ttir_to_functions", return_value=functions),
+            ):
+                x = torch.rand(16, device=device)
+                tensor_accesses = identify_accessed_tensors(
+                    mul2_kernel,
+                    {
+                        "in_ptr0": x,
+                        "out_ptr": x,
+                        "n_elements": x.numel(),
+                        "BLOCK_SIZE": 16,
+                    },
+                    {},
+                )
+                read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+                write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+                self.assertListEqual(read_names, ["in_ptr0"])
+                self.assertListEqual(write_names, ["out_ptr"])
+
+                def f(x):
+                    output = torch.zeros_like(x)
+                    grid = (triton.cdiv(x.numel(), 16),)
+                    mul2_kernel[grid](x, output, x.numel(), BLOCK_SIZE=16)
+                    return output
+
+                config_patch = (
+                    inductor_config.patch("cpu_backend", "triton")
+                    if device == "cpu"
+                    else contextlib.nullcontext()
+                )
+                with config_patch:
+                    actual, (code,) = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(actual, 2 * x)
+                if inductor_config.cpp_wrapper:
+                    self.assertIn("launchKernel(mul2_kernel_0", code)
+                else:
+                    self.assertIn("mul2_kernel_0.run(", code)
+        finally:
+            tkw.unregister_kernel_access_op(custom_store)
+            tkw.unregister_kernel_access_op(custom_load)
+            analyze_kernel_access.reset()
+            get_tma_stores.reset()
 
 
 if HAS_GPU:
