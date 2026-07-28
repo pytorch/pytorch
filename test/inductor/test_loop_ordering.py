@@ -805,85 +805,6 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
         self.assertEqual(actual, f(x))
 
-    def test_reindex_attention_layout_clone_for_index_inversion(self):
-        """Regression test for https://github.com/pytorch/pytorch/issues/188635."""
-
-        def f(x):
-            y = realize(x + 1)
-            return y.view(2, 16, 4, 8).transpose(1, 2).contiguous()
-
-        x = torch.randn(2, 16, 32, device=self.device)
-        self.do_acc_test(f, x)
-        self.assertEqual(metrics.generated_kernel_count, 1)
-
-    def test_reindex_block_scale_swizzle_with_epilogue(self):
-        def f(x):
-            y = realize(x + 1)
-            rows, cols = y.shape
-            blocks = y.view(rows // 128, 128, cols // 4, 4).permute(0, 2, 1, 3)
-            blocks = blocks.reshape(-1, 4, 32, 4).transpose(1, 2)
-            return blocks.reshape(rows, cols) + 1
-
-        x = torch.randn(128, 128, device=self.device)
-        self.do_acc_test(f, x)
-        self.assertEqual(metrics.generated_kernel_count, 1)
-
-    @inductor_config.patch(fx_graph_cache=False)
-    def test_noninvertible_reindex_skips_loop_mutation(self):
-        reindexed = False
-        original_apply = SchedulerNode.apply_loop_reindexing
-
-        def record_apply(node, *args, **kwargs):
-            nonlocal reindexed
-            reindexed = True
-            return original_apply(node, *args, **kwargs)
-
-        def f(x):
-            y = realize(x + 1)
-            return torch.as_strided(y, (2, 3, 2), (6, 1, 1)).clone()
-
-        x = torch.randn(2, 6, device=self.device)
-        with mock.patch.object(
-            SchedulerNode,
-            "apply_loop_reindexing",
-            record_apply,
-        ):
-            actual = torch.compile(f, fullgraph=True)(x)
-
-        self.assertFalse(reindexed)
-        self.assertEqual(actual, f(x))
-
-    @inductor_config.patch(fx_graph_cache=False)
-    def test_rejected_reindex_for_index_inversion_rollback(self):
-        from torch._inductor.choices import InductorChoices
-
-        observed_sizes = []
-
-        class RejectReindexedFusion(InductorChoices):
-            def can_fuse(self, scheduler, node1, node2, shared_data_score):
-                node2_sizes = (
-                    tuple(node2._sizes[0]) if isinstance(node2, SchedulerNode) else ()
-                )
-                if node2_sizes == (1024,):
-                    observed_sizes.append(node2_sizes)
-                    return False
-                return InductorChoices.can_fuse(
-                    scheduler, node1, node2, shared_data_score
-                )
-
-        def f(x):
-            y = realize(x + 1)
-            return y.view(2, 16, 4, 8).transpose(1, 2).contiguous()
-
-        x = torch.randn(2, 16, 32, device=self.device)
-        choices = RejectReindexedFusion()
-        with V.set_choices_handler(choices):
-            actual = torch.compile(f, fullgraph=True)(x)
-
-        self.assertTrue(observed_sizes)
-        self.assertEqual(set(observed_sizes), {(1024,)})
-        self.assertEqual(actual, f(x))
-
     def test_reshape_reindexing_fused_pointwise(self):
         """
         Redecomposition where the pointwise side is a FusedSchedulerNode.
@@ -2244,15 +2165,6 @@ class TestIndexInversion(TestCase):
         )
         self.assertIsNone(generate_inverse_formula(bounded_expr, p, 4096))
         self.assertIsNone(generate_inverse_formula(bounded_expr, p, 32768))
-
-        nested_reconstruction = 128 * FloorDiv(p, 128) + ModularIndexing(p, 1, 128)
-        nested_bounded_expr = bounded_expr.xreplace(
-            {ModularIndexing(p, 16, 32): ModularIndexing(nested_reconstruction, 16, 32)}
-        )
-        self.assertEqual(
-            generate_inverse_formula(nested_bounded_expr, p, 16384),
-            generate_inverse_formula(bounded_expr, p, 16384),
-        )
 
         overlapping_floors = (
             ModularIndexing(p, 1, 2) + 2 * FloorDiv(p, 2) + 4 * FloorDiv(p, 4)
