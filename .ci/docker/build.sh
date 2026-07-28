@@ -122,6 +122,22 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.12
@@ -153,29 +169,32 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang18)
+  pytorch-linux-jammy-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.11-clang18)
+  pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=18
+    CLANG_VERSION=21
+    TVM=yes
     ;;
-  pytorch-linux-jammy-py3.12-clang18)
+  pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=18
+    CLANG_VERSION=21
+    TVM=yes
     ;;
-  pytorch-linux-jammy-py3.13-clang18)
+  pytorch-linux-jammy-py3.13-clang21)
     ANACONDA_PYTHON_VERSION=3.13
-    CLANG_VERSION=18
+    CLANG_VERSION=21
+    TVM=yes
     ;;
-  pytorch-linux-jammy-py3.14-clang18)
+  pytorch-linux-jammy-py3.14-clang21)
     ANACONDA_PYTHON_VERSION=3.14
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -204,14 +223,14 @@ case "$tag" in
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    XPU_VERSION=2025.3
+    XPU_VERSION=2026.0
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    XPU_VERSION=2026.0
+    XPU_VERSION=2026.1
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -235,9 +254,9 @@ case "$tag" in
     CLANG_VERSION=18
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang18-executorch)
+  pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
@@ -289,6 +308,18 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
+    GCC_VERSION=14
+    PYTHON_VERSION=3.12
+    OPENBLAS=yes
+    if [[ "$(uname -m)" != "riscv64" ]]; then
+      platform_flag="--platform linux/riscv64" # we are building using QEMU
+    fi
+    # Use a custom PyPI index to get pre-built wheels for RISC-V
+    # See https://riseproject-dev.github.io/python-wheels/
+    PIP_EXTRA_INDEX_URL=https://pypi.riseproject.dev/simple
+    PIP_PREFER_BINARY=1
+    ;;
+  pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
     GCC_VERSION=14
     ;;
   *)
@@ -366,6 +397,7 @@ fi
 build_image() {
   docker buildx build \
        ${progress_flag} \
+       ${platform_flag:-} \
        ${cache_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
@@ -385,6 +417,7 @@ build_image() {
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
+       --build-arg "TVM=${TVM}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
@@ -398,6 +431,8 @@ build_image() {
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}" \
+       --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        ${output_flag} \
        "$@" \

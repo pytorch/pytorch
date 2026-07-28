@@ -55,9 +55,6 @@ from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
-    GetSet,
-    getset_read,
-    Method,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
@@ -66,9 +63,9 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
+    generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
-    vt_getitem,
 )
 
 
@@ -504,248 +501,216 @@ class ConstDictVariable(VariableTracker):
         self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
         return ConstantVariable.create(None)
 
-    # NB - Both key and value are LazyVariableTrackers in the beginning. So,
-    # we have to insert guards when a dict method is accessed. For this to be
-    # simple, we are conservative and overguard. We skip the guard only for
-    # get/__getitem__ because the key guard will be inserted by the
-    # corresponding value VT. For __contains__, we add a DICT_CONTAINS guard.
-    # But for all the other methods, we insert the DICT_KEYS_MATCH guard to be
-    # conservative.
-
-    def dict_items(
+    def call_method(
         self,
         tx: "InstructionTranslatorBase",
+        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
-        return DictItemsVariable(self)
+        # NB - Both key and value are LazyVariableTrackers in the beginning. So,
+        # we have to insert guards when a dict method is accessed. For this to
+        # be simple, we are conservative and overguard. We skip guard only for
+        # get/__getitem__ because the key guard will be inserted by the
+        # corresponding value VT. For __contains__, we add a DICT_CONTAINS
+        # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
+        # guard to be conservative.
+        Hashable = HashableTracker
 
-    def dict_keys(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
-        return DictKeysVariable(self)
-
-    def dict_values(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
-        return DictValuesVariable(self)
-
-    def dict_copy(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        return self.clone(
-            items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
-        )
-
-    def dict_get(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if len(args) not in (1, 2):
-            raise_args_mismatch(tx, "get", "1 or 2 args", f"{len(args)} args")
-        if args[0] not in self:
-            self.install_dict_contains_guard(tx, args)
-            if len(args) == 1:
-                # if default is not given, return None
-                return ConstantVariable.create(None)
-            return args[1]
-        # Key guarding - Nothing to do.
-        return self.getitem_const(tx, args[0])
-
-    def dict_pop(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        if not self.is_mutable():
-            return None
-        if len(args) not in (1, 2):
-            raise_args_mismatch(tx, "pop", "1 or 2 args", f"{len(args)} args")
-        if args[0] not in self:
-            # missing item, return the default value. Install no DICT_CONTAINS guard.
-            self.install_dict_contains_guard(tx, args)
-            if len(args) == 1:
-                # if default is not given, raise KeyError
-                raise_observed_exception(KeyError, tx)
-            return args[1]
-        self.should_reconstruct_all = True
-        tx.output.side_effects.mutation(self)
-        return self.items.pop(HashableTracker(args[0]))
-
-    def dict_popitem(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        if not self.is_mutable():
-            return None
-        # dict.popitem() takes no args. OrderedDict.popitem(last=) is
-        # handled by OrderedDictVariable.call_method.
-        if len(args):
-            raise_args_mismatch(tx, "popitem")
-        if not self.items:
-            raise_observed_exception(
-                KeyError,
-                tx,
-                args=[
-                    "popitem(): dictionary is empty",
-                ],
-            )
-        k, v = self.items.popitem()
-        self.should_reconstruct_all = True
-        tx.output.side_effects.mutation(self)
-        return variables.TupleVariable([k.vt, v])
-
-    def dict_clear(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        self.should_reconstruct_all = True
-        tx.output.side_effects.mutation(self)
-        self.items.clear()
-        return ConstantVariable.create(None)
-
-    def dict_update(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        if not self.is_mutable():
-            return None
-        # Mirrors CPython PyDict_Merge: if arg has keys(), iterate keys and
-        # __getitem__; else treat arg as iterable of (key, value) pairs.
-        # kwargs are always merged on top.
-        # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/dictobject.c#L3571
-        self.install_dict_keys_match_guard()
-        if len(args) > 1:
-            raise_args_mismatch(tx, "update", "at most 1 args", f"{len(args)} args")
-        if args or kwargs:
-            tx.output.side_effects.mutation(self)
-        if args:
-            other = args[0]
-            if isinstance(other, ConstDictVariable):
-                # NB - Guard on all the keys of the other dict to ensure
-                # correctness.
-                other.install_dict_keys_match_guard()
-                self.items.update(other.items)
-            elif (
-                isinstance(
-                    other,
-                    (variables.UserDefinedObjectVariable, MappingProxyVariable),
+        if name == "items":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-                and other.call_obj_hasattr(tx, "keys").as_python_constant()
-            ):
-                keys = other.call_method(tx, "keys", [], {})
-                for key in unpack_iterable(tx, keys):
-                    self.items[HashableTracker(key)] = vt_getitem(tx, other, key)
-            else:
-                for idx, item in enumerate(unpack_iterable(tx, other)):
-                    pair = unpack_iterable(tx, item)
-                    if len(pair) != 2:
-                        raise_observed_exception(
-                            ValueError,
-                            tx,
-                            args=[
-                                "dictionary update sequence element "
-                                f"#{idx} has length {len(pair)}; 2 is required"
-                            ],
-                        )
-                    self.items[HashableTracker(pair[0])] = pair[1]
-        for k, v in kwargs.items():
-            self.items[HashableTracker(VariableTracker.build(tx, k))] = v
-        return ConstantVariable.create(None)
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            return DictItemsVariable(self)
+        elif name == "keys":
+            if len(args):
+                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            return DictKeysVariable(self)
+        elif name == "__reversed__":
+            # dict.__reversed__: reverse insertion-order key iterator.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            reversed_keys = [k.vt for k in reversed(list(self.items.keys()))]
+            return variables.ListIteratorVariable(
+                reversed_keys, mutation_type=ValueMutationNew()
+            )
+        elif name == "values":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            if args or kwargs:
+                raise_observed_exception(TypeError, tx)
+            return DictValuesVariable(self)
+        elif name == "copy":
+            self.install_dict_keys_match_guard()
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
+        elif name == "get":
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
-    def dict_setdefault(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        if not self.is_mutable():
-            return None
-        if len(args) not in (1, 2):
-            raise_args_mismatch(
-                tx,
-                "setdefault",
-                "1 or 2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
-        self.install_dict_keys_match_guard()
-        if kwargs or len(args) > 2:
-            raise_args_mismatch(
-                tx,
-                "setdefault",
-                "at most 2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
-        value = self.maybe_getitem_const(args[0])
-        if value is not None:
-            return value
-        else:
-            if len(args) == 1:
-                x = ConstantVariable.create(None)
-            else:
-                x = args[1]
+            if args[0] not in self:
+                self.install_dict_contains_guard(tx, args)
+                if len(args) == 1:
+                    # if default is not given, return None
+                    return ConstantVariable.create(None)
+                return args[1]
+            # Key guarding - Nothing to do.
+            return self.getitem_const(tx, args[0])
+        elif name == "pop" and self.is_mutable():
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
+
+            if args[0] not in self:
+                # missing item, return the default value. Install no DICT_CONTAINS guard.
+                self.install_dict_contains_guard(tx, args)
+                if len(args) == 1:
+                    # if default is not given, raise KeyError
+                    raise_observed_exception(KeyError, tx)
+                return args[1]
+
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            self.items[HashableTracker(args[0])] = x
-            return x
+            return self.items.pop(Hashable(args[0]))
+        elif name == "popitem" and self.is_mutable():
+            # dict.popitem() takes no args. OrderedDict.popitem(last=) is
+            # handled by OrderedDictVariable.call_method.
+            if len(args):
+                raise_args_mismatch(tx, name)
 
-    def dict_reversed(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # dict.__reversed__: reverse insertion-order key iterator.
-        # Not a C-level slot, so it lives in tp_methods rather than call_method.
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
-        reversed_keys = [k.vt for k in reversed(list(self.items.keys()))]
-        return variables.ListIteratorVariable(
-            reversed_keys, mutation_type=ValueMutationNew()
-        )
+            if not self.items:
+                raise_observed_exception(
+                    KeyError,
+                    tx,
+                    args=[
+                        "popitem(): dictionary is empty",
+                    ],
+                )
 
-    tp_methods = {
-        "items": Method(dict_items, "items"),
-        "keys": Method(dict_keys, "keys"),
-        "values": Method(dict_values, "values"),
-        "copy": Method(dict_copy, "copy"),
-        "clear": Method(dict_clear, "clear"),
-        "get": Method(dict_get, "get"),
-        "pop": Method(dict_pop, "pop"),
-        "popitem": Method(dict_popitem, "popitem"),
-        "update": Method(dict_update, "update"),
-        "setdefault": Method(dict_setdefault, "setdefault"),
-        "__reversed__": Method(dict_reversed, "__reversed__"),
-    }
+            k, v = self.items.popitem()
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+
+            return variables.TupleVariable([k.vt, v])
+        elif name == "clear":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            return ConstantVariable.create(None)
+        elif name == "update" and self.is_mutable():
+            # Mirrors CPython PyDict_Merge: if arg has keys(), iterate keys and
+            # __getitem__; else treat arg as iterable of (key, value) pairs.
+            # kwargs are always merged on top.
+            # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/dictobject.c#L3571
+            self.install_dict_keys_match_guard()
+            if len(args) > 1:
+                raise_args_mismatch(tx, name, "at most 1 args", f"{len(args)} args")
+            if args or kwargs:
+                tx.output.side_effects.mutation(self)
+            if args:
+                other = args[0]
+                if isinstance(other, ConstDictVariable):
+                    # NB - Guard on all the keys of the other dict to ensure
+                    # correctness.
+                    other.install_dict_keys_match_guard()
+                    self.items.update(other.items)
+                elif (
+                    isinstance(
+                        other,
+                        (variables.UserDefinedObjectVariable, MappingProxyVariable),
+                    )
+                    and other.call_obj_hasattr(tx, "keys").as_python_constant()
+                ):
+                    keys = other.call_method(tx, "keys", [], {})
+                    for key in unpack_iterable(tx, keys):
+                        self.items[Hashable(key)] = generic_getitem(tx, other, key)
+                else:
+                    for idx, item in enumerate(unpack_iterable(tx, other)):
+                        pair = unpack_iterable(tx, item)
+                        if len(pair) != 2:
+                            raise_observed_exception(
+                                ValueError,
+                                tx,
+                                args=[
+                                    "dictionary update sequence element "
+                                    f"#{idx} has length {len(pair)}; 2 is required"
+                                ],
+                            )
+                        self.items[Hashable(pair[0])] = pair[1]
+            for k, v in kwargs.items():
+                self.items[Hashable(VariableTracker.build(tx, k))] = v
+            return ConstantVariable.create(None)
+        elif name == "setdefault" and self.is_mutable():
+            if len(args) not in (1, 2):
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 or 2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+
+            self.install_dict_keys_match_guard()
+            if kwargs or len(args) > 2:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "at most 2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            value = self.maybe_getitem_const(args[0])
+            if value is not None:
+                return value
+            else:
+                if len(args) == 1:
+                    x = ConstantVariable.create(None)
+                else:
+                    x = args[1]
+                tx.output.side_effects.mutation(self)
+                self.items[Hashable(args[0])] = x
+                return x
+        else:
+            return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -873,6 +838,8 @@ class ConstDictVariable(VariableTracker):
         return eq_result
 
     def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
+        if name == "__class__":
+            return VariableTracker.build(tx, self.python_type())
         # DictGuardManager does not support getattr_manager for plain dicts,
         # so AttrSource chains through a dict source break guard creation.
         # Return CallMethodVariable directly for methods, bypassing the
@@ -1119,11 +1086,15 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    # dictview_mapping getset returns a read-only mappingproxy of the underlying
-    # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
-    tp_getset = {
-        "mapping": GetSet(getset_read(lambda s: MappingProxyVariable(s.dv_dict))),
-    }
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # dictview_mapping getset returns a read-only mappingproxy of the
+        # underlying dict for dict_keys/values/items.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
+        if name == "mapping":
+            return MappingProxyVariable(self.dv_dict)
+        return super().getattro_impl(tx, name)
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
@@ -1137,24 +1108,29 @@ class DictViewVariable(VariableTracker):
             )
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
-    def dict_view_reversed(
+    def call_method(
         self,
         tx: "InstructionTranslatorBase",
+        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # dict_keys/values/items __reversed__: reverse insertion order.
-        # Not a C-level slot, so it lives in tp_methods rather than call_method.
-        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
-            tx.output.guard_on_key_order.add(self.dv_dict.source)
-        return variables.ListIteratorVariable(
-            list(reversed(self.view_items_vt)),
-            mutation_type=ValueMutationNew(),
-        )
-
-    tp_methods = {
-        "__reversed__": Method(dict_view_reversed, "__reversed__"),
-    }
+        if name == "__reversed__":
+            # dict_keys/values/items __reversed__: reverse insertion order.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+                tx.output.guard_on_key_order.add(self.dv_dict.source)
+            return variables.ListIteratorVariable(
+                list(reversed(self.view_items_vt)),
+                mutation_type=ValueMutationNew(),
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for dict view objects."""
@@ -1634,19 +1610,25 @@ class DunderDictVariable(ConstDictVariable):
             self.items[name] = value
             return value
 
-    def dict_copy(
+    def call_method(
         self,
         tx: "InstructionTranslatorBase",
+        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return ConstDictVariable(
-            dict(self.items), mutation_type=ValueMutationNew(), source=None
-        )
-
-    tp_methods = {
-        "copy": Method(dict_copy, "copy"),
-    }
+        if name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return ConstDictVariable(
+                dict(self.items), mutation_type=ValueMutationNew(), source=None
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.
