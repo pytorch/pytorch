@@ -19426,13 +19426,44 @@ if RUN_GPU or HAS_MPS:
         def test_addmm_out_dtype_compile(self):
             x = torch.randn(2, 8, device=self.device, dtype=torch.float16)
             w = torch.randn(8, 13, device=self.device, dtype=torch.float16)
-            bias = torch.zeros(13, device=self.device, dtype=torch.float16)
+            bias = torch.randn(13, device=self.device, dtype=torch.float16)
+
+            def eager_fn(bias, x, w):
+                return torch.addmm(bias, x, w, out_dtype=torch.float32)
+
+            eager_result = eager_fn(bias, x, w)
+            compiled_result = torch.compile(eager_fn, fullgraph=True)(bias, x, w)
+            self.assertEqual(compiled_result.dtype, torch.float32)
+            self.assertEqual(compiled_result, eager_result)
+
+        @requires_cuda_and_triton
+        def test_addmm_out_dtype_compile_beta_alpha(self):
+            x = torch.randn(2, 8, device=self.device, dtype=torch.float16)
+            w = torch.randn(8, 13, device=self.device, dtype=torch.float16)
+            bias = torch.randn(13, device=self.device, dtype=torch.float16)
+
+            def fn(bias, x, w, beta, alpha):
+                return torch.addmm(bias, x, w, out_dtype=torch.float32, beta=beta, alpha=alpha)
+
+            for beta, alpha in [(0.5, 1.0), (1.0, 2.0), (0.0, 1.0), (1.0, 1.0)]:
+                eager_result = fn(bias, x, w, beta, alpha)
+                compiled_result = torch.compile(fn, fullgraph=True)(bias, x, w, beta, alpha)
+                self.assertEqual(compiled_result.dtype, torch.float32)
+                self.assertEqual(compiled_result, eager_result)
+
+        @requires_cuda_and_triton
+        def test_addmm_out_dtype_compile_bf16(self):
+            x = torch.randn(2, 8, device=self.device, dtype=torch.bfloat16)
+            w = torch.randn(8, 13, device=self.device, dtype=torch.bfloat16)
+            bias = torch.randn(13, device=self.device, dtype=torch.bfloat16)
 
             def fn(bias, x, w):
                 return torch.addmm(bias, x, w, out_dtype=torch.float32)
 
-            result = torch.compile(fn, fullgraph=True)(bias, x, w)
-            self.assertEqual(result.dtype, torch.float32)
+            eager_result = fn(bias, x, w)
+            compiled_result = torch.compile(fn, fullgraph=True)(bias, x, w)
+            self.assertEqual(compiled_result.dtype, torch.float32)
+            self.assertEqual(compiled_result, eager_result)
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
