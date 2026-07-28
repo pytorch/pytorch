@@ -632,23 +632,23 @@ class GraphModule(torch.nn.Module):
 
         # No stacktrace found for following nodes
         subgraph_record_event_default = self.subgraph_record_event_default
-        control_deps = torch.ops.higher_order.control_deps((mul_1, add_1, mul_2, add_3, add_2), subgraph_record_event_default, add_1, add_3, add_2);  mul_1 = add_1 = mul_2 = add_3 = add_2 = subgraph_record_event_default = None
+        control_deps = torch.ops.higher_order.control_deps((mul_1, add_1, mul_2, add_3, add_2), subgraph_record_event_default, add_3, add_2);  mul_1 = add_1 = mul_2 = add_3 = add_2 = subgraph_record_event_default = None
 
         # Backward of forward node:
-        getitem_2: "f32[2, 2]" = control_deps[3]
+        getitem_1: "f32[2, 2]" = control_deps[2]
 
         # Annotation: {'stream': 1} Backward of forward node:
-        getitem_1: "f32[2, 2]" = control_deps[2];  control_deps = None
+        getitem: "f32[2, 2]" = control_deps[1];  control_deps = None
 
         # No stacktrace found for following nodes
         sync_dealloc_default = torch.ops.streams.sync_dealloc.default(3, 2, mul_3);  mul_3 = sync_dealloc_default = None
-        return (getitem_1, getitem_2)
+        return (getitem, getitem_1)
 
     class subgraph_record_event_default(torch.nn.Module):
-        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]", dep_2: "f32[2, 2]"):
+        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]"):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(3, 1)
-            return (record_event_default, dep_0, dep_1, dep_2)
+            return (record_event_default, dep_0, dep_1)
 """,
         )
 
@@ -712,59 +712,58 @@ class GraphModule(torch.nn.Module):
 
         # No stacktrace found for following nodes
         subgraph_record_event_default = self.subgraph_record_event_default
-        control_deps = torch.ops.higher_order.control_deps((mul, add, mul_3, add_2), subgraph_record_event_default, add, mul_3, add_2);  mul = add = mul_3 = add_2 = subgraph_record_event_default = None
+        control_deps = torch.ops.higher_order.control_deps((mul, add, mul_3, add_2), subgraph_record_event_default, mul_3, add_2);  mul = add = mul_3 = add_2 = subgraph_record_event_default = None
 
         # Backward of forward node:
-        getitem_2: "f32[2, 2]" = control_deps[3]
+        getitem_1: "f32[2, 2]" = control_deps[2]
 
         # Annotation: {'stream': 2} Backward of forward node:
-        getitem_1: "f32[2, 2]" = control_deps[2]
         getitem: "f32[2, 2]" = control_deps[1]
 
         # No stacktrace found for following nodes
         subgraph_wait_event_default = self.subgraph_wait_event_default
-        control_deps_1 = torch.ops.higher_order.control_deps((control_deps, mul_1, add_1, mul_2, getitem, getitem_1, getitem_2), subgraph_wait_event_default, add_1, mul_2, getitem_1, getitem_2);  control_deps = mul_1 = add_1 = mul_2 = getitem = getitem_1 = getitem_2 = subgraph_wait_event_default = None
+        control_deps_1 = torch.ops.higher_order.control_deps((control_deps, mul_1, add_1, mul_2, getitem, getitem_1), subgraph_wait_event_default, mul_2, getitem, getitem_1);  control_deps = mul_1 = add_1 = mul_2 = getitem = getitem_1 = subgraph_wait_event_default = None
 
         # Backward of forward node:
-        getitem_6: "f32[2, 2]" = control_deps_1[4]
+        getitem_4: "f32[2, 2]" = control_deps_1[3]
 
         # Annotation: {'stream': 2} Backward of forward node:
-        getitem_5: "f32[2, 2]" = control_deps_1[3]
+        getitem_3: "f32[2, 2]" = control_deps_1[2]
 
         # Annotation: {'stream': 1} Backward of forward node:
-        getitem_4: "f32[2, 2]" = control_deps_1[2]
+        getitem_2: "f32[2, 2]" = control_deps_1[1]
 
         # Annotation: {'stream': 1} Backward of forward node:
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_4, getitem_5)
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_2, getitem_3)
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_1 = self.subgraph_record_event_default_1
-        control_deps_2 = torch.ops.higher_order.control_deps((add_3, control_deps_1, getitem_4, getitem_5, getitem_6), subgraph_record_event_default_1, add_3, getitem_5, getitem_6);  add_3 = control_deps_1 = getitem_4 = getitem_5 = getitem_6 = subgraph_record_event_default_1 = None
+        control_deps_2 = torch.ops.higher_order.control_deps((add_3, control_deps_1, getitem_2, getitem_3, getitem_4), subgraph_record_event_default_1, add_3, getitem_3, getitem_4);  add_3 = control_deps_1 = getitem_2 = getitem_3 = getitem_4 = subgraph_record_event_default_1 = None
 
         # Backward of forward node:
-        getitem_9: "f32[2, 2]" = control_deps_2[3]
+        getitem_7: "f32[2, 2]" = control_deps_2[3]
 
         # Annotation: {'stream': 2} Backward of forward node:
-        getitem_8: "f32[2, 2]" = control_deps_2[2]
+        getitem_6: "f32[2, 2]" = control_deps_2[2]
 
         # Annotation: {'stream': 1} Backward of forward node:
-        getitem_7: "f32[2, 2]" = control_deps_2[1];  control_deps_2 = None
+        getitem_5: "f32[2, 2]" = control_deps_2[1];  control_deps_2 = None
 
         # No stacktrace found for following nodes
-        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(4, 2, getitem_8);  getitem_8 = sync_dealloc_default = None
-        return (getitem_7, getitem_9)
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(4, 2, getitem_6);  getitem_6 = sync_dealloc_default = None
+        return (getitem_5, getitem_7)
 
     class subgraph_record_event_default(torch.nn.Module):
-        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]", dep_2: "f32[2, 2]"):
+        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]"):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(3, 2)
-            return (record_event_default, dep_0, dep_1, dep_2)
+            return (record_event_default, dep_0, dep_1)
 
     class subgraph_wait_event_default(torch.nn.Module):
-        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]", dep_2: "f32[2, 2]", dep_3: "f32[2, 2]"):
+        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]", dep_2: "f32[2, 2]"):
             # No stacktrace found for following nodes
             wait_event_default = torch.ops.streams.wait_event.default(3, 1)
-            return (wait_event_default, dep_0, dep_1, dep_2, dep_3)
+            return (wait_event_default, dep_0, dep_1, dep_2)
 
     class subgraph_record_event_default_1(torch.nn.Module):
         def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]", dep_2: "f32[2, 2]"):
@@ -944,50 +943,49 @@ class GraphModule(torch.nn.Module):
 
         # No stacktrace found for following nodes
         subgraph_record_event_default = self.subgraph_record_event_default
-        control_deps_2 = torch.ops.higher_order.control_deps((mul, mul_4), subgraph_record_event_default, mul, mul_4);  mul = mul_4 = subgraph_record_event_default = None
+        control_deps_2 = torch.ops.higher_order.control_deps((mul, mul_4), subgraph_record_event_default, mul_4);  mul = mul_4 = subgraph_record_event_default = None
 
         # Annotation: {'stream': 2} Backward of forward node:
-        getitem_3: "f32[2, 2]" = control_deps_2[2]
         getitem_2: "f32[2, 2]" = control_deps_2[1]
 
         # No stacktrace found for following nodes
         subgraph_wait_event_default = self.subgraph_wait_event_default
-        control_deps_3 = torch.ops.higher_order.control_deps((control_deps_2, mul_1, mul_2, mul_3, getitem_2, getitem_3), subgraph_wait_event_default, mul_2, mul_3, getitem_3);  control_deps_2 = mul_1 = mul_2 = mul_3 = getitem_2 = getitem_3 = subgraph_wait_event_default = None
+        control_deps_3 = torch.ops.higher_order.control_deps((control_deps_2, mul_1, mul_2, mul_3, getitem_2), subgraph_wait_event_default, mul_3, getitem_2);  control_deps_2 = mul_1 = mul_2 = mul_3 = getitem_2 = subgraph_wait_event_default = None
 
         # Annotation: {'stream': 2} Backward of forward node:
-        getitem_6: "f32[2, 2]" = control_deps_3[3]
+        getitem_4: "f32[2, 2]" = control_deps_3[2]
 
         # Annotation: {'stream': 3} Backward of forward node:
-        getitem_5: "f32[2, 2]" = control_deps_3[2]
+        getitem_3: "f32[2, 2]" = control_deps_3[1]
 
         # Annotation: {'stream': 3} Backward of forward node:
-        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_5, getitem_6)
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_3, getitem_4)
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_1 = self.subgraph_record_event_default_1
-        control_deps_4 = torch.ops.higher_order.control_deps((add, control_deps_3, getitem_5, getitem_6), subgraph_record_event_default_1, add, getitem_6);  add = control_deps_3 = getitem_5 = getitem_6 = subgraph_record_event_default_1 = None
+        control_deps_4 = torch.ops.higher_order.control_deps((add, control_deps_3, getitem_3, getitem_4), subgraph_record_event_default_1, add, getitem_4);  add = control_deps_3 = getitem_3 = getitem_4 = subgraph_record_event_default_1 = None
 
         # Annotation: {'stream': 2} Backward of forward node:
-        getitem_8: "f32[2, 2]" = control_deps_4[2]
+        getitem_6: "f32[2, 2]" = control_deps_4[2]
 
         # Annotation: {'stream': 3} Backward of forward node:
-        getitem_7: "f32[2, 2]" = control_deps_4[1];  control_deps_4 = None
+        getitem_5: "f32[2, 2]" = control_deps_4[1];  control_deps_4 = None
 
         # No stacktrace found for following nodes
-        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(5, 2, getitem_8);  getitem_8 = sync_dealloc_default = None
-        return (getitem_7,)
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(5, 2, getitem_6);  getitem_6 = sync_dealloc_default = None
+        return (getitem_5,)
 
     class subgraph_record_event_default(torch.nn.Module):
-        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]"):
+        def forward(self, dep_0: "f32[2, 2]"):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(4, 2)
-            return (record_event_default, dep_0, dep_1)
+            return (record_event_default, dep_0)
 
     class subgraph_wait_event_default(torch.nn.Module):
-        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]", dep_2: "f32[2, 2]"):
+        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]"):
             # No stacktrace found for following nodes
             wait_event_default = torch.ops.streams.wait_event.default(4, 3)
-            return (wait_event_default, dep_0, dep_1, dep_2)
+            return (wait_event_default, dep_0, dep_1)
 
     class subgraph_record_event_default_1(torch.nn.Module):
         def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]"):
@@ -1043,142 +1041,142 @@ class GraphModule(torch.nn.Module):
             strip_annotation_desc(print_graph(bw_graphs[0])),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, getitem_30: "f32[2, 2]", getitem_29: "f32[2, 2]", getitem_28: "f32[2, 2]", getitem_27: "f32[2, 2]", getitem_26: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]", tangents_3: "f32[2, 2]"):
+    def forward(self, getitem_29: "f32[2, 2]", getitem_28: "f32[2, 2]", getitem_27: "f32[2, 2]", getitem_26: "f32[2, 2]", getitem_25: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]", tangents_3: "f32[2, 2]"):
         # Annotation: {'stream': 5}
-        mul_7: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_3, getitem_26);  tangents_3 = getitem_26 = None
+        mul_7: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_3, getitem_25);  tangents_3 = getitem_25 = None
 
         # No stacktrace found for following nodes
         subgraph_record_event_default = self.subgraph_record_event_default
         control_deps_8 = torch.ops.higher_order.control_deps((mul_7,), subgraph_record_event_default, mul_7);  mul_7 = subgraph_record_event_default = None
 
         # Annotation: {'stream': 5}
-        getitem_31: "f32[2, 2]" = control_deps_8[1]
+        getitem_30: "f32[2, 2]" = control_deps_8[1]
 
         # No stacktrace found for following nodes
         subgraph_wait_event_default = self.subgraph_wait_event_default
-        control_deps_9 = torch.ops.higher_order.control_deps((control_deps_8, getitem_31), subgraph_wait_event_default, getitem_31);  control_deps_8 = getitem_31 = subgraph_wait_event_default = None
+        control_deps_9 = torch.ops.higher_order.control_deps((control_deps_8, getitem_30), subgraph_wait_event_default, getitem_30);  control_deps_8 = getitem_30 = subgraph_wait_event_default = None
 
         # Annotation: {'stream': 5}
-        getitem_32: "f32[2, 2]" = control_deps_9[1]
+        getitem_31: "f32[2, 2]" = control_deps_9[1]
 
         # Annotation: {'stream': 4}
-        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, getitem_32);  tangents_2 = None
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, getitem_31);  tangents_2 = None
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_4 = self.subgraph_record_event_default_4
-        control_deps_10 = torch.ops.higher_order.control_deps((add, control_deps_9, getitem_32), subgraph_record_event_default_4, add, getitem_32);  add = control_deps_9 = getitem_32 = subgraph_record_event_default_4 = None
+        control_deps_10 = torch.ops.higher_order.control_deps((add, control_deps_9, getitem_31), subgraph_record_event_default_4, add, getitem_31);  add = control_deps_9 = getitem_31 = subgraph_record_event_default_4 = None
 
         # Annotation: {'stream': 5}
-        getitem_34: "f32[2, 2]" = control_deps_10[2]
+        getitem_33: "f32[2, 2]" = control_deps_10[2]
 
         # Annotation: {'stream': 4}
-        getitem_33: "f32[2, 2]" = control_deps_10[1]
+        getitem_32: "f32[2, 2]" = control_deps_10[1]
 
         # No stacktrace found for following nodes
-        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(10, 5, getitem_34);  sync_dealloc_default = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(10, 5, getitem_33);  sync_dealloc_default = None
 
         # Annotation: {'stream': 4}
-        mul_8: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_33, getitem_27);  getitem_27 = None
+        mul_8: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_32, getitem_26);  getitem_26 = None
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_1 = self.subgraph_record_event_default_1
-        control_deps_11 = torch.ops.higher_order.control_deps((mul_8, control_deps_10, getitem_33, getitem_34), subgraph_record_event_default_1, mul_8, getitem_33);  mul_8 = control_deps_10 = getitem_33 = getitem_34 = subgraph_record_event_default_1 = None
+        control_deps_11 = torch.ops.higher_order.control_deps((mul_8, control_deps_10, getitem_32, getitem_33), subgraph_record_event_default_1, mul_8, getitem_32);  mul_8 = control_deps_10 = getitem_32 = getitem_33 = subgraph_record_event_default_1 = None
 
         # Annotation: {'stream': 4}
-        getitem_36: "f32[2, 2]" = control_deps_11[2]
+        getitem_35: "f32[2, 2]" = control_deps_11[2]
 
         # Annotation: {'stream': 4}
-        getitem_35: "f32[2, 2]" = control_deps_11[1]
-        mul_9: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_36, getitem_29);  getitem_29 = None
-        mul_10: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_9, getitem_30)
+        getitem_34: "f32[2, 2]" = control_deps_11[1]
+        mul_9: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_35, getitem_28);  getitem_28 = None
+        mul_10: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_9, getitem_29)
 
         # No stacktrace found for following nodes
         subgraph_wait_event_default_1 = self.subgraph_wait_event_default_1
-        control_deps_12 = torch.ops.higher_order.control_deps((control_deps_11, getitem_35, getitem_36), subgraph_wait_event_default_1, getitem_35);  subgraph_wait_event_default_1 = None
+        control_deps_12 = torch.ops.higher_order.control_deps((control_deps_11, getitem_34, getitem_35), subgraph_wait_event_default_1, getitem_34);  subgraph_wait_event_default_1 = None
 
         # Annotation: {'stream': 4}
-        getitem_37: "f32[2, 2]" = control_deps_12[1]
+        getitem_36: "f32[2, 2]" = control_deps_12[1]
 
         # Annotation: {'stream': 3}
-        mul_11: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_37, getitem_28);  getitem_28 = None
+        mul_11: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_36, getitem_27);  getitem_27 = None
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_5 = self.subgraph_record_event_default_5
-        control_deps_13 = torch.ops.higher_order.control_deps((mul_11, control_deps_12, getitem_37), subgraph_record_event_default_5, mul_11, getitem_37);  mul_11 = control_deps_12 = getitem_37 = subgraph_record_event_default_5 = None
+        control_deps_13 = torch.ops.higher_order.control_deps((mul_11, control_deps_12, getitem_36), subgraph_record_event_default_5, mul_11, getitem_36);  mul_11 = control_deps_12 = getitem_36 = subgraph_record_event_default_5 = None
 
         # Annotation: {'stream': 4}
-        getitem_39: "f32[2, 2]" = control_deps_13[2]
+        getitem_38: "f32[2, 2]" = control_deps_13[2]
 
         # Annotation: {'stream': 3}
-        getitem_38: "f32[2, 2]" = control_deps_13[1]
+        getitem_37: "f32[2, 2]" = control_deps_13[1]
 
         # No stacktrace found for following nodes
-        sync_dealloc_default_1 = torch.ops.streams.sync_dealloc.default(11, 4, getitem_39);  sync_dealloc_default_1 = None
+        sync_dealloc_default_1 = torch.ops.streams.sync_dealloc.default(11, 4, getitem_38);  sync_dealloc_default_1 = None
         subgraph_record_event_default_2 = self.subgraph_record_event_default_2
-        control_deps_14 = torch.ops.higher_order.control_deps((control_deps_13, getitem_38, getitem_39), subgraph_record_event_default_2, getitem_38);  control_deps_13 = getitem_38 = getitem_39 = subgraph_record_event_default_2 = None
+        control_deps_14 = torch.ops.higher_order.control_deps((control_deps_13, getitem_37, getitem_38), subgraph_record_event_default_2, getitem_37);  control_deps_13 = getitem_37 = getitem_38 = subgraph_record_event_default_2 = None
 
         # Annotation: {'stream': 3}
-        getitem_40: "f32[2, 2]" = control_deps_14[1]
+        getitem_39: "f32[2, 2]" = control_deps_14[1]
 
         # No stacktrace found for following nodes
         subgraph_wait_event_default_2 = self.subgraph_wait_event_default_2
-        control_deps_15 = torch.ops.higher_order.control_deps((control_deps_14, getitem_40), subgraph_wait_event_default_2, getitem_40);  control_deps_14 = getitem_40 = subgraph_wait_event_default_2 = None
+        control_deps_15 = torch.ops.higher_order.control_deps((control_deps_14, getitem_39), subgraph_wait_event_default_2, getitem_39);  control_deps_14 = getitem_39 = subgraph_wait_event_default_2 = None
 
         # Annotation: {'stream': 3}
-        getitem_41: "f32[2, 2]" = control_deps_15[1]
+        getitem_40: "f32[2, 2]" = control_deps_15[1]
 
         # Annotation: {'stream': 2}
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_1, getitem_41);  tangents_1 = None
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_1, getitem_40);  tangents_1 = None
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_6 = self.subgraph_record_event_default_6
-        control_deps_16 = torch.ops.higher_order.control_deps((add_1, control_deps_15, getitem_41), subgraph_record_event_default_6, add_1, getitem_41);  add_1 = control_deps_15 = getitem_41 = subgraph_record_event_default_6 = None
+        control_deps_16 = torch.ops.higher_order.control_deps((add_1, control_deps_15, getitem_40), subgraph_record_event_default_6, add_1, getitem_40);  add_1 = control_deps_15 = getitem_40 = subgraph_record_event_default_6 = None
 
         # Annotation: {'stream': 3}
-        getitem_43: "f32[2, 2]" = control_deps_16[2]
+        getitem_42: "f32[2, 2]" = control_deps_16[2]
 
         # Annotation: {'stream': 2}
-        getitem_42: "f32[2, 2]" = control_deps_16[1]
+        getitem_41: "f32[2, 2]" = control_deps_16[1]
 
         # No stacktrace found for following nodes
-        sync_dealloc_default_2 = torch.ops.streams.sync_dealloc.default(12, 3, getitem_43);  sync_dealloc_default_2 = None
+        sync_dealloc_default_2 = torch.ops.streams.sync_dealloc.default(12, 3, getitem_42);  sync_dealloc_default_2 = None
 
         # Annotation: {'stream': 2}
-        mul_12: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_42, getitem_30);  getitem_30 = None
+        mul_12: "f32[2, 2]" = torch.ops.aten.mul.Tensor(getitem_41, getitem_29);  getitem_29 = None
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_3 = self.subgraph_record_event_default_3
-        control_deps_17 = torch.ops.higher_order.control_deps((mul_12, control_deps_16, getitem_42, getitem_43), subgraph_record_event_default_3, mul_12);  mul_12 = control_deps_16 = getitem_42 = getitem_43 = subgraph_record_event_default_3 = None
+        control_deps_17 = torch.ops.higher_order.control_deps((mul_12, control_deps_16, getitem_41, getitem_42), subgraph_record_event_default_3, mul_12);  mul_12 = control_deps_16 = getitem_41 = getitem_42 = subgraph_record_event_default_3 = None
 
         # Annotation: {'stream': 2}
-        getitem_44: "f32[2, 2]" = control_deps_17[1]
+        getitem_43: "f32[2, 2]" = control_deps_17[1]
 
         # No stacktrace found for following nodes
         subgraph_wait_event_default_3 = self.subgraph_wait_event_default_3
-        control_deps_18 = torch.ops.higher_order.control_deps((control_deps_17, mul_9, mul_10, control_deps_11, getitem_35, getitem_36, getitem_44), subgraph_wait_event_default_3, mul_10, getitem_44);  control_deps_17 = mul_9 = mul_10 = control_deps_11 = getitem_35 = getitem_36 = getitem_44 = subgraph_wait_event_default_3 = None
+        control_deps_18 = torch.ops.higher_order.control_deps((control_deps_17, mul_9, mul_10, control_deps_11, getitem_34, getitem_35, getitem_43), subgraph_wait_event_default_3, mul_10, getitem_43);  control_deps_17 = mul_9 = mul_10 = control_deps_11 = getitem_34 = getitem_35 = getitem_43 = subgraph_wait_event_default_3 = None
 
         # Annotation: {'stream': 2}
-        getitem_46: "f32[2, 2]" = control_deps_18[2]
+        getitem_45: "f32[2, 2]" = control_deps_18[2]
 
         # Annotation: {'stream': 4}
-        getitem_45: "f32[2, 2]" = control_deps_18[1]
+        getitem_44: "f32[2, 2]" = control_deps_18[1]
 
         # Annotation: {'stream': 4}
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_45, getitem_46)
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_44, getitem_45)
 
         # No stacktrace found for following nodes
         subgraph_record_event_default_7 = self.subgraph_record_event_default_7
-        control_deps_19 = torch.ops.higher_order.control_deps((add_2, control_deps_18, getitem_45, getitem_46), subgraph_record_event_default_7, add_2, getitem_46);  add_2 = control_deps_18 = getitem_45 = getitem_46 = subgraph_record_event_default_7 = None
+        control_deps_19 = torch.ops.higher_order.control_deps((add_2, control_deps_18, getitem_44, getitem_45), subgraph_record_event_default_7, add_2, getitem_45);  add_2 = control_deps_18 = getitem_44 = getitem_45 = subgraph_record_event_default_7 = None
 
         # Annotation: {'stream': 2}
-        getitem_48: "f32[2, 2]" = control_deps_19[2]
+        getitem_47: "f32[2, 2]" = control_deps_19[2]
 
         # Annotation: {'stream': 4}
-        getitem_47: "f32[2, 2]" = control_deps_19[1];  control_deps_19 = None
+        getitem_46: "f32[2, 2]" = control_deps_19[1];  control_deps_19 = None
 
         # No stacktrace found for following nodes
-        sync_dealloc_default_3 = torch.ops.streams.sync_dealloc.default(13, 2, getitem_48);  getitem_48 = sync_dealloc_default_3 = None
-        return (getitem_47,)
+        sync_dealloc_default_3 = torch.ops.streams.sync_dealloc.default(13, 2, getitem_47);  getitem_47 = sync_dealloc_default_3 = None
+        return (getitem_46,)
 
     class subgraph_record_event_default(torch.nn.Module):
         def forward(self, dep_0: "f32[2, 2]"):
@@ -1695,7 +1693,7 @@ class <lambda>(torch.nn.Module):
         record1_ctrl, record2_ctrl, record3_ctrl = ctrl_nodes
 
         # Each record depends only on its immediate predecessor, keeping the
-        # per-stream sync frontier a linear chain rather than its full history.
+        # per-stream sync ordering a linear chain rather than its full history.
         self.assertIn(record1_ctrl, record2_ctrl.args[0])
         self.assertIn(record2_ctrl, record3_ctrl.args[0])
         self.assertNotIn(record1_ctrl, record3_ctrl.args[0])
@@ -1744,7 +1742,7 @@ class <lambda>(torch.nn.Module):
             list(bare_records), [], "record_event on the waiting stream floated bare"
         )
 
-        # The wait must depend on the waited-on stream's retained record frontier,
+        # The wait must depend on the waited-on stream's retained record dependency,
         # and the following record must depend on the wait on its own stream.
         ctrl_nodes = list(graph.find_nodes(op="call_function", target=control_deps))
         record_ctrl = [n for n in ctrl_nodes if "record_event" in n.args[1].name]
@@ -1904,6 +1902,119 @@ class <lambda>(torch.nn.Module):
         wait_deps, _ = _collect_sync_forward_deps(graph)
         self.assertEqual(wait_deps[fw_wait], [fw_input])
         self.assertEqual(wait_deps[bw_wait], [bw_input])
+
+    def _assert_empty_sync_anchors_record(
+        self, sync_target: torch._ops.OpOverload, sync_args: tuple[int, ...]
+    ) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        sync = graph.call_function(sync_target, sync_args)
+        graph.call_function(torch.ops.streams.record_event.default, (1, 1))
+        graph.output(inp)
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
+        self.assertEqual(len(ctrl_nodes), 1)
+        self.assertIn(sync, ctrl_nodes[0].args[0])
+        graph.lint()
+
+    def test_empty_synchronize_stream_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.synchronize_stream.default, (0,)
+        )
+
+    def test_empty_wait_stream_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.wait_stream.default, (1, 0)
+        )
+
+    def test_external_wait_event_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.wait_event.default, (0, 1)
+        )
+
+    def test_external_wait_event_orders_following_work(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            set_stream,
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        inp.meta["val"] = torch.ones(1)
+        graph.call_function(torch.ops.streams.wait_event.default, (0, 1))
+        add = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        add.meta["val"] = torch.ones(1)
+        set_stream(add, 1)
+        graph.output(add)
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
+        self.assertEqual(len(ctrl_nodes), 1)
+        self.assertIs(add.args[0].args[0], ctrl_nodes[0])
+        graph.lint()
+
+    @requires_cuda
+    def test_captured_external_wait_event_orders_following_work(self) -> None:
+        event = torch.cuda.Event()
+        stream = torch.cuda.Stream()
+        event.record()
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            with torch.cuda.stream(stream):
+                event.wait()
+                return x + 1
+
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, device="cuda"))
+        graph = fw_graphs[0].graph
+
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
+        wait_ctrl = [n for n in ctrl_nodes if "wait_event" in n.args[1].name]
+        self.assertEqual(len(wait_ctrl), 1)
+        add = graph.find_nodes(op="call_function", target=torch.ops.aten.add.Tensor)[0]
+        self.assertIs(add.args[0].args[0], wait_ctrl[0])
+        graph.lint()
+
+    def test_empty_synchronize_event_anchors_record(self) -> None:
+        self._assert_empty_sync_anchors_record(
+            torch.ops.streams.synchronize_event.default, (0,)
+        )
+
+    def test_wait_stream_depends_on_prior_waiting_stream_work(self) -> None:
+        from torch._functorch._aot_autograd.streams import (
+            set_stream,
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        inp.meta["val"] = torch.ones(1)
+        prior_work = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        prior_work.meta["val"] = torch.ones(1)
+        set_stream(prior_work, 1)
+        graph.call_function(torch.ops.streams.wait_stream.default, (1, 0))
+        graph.output(prior_work)
+        gm = torch.fx.GraphModule({}, graph)
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        ctrl_nodes = graph.find_nodes(op="call_function", target=control_deps)
+        self.assertEqual(len(ctrl_nodes), 1)
+        self.assertIn(prior_work, ctrl_nodes[0].args[0])
+        graph.lint()
 
     @requires_cuda
     def test_epilogue_copy_stream_tracking(self):
@@ -2285,14 +2396,14 @@ class <lambda>(torch.nn.Module):
 
         # No stacktrace found for following nodes
         subgraph_synchronize_event = self.subgraph_synchronize_event
-        control_deps = torch.ops.higher_order.control_deps((record_event, add), subgraph_synchronize_event, add);  record_event = subgraph_synchronize_event = control_deps = None
+        control_deps = torch.ops.higher_order.control_deps((record_event, add), subgraph_synchronize_event);  record_event = subgraph_synchronize_event = control_deps = None
         return (add,)
 
     class subgraph_synchronize_event(torch.nn.Module):
-        def forward(self, dep_0: "f32[2, 2]"):
+        def forward(self):
             #
             synchronize_event_default = torch.ops.streams.synchronize_event.default(1)
-            return (synchronize_event_default, dep_0)
+            return synchronize_event_default
 """,
         )
 
