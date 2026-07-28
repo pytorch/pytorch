@@ -85,10 +85,10 @@ def get_extension():
             extra_compile_args=op_extra,
             extra_link_args=[],
         ),
-        # Interop extension (_interop): an importable abi3 module exposing the
-        # PyObject<->Tensor helpers. These need libtorch_python loaded at runtime
-        # (the shims themselves are libtorch-only), so unlike the op extension it
-        # is imported rather than loaded via torch.ops.load_library.
+        # Interop extension (_interop): an importable abi3 module. Its
+        # PyObject<->Tensor helpers are plain module functions, so it is imported
+        # (which runs PyInit and exposes them) rather than loaded via
+        # torch.ops.load_library like the op extension.
         CppExtension(
             "libtorch_agn_2_14._interop",
             sources=[str(CSRC_DIR / "pyobject_interop_module.cpp")],
