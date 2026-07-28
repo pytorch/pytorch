@@ -2670,6 +2670,12 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
 
 # TMA mixins for Blackwell templates
 class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
+    """Config mixin for the Blackwell persistent-TMA GEMM template.
+
+    Generates the fb-triton autoWS (meta-WS) config sweep and prunes the
+    combinations the lowering cannot support before they reach codegen.
+    """
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2741,7 +2747,9 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
     @staticmethod
     def _generate_autows_configs() -> list[BaseConfig]:
         configs: list[BaseConfig] = []
-        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product([32, 64, 128, 256], repeat=3):
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256], repeat=3
+        ):
             for num_stages in [2, 3, 4, 5, 6]:
                 # AutoWS doesn't work with num_warps < 4
                 for num_warps in [4, 8]:
