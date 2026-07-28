@@ -651,7 +651,8 @@ void lu_batched_panel_recursive(
   int* dinfo,
   int batch_count,
   LUWorkspace<scalar_t>& ws,
-  const LUTuning& tuning
+  const LUTuning& tuning,
+  bool compute_pivots
 ) {
   int nrows = m - col_start;
   int recnb;
@@ -707,19 +708,22 @@ void lu_batched_panel_recursive(
     dA, matrix_stride, lda, m,
     col_start, n1,
     dipiv, ipiv_stride, dinfo,
-    batch_count, ws, tuning
+    batch_count, ws, tuning,
+    compute_pivots
   );
 
   // 2. Apply left-half pivots to right half columns [col_start + n1, col_start + nb)
-  using opaque_t = OpaqueType<sizeof(scalar_t)>;
-  setup_pivinfo(m, col_start, n1, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
-  batched_apply_pivots_parallel(
-    reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
-    col_start, n1,
-    dipiv, ipiv_stride,
-    ws.pivinfo, ws.pivinfo_stride,
-    col_start + n1, col_start + nb, batch_count
-  );
+  if (compute_pivots) {
+    using opaque_t = OpaqueType<sizeof(scalar_t)>;
+    setup_pivinfo(m, col_start, n1, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
+    batched_apply_pivots_parallel(
+      reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
+      col_start, n1,
+      dipiv, ipiv_stride,
+      ws.pivinfo, ws.pivinfo_stride,
+      col_start + n1, col_start + nb, batch_count
+    );
+  }
 
   // 3. TRSM + GEMM: trailing update
   trailing_matrix_update(
@@ -733,18 +737,22 @@ void lu_batched_panel_recursive(
     dA, matrix_stride, lda, m,
     col_start + n1, n2,
     dipiv, ipiv_stride, dinfo,
-    batch_count, ws, tuning
+    batch_count, ws, tuning,
+    compute_pivots
   );
 
   // 5. Apply right-half pivots back to left half columns [col_start, col_start + n1)
-  setup_pivinfo(m, col_start + n1, n2, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
-  batched_apply_pivots_parallel(
-    reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
-    col_start + n1, n2,
-    dipiv, ipiv_stride,
-    ws.pivinfo, ws.pivinfo_stride,
-    col_start, col_start + n1, batch_count
-  );
+  if (compute_pivots) {
+    using opaque_t = OpaqueType<sizeof(scalar_t)>;
+    setup_pivinfo(m, col_start + n1, n2, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
+    batched_apply_pivots_parallel(
+      reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
+      col_start + n1, n2,
+      dipiv, ipiv_stride,
+      ws.pivinfo, ws.pivinfo_stride,
+      col_start, col_start + n1, batch_count
+    );
+  }
 }
 
 } // anonymous namespace
@@ -792,28 +800,31 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
         dA, matrix_stride, lda, m,
         j, actual_nb,
         dipiv, ipiv_stride, dinfo,
-        batch_count, ws, tuning
+        batch_count, ws, tuning,
+        compute_pivots
       );
 
       // 2. Propagate pivots to columns outside the panel (row-parallel)
       //    Left side: cols [0, j)
-      using opaque_t = OpaqueType<sizeof(scalar_t)>;
-      setup_pivinfo(m, j, actual_nb, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
-      batched_apply_pivots_parallel(
-        reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
-        j, actual_nb,
-        dipiv, ipiv_stride,
-        ws.pivinfo, ws.pivinfo_stride,
-        0, j, batch_count
-      );
-      //    Right side: cols [j + actual_nb, n)
-      batched_apply_pivots_parallel(
-        reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
-        j, actual_nb,
-        dipiv, ipiv_stride,
-        ws.pivinfo, ws.pivinfo_stride,
-        j + actual_nb, n, batch_count
-      );
+      if (compute_pivots) {
+        using opaque_t = OpaqueType<sizeof(scalar_t)>;
+        setup_pivinfo(m, j, actual_nb, dipiv, ipiv_stride, ws.pivinfo, ws.pivinfo_stride, batch_count);
+        batched_apply_pivots_parallel(
+          reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
+          j, actual_nb,
+          dipiv, ipiv_stride,
+          ws.pivinfo, ws.pivinfo_stride,
+          0, j, batch_count
+        );
+        //    Right side: cols [j + actual_nb, n)
+        batched_apply_pivots_parallel(
+          reinterpret_cast<opaque_t*>(dA), matrix_stride, lda, m,
+          j, actual_nb,
+          dipiv, ipiv_stride,
+          ws.pivinfo, ws.pivinfo_stride,
+          j + actual_nb, n, batch_count
+        );
+      }
 
       // 3. Trailing matrix update
       trailing_matrix_update(
