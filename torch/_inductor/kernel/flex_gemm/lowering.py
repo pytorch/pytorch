@@ -21,13 +21,13 @@ from torch._higher_order_ops.flex_gemm import (
 )
 from torch.utils._ordered_set import OrderedSet
 
-from ...utils import has_free_symbols
-
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
+from ...utils import has_free_symbols
 from ...virtualized import V
 from .constraints import (
+    FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     flex_gemm_local_reduce_config_error,
     FlexGemmGroupedMainOutputTransform,
@@ -273,11 +273,7 @@ def flex_gemm_config_keys(
     )
     swap_ab_aligned = statically_known_multiple(n, swap_ab_alignment)
     requires_swap_ab = all(config.swap_ab for config in candidate_configs)
-    if (
-        not swap_ab_aligned
-        and requires_swap_ab
-        and has_free_symbols((n,))
-    ):
+    if not swap_ab_aligned and requires_swap_ab and has_free_symbols((n,)):
         swap_ab_aligned = V.graph.sizevars.guard_or_false(
             sympy.Eq(n % swap_ab_alignment, 0)
         )
@@ -490,10 +486,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         and main_transform.chunked
         and gemm_args[mat2_index].get_stride()[-1] == 1
     ):
-        raise NotImplementedError(
-            "FlexGEMM concat-layout grouped-N outputs require B's output "
-            "dimension to be non-contiguous, as in linear weight.t()"
-        )
+        raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
     if main_transform is not None and epilogue_args:
         raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     aux_metas = validate_flex_gemm_aux_outputs(
