@@ -408,7 +408,10 @@ class StreamVariable(StreamContextVariable):
         from ..guards import GuardBuilder, install_guard
 
         name = self._device_handle_attr
-        assert name is not None
+        if name is None:
+            raise AssertionError(
+                "StreamVariable subclass must define _device_handle_attr"
+            )
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
         if hasattr(self.value, name):

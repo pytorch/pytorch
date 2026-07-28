@@ -18,7 +18,7 @@ from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import _LoopMutationTracker, SchedulerNode
+from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -813,7 +813,13 @@ class LoopOrderingTest(TestCase):
             return y.view(2, 16, 4, 8).transpose(1, 2).contiguous()
 
         x = torch.randn(2, 16, 32, device=self.device)
-        self.do_acc_test(f, x)
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            wraps=generate_inverse_formula,
+        ) as inverse:
+            self.do_acc_test(f, x)
+
+        self.assertEqual(inverse.call_count, 1)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     def test_reindex_block_scale_swizzle_with_epilogue(self):
@@ -2266,6 +2272,57 @@ class TestIndexInversion(TestCase):
         )
         self.assertIsNone(generate_inverse_formula(blockwise_expr, p, 15))
         self.assertIsNotNone(generate_inverse_formula(blockwise_expr, p, 100))
+
+    def test_flattened_read_inverse_is_cached(self):
+        scheduler = object.__new__(Scheduler)
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        args = (
+            2 * i1 + i0,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+            sympy.Integer(8),
+        )
+
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            wraps=generate_inverse_formula,
+        ) as inverse:
+            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+            self.assertIsNotNone(scheduler._get_flattened_read_inverse(*args))
+
+        self.assertEqual(inverse.call_count, 1)
+
+    def test_failed_flattened_read_inverse_is_cached(self):
+        scheduler = object.__new__(Scheduler)
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+        args = (
+            2 * i1 + i0,
+            (i0, i1),
+            (sympy.Integer(2), sympy.Integer(4)),
+            sympy.Integer(8),
+        )
+
+        with mock.patch(
+            "torch._inductor.invert_expr_analysis.generate_inverse_formula",
+            return_value=None,
+        ) as inverse:
+            self.assertIsNone(scheduler._get_flattened_read_inverse(*args))
+            self.assertIsNone(scheduler._get_flattened_read_inverse(*args))
+
+        self.assertEqual(inverse.call_count, 1)
+
+    def test_zero_numel_flattened_read_is_rejected(self):
+        scheduler = object.__new__(Scheduler)
+        i0, i1 = sympy.symbols("i0 i1", integer=True, nonnegative=True)
+
+        self.assertIsNone(
+            scheduler._get_flattened_read_inverse(
+                i0 + i1,
+                (i0, i1),
+                (sympy.Integer(2), sympy.S.Zero),
+                sympy.S.Zero,
+            )
+        )
 
 
 if __name__ == "__main__":
