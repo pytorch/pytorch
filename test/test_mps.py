@@ -908,6 +908,79 @@ class TestMPS(TestCaseMPS):
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
 
+    def test_stream_base(self):
+        s1 = torch._C._MPSStreamBase()
+        s2 = torch._C._MPSStreamBase()
+        self.assertNotEqual(s1, s2)
+        self.assertNotEqual(s2.stream_id, s1.stream_id)
+        self.assertEqual(s1.device.type, 'mps')
+        self.assertEqual(s2.device.type, 'mps')
+
+        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
+            r1 = a1
+            r2 = a2
+
+            for _ in range(n):
+                torch._C._mps_setStream(s1)
+                r1 = torch.sin(r1)
+                torch._C._mps_setStream(s2)
+                r2 = torch.sin(r2)
+
+            return r1, r2
+
+        try:
+            torch._C._mps_setStream(None)
+            a1 = torch.randn(100, device='mps')
+            a2 = torch.randn(100, device='mps')
+            torch.mps.synchronize()
+
+            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
+            s1.synchronize()
+            s2.synchronize()
+            torch._C._mps_setStream(None)
+            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
+            torch.mps.synchronize()
+
+            self.assertEqual(r1, r1_check)
+            self.assertEqual(r2, r2_check)
+
+        finally:
+            torch._C._mps_setStream(None)
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
+    def test_buffer_reuse_per_stream(self):
+        def make_and_free_get_ptr(stream):
+            torch._C._mps_setStream(stream)
+            t = torch.randn(1 << 16, device='mps')
+            stream.synchronize()
+            ptr = t.data_ptr()
+            del t
+            stream.synchronize()
+            return ptr
+
+        s1 = torch._C._MPSStreamBase()
+        s2 = torch._C._MPSStreamBase()
+
+        try:
+            # Same stream: the exact same buffer should be reused
+            ptr_s1_first = make_and_free_get_ptr(s1)
+            ptr_s1_second = make_and_free_get_ptr(s1)
+            self.assertEqual(ptr_s1_second, ptr_s1_first)
+
+            # Different stream: must not reuse s1's freed buffer
+            ptr_s2 = make_and_free_get_ptr(s2)
+            self.assertNotEqual(ptr_s2, ptr_s1_second)
+
+        finally:
+            torch._C._mps_setStream(None)
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
@@ -4493,6 +4566,15 @@ class TestMPS(TestCaseMPS):
         x = torch.arange(2, device="mps")
         self.assertEqual(x.reshape(1, 1, 2).unique(), x)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/97310:
+        # highly-skewed input with a single long run of duplicates triggered
+        # MPSGraph scatter contention that took ~19s on a 2M-element tensor.
+        # Workload shape mirrors per-frame connected-component labels for
+        # 1080p video.
+        skewed = torch.zeros(1080 * 1920, dtype=torch.int64)
+        skewed[100_000:157_600] = 193_501
+        helper(skewed, True, True)
+
     def test_unique_consecutive(self):
         def helper(x, dim, return_inverse, return_counts):
             cpu_x = x
@@ -5860,6 +5942,44 @@ class TestMPS(TestCaseMPS):
             kw = {"dim": dim, "keepdim": keepdim}
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
+
+    @parametrize("n", [33, 64, 100, 1000, 20000, 262185, 1 << 20])
+    def test_int64_minmax_partial_simdgroups(self, n):
+        # simd_max/min<long> is emulated on top of simd_shuffle_and_fill_down and
+        # reads its neighbours' registers, so a reduction stage that leaves fewer
+        # than 32 lanes active used to fold their zeros into the result. Sizes
+        # span threadgroups of 64 to 1024 threads over the single-pass and
+        # split-K paths.
+        x = -torch.arange(1, n + 1, dtype=torch.int64, device="mps")
+        self.assertEqual(x.amax().cpu(), x.cpu().amax())
+        self.assertEqual((-x).amin().cpu(), (-x).cpu().amin())
+
+    @parametrize("case", ["full_1d", "full_2d", "inner", "outer"])
+    def test_sum_integer_no_overflow(self, case):
+        # int sums must accumulate in int64: 2**30 overflows int32 after 4 adds
+        shape, dim = {"full_1d": ((1 << 20,), None), "full_2d": ((1024, 1024), None),
+                      "inner": ((131072, 16), 1), "outer": ((65536, 16), 0)}[case]
+        x = torch.full(shape, 2**30, dtype=torch.int32, device="mps")
+        args = () if dim is None else (dim,)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.int8, torch.uint8, torch.bool, torch.int16, torch.int32, torch.int64])
+    @parametrize("reduction", ["full", "outer", "inner"])
+    def test_sum_no_input_upcast(self, dtype, reduction):
+        # Skipping the input up-cast puts the (int8|uint8|bool|int16|int32, int64)
+        # kernels on the live path for the first time.
+        x = (torch.arange(1 << 20, device="mps") % 7).to(dtype)
+        dim = {"full": None, "outer": 0, "inner": 1}[reduction]
+        args = () if dim is None else (dim,)
+        if dim is not None:
+            x = x.view(1024, 1024)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_sum_lowp_no_input_upcast(self, dtype):
+        # (half|bfloat16, float32) kernels, likewise unreachable before.
+        x = ((torch.arange(1 << 20, device="mps") % 4) * 0.25).to(dtype)
+        self.assertEqual(x.sum(dtype=torch.float32).cpu(), x.cpu().sum(dtype=torch.float32))
 
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
@@ -9022,6 +9142,27 @@ class TestMPS(TestCaseMPS):
             helper(2, 2, 10, dtype)
             helper(5, 2, 10, dtype)
             helper(2, 2, 0, dtype)
+
+    @parametrize("dtype,start,end,steps", [
+        (torch.int32, 2**24, 2**24 + 8, 9),
+        (torch.int64, 2**40, 2**40 + 8, 9),
+        (torch.int64, -(2**40), -(2**40) + 8, 9),
+        (torch.int64, 2**40 + 8, 2**40, 9),
+    ])
+    def test_linspace_integral_precision(self, dtype, start, end, steps):
+        expected = torch.linspace(start, end, steps, dtype=dtype)
+        actual = torch.linspace(start, end, steps, dtype=dtype, device="mps")
+        self.assertEqual(actual.cpu(), expected)
+
+        storage = torch.empty(steps * 2, dtype=dtype, device="mps")
+        out = storage[::2]
+        torch.linspace(start, end, steps, out=out)
+        self.assertEqual(out.cpu(), expected)
+
+        storage = torch.empty((steps, 2), dtype=dtype, device="mps")
+        out = storage[:, :1]
+        torch.linspace(start, end, steps, out=out)
+        self.assertEqual(out.flatten().cpu(), expected)
 
     # Test argange
     def test_arange(self):
@@ -15807,7 +15948,7 @@ class TestConsistency(TestCaseMPS):
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
-        # TODO: Rounding is broken for linspace, see https://github.com/pytorch/pytorch/issues/137635
+        # Integral linspace can differ from CPU by one due to interpolation rounding.
         if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
             return (1.0, 0.0)
         if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16, torch.bfloat16]:
