@@ -27,6 +27,7 @@ from torch.utils._sympy.functions import (
     Min as TorchSymMin,
     LShift,
     Mod,
+    ModularIndexing,
     OpaqueUnaryFn_cos,
     PythonMod,
     RShift,
@@ -1097,6 +1098,20 @@ class TestSympyFunctions(TestCase):
         x = sympy.Symbol("x", integer=True)
         self.assertIsInstance(TorchSymMin(128 * x, 512 * x), TorchSymMin)
         self.assertIsInstance(TorchSymMax(128 * x, 512 * x), TorchSymMax)
+
+    def test_modular_indexing_does_not_strip_unproven_nonnegative_term(self):
+        q0 = sympy.Symbol("q0", integer=True, nonnegative=True)
+        n = sympy.Symbol("n", integer=True, positive=True)
+        poisoned_base = n**2 + FloorDiv(-1 - q0, 2)
+        expr = ModularIndexing(poisoned_base, 1, n**2)
+
+        self.assertNotEqual(expr, ModularIndexing(-1 - q0, 2, n**2))
+        for nv in range(2, 9):
+            for q0v in range(4 * nv * nv):
+                actual = int(expr.subs({n: nv, q0: q0v}))
+                expected = (nv * nv + (-1 - q0v) // 2) % (nv * nv)
+                self.assertEqual(actual, expected)
+                self.assertTrue(0 <= actual < nv * nv)
 
 
 class TestSingletonInt(TestCase):

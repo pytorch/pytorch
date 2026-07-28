@@ -4913,6 +4913,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
+        # Read-after-write companion to the #1615 guard in store(). If we read
+        # back a buffer we stored in a reduction loop, coalescing can put the
+        # store and load on different warps, so a warp may read before another
+        # warp's write is visible. Barrier first to make the writes visible.
+        if (
+            name in self.cse.invalidated_stores
+            and V.graph.get_current_device_or_throw().type != "cpu"
+        ):
+            load_buffer.writeline(DeferredLine(name, "tl.debug_barrier()"))
         self._handle_pdl_before_access(load_buffer, name)
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
@@ -6877,13 +6886,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
             "incremental_autotune": config.incremental_autotune,
-            # Captured at codegen time so it reflects the per-graph cudagraph
-            # decision, including override_cudagraphs annotations that patch
-            # config.triton.cudagraphs on only for this region's compilation
-            # (see cudagraph_annotation_context). The live global flag is back
-            # to its default by the time the kernel runs, so runtime checks of
-            # config.triton.cudagraphs miss per-region cudagraphs.
-            "cudagraphs": config.triton.cudagraphs,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
