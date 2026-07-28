@@ -40,9 +40,9 @@ GraphAnnotationResolver = Callable[[int], "Any | None"]
 LaneResolver = Callable[[int], "tuple[int, str] | None"]
 
 # graph_node_id -> predecessor graph_node_ids (or None when the node has no recorded
-# dependencies): the CUDA-graph node->node edges the pftrace export draws as dependency arrows,
-# read from the recorded dependency registry (survives replay, keyed on graph_node_id like the
-# annotation resolver). Pluggable; see ObserverAnnotationSettings.graph_dependency_resolver.
+# dependencies): the CUDA-graph node->node edges the export draws as dependency arrows, read
+# from the observer's own dependency map (recorded at graph instantiate, keyed on graph_node_id
+# like the annotation resolver). See ObserverAnnotationSettings.record_graph_dependencies.
 GraphDependencyResolver = Callable[[int], "list[int] | None"]
 
 
@@ -58,20 +58,6 @@ def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     except Exception:
         return None
     return annotations.get(graph_node_id)
-
-
-def default_graph_dependency_resolver(graph_node_id: int) -> list[int] | None:
-    """Default resolver: map a CUDA-graph node id to its recorded predecessor graph_node_ids,
-    or None when it has none."""
-    if graph_node_id == 0:
-        return None
-    try:
-        from torch.cuda._graph_annotations import get_graph_dependencies
-
-        dependencies = get_graph_dependencies()
-    except Exception:
-        return None
-    return dependencies.get(graph_node_id)
 
 
 @dataclass(frozen=True)
@@ -94,10 +80,11 @@ class ObserverAnnotationSettings:
     # CUDA stream lane (no reassignment). Independent of graph_annotation_resolver, though a
     # consumer's implementation typically maps the node's annotation to a lane.
     graph_lane_resolver: LaneResolver | None = None
-    # Pluggable graph node->node dependency lookup (see GraphDependencyResolver). None -> no
-    # dependency arrows. Keyed on graph_node_id like graph_annotation_resolver; pass
-    # default_graph_dependency_resolver to enable.
-    graph_dependency_resolver: GraphDependencyResolver | None = None
+    # Record each graph's node->node dependency topology at instantiate into the observer's own
+    # map (the source for dependency arrows). Off by default (extra work at graph instantiate +
+    # arrow rendering); the observer registers an instantiate hook + a resolver over its map
+    # only when this is set.
+    record_graph_dependencies: bool = False
 
 
 class CuptiMonitorObserver:
@@ -119,7 +106,7 @@ class CuptiMonitorObserver:
     # once its graph is baked, so each resolves once for this observer's lifetime (reused across
     # every buffer delivery). Both take the int graph_node_id and are wrapped in functools.cache
     # on assignment. The caches grow with distinct graph_node_ids (each recapture mints new ids);
-    # the per-resolver graph-destroy handlers (_register_graph_destroy_handlers) invalidate them
+    # the per-resolver graph-destroy hooks (_register_graph_destroy_hooks) invalidate them
     # when a graph is destroyed, bounding growth in long runs.
     @property
     def _annotation_resolver(self) -> GraphAnnotationResolver | None:
@@ -155,6 +142,12 @@ class CuptiMonitorObserver:
         *,
         annotations: ObserverAnnotationSettings | None = None,
     ) -> None:
+        # Observer-owned graph node->node dependency map (graph_node_id -> predecessor
+        # graph_node_ids): populated at graph instantiate by our instantiate hook and read by
+        # our dependency resolver. Stays empty unless record_graph_dependencies is set.
+        self._graph_dependencies: dict[int, list[int]] = {}
+        self._instantiate_hook_handles: list[RemovableHandle] = []
+        record_deps = annotations is not None and annotations.record_graph_dependencies
         # Region naming (see ObserverAnnotationSettings): an enabled source folds its
         # required fields into the selection (graph: just graph_node_id; eager: extra kinds).
         if annotations is None:
@@ -165,7 +158,9 @@ class CuptiMonitorObserver:
         else:
             self._annotation_resolver = annotations.graph_annotation_resolver
             self._lane_resolver = annotations.graph_lane_resolver
-            self._dependency_resolver = annotations.graph_dependency_resolver
+            self._dependency_resolver = (
+                self._make_dependency_resolver() if record_deps else None
+            )
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
             activities = self._with_graph_fields(activities)
@@ -189,51 +184,104 @@ class CuptiMonitorObserver:
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
-        # Register a graph-destroy handler per installed graph-node resolver so a
-        # destroyed CUDA graph purges that resolver's OSS registry and invalidates
-        # its cache. Registering any handler is also the "monitor active" gate
+        # Own the dependency map: record each graph's topology at instantiate into it. Only
+        # while we registered with the monitor (nothing consumes the map otherwise). Removed in
+        # close() so nothing leaks this observer.
+        if record_deps and self.available:
+            self._register_graph_instantiate_hook()
+        # Register a graph-destroy hook per installed graph-node resolver so a
+        # destroyed CUDA graph purges that resolver's registry and invalidates
+        # its cache. Registering any hook is also the "monitor active" gate
         # torch.cuda.graphs checks before arming its destroy callback. Handles are
         # removed in close() so nothing leaks this observer.
-        self._graph_destroy_handles: list[RemovableHandle] = []
+        self._destroy_hook_handles: list[RemovableHandle] = []
         if self.available:
-            self._register_graph_destroy_handlers()
+            self._register_graph_destroy_hooks()
+
+    def _make_dependency_resolver(self) -> GraphDependencyResolver:
+        """A resolver over this observer's own dependency map: graph_node_id -> predecessor
+        graph_node_ids (None when the node has none). Captures the map, not self, so the
+        cached resolver never pins the observer."""
+        deps = self._graph_dependencies
+
+        def resolve(graph_node_id: int) -> list[int] | None:
+            if graph_node_id == 0:
+                return None
+            return deps.get(graph_node_id)
+
+        return resolve
+
+    def _register_graph_instantiate_hook(self) -> None:
+        """Register an instantiate hook that reads each graph's node dependency topology
+        into this observer's map. We hold the live graph here, so get_graph_data() works (it
+        needs keep_graph=True + an instantiated graph, and raises otherwise -- naturally
+        skipping keep_graph=False graphs). Edges are keyed by tools_id (== the CUPTI
+        graph_node_id, joining to profiler kernel records). The hook captures only the map
+        (never self), so the global registry cannot pin this observer; the handle is removed in
+        close()."""
+        from torch.cuda.graphs import register_graph_instantiate_hook
+
+        deps = self._graph_dependencies
+
+        def hook(torch_cuda_graph: Any) -> None:
+            try:
+                nodes = torch_cuda_graph.get_graph_data()["nodes"]
+            except (RuntimeError, AttributeError, KeyError):
+                return
+            tid_by_index = [n["tools_id"] for n in nodes]
+            recorded = {
+                n["tools_id"]: [tid_by_index[i] for i in n["dependencies"]]
+                for n in nodes
+                if n["dependencies"]
+            }
+            if not recorded:
+                return
+            deps.update(recorded)
+            # Track the exec graph id (tools_id >> 32, shared by all the graph's nodes) so the
+            # graph-destroy callback purges these edges from our map on destruction.
+            torch_cuda_graph._recorded_exec_ids.add(next(iter(recorded)) >> 32)
+
+        self._instantiate_hook_handles.append(register_graph_instantiate_hook(hook))
 
     @property
     def available(self) -> bool:
         """True when the monitor was available and this observer registered."""
         return self._obs is not None
 
-    def _register_graph_destroy_handlers(self) -> None:
-        """Register a graph-destroy handler per installed graph-node resolver. Each
-        handler purges its own OSS registry (if any) and clears its resolver cache
-        (cache_clear is global per resolver -- it drops every graph's cached lookups,
-        not just the destroyed graph's -- acceptable on the infrequent destroy path
-        and what bounds cache growth over a long run). Handlers capture only the
-        cache wrapper + module purge fn, never self, so they cannot pin this observer;
-        run_graph_destroy_handlers also swallows any error they raise (finalizer-safe,
-        since a destroy may fire from a GC/finalizer thread). The lane resolver is
-        externally backed (no OSS registry to purge), so its handler only clears the
+    def _register_graph_destroy_hooks(self) -> None:
+        """Register a graph-destroy hook per installed graph-node resolver. Each hook
+        purges its backing store (the annotation module registry, or this observer's own
+        dependency map) and clears its resolver cache (cache_clear is global per resolver
+        -- it drops every graph's cached lookups, not just the destroyed graph's --
+        acceptable on the infrequent destroy path and what bounds cache growth over a
+        long run). Hooks capture only the cache wrapper + purge fn (never self, so they
+        cannot pin this observer -- the dependency purge closes over the map dict, not the
+        observer); run_graph_destroy_hooks also swallows any error they raise
+        (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The lane
+        resolver is externally backed (nothing to purge), so its hook only clears the
         cache."""
-        from torch.cuda._graph_annotations import (
-            register_graph_destroy_handler,
-            remove_graph_dependencies,
-            remove_kernel_annotations,
-        )
+        from torch.cuda._graph_annotations import remove_kernel_annotations
+        from torch.cuda.graphs import register_graph_destroy_hook
 
-        handles = self._graph_destroy_handles
+        handles = self._destroy_hook_handles
+        deps = self._graph_dependencies
+
+        def purge_deps(ids: set[int]) -> None:
+            for key in [k for k in deps if k >> 32 in ids]:
+                del deps[key]
 
         def add(cache: Any, purge: Any) -> None:
-            def handler(ids: set[int]) -> None:
+            def hook(ids: set[int]) -> None:
                 if purge is not None:
                     purge(ids)
                 cache.cache_clear()
 
-            handles.append(register_graph_destroy_handler(handler))
+            handles.append(register_graph_destroy_hook(hook))
 
         if self._annotation_resolver_cached is not None:
             add(self._annotation_resolver_cached, remove_kernel_annotations)
         if self._dependency_resolver_cached is not None:
-            add(self._dependency_resolver_cached, remove_graph_dependencies)
+            add(self._dependency_resolver_cached, purge_deps)
         if self._lane_resolver_cached is not None:
             add(self._lane_resolver_cached, None)
 
@@ -342,9 +390,12 @@ class CuptiMonitorObserver:
 
     def close(self) -> None:
         """Unregister from the monitor. Idempotent."""
-        for handle in self._graph_destroy_handles:
+        for handle in self._instantiate_hook_handles:
             handle.remove()
-        self._graph_destroy_handles = []
+        self._instantiate_hook_handles.clear()
+        for handle in self._destroy_hook_handles:
+            handle.remove()
+        self._destroy_hook_handles = []
         if self._obs is not None and self._monitor is not None:
             self._monitor.unregister(self._obs)
             self._obs = None
