@@ -7,29 +7,26 @@
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
 
-#define C10_CUDA_DRIVER_CHECK(EXPR)                                         \
-  do {                                                                      \
-    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                        \
-    CUresult __err = EXPR;                                                  \
-    if (__err != CUDA_SUCCESS) {                                            \
-      const char* err_str;                                                  \
-      CUresult get_error_str_err [[maybe_unused]] =                         \
-          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str);  \
-      const auto __cuda_error_log_message =                              \
-          __cuda_error_log.get_error_log_suffix();                       \
-      if (get_error_str_err != CUDA_SUCCESS) {                              \
-        TORCH_CHECK(                                                        \
-            false,                                                          \
-            "CUDA driver error: unknown error",                            \
-            __cuda_error_log_message);                                      \
-      } else {                                                              \
-        TORCH_CHECK(                                                        \
-            false,                                                          \
-            "CUDA driver error: ",                                         \
-            err_str,                                                        \
-            __cuda_error_log_message);                                      \
-      }                                                                     \
-    }                                                                       \
+#define C10_CUDA_DRIVER_CHECK(EXPR)                                           \
+  do {                                                                        \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                          \
+    CUresult __err = EXPR;                                                    \
+    if (__err != CUDA_SUCCESS) {                                              \
+      const char* err_str;                                                    \
+      CUresult get_error_str_err [[maybe_unused]] =                           \
+          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str);    \
+      const auto __cuda_error_log_message =                                   \
+          __cuda_error_log.get_error_log_suffix();                            \
+      if (get_error_str_err != CUDA_SUCCESS) {                                \
+        TORCH_CHECK(                                                          \
+            false,                                                            \
+            "CUDA driver error: unknown error",                               \
+            __cuda_error_log_message);                                        \
+      } else {                                                                \
+        TORCH_CHECK(                                                          \
+            false, "CUDA driver error: ", err_str, __cuda_error_log_message); \
+      }                                                                       \
+    }                                                                         \
   } while (0)
 
 // clang-format off
@@ -52,25 +49,24 @@
   } while (0)
 // clang-format on
 
-#define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT)                              \
-  do {                                                                      \
-    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                        \
-    CUresult __err = EXPR;                                                  \
-    if (__err != CUDA_SUCCESS) {                                            \
-      const char* err_str;                                                  \
-      CUresult get_error_str_err [[maybe_unused]] =                         \
-          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str);  \
-      const auto __cuda_error_log_message =                              \
-          __cuda_error_log.get_error_log_suffix();                       \
-      if (get_error_str_err != CUDA_SUCCESS) {                              \
-        TORCH_WARN(                                                         \
-            "CUDA driver error: unknown error", __cuda_error_log_message); \
-      } else {                                                              \
-        TORCH_WARN(                                                         \
-            "CUDA driver error: ", err_str, __cuda_error_log_message);      \
-      }                                                                     \
-      goto NEXT;                                                            \
-    }                                                                       \
+#define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT)                                \
+  do {                                                                        \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                          \
+    CUresult __err = EXPR;                                                    \
+    if (__err != CUDA_SUCCESS) {                                              \
+      const char* err_str;                                                    \
+      CUresult get_error_str_err [[maybe_unused]] =                           \
+          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str);    \
+      const auto __cuda_error_log_message =                                   \
+          __cuda_error_log.get_error_log_suffix();                            \
+      if (get_error_str_err != CUDA_SUCCESS) {                                \
+        TORCH_WARN(                                                           \
+            "CUDA driver error: unknown error", __cuda_error_log_message);    \
+      } else {                                                                \
+        TORCH_WARN("CUDA driver error: ", err_str, __cuda_error_log_message); \
+      }                                                                       \
+      goto NEXT;                                                              \
+    }                                                                         \
   } while (0)
 
 // The integer in the second column specifies the requested CUDA Driver API
@@ -117,17 +113,17 @@
 #endif
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12080)
-#define C10_LIBCUDA_DRIVER_API_12_8(_) \
-  _(cuCtxFromGreenCtx, 12080)          \
-  _(cuCtxGetCurrent, 12080)            \
-  _(cuCtxPopCurrent, 12080)            \
-  _(cuCtxPushCurrent, 12080)           \
-  _(cuCtxSetCurrent, 12080)            \
-  _(cuGreenCtxCreate, 12080)           \
-  _(cuGreenCtxDestroy, 12080)          \
-  _(cuGreenCtxStreamCreate, 12080)     \
+#define C10_LIBCUDA_DRIVER_API_12_8(_)  \
+  _(cuCtxFromGreenCtx, 12080)           \
+  _(cuCtxGetCurrent, 12080)             \
+  _(cuCtxPopCurrent, 12080)             \
+  _(cuCtxPushCurrent, 12080)            \
+  _(cuCtxSetCurrent, 12080)             \
+  _(cuGreenCtxCreate, 12080)            \
+  _(cuGreenCtxDestroy, 12080)           \
+  _(cuGreenCtxStreamCreate, 12080)      \
   _(cuDevSmResourceSplitByCount, 12080) \
-  _(cuDeviceGetDevResource, 12080)     \
+  _(cuDeviceGetDevResource, 12080)      \
   _(cuDevResourceGenerateDesc, 12080)
 #else
 #define C10_LIBCUDA_DRIVER_API_12_8(_)

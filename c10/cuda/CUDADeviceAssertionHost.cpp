@@ -11,18 +11,18 @@
 #include <thread>
 #endif
 
-#define C10_CUDA_CHECK_WO_DSA(EXPR)                                  \
-  do {                                                               \
-    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                 \
-    const cudaError_t __err = EXPR;                                  \
-    c10::cuda::c10_cuda_check_implementation(                        \
-        static_cast<int32_t>(__err),                                 \
-        __FILE__,                                                    \
-        __func__, /* Line number data type not well-defined between  \
-                      compilers, so we perform an explicit cast */   \
-        static_cast<uint32_t>(__LINE__),                             \
-        false,                                                       \
-        &__cuda_error_log);                                          \
+#define C10_CUDA_CHECK_WO_DSA(EXPR)                                 \
+  do {                                                              \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                \
+    const cudaError_t __err = EXPR;                                 \
+    c10::cuda::c10_cuda_check_implementation(                       \
+        static_cast<int32_t>(__err),                                \
+        __FILE__,                                                   \
+        __func__, /* Line number data type not well-defined between \
+                      compilers, so we perform an explicit cast */  \
+        static_cast<uint32_t>(__LINE__),                            \
+        false,                                                      \
+        &__cuda_error_log);                                         \
   } while (0)
 
 namespace c10::cuda {

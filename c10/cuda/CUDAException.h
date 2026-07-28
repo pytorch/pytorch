@@ -40,18 +40,18 @@ class C10_CUDA_API CUDAErrorLogCapture {
 
 } // namespace c10::cuda
 
-#define C10_CUDA_CHECK(EXPR)                                         \
-  do {                                                               \
-    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                 \
-    const cudaError_t __err = EXPR;                                  \
-    c10::cuda::c10_cuda_check_implementation(                        \
-        static_cast<int32_t>(__err),                                 \
-        __FILE__,                                                    \
-        __func__, /* Line number data type not well-defined between  \
-                      compilers, so we perform an explicit cast */   \
-        static_cast<uint32_t>(__LINE__),                             \
-        true,                                                        \
-        &__cuda_error_log);                                          \
+#define C10_CUDA_CHECK(EXPR)                                        \
+  do {                                                              \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                \
+    const cudaError_t __err = EXPR;                                 \
+    c10::cuda::c10_cuda_check_implementation(                       \
+        static_cast<int32_t>(__err),                                \
+        __FILE__,                                                   \
+        __func__, /* Line number data type not well-defined between \
+                      compilers, so we perform an explicit cast */  \
+        static_cast<uint32_t>(__LINE__),                            \
+        true,                                                       \
+        &__cuda_error_log);                                         \
   } while (0)
 // backwards compat due to hipify v2 changes, for extension projects
 #define C10_HIP_CHECK C10_CUDA_CHECK

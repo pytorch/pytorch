@@ -41,8 +41,7 @@ std::string CUDAErrorLogCapture::get_error_log_suffix() {
   auto iterator = static_cast<CUlogIterator>(iterator_);
   try {
     auto* api = DriverAPI::get();
-    if (api->cuLogsDumpToMemory_(&iterator, buffer, &size, 0) ==
-            CUDA_SUCCESS &&
+    if (api->cuLogsDumpToMemory_(&iterator, buffer, &size, 0) == CUDA_SUCCESS &&
         size > 0 && size <= sizeof(buffer)) {
       std::string error_log{
           "\nThe CUDA driver logged these messages, which may provide useful details:\n"};

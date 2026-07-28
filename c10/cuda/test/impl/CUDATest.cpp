@@ -57,8 +57,7 @@ TEST(CUDAErrorTest, IncludesDriverErrorLog) {
   params.bytesize = 4;
   cudaGraphNode_t node = nullptr;
   ASSERT_EQ(
-      cudaGraphAddMemAllocNode(&node, graph, nullptr, 0, &params),
-      cudaSuccess);
+      cudaGraphAddMemAllocNode(&node, graph, nullptr, 0, &params), cudaSuccess);
 
   bool threw = false;
   cudaGraphExec_t graph_exec = nullptr;
