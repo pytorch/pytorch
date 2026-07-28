@@ -3,18 +3,23 @@ import copy
 import sys
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     TEST_GPU_NUM,
@@ -28,11 +33,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-BACKEND = dist.Backend.default_device_backend_map[device_type]
 
 
 # a simple collection of embedding bag implementation
@@ -107,10 +107,14 @@ class CustomSharder(Sharder):
 
 
 class TestCustomSharder(ShardedTensorTestBase):
-    @with_comms(init_rpc=False, backend=BACKEND)
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_custom_sharder(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_custom_sharder(self, device):
+        device_type = torch.device(device).type
+
         class MyModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -157,10 +161,11 @@ class TestCustomSharder(ShardedTensorTestBase):
 
         self.assertEqual(local_output, sharded_output)
 
-    @with_comms(init_rpc=False, backend=BACKEND)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_custom_sharder_errors(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_custom_sharder_errors(self, device):
+        device_type = torch.device(device).type
         custom_sharder = CustomSharder(
             devices=[f"rank:{i}/{device_type}:{i}" for i in range(TEST_GPU_NUM)],
             split_sharding_idx=TEST_GPU_NUM // 2,
@@ -198,6 +203,11 @@ class TestCustomSharder(ShardedTensorTestBase):
         ):
             # shard the module with the provided sharding plan
             shard_module(sharded_model, sharding_plan)
+
+
+instantiate_device_type_tests(
+    TestCustomSharder, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
