@@ -27,14 +27,6 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-MXFP4_RECIP_UE8M0_ASM = (
-    "{.reg .pred p_zero; .reg .s32 neg_exp; .reg .f32 neg_exp_f, result; "
-    "setp.eq.u32 p_zero, $1, 0; sub.s32 neg_exp, 127, $1; "
-    "cvt.rn.f32.s32 neg_exp_f, neg_exp; ex2.approx.f32 result, neg_exp_f; "
-    "selp.f32 $0, 0f00000000, result, p_zero;}"
-)
-
-
 def _choices_context(force_persistent: bool | None):
     import contextlib
 

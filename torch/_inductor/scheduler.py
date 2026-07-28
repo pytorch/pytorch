@@ -594,7 +594,8 @@ class NestedReduction:
         epilogue_nodes: tuple[SchedulerNode, ...]
         reduction_nodes: tuple[BaseSchedulerNode, ...]
         sub_parent_factor: int
-        source_layouts: dict[str, NestedReduction.SubParentSourceLayout]
+        parent_rnumel: int
+        source_layouts: tuple[tuple[str, NestedReduction.SubParentSourceLayout], ...]
 
     @classmethod
     def sub_parent_epilogue_plan(
@@ -602,9 +603,11 @@ class NestedReduction:
         nodes: Sequence[BaseSchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
+        *,
+        check_leaves: bool = True,
     ) -> SubParentEpiloguePlan | None:
-        rnumel_hint = cls._sub_parent_epilogue_rnumel_hint(rnumel)
-        if rnumel_hint is None:
+        parent_rnumel = cls._sub_parent_epilogue_parent_rnumel(rnumel)
+        if parent_rnumel is None:
             return None
         if any(node.has_aliasing_or_mutation() for node in nodes):
             return None
@@ -640,21 +643,21 @@ class NestedReduction:
             reduction_reads,
             sub_parent_factor,
         )
-        if source_deps is None:
-            return None
         if not source_deps:
             return None
         planned_source_deps = tuple(dep for dep, _layout in source_deps)
         epilogue_node_set = OrderedSet(epilogue_nodes)
-        if not cls._sub_parent_epilogue_outputs_unread(nodes, epilogue_node_set):
-            return None
         if not cls._sub_parent_epilogue_source_loads_are_unambiguous(
             nodes,
             epilogue_node_set,
             planned_source_deps,
         ):
             return None
-        if not cls._sub_parent_siblings_are_source_free(
+        if check_leaves and not cls._sub_parent_epilogue_outputs_unread(
+            nodes, epilogue_node_set
+        ):
+            return None
+        if check_leaves and not cls._sub_parent_siblings_are_source_free(
             nodes,
             epilogue_node_set,
             numel,
@@ -665,7 +668,8 @@ class NestedReduction:
             tuple(epilogue_nodes),
             tuple(node for node in nodes if node not in epilogue_node_set),
             sub_parent_factor,
-            {dep.name: layout for dep, layout in source_deps},
+            parent_rnumel,
+            tuple((dep.name, layout) for dep, layout in source_deps),
         )
 
     @classmethod
@@ -679,8 +683,8 @@ class NestedReduction:
     ) -> tuple[tuple[SchedulerNode, ...], int] | None:
         from .codegen.simd import SIMDKernel
 
-        rnumel_hint = cls._sub_parent_epilogue_rnumel_hint(rnumel)
-        if rnumel_hint is None:
+        parent_rnumel = cls._sub_parent_epilogue_parent_rnumel(rnumel)
+        if parent_rnumel is None:
             return None
 
         if reduction_names is None:
@@ -707,7 +711,7 @@ class NestedReduction:
             node_factor = cls._sub_parent_epilogue_factor(
                 node_numel,
                 full_numel,
-                rnumel_hint,
+                parent_rnumel,
             )
             if node_factor is None:
                 continue
@@ -729,34 +733,32 @@ class NestedReduction:
         return tuple(epilogue_nodes), sub_parent_factor
 
     @staticmethod
-    def _sub_parent_epilogue_rnumel_hint(rnumel: sympy.Expr) -> int | None:
+    def _sub_parent_epilogue_parent_rnumel(rnumel: sympy.Expr) -> int | None:
         if V.graph.sizevars.statically_known_equals(rnumel, 1):
             return None
-        rnumel_hint = V.graph.sizevars.simplify(rnumel)
-        if not isinstance(rnumel_hint, (int, sympy.Integer)):
+        parent_rnumel = V.graph.sizevars.simplify(rnumel)
+        if not isinstance(parent_rnumel, (int, sympy.Integer)):
             return None
-        rnumel_hint = int(rnumel_hint)
-        if rnumel_hint <= 1 or rnumel_hint & (rnumel_hint - 1) != 0:
+        parent_rnumel = int(parent_rnumel)
+        if parent_rnumel <= 1 or not is_power_of_2(parent_rnumel):
             return None
-        return rnumel_hint
+        return parent_rnumel
 
     @staticmethod
     def _sub_parent_epilogue_factor(
         node_numel: sympy.Expr,
         full_numel: sympy.Expr,
-        rnumel_hint: int,
+        parent_rnumel: int,
     ) -> int | None:
-        for factor in range(2, min(rnumel_hint, 16) + 1):
-            if factor & (factor - 1) != 0:
-                continue
-            if rnumel_hint % factor != 0:
-                continue
-            if V.graph.sizevars.statically_known_equals(
-                factor * node_numel,
-                full_numel,
-            ):
-                return factor
-        return None
+        factor = 2
+        if parent_rnumel < factor:
+            return None
+        if not V.graph.sizevars.statically_known_equals(
+            factor * node_numel,
+            full_numel,
+        ):
+            return None
+        return factor
 
     @classmethod
     def _sub_parent_epilogue_source_deps(
@@ -768,6 +770,7 @@ class NestedReduction:
         sub_parent_factor: int,
         renames: dict[str, str] | None = None,
     ) -> tuple[tuple[MemoryDep, NestedReduction.SubParentSourceLayout], ...] | None:
+        renames = renames or {}
         source_deps: list[tuple[MemoryDep, NestedReduction.SubParentSourceLayout]] = []
         source_layouts: dict[str, NestedReduction.SubParentSourceLayout] = {}
 
@@ -784,16 +787,12 @@ class NestedReduction:
 
         for node in nodes:
             for raw_dep in node.read_writes.reads:
-                dep_name = (
-                    renames.get(raw_dep.name, raw_dep.name)
-                    if renames is not None
-                    else raw_dep.name
-                )
+                dep_name = renames.get(raw_dep.name, raw_dep.name)
                 if not isinstance(raw_dep, MemoryDep):
                     if dep_name in fused_buffer_names:
                         continue
                     return None
-                dep = raw_dep.rename(renames) if renames is not None else raw_dep
+                dep = raw_dep.rename(renames)
                 if not V.graph.sizevars.statically_known_equals(
                     sub_parent_factor * sympy_product(dep.ranges.values()), full_numel
                 ):
@@ -841,8 +840,9 @@ class NestedReduction:
         epilogue_node_set: OrderedSet[SchedulerNode],
         renames: dict[str, str] | None = None,
     ) -> bool:
+        renames = renames or {}
         epilogue_output_names = OrderedSet(
-            renames.get(name, name) if renames is not None else name
+            renames.get(name, name)
             for node in epilogue_node_set
             for name in node.get_buffer_names()
         )
@@ -852,9 +852,7 @@ class NestedReduction:
             if node in epilogue_node_set:
                 continue
             for dep in node.read_writes.reads:
-                name = (
-                    renames.get(dep.name, dep.name) if renames is not None else dep.name
-                )
+                name = renames.get(dep.name, dep.name)
                 if name in epilogue_output_names:
                     return False
         return True
@@ -866,6 +864,7 @@ class NestedReduction:
         source_deps: tuple[MemoryDep, ...],
         renames: dict[str, str] | None = None,
     ) -> bool:
+        renames = renames or {}
         source_deps_by_name: dict[str, OrderedSet[MemoryDep]] = {}
         for dep in source_deps:
             source_deps_by_name.setdefault(dep.name, OrderedSet()).add(dep)
@@ -874,17 +873,13 @@ class NestedReduction:
             if node in epilogue_node_set:
                 continue
             for raw_dep in node.read_writes.reads:
-                dep_name = (
-                    renames.get(raw_dep.name, raw_dep.name)
-                    if renames is not None
-                    else raw_dep.name
-                )
+                dep_name = renames.get(raw_dep.name, raw_dep.name)
                 planned_deps = source_deps_by_name.get(dep_name)
                 if planned_deps is None:
                     continue
                 if not isinstance(raw_dep, MemoryDep):
                     return False
-                dep = raw_dep.rename(renames) if renames is not None else raw_dep
+                dep = raw_dep.rename(renames)
                 if dep not in planned_deps:
                     return False
         return True
@@ -897,6 +892,7 @@ class NestedReduction:
         source_names: OrderedSet[str],
         renames: dict[str, str] | None = None,
     ) -> bool:
+        renames = renames or {}
         for node in nodes:
             if node in epilogue_node_set or node.is_reduction():
                 continue
@@ -907,9 +903,7 @@ class NestedReduction:
             ):
                 continue
             for dep in node.read_writes.reads:
-                name = (
-                    renames.get(dep.name, dep.name) if renames is not None else dep.name
-                )
+                name = renames.get(dep.name, dep.name)
                 if name in source_names:
                     return False
         return True

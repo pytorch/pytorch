@@ -42,8 +42,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..ir import IRNode
+    from ..ops_handler import OpsHandler
 
-from ..ops_handler import OpsHandler, WrapperHandler
+from ..ops_handler import WrapperHandler
 from ..optimize_indexing import (
     convert_index_expr_to_value_expr,
     indexing_dtype_strength_reduction,
@@ -2003,13 +2004,7 @@ class _GroupedReductionLayout:
             family.remapped_values[name] = value
             return True
         if parent_dim != self.parent_block:
-            family.remapped_values[name] = self._broadcast_value_to_axis_resolution(
-                kernel,
-                value,
-                parent_extent=self.child_block(factor),
-                elems_per_group=self.child_local_reduction_size_dim(factor),
-            )
-            return True
+            return False
         if not self.is_parent_tile_shaped(value):
             return False
         sub_parent_tree = family.sub_parent_tree()
@@ -2595,12 +2590,12 @@ class SIMDScheduling(BaseScheduling):
         reduction_node = node1 if node1.is_reduction() else node2
         _, (numel, rnumel) = reduction_node.group
         nodes = [*node1.get_nodes(), *node2.get_nodes()]
-        candidate = scheduler.NestedReduction._sub_parent_epilogue_candidate_nodes(
-            nodes, numel, rnumel
+        plan = self._sub_parent_epilogue_plan(
+            nodes, numel, rnumel, check_leaves=False
         )
-        if candidate is None:
+        if plan is None:
             return False
-        epilogue_nodes, _sub_parent_factor = candidate
+        epilogue_nodes = plan.epilogue_nodes
         assert self.scheduler is not None  # noqa: S101
         renames = self.scheduler.mutation_renames
         epilogue_node_set = OrderedSet(epilogue_nodes)
@@ -2637,13 +2632,17 @@ class SIMDScheduling(BaseScheduling):
         nodes: Sequence[BaseSchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
+        *,
+        check_leaves: bool = True,
     ) -> scheduler.NestedReduction.SubParentEpiloguePlan | None:
         if (
             not self.supports_sub_parent_epilogue
             or not torch._inductor.config.triton.nested_reduction
         ):
             return None
-        plan = scheduler.NestedReduction.sub_parent_epilogue_plan(nodes, numel, rnumel)
+        plan = scheduler.NestedReduction.sub_parent_epilogue_plan(
+            nodes, numel, rnumel, check_leaves=check_leaves
+        )
         return plan
 
     def _find_sub_parent_epilogue_plan(
@@ -3544,18 +3543,24 @@ class SIMDScheduling(BaseScheduling):
         kernel = cast("TritonKernel", kernel)
         metrics.codegen_nested_reduction += 1
         sub_parent_factor = sub_parent_epilogue_plan.sub_parent_factor
-        sub_parent_source_layouts = sub_parent_epilogue_plan.source_layouts
+        parent_rnumel = sub_parent_epilogue_plan.parent_rnumel
+        sub_parent_source_layouts = dict(sub_parent_epilogue_plan.source_layouts)
         if not V.graph.sizevars.statically_known_equals(numel, 1):
             # Keep enough rows per program to amortize the parent-tile load and
             # epilogue split for the standalone packing pattern.
-            kernel.min_xblock = 128
+            numel_static = V.graph.sizevars.simplify(numel)
+            kernel.min_xblock = (
+                min(int(numel_static), 128)
+                if isinstance(numel_static, (int, sympy.Integer))
+                else 128
+            )
         kernel.min_rblock = (
-            int(rnumel) if kernel.persistent_reduction else sub_parent_factor
+            parent_rnumel if kernel.persistent_reduction else sub_parent_factor
         )
         assert len(kernel.range_trees) == 2  # noqa: S101
         layout = _GroupedReductionLayout.from_kernel(
             kernel,
-            sympy.Integer(int(rnumel)),
+            sympy.Integer(parent_rnumel),
             local_reduction_in_r=True,
         )
         sub_parent_family = layout.make_sub_parent_family(sub_parent_factor)
