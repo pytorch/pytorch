@@ -26,9 +26,10 @@ WorkNCCL::WorkNCCL(
       comm_(comm),
       stream_(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
-      timeout_ms_(timeout_ms) {
-  start_event_ = comm_->getEvent();
-  end_event_ = comm_->getEvent();
+      timeout_ms_(timeout_ms),
+      timing_enabled_(comm->collectivesTimingEnabled()) {
+  start_event_ = comm_->getEvent(timing_enabled_);
+  end_event_ = comm_->getEvent(timing_enabled_);
 }
 
 WorkNCCL::WorkNCCL(
@@ -40,17 +41,18 @@ WorkNCCL::WorkNCCL(
       comm_(comm),
       stream_(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
-      timeout_ms_(timeout_ms) {
-  start_event_ = comm_->getEvent();
-  end_event_ = comm_->getEvent();
+      timeout_ms_(timeout_ms),
+      timing_enabled_(comm->collectivesTimingEnabled()) {
+  start_event_ = comm_->getEvent(timing_enabled_);
+  end_event_ = comm_->getEvent(timing_enabled_);
 }
 
 WorkNCCL::~WorkNCCL() {
   if (!comm_) {
     return;
   }
-  comm_->returnEvent(std::move(start_event_));
-  comm_->returnEvent(std::move(end_event_));
+  comm_->returnEvent(std::move(start_event_), timing_enabled_);
+  comm_->returnEvent(std::move(end_event_), timing_enabled_);
 }
 
 void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
@@ -203,6 +205,25 @@ void WorkNCCL::synchronize() {
 
 std::vector<at::Tensor> WorkNCCL::result() {
   return outputs_;
+}
+
+float WorkNCCL::getDuration() const {
+  TORCH_CHECK(
+      timing_enabled_,
+      "getDuration only works if timing was enabled, see ProcessGroup::_enable_collectives_timing");
+  TORCH_CHECK(start_event_ && end_event_, "getDuration requires CUDA events");
+  // A coalesced work owns the last op of the group and holds the earlier ops as
+  // children, so span from the first op's start event to this work's end event.
+  const auto& start_event =
+      children_.empty() ? *start_event_ : *children_.front()->start_event_;
+  TORCH_CHECK(
+      end_event_->isCreated() && end_event_->query(),
+      "getDuration only works after the work has completed");
+  return start_event.elapsed_time(*end_event_);
+}
+
+uint64_t WorkNCCL::getSequencenumber() const {
+  return seq_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
