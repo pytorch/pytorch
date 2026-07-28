@@ -119,11 +119,12 @@ def log_ndtr(a: TensorLikeType) -> TensorLikeType:
     # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
     M_SQRT1_2 = 0.707106781186547524400844362104849039
     t = a * M_SQRT1_2
-    return torch.where(
+    res = torch.where(
         a < 1.0,
         torch.log(torch.special.erfcx(-t) / 2) - t * t,
         torch.log1p(-torch.erfc(t) / 2),
     )
+    return -torch.abs(res)
 
 
 @register_decomposition(aten.logit)
