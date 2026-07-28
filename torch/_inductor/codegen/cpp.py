@@ -630,14 +630,18 @@ class RecordOptimizationContext:
         return self.current_node
 
 
-def decltype_promoted(*args):
+def arith_promoted(op, a, b):
+    args = (a, b)
     if any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args):
         raise AssertionError("Promotion of vector types is not supported")
 
-    if (dt := get_promote_dtype(args)) is not None:
-        return DTYPE_TO_CPP[dt]
-    else:
-        return f"decltype({args[0]})"
+    dtype = get_promote_dtype(args)
+    cpp_type = DTYPE_TO_CPP[dtype] if dtype is not None else f"decltype({a})"
+    if dtype in (torch.int32, torch.int64):
+        # signed overflow is UB in C++; int8/int16 promote to int and cannot overflow
+        cast = f"static_cast<std::make_unsigned_t<{cpp_type}>>"
+        return f"{cpp_type}({cast}({a}) {op} {cast}({b}))"
+    return f"{cpp_type}({a} {op} {b})"
 
 
 class CppOverrides(OpOverrides):
@@ -645,15 +649,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def add(a, b):
-        return f"{decltype_promoted(a, b)}({a} + {b})"
+        return arith_promoted("+", a, b)
 
     @staticmethod
     def sub(a, b):
-        return f"{decltype_promoted(a, b)}({a} - {b})"
+        return arith_promoted("-", a, b)
 
     @staticmethod
     def mul(a, b):
-        return f"{decltype_promoted(a, b)}({a} * {b})"
+        return arith_promoted("*", a, b)
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -1012,6 +1016,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"std::max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
 
@@ -1330,9 +1339,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def expm1(x):
-        # decompose for a better performance
-        vec_one = f"decltype({x})(1)"
-        return f"{x}.exp() - {vec_one}"
+        return f"{x}.expm1()"
 
     @staticmethod
     def erf(x):
@@ -1715,6 +1722,10 @@ class CppVecOverrides(CppOverrides):
             return f"{a_cast} | {b_cast}"
         else:
             return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
+    def fmaximum(a, b):
+        return f"decltype({a})::blendv({a}, {b}, {a} < {b})"
 
     @staticmethod
     def square(a):
