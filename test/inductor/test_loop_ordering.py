@@ -765,17 +765,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(2, metrics.generated_kernel_count)
 
     def test_upsample_into_reduction_keeps_coalesced_loops(self):
-        """
-        Nearest-neighbour upsample into a conv feeding a GroupNorm. The
-        pointwise leaves ahead of the GroupNorm reduction can be reindexed
-        onto the reduction's split, but doing so makes their reads
-        uncoalesced, and the fusion it unlocks does not pay for that.
-
-        Expected: the reindex is rolled back, so the upsample keeps its
-        coalesced loop order.
-
-        Regression test for https://github.com/pytorch/pytorch/issues/189488
-        """
+        """Reindexing upsample onto GroupNorm's split loses coalescing (#189488)."""
 
         class Mod(nn.Module):
             def __init__(self, channels, groups):
