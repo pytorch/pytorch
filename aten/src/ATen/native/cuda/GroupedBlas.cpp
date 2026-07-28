@@ -19,7 +19,7 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 #include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/native/cuda/CublasGroupedArgs.h>
 #endif
@@ -97,21 +97,18 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #endif
 }
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 bool should_use_cublaslt_grouped_gemm(
     const Tensor& mat_a,
     const Tensor& mat_b,
     const std::optional<Tensor>& offs,
     std::optional<c10::ScalarType> out_dtype) {
   const auto dprops = at::cuda::getCurrentDeviceProperties();
-  const bool sm90 = dprops->major == 9;
-  const bool sm10_or_sm11 =
-      dprops->major == 10 || dprops->major == 11;
-#if CUDA_VERSION >= 13030
-  const bool sm90_cublaslt_grouped_gemm_supported = sm90;
-#else
-  constexpr bool sm90_cublaslt_grouped_gemm_supported = false;
-#endif
+  const bool valid_sm =
+      dprops->major >= 9 && dprops->major <= 11;
+  if (!valid_sm) {
+    return false;
+  }
   const bool fp16_grouped_gemm =
       mat_a.dtype() == at::kHalf && mat_b.dtype() == at::kHalf &&
       out_dtype.value_or(at::kHalf) == at::kHalf;
@@ -130,20 +127,10 @@ bool should_use_cublaslt_grouped_gemm(
     return false;
   }
 
-  const bool use_fp16_by_default =
-      sm10_or_sm11 || sm90_cublaslt_grouped_gemm_supported;
-  if (use_fp16_by_default && fp16_grouped_gemm) {
+  if (fp16_grouped_gemm) {
     return true;
   }
-  if (sm90) {
-    if (!sm90_cublaslt_grouped_gemm_supported) {
-      return false;
-    }
-    return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
-  }
-  // Only SM 9.0-11.0 are supported; on any other arch fall back so we don't
-  // dispatch to a kernel that hard-errors on the device check.
-  return sm10_or_sm11 && bf16_grouped_gemm &&
+  return bf16_grouped_gemm &&
       at::globalContext().preferCublasltGroupedGemm();
 }
 #endif
@@ -474,7 +461,7 @@ static Tensor grouped_mm_cublaslt(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   TORCH_CHECK(
       mat_a.dtype() == at::kBFloat16 || mat_a.dtype() == at::kHalf,
       "cublasLt grouped GEMM requires BFloat16 or Float16 input, got ", mat_a.scalar_type());
@@ -521,8 +508,8 @@ std::optional<c10::ScalarType> out_dtype) {
                                args.batchCount, args.use_int64);
   return out;
 #else
-  TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 
 Tensor
@@ -796,7 +783,7 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   if (should_use_cublaslt_grouped_gemm(mat_a, mat_b, offs, out_dtype)) {
     return grouped_mm_cublaslt(mat_a, mat_b, offs, bias, out_dtype);
   }

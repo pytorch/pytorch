@@ -211,7 +211,7 @@ class InPlaceCompilationTests(TestCase):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
         scripted = torch.jit.script(model)
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             frozen = torch.jit.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
@@ -222,7 +222,7 @@ class InPlaceCompilationTests(TestCase):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
         scripted = torch.jit.script(model)
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             frozen = torch.jit.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
