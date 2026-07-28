@@ -5785,34 +5785,28 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             self.assertFalse(use_triton_tdm_template(mat1, mat2))
 
     def test_tdm_template_checks_alignment_and_offset(self):
+        from torch._dynamo.source import ConstantSource
         from torch._inductor.utils import use_triton_tdm_template
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
 
-        class FakeSizeVars:
-            @staticmethod
-            def replace_backed_symbols_with_hints(expr):
-                return expr
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+        graph.unaligned_buffers.add("A")
 
-            @staticmethod
-            def statically_known_equals(expr, val):
-                return expr == val
+        def make_mat(name, offset=0, size=(128, 128), stride=(128, 1)):
+            return Buffer(
+                name=name,
+                layout=FixedLayout(
+                    torch.device("cuda"),
+                    torch.float16,
+                    size,
+                    stride,
+                    offset,
+                ),
+            )
 
-            @staticmethod
-            def statically_known_multiple_of(expr, val):
-                return expr % val == 0
-
-        def make_mat(name, offset=0, stride=(128, 1)):
-            mat = mock.Mock()
-            mat.get_device.return_value = torch.device("cuda")
-            mat.get_dtype.return_value = torch.float16
-            mat.get_size.return_value = [128, 128]
-            mat.get_stride.return_value = list(stride)
-            mat.get_name.return_value = name
-            mat.get_layout.return_value = mock.Mock(offset=offset)
-            return mat
-
-        fake_graph = mock.Mock(sizevars=FakeSizeVars(), unaligned_buffers={"A"})
         with (
-            V.set_graph_handler(fake_graph),
+            V.set_graph_handler(graph),
             mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
         ):
             self.assertFalse(use_triton_tdm_template(make_mat("A"), make_mat("B")))
@@ -5826,6 +5820,41 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                 use_triton_tdm_template(make_mat("C", stride=(65, 1)), make_mat("B"))
             )
             self.assertTrue(use_triton_tdm_template(make_mat("C"), make_mat("B")))
+
+            aligned_dim = graph.sizevars.shape_env.create_symbol(
+                128,
+                source=ConstantSource("aligned_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            unaligned_dim = graph.sizevars.shape_env.create_symbol(
+                65,
+                source=ConstantSource("unaligned_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            guards_before = len(graph.sizevars.shape_env.guards)
+            self.assertTrue(
+                use_triton_tdm_template(
+                    make_mat(
+                        "dynamic_aligned",
+                        size=(128, aligned_dim),
+                        stride=(aligned_dim, 1),
+                    ),
+                    make_mat("B"),
+                    add_guards=True,
+                )
+            )
+            self.assertGreater(len(graph.sizevars.shape_env.guards), guards_before)
+            self.assertFalse(
+                use_triton_tdm_template(
+                    make_mat(
+                        "dynamic_unaligned",
+                        size=(128, unaligned_dim),
+                        stride=(unaligned_dim, 1),
+                    ),
+                    make_mat("B"),
+                    add_guards=True,
+                )
+            )
 
     def test_tdm_descriptor_orientation_uses_unit_stride_dimension(self):
         from torch._inductor.utils import tdm_descriptor_row_major
