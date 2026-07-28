@@ -6388,7 +6388,7 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            # Use CeilDiv to prevent zeroing the whole product and making the 
+            # Use CeilDiv to prevent zeroing the whole product and making the
             # heuristic below think there is no outer work.
             num_steps = num_steps * CeilDiv(loop.size, loop.steps)
             max_depth += 1
