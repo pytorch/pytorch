@@ -317,8 +317,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
         fused_buffer_names = OrderedSet(
             n.get_name() for n in [gemm_template_node, *all_epilogue_nodes]
         )
-        preserve_gemm_output = not V.graph.scheduler.can_buffer_be_removed_through_fusion(
-            ir_node.get_name(), fused_buffer_names
+        preserve_gemm_output = (
+            not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+                ir_node.get_name(), fused_buffer_names
+            )
         )
 
         # Multi-store epilogues (the GEMM output feeding >1 graph output) are
