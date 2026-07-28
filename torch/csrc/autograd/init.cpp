@@ -439,10 +439,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("config"),
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
-  m.def(
-      "_disable_profiler",
-      disableProfiler,
-      py::call_guard<py::gil_scoped_release>());
+  m.def("_disable_profiler", disableProfiler);
   m.def(
       "_prepare_profiler",
       prepareProfiler,
