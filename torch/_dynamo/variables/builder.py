@@ -18,7 +18,6 @@ VariableTracker instances based on their type and usage context.
 """
 
 import abc
-import builtins
 import collections
 import contextlib
 import contextvars
@@ -281,11 +280,6 @@ from .misc import (
     TypingVariable,
     WeakRefVariable,
 )
-
-
-if sys.version_info >= (3, 15):
-    from .misc import SentinelVariable
-
 from .nn_module import (
     FSDPManagedNNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
@@ -2348,12 +2342,6 @@ class VariableBuilder:
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return ObjectVariable(value, source=self.source)
-        elif (
-            sys.version_info >= (3, 15)
-            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
-        ):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return SentinelVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -5195,11 +5183,6 @@ class SourcelessBuilder:
             return UnspecializedNNModuleVariable(value)
         elif istype(value, object):
             return ObjectVariable(value)
-        elif (
-            sys.version_info >= (3, 15)
-            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
-        ):
-            return SentinelVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
