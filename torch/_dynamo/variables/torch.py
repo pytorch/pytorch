@@ -3806,6 +3806,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 )
             return flat_out
 
+        flat_apply_capture._torchdynamo_contextvar_runtime_observer = True  # type: ignore[attr-defined]
+
         proxy = tx.output.create_proxy(
             "call_function", flat_apply_capture, all_args, {}
         )
