@@ -82,10 +82,17 @@ def vt_identity_compare(
             else ConstantVariable.create(False)
         )
 
-    # One side has a concrete backing object, the other doesn't.  We cannot
-    # prove they are different — the unknown side might be a deferred
-    # representation (e.g. CallMethodVariable) of the same value.
+    # One side has a concrete backing object, the other doesn't.  We generally
+    # cannot prove they are different -- the unknown side might be a deferred
+    # representation (e.g. CallMethodVariable) of the same value.  But a
+    # NestedUserFunctionVariable is a function defined in the traced code, with
+    # fresh identity, so it can never be the same object as a known value.
     if left_known != right_known:
+        from .functions import NestedUserFunctionVariable
+
+        unknown = right if left_known else left
+        if isinstance(unknown, NestedUserFunctionVariable):
+            return ConstantVariable.create(False)
         return None
 
     # Objects created during tracing: VT identity = Python identity.
