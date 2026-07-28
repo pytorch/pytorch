@@ -1678,24 +1678,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
 
-        self.tdm_persistent_mm_configs: list[BaseConfig] = [
-            ROCmGemmConfig(128, 64, 64, 1, 4, group_m=8, waves_per_eu=2),
-            ROCmGemmConfig(64, 128, 64, 1, 4, group_m=8, waves_per_eu=2),
-            ROCmGemmConfig(128, 64, 128, 1, 4, group_m=8),
-            ROCmGemmConfig(64, 128, 128, 1, 4, group_m=8),
-            ROCmGemmConfig(128, 128, 64, 1, 4, group_m=8),
-            ROCmGemmConfig(128, 128, 128, 1, 4, group_m=8),
-            ROCmGemmConfig(256, 128, 64, 1, 8, group_m=16),
-            ROCmGemmConfig(128, 256, 64, 1, 8, group_m=16),
-        ]
-
-        self.tdm_scaled_persistent_mm_configs: list[BaseConfig] = [
-            ROCmGemmConfig(128, 128, 128, 1, 4, group_m=8),
-            ROCmGemmConfig(128, 128, 128, 1, 8, group_m=8),
-            ROCmGemmConfig(256, 128, 128, 1, 8, group_m=16),
-            ROCmGemmConfig(128, 256, 128, 1, 8, group_m=16),
-        ]
-
         # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
@@ -3267,7 +3249,6 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.tdm_persistent_mm_configs
         self.uses_tdm_configs = True
 
     def _get_template_configs_impl(
@@ -3318,12 +3299,9 @@ class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
 class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
     """Shared stable-descriptor options for gfx1250 scaled TDM templates."""
 
-    tdm_scaled_persistent_mm_configs: list[BaseConfig]
-
     def __init__(self) -> None:
         super().__init__()
         if config.enable_tdm:
-            self.mm_configs = self.tdm_scaled_persistent_mm_configs
             self.uses_tdm_configs = True
 
     def _get_template_configs_impl(
