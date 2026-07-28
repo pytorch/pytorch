@@ -109,7 +109,7 @@ class CustomSharder(Sharder):
 class TestCustomSharder(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_custom_sharder(self):
         class MyModule(nn.Module):
             def __init__(self) -> None:
@@ -159,7 +159,7 @@ class TestCustomSharder(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_custom_sharder_errors(self):
         custom_sharder = CustomSharder(
             devices=[f"rank:{i}/{device_type}:{i}" for i in range(TEST_GPU_NUM)],
