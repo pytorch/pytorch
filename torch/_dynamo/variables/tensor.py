@@ -638,6 +638,10 @@ class TensorVariable(VariableTracker):
     ) -> ConstantVariable:
         from . import GetAttrVariable
 
+        # TODO - This is not a good solution but solves an accuracy issue.
+        # Today, getattro_impl returns GetAttrVariable for both non-existent
+        # attributes and existing attributes. This is a bug and requires more
+        # deep dive.
         if name in all_tensor_attrs:
             return ConstantVariable.create(True)
 
@@ -645,38 +649,9 @@ class TensorVariable(VariableTracker):
             var = VariableTracker.build(tx, getattr).call_function(
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
-            # getattro_impl returns GetAttrVariable as a fallback for both
-            # non-existent and existing-but-unhandled attributes (the root
-            # ambiguity still lives in getattro_impl and needs a deeper fix).
-            # When that happens, disambiguate by checking the fake tensor
-            # directly. Restricted to wrapper subclasses: a plain FakeTensor
-            # would leak FakeTensor-internal attributes (e.g. fake_device).
-            # NB: a wrapper subclass that delegates __getattr__ to its inner
-            # fake tensors can still report such internal attributes here;
-            # that residual divergence is out of scope for this workaround.
-            if isinstance(var, GetAttrVariable):
-                fake_val = self.as_proxy().node.meta.get("example_value")
-                if fake_val is not None and is_traceable_wrapper_subclass(fake_val):
-                    # hasattr returns False for a missing attr; it only
-                    # propagates a non-AttributeError raised by a descriptor
-                    # getter. Eager would propagate that too, and the fake
-                    # tensor may raise where the real one would not, so
-                    # graph-break and let eager decide on the real object
-                    # rather than fabricating a (possibly wrong) result.
-                    try:
-                        ret_val = hasattr(fake_val, name)
-                    except Exception:
-                        unimplemented(
-                            gb_type="hasattr on wrapper subclass raised in fake probe",
-                            context=f"hasattr({self}, {name})",
-                            explanation="Probing hasattr on the fake wrapper subclass "
-                            f"for attribute '{name}' raised a non-AttributeError exception.",
-                            hints=[*graph_break_hints.SUPPORTABLE],
-                        )
-                else:
-                    ret_val = False
-            else:
-                ret_val = True
+            # in the event that TensorVariable returns NotImplemented
+            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
+            ret_val = not isinstance(var, GetAttrVariable)
         except (AttributeError, ObservedAttributeError):
             ret_val = False
 

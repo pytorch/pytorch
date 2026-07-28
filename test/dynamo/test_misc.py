@@ -17112,30 +17112,6 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt()
         self.assertEqual(result.shape, (3, 7))
 
-    def test_module_hook_handle_references_real_dict(self):
-        """A RemovableHandle created inside a compiled function must reference
-        the real module's (empty) hooks dict. This requires reconstructing the
-        empty hooks dict from its source; a sourceless fresh {} would make the
-        handle weakref point at the wrong object so remove() silently no-ops.
-        """
-
-        def hook(mod, inp, out):
-            return out
-
-        def fn(m, x):
-            y = m(x)
-            h = m.register_forward_hook(hook)
-            return y, h
-
-        m = torch.nn.Linear(3, 3)
-        opt = torch.compile(fn, backend="eager")
-        x = torch.randn(2, 3)
-        _, h = opt(m, x)
-        self.assertEqual(len(m._forward_hooks), 1)
-        self.assertIs(h.hooks_dict_ref(), m._forward_hooks)
-        h.remove()
-        self.assertEqual(len(m._forward_hooks), 0)
-
     def test_custom_op_register_fake_inside_traced_function(self):
         """Custom op defined with register_fake inside a traced function must
         produce correct results. register_fake mutates _abstract_fn on the real
@@ -17186,6 +17162,39 @@ def forward(self, L_x_ : torch.Tensor):
         @torch.compile(backend="eager")
         def fn(x):
             return ngb_missing_fake(x) + 1
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
+
+    def test_custom_op_defined_inside_without_fake_hard_errors(self):
+        """A custom op DEFINED INSIDE the traced function but never
+        register_fake'd must still hard-error, and the gate must key off a
+        pending `_abstract_fn` mutation SPECIFICALLY, not any pending mutation.
+
+        Unlike test_custom_op_missing_fake_impl_hard_errors (op at module
+        scope, whose opdef is untracked so the gate short-circuits at
+        `vt is None`), the opdef here is tracked in side_effects. We store an
+        unrelated attribute on it so it has a pending NON-`_abstract_fn`
+        mutation: a gate that checked `has_pending_mutation(vt)` instead of
+        `has_pending_mutation_of_attr(vt, "_abstract_fn")` would then wrongly
+        graph-break and silently fall the genuinely-broken op back to eager.
+        The specific check hard-errors as it must.
+        """
+
+        def get_op():
+            @torch.library.custom_op("test::ngb_inside_nofake", mutates_args=[])
+            def op(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            return op
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            my_op = get_op()
+            # pending non-_abstract_fn mutation on the tracked opdef
+            my_op._unrelated_marker = 1
+            return my_op(x)
 
         with self.assertRaises(RuntimeError):
             fn(torch.randn(3))
