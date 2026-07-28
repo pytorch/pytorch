@@ -21,8 +21,6 @@ RUN yum install -y \
   diffutils \
   file \
   git \
-  lld \
-  llvm-devel \
   make \
   patch \
   perl \
@@ -94,18 +92,8 @@ RUN bash ./install_acl.sh && rm install_acl.sh
 
 # Build and install llvm-bolt from source
 FROM base as llvm
-RUN LLVM_VERSION="$(rpm -q --qf '%{VERSION}' llvm-devel)" \
-  && git clone --depth 1 --filter=blob:none --sparse --branch "llvmorg-${LLVM_VERSION}" \
-     https://github.com/llvm/llvm-project.git /llvm \
-  && git -C /llvm sparse-checkout set bolt cmake llvm \
-  && cmake -S /llvm/bolt -B /llvm/build \
-    -DCMAKE_INSTALL_PREFIX=/llvm/install \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DLLVM_TARGETS_TO_BUILD=AArch64 \
-    -DBOLT_TARGETS_TO_BUILD=AArch64 \
-    -DBOLT_INCLUDE_TESTS=OFF \
-  && cmake --build /llvm/build --target install-bolt --parallel \
-  && /llvm/install/bin/llvm-bolt --version
+COPY ./common/install_llvm_tools.sh install_llvm_tools.sh
+RUN bash ./install_llvm_tools.sh && rm install_llvm_tools.sh
 
 FROM base as final
 
