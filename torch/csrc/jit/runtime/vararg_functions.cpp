@@ -67,7 +67,7 @@ void addFormattedArg(
       } else {
         tmp << static_cast<float>(ival.toDouble());
       }
-      ss << tmp.str();
+      ss << std::move(tmp).str();
       break;
     case 'c':
       TORCH_CHECK(
@@ -137,7 +137,7 @@ void format(Stack& stack, size_t num_inputs) {
   }
 
   drop(stack, num_inputs);
-  push(stack, ss.str());
+  push(stack, std::move(ss).str());
 }
 
 void einsum(Stack& stack, size_t num_inputs) {
@@ -199,7 +199,7 @@ void einsum(Stack& stack, size_t num_inputs) {
     parse_sublist(args.back().toIntList(), num_inputs - 1);
   }
 
-  const auto equation = ss.str();
+  const auto equation = std::move(ss).str();
   std::vector<at::Tensor> operands;
 
   // Parse input operands
@@ -257,7 +257,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
   }
   TORCH_CHECK(used_args == args_size, "Too many arguments for format string");
   drop(stack, num_inputs);
-  push(stack, ss.str());
+  push(stack, std::move(ss).str());
 }
 
 void listUnpack(Stack& stack, size_t num_outputs) {
@@ -315,10 +315,7 @@ void namedTupleConstruct(
     Stack& stack,
     c10::TypePtr tuple_type,
     size_t num_inputs) {
-  std::vector<IValue> elems{
-      std::make_move_iterator(stack.end() - num_inputs),
-      std::make_move_iterator(stack.end())};
-  drop(stack, num_inputs);
+  auto elems = pop(stack, num_inputs);
   push(
       stack,
       c10::ivalue::Tuple::createNamed(std::move(elems), std::move(tuple_type)));

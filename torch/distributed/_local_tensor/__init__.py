@@ -14,7 +14,7 @@ autograd needs multithreading to keep up!)  (It might potentially be possible
 to trace through this with torch.compile and then compile it with CUDA graphs
 but this is currently a non-goal.)
 
-We do not directly handling MPMD. However in practice even in SPMD you may
+We do not directly handle MPMD. However in practice even in SPMD you may
 encounter divergence in behavior per rank (for example, uneven sharding
 across ranks). To support scenarios like this, we provide a helper decorator
 that allows you to run a function with no side effects for each LocalTensor
@@ -798,7 +798,7 @@ class _LocalOffsetBasedRNGTracker:
                 any_rank_state = lm._any_local_rng_state()
                 any_rank_cpu, any_rank_cuda = any_rank_state
 
-                if self._device.type == "cuda":
+                if self._device.type in {"cuda", "xpu"}:
                     if self._device.index not in any_rank_cuda:
                         raise AssertionError
                     any_rank_device_state = any_rank_cuda[self._device.index]
@@ -1222,6 +1222,8 @@ _PATCHED_RANDOM_FUNCTIONS: Sequence[tuple[str, str]] = (
     ("torch.initial_seed", "torch_initial_seed"),
 )
 
+_PATCHED_DIST_FUNCTIONS: Sequence[str] = ("get_rank",)
+
 
 class LocalTensorMode(TorchDispatchMode):
     """
@@ -1259,12 +1261,17 @@ class LocalTensorMode(TorchDispatchMode):
         self._old_device_mesh_methods: dict[str, Callable[..., object]] | None = None
         # Used to store the patched "random" functions
         self._old_random_functions: dict[str, Callable[..., object]] = {}
+        # Used to store the patched dist functions
+        self._old_dist_functions: dict[str, Callable[..., object]] | None = None
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
-        # Cache for get_coordinate results, keyed by mesh id
-        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
-        self._coordinate_cache: dict[int, list[SymInt]] = {}
+        # Cache for get_coordinate results, keyed by the inputs used to compute them:
+        # (ndim, flattened rank map, layout).
+        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts.
+        self._coordinate_cache: dict[
+            tuple[int, tuple, torch.distributed._mesh_layout._MeshLayout], list[SymInt]
+        ] = {}
         self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
@@ -1324,6 +1331,44 @@ class LocalTensorMode(TorchDispatchMode):
                 "LocalTensorMode unrecognized subclass(es): %s", unrecognized_types
             )
             return NotImplemented
+
+        # device_mesh::_runtime_compute_coordinate_on_dim is checked before the
+        # no-LocalTensor early return because compile-on-one-rank calls it with
+        # only a plain mesh-tensor argument, but the result must still vary per
+        # simulated rank under LocalTensorMode.
+        if (
+            not self._disable
+            and func.namespace == "device_mesh"
+            and func is torch.ops.device_mesh._runtime_compute_coordinate_on_dim.default
+        ):
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized = normalize_function(
+                func,
+                args,
+                kwargs,
+                normalize_to_only_use_kwargs=True,
+            )
+            if normalized is None:
+                raise AssertionError(
+                    "LocalTensorMode could not normalize arguments for "
+                    "device_mesh::_runtime_compute_coordinate_on_dim"
+                )
+            full_mesh = normalized.kwargs["full_mesh"]
+            index = normalized.kwargs["index"]
+            rank_results: dict[int, int] = {}
+            for r in self.ranks:
+                mesh_tensor = DeviceMesh._get_mesh_tensor_from_full_mesh(
+                    full_mesh, current_rank=r
+                )
+                mesh_coords = DeviceMesh._compute_coordinates_from_mesh(mesh_tensor, r)
+                if mesh_coords is None:
+                    raise RuntimeError(
+                        f"Rank {r} not found in mesh tensor for "
+                        "_runtime_compute_coordinate_on_dim"
+                    )
+                rank_results[r] = mesh_coords[index]
+            return _combine_int_rank_results(rank_results)
 
         # Factory functions convert into LocalTensor, so we don't have to
         # transmute a Tensor into a LocalTensor if mutation happens...
@@ -1417,6 +1462,7 @@ class LocalTensorMode(TorchDispatchMode):
 
         self._unpatch_device_mesh()
         self._unpatch_random_functions()
+        self._unpatch_dist()
         self._disable = True
 
     def enable_(self):
@@ -1425,6 +1471,7 @@ class LocalTensorMode(TorchDispatchMode):
 
         self._patch_device_mesh()
         self._patch_random_functions()
+        self._patch_dist()
         self._disable = False
 
     @contextlib.contextmanager
@@ -1452,7 +1499,7 @@ class LocalTensorMode(TorchDispatchMode):
 
     def rank_map(self, cb: Callable[[int], Tensor]) -> LocalTensor:
         """
-        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        Creates a LocalTensor instance by mapping rank id to its local shard.
         """
 
         with self.disable():
@@ -1463,7 +1510,7 @@ class LocalTensorMode(TorchDispatchMode):
         self, tensor: LocalTensor, cb: Callable[[int, Tensor], Tensor | None]
     ) -> LocalTensor:
         """
-        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        Creates a LocalTensor instance by mapping rank id to its local shard.
         """
 
         with self.disable():
@@ -1520,6 +1567,27 @@ class LocalTensorMode(TorchDispatchMode):
                 mod_name, attr_name = global_name.rsplit(".", 1)
                 mod = importlib.import_module(mod_name)
                 setattr(mod, attr_name, value)
+
+    def _patch_dist(self) -> None:
+        if self._old_dist_functions is not None:
+            raise AssertionError
+        import torch.distributed as dist
+
+        saved = {}
+        for name in _PATCHED_DIST_FUNCTIONS:
+            saved[name] = getattr(dist, name)
+            local = getattr(_LocalDist, name)
+            setattr(dist, name, local)
+        self._old_dist_functions = saved
+
+    def _unpatch_dist(self) -> None:
+        saved, self._old_dist_functions = self._old_dist_functions, None
+        if saved is None:
+            raise AssertionError
+        import torch.distributed as dist
+
+        for name, value in saved.items():
+            setattr(dist, name, value)
 
 
 class _LocalRandom:
@@ -1595,16 +1663,17 @@ class _LocalDeviceMesh:
         if lm is None:
             raise AssertionError("Unexpectedly not in LocalTensorMode")
 
+        # Include all attributes used below in the cache key
+        cache_key = (self.ndim, self._flatten_rank_map, self._layout)
         # Check cache first (fast path without lock)
-        mesh_id = id(self)
-        if mesh_id in lm._coordinate_cache:
-            return lm._coordinate_cache[mesh_id]
+        if cache_key in lm._coordinate_cache:
+            return lm._coordinate_cache[cache_key]
 
         # Acquire lock for thread safety in MPMD contexts
         with lm._coordinate_cache_lock:
             # Double-check after acquiring lock
-            if mesh_id in lm._coordinate_cache:
-                return lm._coordinate_cache[mesh_id]
+            if cache_key in lm._coordinate_cache:
+                return lm._coordinate_cache[cache_key]
 
             coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
             # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
@@ -1620,7 +1689,7 @@ class _LocalDeviceMesh:
 
             out = [torch.SymInt(LocalIntNode(c)) for c in coords]
             # Cache the result
-            lm._coordinate_cache[mesh_id] = out
+            lm._coordinate_cache[cache_key] = out
             # The output contains coordinates for each of the ranks with respect to
             # their meshes formed from root mesh and selecting the same dimensions
             # as the current mesh.
@@ -1669,6 +1738,31 @@ class _LocalDeviceMesh:
         if coords is None:
             raise AssertionError
         return coords[mesh_dim]
+
+
+class _LocalDist:
+    """
+    Holds implementations of torch.distributed functions that must be patched while
+    running under LocalTensorMode.
+    """
+
+    @staticmethod
+    def get_rank(group: "ProcessGroup | None" = None) -> "int | SymInt":
+        import torch.distributed as dist
+
+        lm = enabled_local_tensor_mode()
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
+        if group is None or group is dist.GroupMember.WORLD:
+            return torch.SymInt(LocalIntNode({r: r for r in lm.ranks}))
+        from ._c10d import _prepare_collective_groups
+
+        ranks, group_offsets, _ = _prepare_collective_groups(group)
+        mapping: dict[int, int] = {}
+        for group_offset in group_offsets:
+            for local_rank, r in enumerate(ranks):
+                mapping[group_offset + r] = local_rank
+        return torch.SymInt(LocalIntNode(mapping))
 
 
 def reconcile_args(args: Any, kwargs: dict[str, Any] | None = None) -> Any:

@@ -24,11 +24,21 @@ static const size_t kMinLargeAlloc = MB(10); // allocations between 1 and 10 MiB
 static const size_t kRoundLarge = MB(2); // round up large allocations to 2 MiB
 static const size_t kSmallHeap = MB(8); // "small" allocations are packed in 8 MiB heaps
 static const size_t kLargeHeap = MB(32); // "large" allocations may be packed in 32 MiB heaps
-static const size_t kXLargeHeapD =
-    MB(128); // "extra large" allocations on Discrete devices may be packed in 128 MiB heaps
-static const size_t kXLargeHeapU =
-    MB(1024); // "extra large" allocations on Unified devices may be packed in 1 GiB heaps
+static const size_t kXLargeHeap = MB(1024); // "extra large" allocations may be packed in 1 GiB heaps
 static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" allocation
+
+enum class HeapTier { SMALL, LARGE, XLARGE, OVERSIZE };
+
+inline HeapTier getHeapTier(size_t size, bool has_memory_pressure) {
+  if (size <= kMaxSmallAlloc) {
+    return HeapTier::SMALL;
+  } else if (size < kMinLargeAlloc) {
+    return HeapTier::LARGE;
+  } else if (size < kXLargeHeap / 2 && !has_memory_pressure) {
+    return HeapTier::XLARGE;
+  }
+  return HeapTier::OVERSIZE;
+}
 
 // buffer pools could be customized with a combination of usage flags
 enum UsageFlags : uint32_t {
@@ -68,6 +78,8 @@ struct BufferBlock {
   static uint64_t buffer_counter;
   // Metal events used to sync GPU/CPU operations on the shared-storage buffers
   MPSEventPtr event;
+  // Stream for which this buffer was allocated.
+  MPSStream* stream = nullptr;
 
   BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr)
       : buffer(Buffer), size(Size), requested_size(RequestedSize), heap(Heap), buf_id(Buffer ? ++buffer_counter : 0) {}
@@ -100,8 +112,6 @@ struct AllocParams {
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
-  // true if we're allocating on a unified memory device
-  bool has_unified_memory = true;
 };
 
 struct HeapBlock {
@@ -147,16 +157,20 @@ struct HeapBlock {
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
-      const size_t kXLargeHeap = params.has_unified_memory ? kXLargeHeapU : kXLargeHeapD;
-      if (size <= kMaxSmallAlloc) {
-        d.size = kSmallHeap;
-      } else if (size < kMinLargeAlloc) {
-        d.size = kLargeHeap;
-      } else if (size < kXLargeHeap / 2 && !params.has_memory_pressure) {
-        d.size = kXLargeHeap;
-      } else {
-        d.size = kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
-        is_split = false;
+      switch (getHeapTier(size, params.has_memory_pressure)) {
+        case HeapTier::SMALL:
+          d.size = kSmallHeap;
+          break;
+        case HeapTier::LARGE:
+          d.size = kLargeHeap;
+          break;
+        case HeapTier::XLARGE:
+          d.size = kXLargeHeap;
+          break;
+        case HeapTier::OVERSIZE:
+          d.size = kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
+          is_split = false;
+          break;
       }
       d.storageMode = (usage & UsageFlags::SHARED) ? MTLStorageModeShared : MTLStorageModePrivate;
       d.cpuCacheMode = MTLCPUCacheModeDefaultCache;
@@ -248,6 +262,11 @@ struct BufferPool {
   std::set<HeapBlock*, HeapComparison> heaps;
   // list of only "available" buffers in the pool (i.e., buffers not in-use)
   std::set<BufferBlock*, BufferComparison> available_buffers;
+  // List of available buffers partitioned by which stream allocated them.
+  // Buffers can only be reused by the same stream. Allowing buffers to be used
+  // by a different stream would require an expensive cross-stream
+  // synchronization.
+  ska::flat_hash_map<MPSStream*, std::set<BufferBlock*, BufferComparison>> available_buffers_by_stream;
   // list of buffers that are in a state of "limbo" where they've already been freed
   // from PyTorch-side, but were not returned to pool due to still being
   // in-use by command buffers with retainCount > 1. In this state, the buffer is
@@ -324,12 +343,16 @@ class MPSHeapAllocatorImpl {
   }
   // (see m_total_allocated_memory for description)
   size_t getTotalAllocatedMemory() const {
-    return m_total_allocated_memory;
+    return m_total_allocated_memory.current;
   }
   // (see m_current_allocated_memory for description)
   size_t getCurrentAllocatedMemory() const {
-    return m_current_allocated_memory;
+    return m_current_allocated_memory.current;
   }
+  // snapshot of memory stats for the generic torch.accelerator memory APIs
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats();
+  void resetAccumulatedStats();
+  void resetPeakStats();
   // total GPU memory allocated in the process by Metal driver; including
   // implicit allocations from MPS/MPSGraph frameworks and MPSHeapAllocatorImpl.
   size_t getDriverAllocatedMemory() const {
@@ -357,8 +380,7 @@ class MPSHeapAllocatorImpl {
   constexpr static double default_high_watermark_upper_bound = 2.0;
   // (see m_low_watermark_ratio for description)
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
-  constexpr static double default_low_watermark_ratio_unified = 1.4;
-  constexpr static double default_low_watermark_ratio_discrete = 1.0;
+  constexpr static double default_low_watermark_ratio = 1.4;
 
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
@@ -366,10 +388,12 @@ class MPSHeapAllocatorImpl {
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;
-  // total memory allocated by HeapAllocator (including blocks in pools)
-  size_t m_total_allocated_memory = 0;
-  // currently active memory allocations in use (i.e., blocks not in pools)
-  size_t m_current_allocated_memory = 0;
+  // total memory allocated by HeapAllocator (including blocks in pools);
+  // tracked as a Stat to expose current/peak/accumulated reserved bytes
+  c10::CachingAllocator::Stat m_total_allocated_memory;
+  // currently active memory allocations in use (i.e., blocks not in pools);
+  // tracked as a Stat to expose current/peak/accumulated allocated bytes
+  c10::CachingAllocator::Stat m_current_allocated_memory;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size = 0;
   // maximum total size allowed to be allocated
@@ -406,9 +430,18 @@ class MPSHeapAllocatorImpl {
   void free_buffer(BufferBlock* buffer_block);
   // returns true if the container heap is also released
   bool release_buffer(BufferBlock* buffer_block, bool remove_empty_heap = true);
+  // adds/removes a buffer in both `pool.available_buffers` and
+  // `pool.available_buffers_by_stream[buffer_block->stream]`, so the two stay
+  // in sync. `insert_available_buffer` returns whether the buffer was newly
+  // inserted.
+  bool insert_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
+  void erase_available_buffer(BufferPool& pool, BufferBlock* buffer_block);
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(AllocParams& params);
   bool release_cached_buffers();
+  // waits for buffers parked in-flight in the pool's pending-free list to finish
+  // on the GPU and returns them to the pool; returns true if any were reclaimed
+  bool wait_for_pending_free_buffers(BufferPool& pool);
   // free unused cached blocks to reclaim GPU memory if memory pressure is high
   void garbage_collect_cached_buffers(AllocParams& params);
   // returns the suitable buffer pool type for the usage or

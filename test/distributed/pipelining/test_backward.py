@@ -97,6 +97,27 @@ class StageBackwardTests(TestCase):
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
+    def test_stage_backward_input_ignores_non_tensor_inputs(self, device):
+        mod = MLPModule(d_hid).to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        non_tensor_input = object()
+
+        ref_mod = copy.deepcopy(mod).to(device)
+        ref_x = x.detach().requires_grad_(True).to(device)
+
+        loss = mod(x).sum()
+        dinputs, _param_groups = stage_backward_input(
+            stage_outputs_or_loss=(loss,),
+            output_grads=None,
+            input_values=[non_tensor_input, x],
+            weights=mod.parameters(),
+        )
+
+        ref_mod(ref_x).sum().backward()
+        self.assertEqual(dinputs[0], None)
+        torch.testing.assert_close(x.grad, ref_x.grad)
+        torch.testing.assert_close(dinputs[1], ref_x.grad)
+
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight(self, device):
         # MLP as a stage module
@@ -256,6 +277,43 @@ class StageBackwardTests(TestCase):
 
         ref_mod = copy.deepcopy(mod)
         ref_x = x.detach().clone().requires_grad_(True)
+        ref_out = ref_mod(ref_x)
+        ref_loss = ref_out.sum()
+        ref_loss.backward()
+
+        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            ref_p = ref_mod.get_parameter(name)
+            torch.testing.assert_close(p.grad, ref_p.grad)
+
+    def test_stage_backward_weight_shared_weights(self, device):
+        class SharedWeightModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+
+            def forward(self, x):
+                x = torch.matmul(x, self.w)
+                x = torch.relu(x)
+                return torch.matmul(x, self.w)
+
+        mod = SharedWeightModule().to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        out = mod(x)
+        loss = out.sum()
+
+        dinputs, param_groups = stage_backward_input(
+            stage_outputs_or_loss=[loss],
+            output_grads=None,
+            input_values=[x],
+            weights=mod.parameters(),
+        )
+        stage_backward_weight(mod.parameters(), param_groups)
+
         ref_out = ref_mod(ref_x)
         ref_loss = ref_out.sum()
         ref_loss.backward()

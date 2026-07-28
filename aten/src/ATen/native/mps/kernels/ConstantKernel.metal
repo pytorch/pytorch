@@ -13,18 +13,29 @@ kernel void fill_scalar_dense(
     out[index] = fill_val;
 }
 
-// Single-byte types: each thread fills 4 elements via vec<T,4> writes.
+// Single-byte types: each thread fills 4 elements via vec<T,4> writes. The
+// vec store requires a 4-byte-aligned address, but a sliced view like x[1:]
+// hands us a buffer pointer with a 1..3 byte misalignment. Re-align the
+// pointer down to a 4-byte boundary (the same trick c10/metal/atomic.h uses
+// for atomic<uint>); the data region is then bytes [offs, offs+numel) of the
+// realigned buffer. Threads whose 4-byte slot is fully inside that region
+// issue a vec4 store, edge threads (head/tail) fall back to scalar writes.
 template <typename T>
 kernel void fill_scalar_dense_vec4(
     device T* out [[buffer(0)]],
     constant T& fill_val [[buffer(1)]],
     constant uint& numel [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
+  uint offs = reinterpret_cast<ulong>(out) & 3;
+  out = reinterpret_cast<device T*>(reinterpret_cast<device char*>(out) - offs);
   uint base = index * 4;
-  if (base + 4 <= numel) {
+  uint end = offs + numel;
+  if (base >= offs && base + 4 <= end) {
     *(device vec<T, 4>*)(out + base) = vec<T, 4>(fill_val);
   } else {
-    for (uint i = base; i < numel; i++)
+    uint start = max(base, offs);
+    uint stop = min(base + 4, end);
+    for (uint i = start; i < stop; i++)
       out[i] = fill_val;
   }
 }

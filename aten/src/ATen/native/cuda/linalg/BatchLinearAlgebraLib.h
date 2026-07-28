@@ -10,17 +10,6 @@
 
 #define USE_LINALG_SOLVER
 
-// cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
-// (which is cusolver version 11101 in the header), so we only use cusolver potrf batched
-// if cuda version is >= 11.3
-constexpr bool use_cusolver_potrf_batched_ = true;
-
-// cusolverDn<T>syevjBatched may have numerical issue before cuda 11.3.1 release,
-// (which is cusolver version 11102 in the header), so we only use cusolver syevj batched
-// if cuda version is >= 11.3.1
-// See https://github.com/pytorch/pytorch/pull/53040#issuecomment-793626268 and https://github.com/cupy/cupy/issues/4847
-constexpr bool use_cusolver_syevj_batched_ = true;
-
 // From cuSOLVER doc: Jacobi method has quadratic convergence, so the accuracy is not proportional to number of sweeps.
 //   To guarantee certain accuracy, the user should configure tolerance only.
 // The current pytorch implementation sets gesvdj tolerance to epsilon of a C++ data type to target the best possible precision.
@@ -71,7 +60,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues,
                           bool upper,
                           bool compute_eigenvectors);
 
-#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71400)
 void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues,
                                const Tensor& eigenvectors,
                                const Tensor& input,

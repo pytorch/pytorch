@@ -1,9 +1,13 @@
 # Build System requirements
-setuptools>=70.1.0,<82
+# 1.0 is required for [[tool.dynamic-metadata]] and the env table; see
+# pyproject.toml for the rationale on this lower bound.
+scikit-build-core>=1.0
+setuptools>=77.0.0,<82  # 77.0 is the first release with PEP 639 license-files support
+spin
 cmake>=3.27
 ninja
 numpy
-packaging
+packaging>=24.2  # required by setuptools>=77 to validate PEP 639 license expressions
 pyyaml
 requests
 six  # dependency chain: NNPACK -> PeachPy -> six
