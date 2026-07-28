@@ -244,7 +244,7 @@ class PHWithMeta(PHBase):
     def __init__(self, ph_key: str | None = None) -> None:
         super().__init__()
 
-        # Provide a hey for user to identify placeholder node during analysis
+        # Provide a key for user to identify placeholder node during analysis
         self.ph_key = ph_key
 
 

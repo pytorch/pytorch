@@ -6,6 +6,11 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG PIP_EXTRA_INDEX_URL
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ARG PIP_PREFER_BINARY
+ENV PIP_PREFER_BINARY=${PIP_PREFER_BINARY}
+
 ARG CLANG_VERSION
 
 # Allow APT to run as root
@@ -149,12 +154,20 @@ COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
 
+ARG TVM
+# Install apache-tvm for the dynamo tvm backend tests
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/tvm.txt tvm.txt
+RUN if [ -n "${TVM}" ]; then bash -c 'source ./common_utils.sh && pip_install apache-tvm==$(get_pinned_commit tvm) && python -c "import tvm"'; fi
+RUN rm common_utils.sh tvm.txt
+
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
+ARG CLANG_VERSION
 COPY ./common/install_cpython.sh install_cpython.sh
 COPY requirements-ci.txt /tmp/requirements-ci.txt
 RUN if [ -n "${TSAN}" ]; then \
-      CC=clang-18 CXX=clang++-18 \
+      CC=clang-${CLANG_VERSION} CXX=clang++-${CLANG_VERSION} \
       CPYTHON_VERSIONS="3.14.4t+tsan" bash ./install_cpython.sh && \
       /opt/python/cp314-cp314t+tsan/bin/pip install -r /tmp/requirements-ci.txt; \
     fi
