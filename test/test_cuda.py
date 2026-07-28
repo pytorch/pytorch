@@ -2884,6 +2884,145 @@ torch.cuda.synchronize()
         finally:
             torch.autograd.graph.set_override_stale_capture_stream(False)
 
+    class _NoWgrad(torch.autograd.Function):
+        """Uses the weight in forward but returns an undefined grad for it
+        (delayed-wgrad pattern: the real wgrad is computed out of band)."""
+
+        @staticmethod
+        def forward(ctx, x, w):
+            ctx.save_for_backward(w)
+            return x @ w.t()
+
+        @staticmethod
+        def backward(ctx, gy):
+            (w,) = ctx.saved_tensors
+            return gy @ w, None
+
+    def _warmup_no_wgrad(self):
+        """Warmup on the default stream so the weight's AccumulateGrad caches
+        a stale (default) stream, then return (x, w, keepalive).
+
+        AccumulateGrad nodes are cached weakly: `keepalive` retains the warmup
+        graph so the stale node survives until capture (as DDP/FSDP do by
+        stashing grad accumulators)."""
+        w = torch.nn.Parameter(torch.randn(16, 16, device="cuda"))
+        x = torch.randn(4, 16, device="cuda")
+        for _ in range(3):
+            y = self._NoWgrad.apply(x, w)
+            y.sum().backward(retain_graph=True)
+        torch.cuda.synchronize()
+        return x, w, y
+
+    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_undefined_grad_stale_leaf_error(self):
+        """A leaf whose incoming grads are all undefined short-circuits out
+        of the input buffer before stream reconciliation, so the override
+        cannot fix its stale stream; the end-of-backward leaf sync must raise
+        a clear error instead of invalidating the capture."""
+        x, w, keepalive = self._warmup_no_wgrad()
+
+        s = torch.cuda.Stream()
+        with torch.cuda.stream(s):
+            g = torch.cuda.CUDAGraph()
+            g.capture_begin(capture_error_mode="relaxed")
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError, "across the capture boundary"
+                ):
+                    self._NoWgrad.apply(x, w).sum().backward()
+            finally:
+                g.capture_end()
+        torch.cuda.synchronize()
+
+    @skipIfRocm(msg="hipBLASLt lazy handle initialization fails during graph capture")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_undefined_grad_stale_leaf_override(self):
+        """With the override enabled, the meaningless sync with the stale
+        undefined-grad leaf is skipped and capture + replay succeed."""
+        x, w, keepalive = self._warmup_no_wgrad()
+
+        torch.autograd.graph.set_override_stale_capture_stream(True)
+        try:
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                g = torch.cuda.CUDAGraph()
+                g.capture_begin()
+                self._NoWgrad.apply(x, w).sum().backward()
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertIsNone(w.grad)
+        finally:
+            torch.autograd.graph.set_override_stale_capture_stream(False)
+
+    class _CpuComputeCudaWeight(torch.autograd.Function):
+        """CPU compute that references a CUDA weight: its AccumulateGrad is
+        created where apply() runs, and the weight's grad is undefined."""
+
+        @staticmethod
+        def forward(ctx, x_cpu, w_cuda):
+            return x_cpu * 2
+
+        @staticmethod
+        def backward(ctx, g):
+            return g * 2, None
+
+    def _capture_reverse_leaf(self):
+        """Build the reverse crossing: the weight's AccumulateGrad is created
+        inside the capture (its metadata stream is the capturing stream), and
+        backward() runs with the non-capturing default stream current. The
+        CPU root and CPU intermediate nodes produce no other stream syncs, so
+        the end-of-backward leaf sync is the only capture crossing."""
+        w = torch.nn.Parameter(torch.randn(8, device="cuda"))
+        x = torch.randn(8)  # CPU
+
+        s = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(s):
+            g.capture_begin(capture_error_mode="relaxed")
+            torch.ones(4, device="cuda").mul_(2)  # non-empty capture
+            loss = self._CpuComputeCudaWeight.apply(x, w).sum()
+        return g, s, loss
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_capturing_leaf_noncapturing_caller_error(self):
+        """Reverse direction of the leaf-sync guard: leaf stream capturing,
+        caller stream not."""
+        g, s, loss = self._capture_reverse_leaf()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "across the capture boundary"):
+                loss.backward()
+        finally:
+            with torch.cuda.stream(s):
+                g.capture_end()
+        torch.cuda.synchronize()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_capturing_leaf_noncapturing_caller_override(self):
+        """Reverse direction with the override: the sync is skipped and the
+        capture completes and replays."""
+        torch.autograd.graph.set_override_stale_capture_stream(True)
+        try:
+            g, s, loss = self._capture_reverse_leaf()
+            loss.backward()
+            with torch.cuda.stream(s):
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
+            g.replay()
+            torch.cuda.synchronize()
+        finally:
+            torch.autograd.graph.set_override_stale_capture_stream(False)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )

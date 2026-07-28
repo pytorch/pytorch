@@ -220,10 +220,9 @@ class CuptiMonitorObserver:
                 nodes = torch_cuda_graph.get_graph_data()["nodes"]
             except (RuntimeError, AttributeError, KeyError):
                 return
-            tid_by_index = [n["tools_id"] for n in nodes]
             deps.update(
                 {
-                    n["tools_id"]: [tid_by_index[i] for i in n["dependencies"]]
+                    n["tools_id"]: [nodes[i]["tools_id"] for i in n["dependencies"]]
                     for n in nodes
                     if n["dependencies"]
                 }
