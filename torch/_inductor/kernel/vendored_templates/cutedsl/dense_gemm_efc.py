@@ -1,5 +1,6 @@
 # Copyright (c) 2025 - 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
+# ruff: noqa: S101
 
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -41,7 +42,7 @@ from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.operators.providers.cutedsl.evt.common_efc import log
 
 from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
-from torch._vendor.quack.reduction_utils import (
+from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
 )
