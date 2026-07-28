@@ -3018,6 +3018,21 @@ torch.cuda.synchronize()
         g.set_offset(off + 4)
         self.assertEqual(torch.rand(1000, device="cuda", generator=g), b)
 
+    def test_philox_state_advances_default_generator(self):
+        # Reserving through the default generator advances the global state
+        # that generator-less ops consume, by exactly the reserved amount.
+        g = torch.cuda.default_generators[0]
+        g.manual_seed(0)
+        ref = torch.rand(1000, device="cuda")
+        g.manual_seed(0)
+        _, off_t, _ = g.philox_state(4)
+        self.assertEqual(off_t.item(), 0)
+        shifted = torch.rand(1000, device="cuda")
+        self.assertNotEqual(shifted, ref)
+        g.manual_seed(0)
+        g.set_offset(4)
+        self.assertEqual(torch.rand(1000, device="cuda"), shifted, atol=0, rtol=0)
+
     def test_philox_state_errors(self):
         cpu_gen = torch.Generator()
         with self.assertRaisesRegex(NotImplementedError, "philox_state"):
