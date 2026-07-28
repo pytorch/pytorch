@@ -580,7 +580,12 @@ def rebuild_storage_xpu(
         cls, cache_key
     )
     if storage is not None:
-        cls._release_ipc_counter_xpu(ref_counter_handle, ref_counter_offset)
+        if ref_counter_handle is not None:
+            cls._release_ipc_counter_xpu(ref_counter_handle, ref_counter_offset)
+        return storage
+    if handle is None or size_bytes == 0:
+        storage = cls(0, device=torch.device("xpu", device))
+        shared_cache[cache_key] = StorageWeakRef(storage)
         return storage
     storage = cls._new_shared_xpu(
         device,
@@ -595,8 +600,10 @@ def rebuild_storage_xpu(
     return storage
 
 
-def rebuild_storage_empty(cls):
-    return cls()
+def rebuild_storage_empty(cls, device=None):
+    if device is None:
+        return cls()
+    return cls(0, device=device)
 
 
 def rebuild_typed_storage(storage, dtype):
@@ -629,6 +636,8 @@ def reduce_storage(storage):
             "Cannot pickle meta storage; try pickling a meta tensor instead"
         )
     elif storage.device.type == "xpu":
+        if storage.size() == 0:
+            return (rebuild_storage_empty, (type(storage), storage.device))
         (
             device,
             handle,
