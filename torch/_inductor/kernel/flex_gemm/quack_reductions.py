@@ -30,16 +30,21 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     tensorssa_reduction,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
-    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known_equal,
 )
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import (
+    guard_int,
+    has_guarding_hint,
+    optimization_hint,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -48,90 +53,109 @@ def normalize_shape(shape: Any) -> Any:
 
 
 @dataclasses.dataclass(frozen=True)
-class GroupedTensorSSALayout:
-    """Describe a grouped M/N TensorSSA view inside the generated epilogue.
+class FlexGemmStructuralInt:
+    """Hold a backed structural hint until its accepted match installs a guard.
 
-    Attributes:
-        axis: GEMM output dimension being grouped: 0 for M, 1 for N.
-        group_size: Number of contiguous output elements reduced as one group.
+    Unbacked values have no stable specialization contract and are rejected by
+    ``from_value`` rather than guessed during analysis or code generation.
     """
 
-    axis: int
-    group_size: int
+    value: int
+    symbolic: torch.SymInt | None = None
 
-    @property
-    def reduce_dims(self) -> tuple[int, ...]:
-        return (-1, 2) if self.axis == 1 else (-2, 1)
+    @classmethod
+    def from_value(cls, value: Any) -> "FlexGemmStructuralInt | None":
+        """Return a guard-free structural hint, or None for unsupported values."""
+        if isinstance(value, torch.fx.Node):
+            value = value.meta.get("val")
+        if isinstance(value, torch.SymInt):
+            if not has_guarding_hint(value):
+                return None
+            return cls(optimization_hint(value), value)
+        return cls(value) if isinstance(value, int) else None
 
-    def matches_reduction_dim(self, dim: Any) -> bool:
-        """Return whether an FX reduction selects this layout's grouped dimension."""
-        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
-        return len(dims) == 1 and dims[0] in self.reduce_dims
+    def guard(self) -> None:
+        """Install the specialization guard after the semantic match is accepted."""
+        if self.symbolic is not None and guard_int(self.symbolic) != self.value:
+            raise AssertionError("FlexGEMM structural hint changed before commit")
 
-    def fragment_group_size_expr(self, source: Any) -> str:
-        """Return the local group size available in this epilogue fragment."""
-        return (
-            f"cutlass.const_expr(min({self.group_size}, "
-            f"cute.size({source}.shape, mode=[0])))"
-        )
 
-    def fragment_repeat_expr(self, source: Any) -> str:
-        """Return the repeat count needed to cover the current epilogue fragment."""
-        return (
-            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
-            f"// min({self.group_size}, cute.size({source}.shape, mode=[0])))"
-        )
+@dataclasses.dataclass(frozen=True)
+class FlexGemmGroupedLayoutMatch:
+    """Pair a grouped TensorSSA geometry with its deferred shape guards."""
 
-    def tensorssa_shape(self, source: Any) -> str:
-        fragment_group_size = self.fragment_group_size_expr(source)
-        repeats = self.fragment_repeat_expr(source)
-        if self.axis == 1:
-            return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
-        return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
+    layout: FlexGemmLocalReduceGeometry
+    structural_values: tuple[FlexGemmStructuralInt, ...] = ()
 
-    def keepdim_shape(self, source: Any) -> str:
-        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
 
-    @property
-    def needs_physical_combine(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.axis, self.group_size)
+def _is_inferred_reshape_dim(value: Any) -> bool:
+    """Return whether a reshape dimension is the literal inferred-size marker."""
+    return isinstance(value, int) and value == -1
 
-    @property
-    def reduction_profile(self) -> str:
-        if self.axis == 1:
-            return "((None, 1, None), 1, 1)"
-        return "((1, None, None), 1, 1)"
+
+def _grouped_reshape_group_hint(
+    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
+) -> tuple[tuple[Any, ...], FlexGemmStructuralInt | None]:
+    """Resolve a backed group hint without guarding a rejected reshape."""
+    if len(shape) != 3:
+        return shape, None
+    for group_index, kept_index in ((-1, 0), (-2, -1)):
+        if not _kept_dim_matches_source(shape[kept_index], source_shape[kept_index]):
+            continue
+        structural = FlexGemmStructuralInt.from_value(shape[group_index])
+        if structural is not None and structural.symbolic is not None:
+            result = list(shape)
+            result[group_index] = structural.value
+            return tuple(result), structural
+    return shape, None
 
 
 def _syntactic_grouped_tensor_layout(
     shape: tuple[Any, ...],
-) -> GroupedTensorSSALayout | None:
+) -> FlexGemmLocalReduceGeometry | None:
     """Match grouped-reshape syntax before validating source geometry."""
     if len(shape) not in (3, 4):
         return None
-    if isinstance(shape[-1], int) and shape[-1] > 0 and shape[-2] == -1:
-        return GroupedTensorSSALayout(axis=1, group_size=shape[-1])
-    if shape[-3] == -1 and isinstance(shape[-2], int) and shape[-2] > 0:
-        return GroupedTensorSSALayout(axis=0, group_size=shape[-2])
+    if (
+        isinstance(shape[-1], int)
+        and shape[-1] > 0
+        and _is_inferred_reshape_dim(shape[-2])
+    ):
+        return FlexGemmLocalReduceGeometry(group=shape[-1], axis=1)
+    if (
+        _is_inferred_reshape_dim(shape[-3])
+        and isinstance(shape[-2], int)
+        and shape[-2] > 0
+    ):
+        return FlexGemmLocalReduceGeometry(group=shape[-2], axis=0)
     return None
 
 
 def _group_count_matches_selected_dim(
-    group_count: Any, selected_size: Any, group: int
+    group_count: Any,
+    selected_size: Any,
+    group: int,
+    kept_size: Any,
 ) -> bool:
-    match group_count:
-        case -1:
-            return True
-        case _:
-            return statically_known_equal(
-                group_count * group, selected_size
-            ) or statically_known_equal(group_count, selected_size // group)
+    """Match a group count, allowing -1 to infer the selected source dimension."""
+    if _is_inferred_reshape_dim(group_count):
+        return True
+    return statically_known_equal(group_count * group, selected_size) or (
+        not _is_inferred_reshape_dim(kept_size)
+        and statically_known_equal(group_count, selected_size // group)
+    )
+
+
+def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
+    return _is_inferred_reshape_dim(kept_size) or statically_known_equal(
+        kept_size, source_size
+    )
 
 
 def _grouped_layout_matches_source_shape(
     shape: tuple[Any, ...],
     source_shape: tuple[Any, ...],
-    layout: GroupedTensorSSALayout,
+    layout: FlexGemmLocalReduceGeometry,
 ) -> bool:
     """Require a 2-D GEMM output reshape to split exactly M or N."""
     if len(shape) != 3:
@@ -139,22 +163,22 @@ def _grouped_layout_matches_source_shape(
 
     m, n = source_shape
     match layout.axis, shape:
-        case 1, (kept_m, group_count, group) if group == layout.group_size:
-            return statically_known_equal(
+        case 1, (kept_m, group_count, group) if group == layout.group:
+            return _kept_dim_matches_source(
                 kept_m, m
-            ) and _group_count_matches_selected_dim(group_count, n, group)
-        case 0, (group_count, group, kept_n) if group == layout.group_size:
-            return statically_known_equal(
+            ) and _group_count_matches_selected_dim(group_count, n, group, kept_m)
+        case 0, (group_count, group, kept_n) if group == layout.group:
+            return _kept_dim_matches_source(
                 kept_n, n
-            ) and _group_count_matches_selected_dim(group_count, m, group)
+            ) and _group_count_matches_selected_dim(group_count, m, group, kept_n)
         case _:
             return False
 
 
-def grouped_tensor_layout(
+def grouped_tensor_layout_match(
     shape: Any, source_shape: Any | None = None
-) -> GroupedTensorSSALayout | None:
-    """Recognize exact grouped M/N reshapes for the local-reduction contract."""
+) -> FlexGemmGroupedLayoutMatch | None:
+    """Recognize grouped M/N geometry without guarding backed dimensions."""
     shape = normalize_shape(shape)
     if not isinstance(shape, tuple):
         return None
@@ -163,20 +187,37 @@ def grouped_tensor_layout(
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:
+            shape, structural_group = _grouped_reshape_group_hint(shape, source_shape)
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=1, group_size=group))
+                    candidates.append(FlexGemmLocalReduceGeometry(group=group, axis=1))
             match shape:
                 case (*_, int(group), _) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=0, group_size=group))
+                    candidates.append(FlexGemmLocalReduceGeometry(group=group, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
-                    return layout
+                    structural_values = (
+                        () if structural_group is None else (structural_group,)
+                    )
+                    return FlexGemmGroupedLayoutMatch(layout, structural_values)
             if _syntactic_grouped_tensor_layout(shape) is not None:
                 raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
             return None
-    return _syntactic_grouped_tensor_layout(shape)
+    layout = _syntactic_grouped_tensor_layout(shape)
+    return None if layout is None else FlexGemmGroupedLayoutMatch(layout)
+
+
+def grouped_tensor_layout(
+    shape: Any, source_shape: Any | None = None
+) -> FlexGemmLocalReduceGeometry | None:
+    """Recognize grouped M/N geometry and guard accepted backed dimensions."""
+    match = grouped_tensor_layout_match(shape, source_shape)
+    if match is None:
+        return None
+    for structural in match.structural_values:
+        structural.guard()
+    return match.layout
 
 
 def _cute_op_name(target: Any) -> str | None:
@@ -204,8 +245,70 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
         "clamp_max",
         "clamp_min",
         "convert_element_type",
+        "mx_e8m0_scale",
+        "nvfp4_e4m3_scale",
     )
 )
+
+
+def _cute_scale_expr(
+    op_name: str,
+    source: Any,
+    max_value: float,
+    rounding: str,
+    *,
+    tensorssa: bool = False,
+) -> str:
+    """Render MX with its exact packed conversion and NVFP4 with native clamp ops."""
+    match op_name:
+        case "mx_e8m0_scale":
+            return f"mx_e8m0_scale_intrinsic({source}, {max_value!r}, {rounding!r})"
+        case "nvfp4_e4m3_scale":
+            scale = f"({source} / {max_value!r})"
+            clamped = (
+                f"cute.where({scale} < 0.015625, 0.015625, "
+                f"cute.where({scale} > 448.0, 448.0, {scale}))"
+                if tensorssa
+                else f"cutlass.Float32(cutlass.max(cutlass.min({scale}, 448.0), 0.015625))"
+            )
+            return f"({clamped}).to(cutlass.Float8E4M3FN).to(cutlass.Float32)"
+        case _:
+            raise AssertionError(f"unexpected scale op: {op_name}")
+
+
+def _cute_scale_call(
+    op_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
+    """Lower validated scale ops for TensorSSA values and scalar finalizers."""
+    match op_name:
+        case "mx_e8m0_scale":
+            max_value = args[1] if len(args) >= 2 else kwargs.get("max_value", 448.0)
+            rounding = args[2] if len(args) >= 3 else kwargs.get("rounding")
+            rounding = "rceil" if rounding is None else rounding
+        case "nvfp4_e4m3_scale":
+            max_value = args[1] if len(args) >= 2 else kwargs.get("max_value", 6.0)
+            rounding = args[2] if len(args) >= 3 else kwargs.get("rounding")
+            rounding = "nearest" if rounding is None else rounding
+        case _:
+            raise AssertionError(f"unexpected scale op: {op_name}")
+    source = args[0]
+    cse_var = CuteDSLOpOverrides._get_cse_var(source)
+    expr = _cute_scale_expr(
+        op_name,
+        source,
+        max_value,
+        rounding,
+        tensorssa=cse_var is not None,
+    )
+    if cse_var is None:
+        return expr
+    return V.kernel.cse.generate(
+        V.kernel.body,
+        expr,
+        bounds=cse_var.bounds,
+        dtype=cse_var.dtype,
+        shape=cse_var.shape,
+    )
 
 
 def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
@@ -226,6 +329,8 @@ def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
             int,
             float,
             bool,
+            str,
+            type(None),
             torch.dtype,
             torch.device,
             torch.layout,
@@ -253,7 +358,7 @@ def _generate_like(
 
 
 def _keepdim_and_broadcast(
-    kernel: Any, reduced: Any, layout: GroupedTensorSSALayout, source: Any
+    kernel: Any, reduced: Any, layout: FlexGemmLocalReduceGeometry, source: Any
 ) -> tuple[Any, Any]:
     """Materialize keepdim and store-shaped forms of a grouped reduction."""
     keepdim_source = _generate_like(
@@ -268,6 +373,14 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
     op_name = _cute_op_name(target)
     if op_name is None:
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
+    if op_name in ("mx_e8m0_scale", "nvfp4_e4m3_scale"):
+        return _cute_scale_call(op_name, args, kwargs)
+    if op_name == "nvfp4_pack":
+        return V.kernel.cse.generate(
+            V.kernel.body,
+            f"nvfp4_pack_intrinsic({args[0]})",
+            dtype=torch.uint8,
+        )
     try:
         op = getattr(V.get_ops_handler(), op_name)
     except AttributeError:
@@ -341,47 +454,114 @@ def iter_fx_node_inputs(value: Any):
     yield from result
 
 
-def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | None:
-    if node.op == "call_function" and node.target in (
-        torch.ops.aten.view.default,
-        torch.ops.aten.reshape.default,
-    ):
-        shape = node.args[1]
-        if isinstance(shape, (tuple, list, torch.Size)):
-            return node.args[0], tuple(
-                arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
-                for arg in shape
-            )
-    return None
+@dataclasses.dataclass(frozen=True)
+class FlexGemmViewForm:
+    """Canonical source, shape, and optional grouped-layout interpretation."""
+
+    source: torch.fx.Node
+    shape: tuple[Any, ...]
+    grouped_layout: FlexGemmGroupedLayoutMatch | None
 
 
-def squeeze_source_node(node: torch.fx.Node) -> torch.fx.Node | None:
-    if node.op != "call_function" or node.target not in (
-        torch.ops.aten.squeeze.dim,
-        torch.ops.aten.squeeze.dims,
-        torch.ops.aten.squeeze.default,
-    ):
-        return None
-    source_node = node.args[0]
-    return source_node if isinstance(source_node, torch.fx.Node) else None
+@dataclasses.dataclass(frozen=True)
+class FlexGemmReductionForm:
+    """Canonical arguments for one supported reduction node."""
+
+    source: torch.fx.Node
+    dim: Any
+    keepdim: Any
+    dtype: Any
+    reduction_type: str
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmPrepareSoftmaxForm:
+    """Canonical source and dimension for online softmax preparation."""
+
+    source: torch.fx.Node
+    dim: Any
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmSqueezeForm:
+    """Canonical source for one squeeze alias."""
+
+    source: torch.fx.Node
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmGetItemForm:
+    """Canonical aggregate source and literal index for one getitem node."""
+
+    source: torch.fx.Node
+    index: int
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmSplitForm:
+    """Canonical source, width, and dimension for one tensor split."""
+
+    source: torch.fx.Node
+    split_size: Any
+    dim: int
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmSelectForm:
+    """Canonical source, dimension, and index for one tensor select."""
+
+    source: torch.fx.Node
+    dim: int
+    index: Any
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmNVFP4PackForm:
+    """Canonical grouped source for one terminal NVFP4 pack."""
+
+    source: torch.fx.Node
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmToBlockedForm:
+    """Canonical logical source for one blocked-output transform."""
+
+    source: torch.fx.Node
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmUnsupportedReductionForm:
+    """Record an unsupported reduction source for shared error handling."""
+
+    source: torch.fx.Node
+
+
+FlexGemmStructuralForm = (
+    FlexGemmViewForm
+    | FlexGemmReductionForm
+    | FlexGemmPrepareSoftmaxForm
+    | FlexGemmSqueezeForm
+    | FlexGemmGetItemForm
+    | FlexGemmSplitForm
+    | FlexGemmSelectForm
+    | FlexGemmNVFP4PackForm
+    | FlexGemmToBlockedForm
+    | FlexGemmUnsupportedReductionForm
+)
 
 
 def lower_view_or_reshape(
     node: torch.fx.Node,
+    form: FlexGemmViewForm,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
-    active_grouped_layouts: OrderedSet[GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
+    active_grouped_layouts: OrderedSet[FlexGemmLocalReduceGeometry],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
 ) -> Any | None:
-    """Emit a view using grouped provenance from the shared FX analysis."""
-    view_args = view_or_reshape_args(node)
-    if view_args is None:
-        return None
-    source_node, _ = view_args
-    if not isinstance(source_node, torch.fx.Node):
-        return None
+    """Emit an analyzed view using grouped provenance."""
+    source_node = form.source
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
         return _cute_arg(source_node, env)
@@ -398,6 +578,46 @@ def lower_view_or_reshape(
     if source_node in grouped_tensors:
         return source
     return None
+
+
+def lower_grouped_n_split(
+    node: torch.fx.Node,
+    form: FlexGemmSplitForm,
+    env: dict[torch.fx.Node, Any],
+    kernel: Any,
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
+) -> tuple[Any, ...] | None:
+    """Split an analyzed grouped-main value into per-lane TensorSSA values."""
+    layout = grouped_tensors.get(node)
+    if layout is None or layout.axis != 1:
+        return None
+    source = _cute_arg(form.source, env)
+    grouped = _generate_like(
+        kernel, f"{source}.reshape({layout.tensorssa_shape(source)})", source
+    )
+    return tuple(
+        _generate_like(
+            kernel,
+            f"{grouped}[((0, {index}, None), None, None)]",
+            grouped,
+        )
+        for index in range(layout.group)
+    )
+
+
+def lower_grouped_n_select(
+    form: FlexGemmSelectForm,
+    index: int,
+    env: dict[torch.fx.Node, Any],
+    kernel: Any,
+) -> Any:
+    """Select one analysis-validated grouped-N TensorSSA lane."""
+    source = _cute_arg(form.source, env)
+    return _generate_like(
+        kernel,
+        f"{source}[((0, {index}, None), None, None)]",
+        source,
+    )
 
 
 FUNCTION_REDUCTION_TYPES = {
@@ -426,21 +646,110 @@ FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
 )
 
 
-def reduction_from_node(node: torch.fx.Node) -> tuple[Any, Any, Any, Any, str] | None:
-    if node.op != "call_function" or node.target not in FUNCTION_REDUCTION_TYPES:
+def flex_gemm_structural_form(
+    node: torch.fx.Node,
+) -> FlexGemmStructuralForm | None:
+    """Parse one structural FX node into the shared analysis/emission form."""
+    if node.op != "call_function":
         return None
-    reduction_type, has_dtype = FUNCTION_REDUCTION_TYPES[node.target]
-    input_node = node.args[0]
-    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-    keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-    dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-    return input_node, dim, keepdim, dtype if has_dtype else None, reduction_type
-
-
-def unsupported_reduction_from_node(node: torch.fx.Node) -> str | None:
-    if node.op != "call_function" or node.target not in FUNCTION_UNSUPPORTED_REDUCTIONS:
+    if node.target in (
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+    ):
+        source = node.args[0]
+        shape = node.args[1]
+        if not isinstance(source, torch.fx.Node) or not isinstance(
+            shape, (tuple, list, torch.Size)
+        ):
+            raise AssertionError(f"malformed FlexGEMM view node: {node.format_node()}")
+        canonical_shape = tuple(
+            arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
+            for arg in shape
+        )
+        return FlexGemmViewForm(
+            source,
+            canonical_shape,
+            grouped_tensor_layout_match(canonical_shape, tensor_meta_shape(source)),
+        )
+    if node.target in (
+        torch.ops.flex_gemm.nvfp4_pack.default,
+        torch.ops.flex_gemm.to_blocked.default,
+    ):
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM output transform: {node.format_node()}"
+            )
+        return (
+            FlexGemmNVFP4PackForm(source)
+            if node.target is torch.ops.flex_gemm.nvfp4_pack.default
+            else FlexGemmToBlockedForm(source)
+        )
+    if node.target in FUNCTION_REDUCTION_TYPES:
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM reduction node: {node.format_node()}"
+            )
+        reduction_type, has_dtype = FUNCTION_REDUCTION_TYPES[node.target]
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        keepdim = (
+            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+        )
+        dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
+        return FlexGemmReductionForm(
+            source,
+            dim,
+            keepdim,
+            dtype if has_dtype else None,
+            reduction_type,
+        )
+    if node.target is inductor_prims.prepare_softmax_online:
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM softmax node: {node.format_node()}"
+            )
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        return FlexGemmPrepareSoftmaxForm(source, dim)
+    if node.target is torch.ops.aten.split.Tensor:
+        source = node.args[0]
+        dim = node.args[2] if len(node.args) > 2 else node.kwargs.get("dim", 0)
+        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
+            raise AssertionError(f"malformed FlexGEMM split node: {node.format_node()}")
+        return FlexGemmSplitForm(source, node.args[1], dim)
+    if node.target is torch.ops.aten.select.int:
+        source = node.args[0]
+        dim = node.args[1]
+        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
+            raise AssertionError(
+                f"malformed FlexGEMM select node: {node.format_node()}"
+            )
+        return FlexGemmSelectForm(source, dim, node.args[2])
+    if node.target in (
+        torch.ops.aten.squeeze.dim,
+        torch.ops.aten.squeeze.dims,
+        torch.ops.aten.squeeze.default,
+    ):
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM squeeze node: {node.format_node()}"
+            )
+        return FlexGemmSqueezeForm(source)
+    if node.target is operator.getitem:
+        source, index = node.args
+        if isinstance(source, torch.fx.Node) and isinstance(index, int):
+            return FlexGemmGetItemForm(source, index)
         return None
-    return str(node.target)
+    if node.target in FUNCTION_UNSUPPORTED_REDUCTIONS:
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM reduction node: {node.format_node()}"
+            )
+        return FlexGemmUnsupportedReductionForm(source)
+    return None
 
 
 def lower_full_scalar(node: torch.fx.Node) -> Any | None:
@@ -455,11 +764,13 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
 
 def lower_squeeze(
     node: torch.fx.Node,
+    form: FlexGemmSqueezeForm,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
-    source_node = squeeze_source_node(node)
-    if source_node is None or source_node not in env:
+    """Forward an analyzed squeeze alias."""
+    source_node = form.source
+    if source_node not in env:
         return None
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
@@ -468,14 +779,12 @@ def lower_squeeze(
 
 def lower_getitem(
     node: torch.fx.Node,
+    form: FlexGemmGetItemForm,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
-    if node.op != "call_function" or node.target is not operator.getitem:
-        return None
-    source_node, index = node.args
-    if not isinstance(source_node, torch.fx.Node) or not isinstance(index, int):
-        return None
+    """Index an analyzed aggregate value."""
+    source_node, index = form.source, form.index
     source = _cute_arg(source_node, env)
     if not isinstance(source, (tuple, list)) or not -len(source) <= index < len(source):
         return None
@@ -488,24 +797,18 @@ def lower_getitem(
 
 def lower_prepare_softmax_online(
     node: torch.fx.Node,
+    form: FlexGemmPrepareSoftmaxForm,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
-) -> Any | None:
-    if (
-        node.op != "call_function"
-        or node.target is not inductor_prims.prepare_softmax_online
-    ):
-        return None
-    input_node = node.args[0]
-    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-    if not isinstance(input_node, torch.fx.Node):
-        return None
+) -> Any:
+    """Lower analyzed online-softmax preparation."""
+    input_node, dim = form.source, form.dim
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]
-    if layout.needs_physical_combine:
+    if layout.needs_physical_callbacks:
         raise NotImplementedError(
             "unsupported FlexGEMM physical local reduction: prepare_softmax_online "
             "needs a multi-value generated physical reducer"
@@ -536,21 +839,21 @@ def lower_prepare_softmax_online(
 
 def lower_tensorssa_reduce(
     node: torch.fx.Node,
+    form: FlexGemmReductionForm,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction],
-) -> Any | None:
-    """Lower value reductions while deferring cross-fragment finalization to QuACK."""
-    reduction = reduction_from_node(node)
-    if reduction is None:
-        return None
-    input_node, dim, keepdim, dtype, reduction_type = reduction
+) -> Any:
+    """Lower an analyzed reduction while deferring physical finalization."""
+    input_node = form.source
+    dim = form.dim
+    keepdim = form.keepdim
+    dtype = form.dtype
+    reduction_type = form.reduction_type
     if dtype is not None:
         raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-    if not isinstance(input_node, torch.fx.Node):
-        return None
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]
@@ -560,16 +863,14 @@ def lower_tensorssa_reduce(
         ReductionType, "sum" if reduction_type == "mean" else reduction_type
     )
     desc = tensorssa_reduction(reduction_name)
-    finalize_expr = (
-        f"value / {layout.group_size}.0" if reduction_type == "mean" else "value"
-    )
+    finalize_expr = f"value / {layout.group}.0" if reduction_type == "mean" else "value"
     source = _cute_arg(input_node, env)
-    needs_physical_combine = layout.needs_physical_combine
-    if needs_physical_combine:
+    needs_physical_callbacks = layout.needs_physical_callbacks
+    if needs_physical_callbacks:
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
-        if layout.axis == 0:
+        if layout.tensorssa_axis == 0:
             local_reduce_store_sources[node] = source
             return source
     reduced = _generate_like(
@@ -577,9 +878,9 @@ def lower_tensorssa_reduce(
         f"{source}.reduce({desc.cute_op}, init_val={desc.init_val}, reduction_profile={layout.reduction_profile})",
         source,
     )
-    if reduction_type == "mean" and not needs_physical_combine:
+    if reduction_type == "mean" and not needs_physical_callbacks:
         reduced = _generate_like(
-            kernel, f"{reduced} / {float(layout.group_size)!r}", reduced
+            kernel, f"{reduced} / {float(layout.group)!r}", reduced
         )
     keepdim_source, local_reduce_store_sources[node] = _keepdim_and_broadcast(
         kernel, reduced, layout, source
