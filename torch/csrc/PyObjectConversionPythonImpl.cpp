@@ -5,7 +5,6 @@
 
 #include <torch/csrc/PyObjectConversion.h>
 
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 
@@ -43,10 +42,12 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     PyObject* py = (py_type != nullptr)
         ? THPVariable_Wrap(t, reinterpret_cast<PyTypeObject*>(py_type))
         : THPVariable_Wrap(t);
-    if (py == nullptr) {
-      // Forward the Python error left set by THPVariable_Wrap.
-      throw python_error();
-    }
+    // THPVariable_Wrap throws (a c10::Error, surfaced by the shim's error-code
+    // macro) on failure rather than returning null; guard defensively so we
+    // never hand back a null PyObject.
+    TORCH_CHECK(
+        py != nullptr,
+        "torch_tensor_to_pyobject: THPVariable_Wrap returned null");
     return py;
   }
 };
