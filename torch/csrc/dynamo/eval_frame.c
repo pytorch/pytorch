@@ -963,7 +963,20 @@ static PyObject* THPDisableWrapper_descr_get(
 // repr()/str() of a disabled callable) name the user's function rather than the
 // opaque wrapper -- matches the old functools.wraps'd Python closure.
 static PyObject* THPDisableWrapper_repr(THPDisableWrapper* self) {
-  return PyObject_Repr(self->fn);
+  // Mimic the functools.wraps closure this replaced: a function-style repr with
+  // this wrapper's own address, so tools that display raw values (e.g. the
+  // bytecode debugger) still show an address while graph-break messages keep a
+  // readable name. Fall back to the wrapped callable's repr if __qualname__ is
+  // unavailable (e.g. wrapping=False).
+  PyObject* qualname = PyObject_GetAttrString((PyObject*)self, "__qualname__");
+  if (qualname == NULL) {
+    PyErr_Clear();
+    return PyObject_Repr(self->fn);
+  }
+  PyObject* result =
+      PyUnicode_FromFormat("<function %U at %p>", qualname, (void*)self);
+  Py_DECREF(qualname);
+  return result;
 }
 
 // Delegate function-introspection attributes to the wrapped fn. The old disable
