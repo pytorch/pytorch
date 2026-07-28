@@ -115,6 +115,8 @@ runner_mapping:
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
   linux.rocm.gpu.gfx1100: linux.rocm.gpu.gfx1100
+  # AMD-dedicated MI355 (gfx950) k8s runner; not OSDC-managed, so passthrough.
+  linux-mi355-1gpu-pytorch: linux-mi355-1gpu-pytorch
   # amd-do experiment routes mi350 tests to AMD's dedicated runners via this
   # prefix; kept as passthrough so the OSDC build's runner mapping preserves it.
   amd-do-linux.rocm.gpu.gfx950.1: amd-do-linux.rocm.gpu.gfx950.1
