@@ -6582,6 +6582,7 @@ with torch.cuda.graph(g):
             )
             self.assertEqual(rc, "3")
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Failed onr ROCm due to rocprofiler-sdk issue AIPROFSDK-840")
     @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
     @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
     def test_hip_device_count(self):
