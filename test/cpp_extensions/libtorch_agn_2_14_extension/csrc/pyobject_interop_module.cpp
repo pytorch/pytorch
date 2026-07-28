@@ -73,7 +73,7 @@ PyMethodDef methods[] = {
 
 PyModuleDef moduledef = {
     PyModuleDef_HEAD_INIT,
-    "_C",
+    "_interop",
     nullptr,
     -1,
     methods,
@@ -84,6 +84,6 @@ PyModuleDef moduledef = {
 
 } // namespace
 
-extern "C" PyObject* PyInit__C() {
+extern "C" PyObject* PyInit__interop() {
   return PyModule_Create(&moduledef);
 }

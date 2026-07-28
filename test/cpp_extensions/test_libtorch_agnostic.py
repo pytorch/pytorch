@@ -270,14 +270,14 @@ class TestLibtorchAgnostic(TestCase):
 
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
-    # extension's importable PyMethodDef module (_C).
+    # extension's importable PyMethodDef module (_interop).
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 14)
     def test_pyobject_roundtrip(self, device):
         import libtorch_agn_2_14 as libtorch_agnostic
 
         x = torch.randn(3, 4, device=device)
-        y = libtorch_agnostic._C.pyobject_roundtrip(x)
+        y = libtorch_agnostic._interop.pyobject_roundtrip(x)
         self.assertIsInstance(y, torch.Tensor)
         self.assertEqual(y, x)
         # from_pyobject / to_pyobject share the underlying TensorImpl.
@@ -291,7 +291,7 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_14 as libtorch_agnostic
 
         x = torch.randn(3, 4, device=device)
-        s = libtorch_agnostic._C.pyobject_sum(x)
+        s = libtorch_agnostic._interop.pyobject_sum(x)
         self.assertEqual(s, x.sum())
 
     @onlyCPU
@@ -300,7 +300,7 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_14 as libtorch_agnostic
 
         x = torch.randn(2, 2, device=device)
-        p = libtorch_agnostic._C.pyobject_to_type(x, torch.nn.Parameter)
+        p = libtorch_agnostic._interop.pyobject_to_type(x, torch.nn.Parameter)
         self.assertIsInstance(p, torch.nn.Parameter)
         self.assertEqual(p.detach(), x)
 
@@ -310,7 +310,7 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_14 as libtorch_agnostic
 
         with self.assertRaises(Exception):
-            libtorch_agnostic._C.pyobject_roundtrip("not a tensor")
+            libtorch_agnostic._interop.pyobject_roundtrip("not a tensor")
 
     # TODO: Debug this:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
