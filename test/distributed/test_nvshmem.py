@@ -34,7 +34,7 @@ def requires_nvshmem():
 
 
 def has_nvls_support():
-    if not symm_mem.is_nvshmem_available():
+    if not torch.cuda.is_available() or not symm_mem.is_nvshmem_available():
         return False
 
     if os.environ.get("NVSHMEM_DISABLE_NVLS", "0") == "1":

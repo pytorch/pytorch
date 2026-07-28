@@ -737,6 +737,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
             "TENSOR_MATCH", fn, AsyncCollectiveTensor(base)
         )
         self._test_check_fn(ref, loaded, {"w": AsyncCollectiveTensor(base)}, True)
+        # The reloaded guard must also match the resolved plain Tensor -- the
+        # ACT->Tensor reuse this relaxation enables, and the case that matters
+        # for precompile under FSDP+TP.
+        self._test_check_fn(ref, loaded, {"w": base}, True)
 
     def test_equals_match(self):
         def fn(x, y):

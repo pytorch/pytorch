@@ -60,6 +60,7 @@ from torch._dynamo.utils import (
     normalize_count_iter,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -1945,6 +1946,7 @@ class VariableBuilder:
                 torch.utils.hooks.BackwardHook,
                 torch.nn.Parameter,
                 torch.nn.Buffer,
+                torch.backends.cuda.SDPAParams,
             ):
                 # TODO(jansel): combine this case with the one above
                 # type: ignore[attr-defined]
@@ -2611,13 +2613,13 @@ class VariableBuilder:
                 ],
             )
 
-        if getattr(value, "_is_fsdp_managed_module", False):
+        if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            if not getattr(value, "_fsdp_use_orig_params", False):
+            if not inspect.getattr_static(value, "_fsdp_use_orig_params", False):
                 unimplemented(
                     gb_type="FSDP with use_orig_params=False",
                     context="",
@@ -3011,6 +3013,24 @@ class VariableBuilder:
             )
 
         if (
+            isinstance(value, torch.Tensor)
+            and torch._C._functorch.peek_interpreter_stack() is None
+        ):
+            try:
+                tangent = torch.autograd.forward_ad.unpack_dual(value).tangent
+            except RuntimeError:
+                tangent = None
+            if tangent is not None:
+                unimplemented(
+                    gb_type="Attempted to wrap a dual tensor input",
+                    context="",
+                    explanation="torch.compile does not support input tensors that "
+                    "carry a forward-mode AD tangent; compiled code would silently "
+                    "drop the tangent.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        if (
             safe_has_grad(value)
             and safe_grad(value) is not None
             # type: ignore[attr-defined]
@@ -3098,13 +3118,9 @@ class VariableBuilder:
         # correct (ACT desugars ops to the inner tensor), but a compiled region
         # can succeed where eager would raise AttributeError on the plain Tensor;
         # that only bites user code already broken in eager on the resolved input.
-        is_polymorphic_act = False
-        if not is_dtensor and is_traceable_wrapper_subclass(value):
-            from torch._functorch._aot_autograd.utils import (
-                is_async_collective_tensor_type,
-            )
-
-            is_polymorphic_act = is_async_collective_tensor_type(type(value))
+        is_polymorphic_act = not is_dtensor and is_async_collective_tensor_type(
+            type(value)
+        )
 
         if not is_dtensor and not is_polymorphic_act:
             # We guard on the _local_tensor and the _spec, and therefore we don't

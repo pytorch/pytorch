@@ -873,7 +873,7 @@ class _CheckpointFrame:
         if not len(self.weak_holders) == self.recomp_counter[gid]:
             # 2. During recompute, fewer tensors were saved
             #
-            # We know that every time we save something do original forward
+            # We know that every time we save something during original forward
             # we append to weak_holder, and every time we save a tensor
             # during recompute we increment recompute_counter.
             raise CheckpointError(
@@ -1701,6 +1701,14 @@ def _checkpoint_without_reentrant_generator(
     if not torch.is_grad_enabled():
         yield
         return
+
+    if (
+        isinstance(forward_context, _CachingTorchDispatchMode)
+        and torch._C._autograd._top_saved_tensors_default_hooks(False) is not None
+    ):
+        torch._C._log_api_usage_once(
+            "torch.utils.checkpoint.sac_with_saved_tensors_hooks"
+        )
 
     new_frame.save_inputs(*args)
 

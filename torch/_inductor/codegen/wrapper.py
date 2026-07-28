@@ -542,16 +542,16 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
-class ConditionalLine(WrapperLine):
+class SwitchLine(WrapperLine):
     wrapper: PythonWrapperCodegen
-    node: ir.Conditional
+    node: ir.Switch
 
     def codegen(self, code: IndentedBuffer) -> None:
         raise NotImplementedError("Only supports FX codegen")
 
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
-        return converter._generate_conditional
+        return converter._generate_switch
 
 
 @dataclasses.dataclass
@@ -1322,10 +1322,11 @@ class AssertSizeStrideLine(WrapperLine):
     size: str
     stride: str
     op_name: str = "input"
+    dtype: torch.dtype | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._codegen_assert_size_stride(
-            code, self.name, self.size, self.stride, self.op_name
+            code, self.name, self.size, self.stride, self.op_name, self.dtype
         )
 
     @staticmethod
@@ -1848,10 +1849,15 @@ class PythonWrapperCodegen(CodeGen):
             self.write_assert_size_stride_grouped(grouped_asserts, "input")
 
     def write_assert_size_stride(
-        self, name: str, size: str, stride: str, op_name: str
+        self,
+        name: str,
+        size: str,
+        stride: str,
+        op_name: str,
+        dtype: torch.dtype | None = None,
     ) -> None:
         """Queue an assert_size_stride for emission during replay."""
-        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name))
+        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name, dtype))
 
     def _codegen_assert_size_stride(
         self,
@@ -1860,13 +1866,22 @@ class PythonWrapperCodegen(CodeGen):
         size: str,
         stride: str,
         op_name: str,
+        dtype: torch.dtype | None = None,
     ) -> None:
         """Emit one assert_size_stride line to `code` (replay-phase target).
 
         Subclasses override to change the emitted form (e.g., C++ assert with
         an AOTI runtime env guard).
         """
-        code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        if dtype is None:
+            code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        else:
+            self.add_import_once(
+                "from torch._inductor.runtime.runtime_utils import assert_tensor_metadata"
+            )
+            code.writeline(
+                f"assert_tensor_metadata({name}, {size}, {stride}, {dtype}, {op_name!r})"
+            )
 
     def write_assert_div_by_zero(self, divisor_str: str, op_name: str) -> None:
         """Queue a div-by-zero AOTI check for emission during replay.
@@ -4548,14 +4563,24 @@ class PythonWrapperCodegen(CodeGen):
 
         try:
             self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-            _codegen_subgraph_prefix()
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
-                )
-            _codegen_subgraph_suffix()
+            # Only ir.Subgraph (invoke_subgraph regions) carries nested config
+            # patches; other subgraph adapters (e.g. the CodegenGraph used for
+            # decompose_k) have none.
+            inductor_config_patches = getattr(subgraph, "inductor_config_patches", None)
+            ctx = (
+                config.patch(inductor_config_patches)
+                if inductor_config_patches
+                else contextlib.nullcontext()
+            )
+            with ctx:
+                self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+                _codegen_subgraph_prefix()
+                parent_graph = V.graph
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.codegen_subgraph(
+                        parent_graph=parent_graph,
+                    )
+                _codegen_subgraph_suffix()
         finally:
             self.pop_codegened_graph()
 
@@ -4647,11 +4672,23 @@ class PythonWrapperCodegen(CodeGen):
         if subgraph.graph.name not in self.already_codegened_subgraphs:
             # If it is already codegened, the parent wrapper already has
             # subgraph fn by name subgraph.graph.name
-            with V.set_graph_handler(subgraph.graph):
-                # do not graph partition for subgraph
-                with config.patch("graph_partition", False):
-                    # Call the codegen of subgraph recursively
-                    subgraph_code, _ = subgraph.graph.codegen()
+            # Only ir.Subgraph (invoke_subgraph regions) carries nested config
+            # patches; other subgraph adapters (e.g. the CodegenGraph used for
+            # decompose_k) have none.
+            inductor_config_patches = getattr(subgraph, "inductor_config_patches", None)
+            ctx = (
+                config.patch(inductor_config_patches)
+                if inductor_config_patches
+                else contextlib.nullcontext()
+            )
+            # do not graph partition inside subgraph bodies
+            with (
+                ctx,
+                config.patch("graph_partition", False),
+                V.set_graph_handler(subgraph.graph),
+            ):
+                # Call the codegen of subgraph recursively
+                subgraph_code, _ = subgraph.graph.codegen()
             subgraph_name = subgraph.graph.name
             self.already_codegened_subgraphs.add(subgraph_name)
             self.define_subgraph_launcher_fn(subgraph_name, subgraph_code)
@@ -4686,38 +4723,44 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
-    def codegen_conditional(self, conditional) -> None:
-        name = conditional.get_name()
+    def codegen_switch(self, node) -> None:
+        name = node.get_name()
 
-        outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
+        outer_inputs = [buf.codegen_reference() for buf in node.operands]
 
-        predicate = conditional.predicate.codegen_reference()
-        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-            # move the Tensor predicate to host
-            predicate = f"{predicate}.item()"
-
-        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-        self.writeline(f"if {predicate}:")
-        self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-        if V.graph.aot_mode:
-            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
-            self.codegen_subgraph_by_inlining(
-                conditional.true_subgraph, outer_inputs, outer_outputs
-            )
+        selector_ref = node.selector.codegen_reference()
+        # Evaluate the selector once into a named local.
+        selector_var = f"{name}_selector"
+        if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
+            # move the Tensor selector to host; always as int so the branch loop
+            # can use uniform index comparisons (cond: True==1, False==0)
+            self.writeline(f"{selector_var} = int({selector_ref}.item())")
         else:
-            self.codegen_subgraph(conditional.true_subgraph, outer_inputs, name)
+            # ShapeAsConstantBuffer yields a Python bool/int expression; wrap in
+            # int() so "== <idx>" comparisons don't form a Python chained comparison.
+            self.writeline(f"{selector_var} = int({selector_ref})")
 
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline("else:")
-        self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
-        if V.graph.aot_mode:
-            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
-            self.codegen_subgraph_by_inlining(
-                conditional.false_subgraph, outer_inputs, outer_outputs
-            )
-        else:
-            self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
-        self.writeline(ExitSubgraphLine(self))
+        self.writeline(f"{name} = [None] * {len(node.outputs)}")
+
+        def _emit_branch(keyword: str, condition: str, branch) -> None:
+            self.writeline(f"{keyword}{condition}:")
+            self.writeline(EnterSubgraphLine(self, branch.graph))
+            if V.graph.aot_mode:
+                outer_outputs = [f"{name}[{i}]" for i in range(len(node.outputs))]
+                self.codegen_subgraph_by_inlining(branch, outer_inputs, outer_outputs)
+            else:
+                self.codegen_subgraph(branch, outer_inputs, name)
+            self.writeline(ExitSubgraphLine(self))
+
+        num_branches = len(node.branches)
+        for b_idx, branch in enumerate(node.branches):
+            if b_idx == 0:
+                keyword, condition = "if", f" {selector_var} == 0"
+            elif b_idx < num_branches - 1:
+                keyword, condition = "elif", f" {selector_var} == {b_idx}"
+            else:
+                keyword, condition = "else", ""
+            _emit_branch(keyword, condition, branch)
 
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""

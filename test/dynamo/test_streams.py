@@ -240,6 +240,16 @@ class <lambda>(torch.nn.Module):
         # Stream should be newly allocated on each call
         self.assertNotEqual(s0, s1)
 
+    def test_event_subclass_python_type(self):
+        class MyEvent(torch.Event):
+            pass
+
+        def fn(e):
+            return torch.ones(2) if type(e) is MyEvent else torch.zeros(2)
+
+        res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent())
+        self.assertEqual(res, torch.ones(2))
+
     @requires_cuda
     def test_get_current_stream_return(self):
         def fn(x, s):

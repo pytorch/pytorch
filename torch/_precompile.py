@@ -81,22 +81,17 @@ it.
 #    layout (.contiguous() to match a contiguous example), or use backend='eager' for
 #    layout-flexible weights.
 #
-# 3. Control flow and shapes are specialized to the example. A non-strict trace follows
-#    the single path taken for the example inputs: Python ``if``/``for`` over tensor
-#    values, ``.item()``, and shape-dependent branching are resolved at trace time and
-#    baked. Shapes are STATIC for now (capture uses make_fx in its "real" mode, so each
-#    size is baked as a constant); inputs that would take a different path, or a different
-#    shape, yield a wrong result (an inductor-backend static-dim mismatch is rejected up
-#    front; see invariant 6). Dynamic-shape support (symbolic sizes that need not be
-#    retraced per shape) is planned in a follow-up later in this stack.
-#    Each dense user-input leaf's DTYPE and DEVICE are also baked at capture: a runtime
-#    input whose dtype or device differs from the example is rejected up front with a
-#    PrecompileError (both backends), since the graph is specialized to them. Control flow
-#    is NOT enforced -- this is the defining property of a non-strict trace. Capture also
-#    EXECUTES ``fn`` once on the example inputs, so any in-place mutation of an input or
-#    other side effect ``fn`` performs (e.g. ``x.add_(1)``, printing, RNG advancement)
-#    happens to the example inputs / external state at capture time; pass throwaway
-#    example inputs if that matters.
+# 3. Control flow (and, by default, shapes) is specialized to the example. A non-strict
+#    trace follows the single path taken for the example inputs: Python ``if``/``for``
+#    over tensor values, ``.item()``, and shape-dependent branching are resolved at
+#    trace time and baked. Shapes are static BY DEFAULT (capture uses make_fx in its
+#    "real" mode, so each size is baked as a constant). You can opt specific user-input
+#    dims into being dynamic by marking them with
+#    ``torch._dynamo.decorators.mark_unbacked`` before calling: those dims are
+#    captured as UNBACKED symints (symbolic capture), which CANNOT be guarded on -- so
+#    the artifact is valid for any runtime size of those dims, and a graph that needs to
+#    guard on / specialize a marked dim fails LOUDLY at capture (PrecompileError) instead
+#    of baking a silently-wrong result.
 #
 # 4. Boundary effects. Input mutation (including module buffers -- e.g. BatchNorm
 #    running stats in training mode), tensor-subclass wrap/unwrap (e.g. DTensor),
@@ -134,22 +129,20 @@ it.
 #    functional. precompile does not own optimizer state; bring your own optimizer and
 #    zero grads as usual.
 #
-# 6. Shapes are static (for now), each input's dtype/device is baked, and the inductor
-#    backend also specializes on input layout. The static-shape restriction is temporary:
-#    dynamic-shape support (symbolic sizes that need not be retraced per shape) is planned
-#    in a follow-up later in this stack (see invariant 3). Each dense user-input leaf's
-#    dtype and device are recorded at capture and checked at runtime (both backends): a
-#    dtype- or device-mismatched input is rejected with a PrecompileError rather than
-#    crashing deep in a kernel or reading a wrong value. The graph is specialized to the
-#    example input shapes (invariant 3); tensor-subclass outputs in particular are
-#    rebuilt with constant outer sizes/strides, so a different runtime shape is undefined.
-#    The inductor backend ADDITIONALLY bakes each read input's stride / memory format
-#    (it emits assert_size_stride) -- and this applies to model PARAMETERS/BUFFERS too,
-#    not only user inputs, since they are graph inputs the kernels read. So a same-shape
-#    runtime input OR a same-shape/same-dtype checkpoint WEIGHT with a DIFFERENT layout
-#    (e.g. a contiguous tensor when the example was transposed or channels_last, or a
-#    non-contiguous view of a weight) is rejected with a clear PrecompileError; match the
-#    example layout or use backend='eager'.
+# 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
+#    3), each input's dtype/device is baked, and the inductor backend also specializes
+#    on input layout. Each dense user-input leaf's dtype and device are recorded at
+#    capture and checked at runtime (both backends): a dtype- or device-mismatched input
+#    is rejected with a PrecompileError rather than crashing deep in a kernel or reading
+#    a wrong value. The graph is specialized to the example input shapes (invariant 3);
+#    tensor-subclass outputs in particular are rebuilt with constant outer sizes/strides,
+#    so a different runtime shape is undefined. The inductor backend ADDITIONALLY bakes
+#    each read input's stride / memory format (it emits assert_size_stride) -- and this
+#    applies to model PARAMETERS/BUFFERS too, not only user inputs, since they are graph
+#    inputs the kernels read. So a same-shape runtime input OR a same-shape/same-dtype
+#    checkpoint WEIGHT with a DIFFERENT layout (e.g. a contiguous tensor when the example
+#    was transposed or channels_last, or a non-contiguous view of a weight) is rejected
+#    with a clear PrecompileError; match the example layout or use backend='eager'.
 #    This guard is deliberately CONSERVATIVE: a layout-agnostic kernel (e.g. matmul) may
 #    well have computed the right answer on the new layout, but precompile cannot
 #    recompile to specialize it the way torch.compile does, so it rejects to stay safe
@@ -214,6 +207,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
 import torch
@@ -228,7 +222,9 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
+
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
 
 # ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
@@ -249,6 +245,25 @@ _CACHE_VERSION = 1
 # Index into the caller's positional nn.Module arguments (0-based over the modules,
 # not over all args), used to qualify tied-across-modules param/buffer names as m<i>.<n>.
 _ModuleIndex = NewType("_ModuleIndex", int)
+
+
+# Decoded mark_unbacked spec for one dim: (shape_id, min, max, hint_override). shape_id is
+# an opaque hashable grouping label (dims sharing it collapse to one unbacked symbol); the
+# other three are optional integer sizes and are None wherever the decorator left them unset.
+_MarkSpec = tuple[object, int | None, int | None, int | None]
+# Per-user-input-leaf runtime bounds harvested from the marks: {dim: (min, max)} (either
+# may be None), or None when the leaf has no bounded marked dim.
+_LeafBounds = dict[int, tuple[int | None, int | None]] | None
+
+
+# Reused read-only empty mapping for the mark_unbacked getattr fallbacks (Note [precompile
+# reads private dynamo mark attributes]), so the common unmarked leaf reads its (absent)
+# _dynamo_* dicts without allocating a throwaway {} per call.
+# The value type is Any because these back three DISTINCT private dynamo dicts (dim ->
+# shape_id label / (min, max) tuple / hint int); one shared empty default cannot name all
+# three, and the private _dynamo_* attrs are untyped (Note above), so Any is the isolated
+# boundary here.
+_NO_MARKS: Mapping[int, Any] = MappingProxyType({})
 
 
 class PrecompileError(RuntimeError):
@@ -311,6 +326,230 @@ def _resolved_get_attrs(
             attr = getattr(attr, part, None)
         resolved.append((node.target, attr))
     return resolved
+
+
+# Note [precompile reads private dynamo mark attributes]
+#
+# The functions below read PRIVATE per-tensor attributes that
+# torch._dynamo.decorators.mark_unbacked stamps onto a tensor: it consumes
+# _dynamo_unbacked_indices / _dynamo_strict_unbacked_indices / _dynamo_shape_ids /
+# _dynamo_unbacked_bounds / _dynamo_hint_overrides, and rejects _dynamo_dynamic_indices
+# / _specialize_on (marks it cannot honor). This is a deliberate coupling to a private
+# dynamo contract -- mark_unbacked is the documented entry point, and precompile reads
+# what it leaves behind rather than exposing its own dynamic-shape kwarg. A stable
+# dynamo-owned accessor is the eventual home; until then these names are load-bearing.
+def _has_unbacked_marks(args: tuple[object, ...]) -> bool:
+    """True if any tensor reachable in ``args`` carries a mark_unbacked dim (backed or
+    strict)."""
+    return any(
+        isinstance(t, torch.Tensor)
+        and (
+            getattr(t, "_dynamo_unbacked_indices", None)
+            or getattr(t, "_dynamo_strict_unbacked_indices", None)
+        )
+        for t in pytree.tree_leaves(args)
+    )
+
+
+def _reject_unsupported_marks(user_flat: list[object]) -> None:
+    """Reject mark options precompile cannot honor, loudly (invariant 3).
+
+    precompile only honors mark_unbacked (backed unbacked dims) and mark_unbacked's
+    strict variant. Backed dynamic marks (mark_dynamic -> _dynamo_dynamic_indices) and
+    per-dim specialization (_specialize_on) have no analogue in the static/unbacked
+    capture path -- silently dropping them would bake a wrong artifact, so reject rather
+    than ignore. (mark_unbacked's hint_override is NOT rejected: it is a perf-only
+    autotuning size hint, never a guard, so the single artifact is valid regardless; it
+    is threaded into the capture ShapeEnv in _fakeify_with_unbacked.) A mark_unbacked dim
+    on a tensor SUBCLASS (e.g. DTensor) is rejected: the dynamic capture cannot preserve
+    the subclass through the refake, so it too would bake a wrong artifact.
+    """
+    for t in user_flat:
+        if not isinstance(t, torch.Tensor):
+            continue
+        # mark_unbacked on a tensor subclass (e.g. DTensor) stamps its marks on the OUTER
+        # subclass as well as the inner tensor, so precompile's dynamic path picks it up --
+        # but _fakeify_with_unbacked refakes a marked leaf via torch.empty, which yields a
+        # plain dense tensor and DROPS the subclass, so the trace would run on the wrong
+        # type. Reject loudly here rather than silently capturing a subclass-stripped tensor
+        # (mirrors the decorator itself, which raises for every non-DTensor subclass).
+        if is_traceable_wrapper_subclass(t) and (
+            getattr(t, "_dynamo_unbacked_indices", None)
+            or getattr(t, "_dynamo_strict_unbacked_indices", None)
+        ):
+            raise PrecompileError(
+                "precompile: an input is a tensor subclass (e.g. DTensor) with a "
+                "mark_unbacked dynamic dim, which precompile cannot honor: the dynamic "
+                "capture cannot preserve the subclass. Mark a dense input instead, or "
+                "capture that dim static (do not mark_unbacked it)."
+            )
+        if getattr(t, "_dynamo_dynamic_indices", None):
+            raise PrecompileError(
+                "precompile: an input has a mark_dynamic (backed dynamic) dim, which "
+                "precompile cannot honor; it supports only mark_unbacked dynamic dims. "
+                "Use torch._dynamo.decorators.mark_unbacked, or leave the dim static."
+            )
+        specialize_on = getattr(t, "_specialize_on", None)
+        if specialize_on and any(v for v in specialize_on.values()):
+            raise PrecompileError(
+                "precompile: an input has a mark_unbacked specialize_on list, which "
+                "precompile cannot honor (it produces a single artifact, not per-value "
+                "specializations). Remove specialize_on."
+            )
+
+
+def _read_unbacked_marks(user_flat: list[object]) -> list[dict[int, _MarkSpec]]:
+    """Read ``torch._dynamo.decorators.mark_unbacked`` marks off the user-input tensors.
+
+    Dynamic shapes are opt-in via that decorator (the caller marks dims before calling
+    precompile), NOT via a precompile kwarg -- so the precompile signature stays simple.
+    Returns a per-leaf list aligned to ``user_flat``; each entry maps a marked dim to
+    ``(shape_id, min, max, hint_override)`` (None when unset), empty when the leaf has no
+    marks. Dims sharing a ``shape_id`` get the SAME unbacked symbol (so they are equal by
+    construction); ``min``/``max`` become runtime range asserts; ``hint_override`` is a
+    perf-only autotuning size hint applied to the symbol in _fakeify_with_unbacked.
+    """
+    marks: list[dict[int, _MarkSpec]] = []
+    for t in user_flat:
+        if not isinstance(t, torch.Tensor):
+            marks.append({})
+            continue
+        # Union the non-strict and strict unbacked index sets. mark_unbacked(strict=True)
+        # records ONLY _dynamo_strict_unbacked_indices; precompile already enforces
+        # strict's error-on-specialize semantics via the GuardOnDataDependentSymNode ->
+        # PrecompileError path, so both are honored identically here. NOTE: the decorator's
+        # strict branch returns early, so a strict dim carries no shape_id/min/max/
+        # hint_override (those are dropped at mark time) -- combine strict with shape_id/
+        # min/max only if that limitation is acceptable; use non-strict to get them.
+        idx = set(getattr(t, "_dynamo_unbacked_indices", None) or ())
+        idx |= set(getattr(t, "_dynamo_strict_unbacked_indices", None) or ())
+        if not idx:
+            marks.append({})
+            continue
+        shape_ids = getattr(t, "_dynamo_shape_ids", _NO_MARKS) or _NO_MARKS
+        bounds = getattr(t, "_dynamo_unbacked_bounds", _NO_MARKS) or _NO_MARKS
+        hints = getattr(t, "_dynamo_hint_overrides", _NO_MARKS) or _NO_MARKS
+        marks.append(
+            {
+                d: (shape_ids.get(d), *bounds.get(d, (None, None)), hints.get(d))
+                for d in idx
+            }
+        )
+    return marks
+
+
+def _read_input_bounds(marks: list[dict[int, _MarkSpec]]) -> list[_LeafBounds]:
+    """Build the per-leaf runtime min/max bounds from the already-read mark_unbacked
+    marks, aligned to ``user_flat`` (so ``marks`` is the output of _read_unbacked_marks).
+
+    mark_unbacked promises (in its own docstring) a runtime check that the dim is >= min
+    and <= max; those bounds are applied as capture-time torch._check constraints in
+    _fakeify_with_unbacked, but unbacked symints cannot be guarded on, so they never
+    become a runtime guard on their own. We record them here so the driver enforces them.
+    Each entry is None when the leaf has no bounded marked dim, else a dict mapping a
+    marked dim index to ``(lo, hi)`` (either may be None); mirrors USER_INPUT_DTYPES.
+    """
+    bounds: list[_LeafBounds] = []
+    for per in marks:
+        per_leaf: dict[int, tuple[int | None, int | None]] = {}
+        for d, (_shape_id, lo, hi, _hint) in per.items():
+            if lo is not None or hi is not None:
+                per_leaf[d] = (lo, hi)
+        bounds.append(per_leaf or None)
+    return bounds
+
+
+def _detect_memory_format(t: torch.Tensor) -> torch.memory_format:
+    """Return the example leaf's memory format so a refaked marked input preserves it.
+
+    A mark_unbacked dim refakes the leaf via torch.empty; defaulting to contiguous would
+    bake a contiguous assert_size_stride and reject a channels_last / transposed input
+    even at its own layout. Probe the recognized formats and raise on an exotic /
+    ambiguous layout we cannot capture rather than silently forcing contiguous.
+    """
+    if t.is_contiguous(memory_format=torch.contiguous_format):
+        return torch.contiguous_format
+    if t.is_contiguous(memory_format=torch.channels_last):
+        return torch.channels_last
+    if t.is_contiguous(memory_format=torch.channels_last_3d):
+        return torch.channels_last_3d
+    raise PrecompileError(
+        "precompile: a mark_unbacked input has a memory format that is neither "
+        "contiguous, channels_last, nor channels_last_3d (e.g. a transposed or "
+        "otherwise non-standard layout); the dynamic-shape capture cannot preserve it. "
+        "Pass the input in one of those layouts (.contiguous() to make it contiguous), "
+        "or capture the dim static (do not mark_unbacked it)."
+    )
+
+
+def _fakeify_with_unbacked(
+    pb_flat: list[Tensor], user_flat: list[object], marks: list[dict[int, _MarkSpec]]
+) -> tuple[list[object], FakeTensorMode]:
+    """Fakeify the flat capture inputs for an unbacked dynamic-shape capture.
+
+    Params/buffers and unmarked dims become static fakes; each mark_unbacked dim becomes
+    an UNBACKED SymInt (unguardable, so the artifact is valid for any runtime size and a
+    graph that needs to guard on it fails at capture). Dims sharing a ``shape_id`` reuse
+    one symbol; ``min``/``max`` add runtime asserts. Returns ``(flat_fake, fake_mode)``;
+    the fake_mode (ShapeEnv) is threaded to the lowering via from_tracing_context.
+    """
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    shape_env = ShapeEnv()
+    fake_mode = FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
+    # shape_id -> unbacked symint (a dynamic SymInt); untyped so grouped dims share one symbol.
+    shared: dict[object, Any] = {}
+    with fake_mode:
+        fake_pb = [fake_mode.from_tensor(t, static_shapes=True) for t in pb_flat]
+        fake_user: list[object] = []
+        for leaf, per in zip(user_flat, marks):
+            if not isinstance(leaf, torch.Tensor):
+                fake_user.append(leaf)
+            elif not per:
+                fake_user.append(fake_mode.from_tensor(leaf, static_shapes=True))
+            else:
+                sizes: list[Any] = []  # mix of static ints and unbacked SymInts
+                for i, s in enumerate(leaf.shape):
+                    if i not in per:
+                        sizes.append(int(s))
+                        continue
+                    shape_id, lo, hi, hint = per[i]
+                    if shape_id is not None and shape_id in shared:
+                        u = shared[shape_id]
+                        # Reusing the shared symbol still applies THIS occurrence's
+                        # bounds: distinct dims grouped by shape_id may each carry their
+                        # own (min, max), and dropping them would lose a runtime assert.
+                        if lo is not None:
+                            torch._check(u >= lo)
+                        if hi is not None:
+                            torch._check(u <= hi)
+                        sizes.append(u)
+                        continue
+                    u = shape_env.create_unbacked_symint()
+                    torch._check(u >= 0)
+                    if lo is not None:
+                        torch._check(u >= lo)
+                    if hi is not None:
+                        torch._check(u <= hi)
+                    # hint_override is a perf-only autotuning size hint (not a guard):
+                    # thread it onto the fresh symbol so inductor autotuning sees it. For a
+                    # shared shape_id the group's one symbol keeps the first hint set here.
+                    if hint is not None:
+                        shape_env._set_unbacked_var_to_hint_override(u, hint)
+                    if shape_id is not None:
+                        shared[shape_id] = u
+                    sizes.append(u)
+                memory_format = _detect_memory_format(leaf)
+                f = torch.empty(
+                    sizes,
+                    dtype=leaf.dtype,
+                    device=leaf.device,
+                    memory_format=memory_format,
+                )
+                f.requires_grad_(leaf.requires_grad)
+                fake_user.append(f)
+    return [*fake_pb, *fake_user], fake_mode
 
 
 def _check_no_constant_tensors(gm: torch.fx.GraphModule) -> None:
@@ -380,10 +619,10 @@ def _intern_param_buffers(
     user-supplied modules, so the dense list lines up with the compiled graph.
 
     INVARIANT: the all-modules' params then all-modules' buffers, dedup-by-id ordering
-    here is load-bearing and is reproduced VERBATIM by the embedded
-    ``_extract_param_buffers`` in both _DRIVER_SOURCE and _EAGER_DRIVER_SOURCE (the
-    inlined/eager load paths). The cached load path uses this function directly, so all
-    three must stay in sync; ``test_cached_and_inlined_paths_agree`` cross-checks them.
+    here is load-bearing and is reproduced VERBATIM by
+    ``torch._precompile_driver._extract_param_buffers`` (emitted into the inlined/eager
+    load paths). The cached load path uses this function directly, so both must stay
+    in sync; ``test_cached_and_inlined_paths_agree`` cross-checks them.
     """
     if len(mods) > 1:
 
@@ -472,35 +711,71 @@ def _capture(
     buffer_devices = [str(t.device) for t in pb_flat[num_params:]]
 
     user_flat, in_spec = pytree.tree_flatten(user_inputs)
+    # Reject mark options precompile cannot honor (mark_dynamic, specialize_on) loudly
+    # here, before tracing, rather than silently dropping them. (hint_override is honored,
+    # not rejected -- it is a perf-only autotuning hint threaded onto the capture symbol.)
+    _reject_unsupported_marks(user_flat)
     flat_args = [*pb_flat, *user_flat]
-    # The REAL example tensors (params/buffers and user inputs). The saved-grad
-    # snapshot/clear/restore block below protects the real example model's .grad fields
-    # (those are what the user owns and what a backward in fn populates).
+    # The REAL example tensors (params/buffers and user inputs). flat_args is reassigned
+    # to FAKE tensors in the unbacked path below, but the saved-grad snapshot/clear/restore
+    # block must protect the real example model's .grad fields (those are what the user
+    # owns and what a backward in fn populates), not the throwaway fakes. list() snapshots
+    # the real tensors here, so the later flat_args rebind does not affect real_flat.
     real_flat = list(flat_args)
     # Record the example user inputs' dense shapes/dtypes/devices so the drivers can
     # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
-    # the inlined _DRIVER_SOURCE / _EAGER_DRIVER_SOURCE checks. Stride is NOT recorded --
+    # the inlined driver checks (torch._precompile_driver). Stride is NOT recorded --
     # memory-format mismatches are enforced by inductor's own (pinned-on)
     # assert_size_stride. Subclasses -> None.
-    user_input_shapes = [_dense_shape(t) for t in user_flat]
+    # Widened element type (a marked-dynamic dim becomes None within the tuple in the
+    # unbacked path below); _dense_shape's static tuples conform to it.
+    user_input_shapes: list[tuple[int | None, ...] | None] = [
+        _dense_shape(t) for t in user_flat
+    ]
     user_input_dtypes = [_dense_dtype(t) for t in user_flat]
     user_input_devices = [_dense_device(t) for t in user_flat]
 
-    # Snapshot and clear the REAL example tensors' .grad BEFORE tracing. A backward in fn
-    # accumulates (``p.grad = p.grad + new``), so a live pre-existing grad would be read
-    # into the graph and baked by make_fx as a get_attr constant -- tripping the
-    # invariant-1 guard with a misleading "tensor closed over by fn" error on the common
-    # warmup-step-then-precompile flow. Restored in finally; precompile does not mutate the
-    # user's example .grad (params/buffers AND user inputs). Snapshot the ORIGINAL .grad
-    # object (no clone) and restore that SAME object below, so grad IDENTITY is preserved --
-    # a caller holding a prior p.grad reference, or optimizer state keyed on grad identity,
-    # is not invalidated. Tracing runs on the real interned params, so a backward in fn DOES
-    # write .grad in place -- but onto a fresh grad object, since .grad was snapshotted and
-    # cleared to None just above; the finally-restore puts the snapshotted object back.
+    # Dynamic shapes (opt-in, UNBACKED only): dims the caller tagged with
+    # torch._dynamo.decorators.mark_unbacked are refakeified as unbacked symints, then
+    # traced symbolically with the fake_mode's ShapeEnv threaded to the lowering. Unbacked
+    # dims cannot be guarded on, so the artifact is valid across runtime sizes; a graph
+    # that would need to guard on a marked dim fails loudly at capture
+    # (GuardOnDataDependentSymNode) rather than baking it. Reading the marks here (instead
+    # of a precompile kwarg) keeps the precompile signature simple.
+    marks = _read_unbacked_marks(user_flat)
+    # Record each marked dim's declared min/max so the driver enforces them at runtime;
+    # the capture-time torch._check on an unbacked symint never becomes a runtime guard,
+    # so without this the documented mark_unbacked min/max check would be a silent no-op.
+    user_input_bounds = _read_input_bounds(marks)
+    # Snapshot and clear the REAL example tensors' .grad BEFORE fakeifying and tracing.
+    # A backward in fn accumulates (``p.grad = p.grad + new``), so a live pre-existing
+    # grad would be read into the graph and baked by make_fx as a get_attr constant --
+    # tripping the invariant-1 guard with a misleading "tensor closed over by fn" error on
+    # the common warmup-step-then-precompile flow. The clear MUST precede
+    # _fakeify_with_unbacked: fake_mode.from_tensor copies .grad onto the fakes we trace
+    # on, so clearing the reals first keeps the fakes grad-free too. Restored in finally;
+    # precompile does not mutate the user's example .grad (params/buffers AND user inputs).
+    # Snapshot the ORIGINAL .grad object (no clone) and restore that SAME object below, so
+    # grad IDENTITY is preserved -- a caller holding a prior p.grad reference, or optimizer
+    # state keyed on grad identity, is not invalidated. The unbacked path traces on fakes,
+    # so the reals' .grad is untouched there; the STATIC path (fake_mode is None) traces on
+    # the real interned params, so a backward in fn DOES write .grad in place -- but onto a
+    # fresh grad object, since .grad was snapshotted and cleared to None just above. The
+    # finally-restore below puts the snapshotted object back, so both grad identity and
+    # value are preserved regardless of which path ran.
     saved_grads = [a.grad if isinstance(a, torch.Tensor) else None for a in real_flat]
     for a in real_flat:
         if isinstance(a, torch.Tensor):
             a.grad = None
+    fake_mode = None
+    if any(marks):
+        flat_args, fake_mode = _fakeify_with_unbacked(pb_flat, user_flat, marks)
+        user_input_shapes = [
+            None
+            if base is None
+            else tuple(None if i in per else s for i, s in enumerate(base))
+            for base, per in zip(user_input_shapes, marks)
+        ]
 
     # flat_fn (traced by make_fx) writes these back so _capture can thread the output
     # structure and the harvested-grad param indices into the _Capture result.
@@ -576,13 +851,30 @@ def _capture(
     # forward graph is the same as under no_grad. Restore in finally so a make_fx
     # failure (e.g. fn raising after running a backward) does not leave the user's
     # example model with clobbered .grad fields.
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
+    tracing_mode = "symbolic" if fake_mode is not None else "real"
+    capture_cm = fake_mode if fake_mode is not None else contextlib.nullcontext()
     try:
-        with torch.enable_grad():
-            gm = make_fx(
-                flat_fn,
-                decomposition_table=decompositions,
-                tracing_mode="real",
-            )(flat_args)
+        with torch.enable_grad(), capture_cm:
+            try:
+                gm = make_fx(
+                    flat_fn,
+                    decomposition_table=decompositions,
+                    tracing_mode=tracing_mode,
+                )(flat_args)
+            except GuardOnDataDependentSymNode as e:
+                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
+                # the computation needs to guard on / specialize its size (e.g. a
+                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
+                # be guarded, so rather than bake a silently-wrong artifact, fail here.
+                raise PrecompileError(
+                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
+                    "(it branches on or specializes that size), which is not allowed for "
+                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
+                    "or restructure fn to avoid the size-dependent operation. Underlying: "
+                    f"{str(e).splitlines()[0]}"
+                ) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -611,6 +903,8 @@ def _capture(
         user_input_shapes=user_input_shapes,
         user_input_dtypes=user_input_dtypes,
         user_input_devices=user_input_devices,
+        user_input_bounds=user_input_bounds,
+        fake_mode=fake_mode,
     )
 
 
@@ -632,9 +926,11 @@ class _Capture:
         in_spec: pytree.TreeSpec,
         out_spec: pytree.TreeSpec,
         grad_param_indices: list[int],
-        user_input_shapes: list[tuple[int, ...] | None],
+        user_input_shapes: list[tuple[int | None, ...] | None],
         user_input_dtypes: list[str | None],
         user_input_devices: list[str | None],
+        user_input_bounds: list[_LeafBounds],
+        fake_mode: FakeTensorMode | None = None,
     ) -> None:
         self.gm = gm
         self.flat_args = flat_args
@@ -654,6 +950,10 @@ class _Capture:
         self.user_input_shapes = user_input_shapes
         self.user_input_dtypes = user_input_dtypes
         self.user_input_devices = user_input_devices
+        self.user_input_bounds = user_input_bounds
+        # The fake_mode (with ShapeEnv) used for a dynamic-shape capture, threaded to the
+        # lowering (dynamic_shapes="from_tracing_context"); None for a static capture.
+        self.fake_mode = fake_mode
 
 
 _GENERATED_HEADER = """\
@@ -764,6 +1064,10 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}",
         f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}",
         f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}",
+        # Per user-input-leaf mark_unbacked min/max bounds: None for a leaf with no bounded
+        # marked dim, else {dim: (lo, hi)} (either may be None). The drivers reject a
+        # runtime size outside the declared range (invariant 3); see the inlined drivers.
+        f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}",
         "",
     ]
     return parts
@@ -798,6 +1102,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "USER_INPUT_SHAPES",
         "USER_INPUT_DTYPES",
         "USER_INPUT_DEVICES",
+        "USER_INPUT_BOUNDS",
     }
     found: dict[str, object] = {}
     try:
@@ -816,9 +1121,11 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if target.id in wanted:
             found[target.id] = ast.literal_eval(node.value)
         else:
-            # Not a metadata name we consume (e.g. a driver-internal top-level like
-            # _MODULE_POSITIONS_SET). Skipped by design, but log it at debug so a
-            # malformed / renamed artifact is diagnosable rather than silently dropped.
+            # Not a metadata name we consume (the driver section emits only
+            # function defs today, but a future artifact revision could add a
+            # driver-internal top-level assignment). Skipped by design, but log
+            # it at debug so a malformed / renamed artifact is diagnosable
+            # rather than silently dropped.
             log.debug(
                 "precompile: ignoring unrecognized top-level assignment %r while "
                 "parsing artifact calling-convention metadata",
@@ -852,7 +1159,7 @@ def _build_python_source(
         "# 3. Driver: module params/buffers + grad scatter + calling convention"
     )
     parts.append("# " + "=" * 70)
-    parts.append(_DRIVER_SOURCE)
+    parts.append(_emit_driver_source("_inductor_forward"))
     return "\n".join(parts)
 
 
@@ -914,364 +1221,41 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     parts.append("# " + "=" * 70)
     parts.append("# 3. Driver: run the inlined captured graph eagerly")
     parts.append("# " + "=" * 70)
-    parts.append(_EAGER_DRIVER_SOURCE)
+    parts.append(_emit_driver_source("_eager_forward"))
     return "\n".join(parts)
 
 
-_EAGER_DRIVER_SOURCE = '''
-def _extract_param_buffers(mods):
-    """Lift the runtime modules' params then buffers, interning by identity, in the
-    same order as capture, so the list lines up with the captured graph. Returns
-    (pb, names) where names mirrors PARAM_NAMES + BUFFER_NAMES. This ordering AND the
-    naming must match torch._precompile._intern_param_buffers verbatim (its INVARIANT)."""
-    multi = len(mods) > 1
-    seen = set()
-    pb = []
-    names = []
-    def intern(mi, n, t):
-        if id(t) not in seen:
-            seen.add(id(t))
-            pb.append(t)
-            names.append(("m%d.%s" % (mi, n)) if multi else n)
-    for mi, m in enumerate(mods):
-        for n, p in m.named_parameters(remove_duplicate=False):
-            intern(mi, n, p)
-    for mi, m in enumerate(mods):
-        for n, b in m.named_buffers(remove_duplicate=False):
-            intern(mi, n, b)
-    return pb, names
-
-
-def _fail(msg):
-    # Imported lazily (only when a guard fails) so a normal run does not couple the
-    # standalone artifact to torch._precompile's import surface.
-    from torch._precompile import PrecompileError as _PrecompileError
-
-    raise _PrecompileError(msg)
-
-
-def _check_structure(pb, names):
-    # Verify the runtime model's extracted param/buffer NAMES match the baked
-    # PARAM_NAMES + BUFFER_NAMES (count AND order/identity), so a reordered or
-    # structurally-drifted same-count model is caught precisely (invariant 2) rather
-    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE, DTYPE and
-    # DEVICE against the baked example: the graph is specialized to the example shapes and
-    # can bake a device literal, so a same-named but differently shaped/typed/placed
-    # runtime tensor would silently miscompute or fail deep in a kernel.
-    expected = list(PARAM_NAMES) + list(BUFFER_NAMES)  # noqa: F821
-    if names != expected:
-        _fail(
-            "precompile: the runtime model's param/buffer names %r do not match the "
-            "traced model's %r; the runtime model must be structurally identical to the "
-            "traced model (invariant 2)." % (names, expected)
-        )
-    expected_shapes = list(PARAM_SHAPES) + list(BUFFER_SHAPES)  # noqa: F821
-    expected_dtypes = list(PARAM_DTYPES) + list(BUFFER_DTYPES)  # noqa: F821
-    expected_devices = list(PARAM_DEVICES) + list(BUFFER_DEVICES)  # noqa: F821
-    for _nm, _t, _shp, _dt, _dev in zip(
-        names, pb, expected_shapes, expected_dtypes, expected_devices
-    ):
-        if tuple(_t.shape) != tuple(_shp):
-            _fail(
-                "precompile: the runtime param/buffer %r has shape %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, tuple(_t.shape), tuple(_shp))
-            )
-        if str(_t.dtype) != _dt:
-            _fail(
-                "precompile: the runtime param/buffer %r has dtype %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.dtype), _dt)
-            )
-        if str(_t.device) != _dev:
-            _fail(
-                "precompile: the runtime param/buffer %r is on device %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.device), _dev)
-            )
-
-
-_MODULE_POSITIONS_SET = set(MODULE_POSITIONS)  # noqa: F821
-
-
-def forward(*args):
-    """Run the captured ATen graph eagerly. Pass the same args the traced fn took --
-    the module(s) in the same positions plus the runtime inputs. The module(s) must
-    be structurally identical to the ones precompile traced (same param/buffer order
-    and tying); only the weight values may differ.
-
-    The eager backend runs the graph as captured: inputs (including tensor
-    subclasses) are passed through unchanged (no dense flatten/unflatten), and the
-    graph's flat outputs are reassembled into fn's output structure. If fn ran a
-    backward, the trailing grad outputs (one per GRAD_PARAM_INDICES entry) are
-    parameter grads, scattered (accumulated) onto the params that received one like
-    eager .backward() -- frozen / non-contributing params keep .grad = None."""
-    if len(args) != NUM_POSITIONAL_ARGS:  # noqa: F821
-        _fail(
-            "precompile: expected %d positional args (the same as the traced fn), got "
-            "%d (invariant 2)." % (NUM_POSITIONAL_ARGS, len(args))  # noqa: F821
-        )
-    mods = []
-    for _i in MODULE_POSITIONS:  # noqa: F821
-        if not isinstance(args[_i], _torch.nn.Module):
-            _fail(
-                "precompile: argument at position %d must be the nn.Module the traced "
-                "fn took (invariant 2), got %s." % (_i, type(args[_i]).__name__)
-            )
-        mods.append(args[_i])
-    user_inputs = [a for i, a in enumerate(args) if i not in _MODULE_POSITIONS_SET]  # noqa: F821
-    user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
-    if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
-        )
-    # Reject a SHAPE / DTYPE / DEVICE mismatch (invariants 3 and 6) up front. Mirrors the
-    # inductor _DRIVER_SOURCE checks (keep the two inlined drivers in sync). The eager
-    # backend has no assert_size_stride, so only these are checked (layout-flexible).
-    if len(user_flat) != len(USER_INPUT_SHAPES):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs flattened to a different number of leaves than "
-            "the traced example (invariant 3); they must match the traced structure."
-        )
-    for _t, _shp, _dt, _dev in zip(
-        user_flat, USER_INPUT_SHAPES, USER_INPUT_DTYPES, USER_INPUT_DEVICES  # noqa: F821
-    ):
-        if _shp is None or not isinstance(_t, _torch.Tensor):
-            continue
-        _act = tuple(_t.shape)
-        if len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp)):
-            _fail(
-                "precompile: a runtime input has shape %s but the artifact was traced "
-                "with shape %s; the graph is specialized to the static dims (invariant "
-                "3). Retrace for this shape, or use backend='eager'." % (_act, tuple(_shp))
-            )
-        if _dt is not None and str(_t.dtype) != _dt:
-            _fail(
-                "precompile: a runtime input has dtype %s but the artifact was traced "
-                "with dtype %s; the graph is specialized to the example dtype "
-                "(invariant 6). Cast the input to the traced dtype, or retrace."
-                % (str(_t.dtype), _dt)
-            )
-        if _dev is not None and str(_t.device) != _dev:
-            _fail(
-                "precompile: a runtime input is on device %s but the artifact was traced "
-                "on device %s; the graph is specialized to the example device "
-                "(invariant 6). Move the input to the traced device, or retrace."
-                % (str(_t.device), _dev)
-            )
-    pb, _names = _extract_param_buffers(mods)
-    _check_structure(pb, _names)
-    with _torch.no_grad():
-        out = list(call([*pb, *user_flat]))  # noqa: F821
-    if GRAD_PARAM_INDICES:  # noqa: F821
-        n = len(GRAD_PARAM_INDICES)  # noqa: F821
-        grads = out[len(out) - n:]
-        out = out[:len(out) - n]
-        for idx, g in zip(GRAD_PARAM_INDICES, grads):  # noqa: F821
-            p = pb[idx]
-            if p.grad is None:
-                p.grad = g
-            else:
-                p.grad.add_(g)
-    return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))  # noqa: F821
-
-
+_DRIVER_MAIN = """\
 if __name__ == "__main__":
     print("forward() is ready; call it with the model(s) and inputs the traced")
     print("fn took, e.g. forward(model, x).")
-'''
+"""
 
 
-_DRIVER_SOURCE = '''
-def _extract_param_buffers(mods):
-    """Lift the runtime modules' params then buffers, interning by identity, in the
-    same order as capture, so the dense list lines up with the compiled graph. Returns
-    (pb, names) where names mirrors PARAM_NAMES + BUFFER_NAMES. This ordering AND the
-    naming must match torch._precompile._intern_param_buffers verbatim (its INVARIANT)."""
-    multi = len(mods) > 1
-    seen = set()
-    pb = []
-    names = []
-    def intern(mi, n, t):
-        if id(t) not in seen:
-            seen.add(id(t))
-            pb.append(t)
-            names.append(("m%d.%s" % (mi, n)) if multi else n)
-    for mi, m in enumerate(mods):
-        for n, p in m.named_parameters(remove_duplicate=False):
-            intern(mi, n, p)
-    for mi, m in enumerate(mods):
-        for n, b in m.named_buffers(remove_duplicate=False):
-            intern(mi, n, b)
-    return pb, names
+def _emit_driver_source(forward_fn_name: str) -> str:
+    """Emit the runtime driver as text for inlining into python_code.
 
+    The driver lives as real, type-checked code in torch._precompile_driver; here we read
+    it back with inspect.getsource (LAZILY -- only on this emit path; load() never runs
+    it, so a stripped-source environment only affects capture, not reload) and rename the
+    selected forward variant to the public ``forward``. Emitting the TEXT (rather than
+    importing the module from the artifact) keeps python_code self-contained and
+    version-frozen (Note [precompile programming model], invariant 7)."""
+    import inspect
 
-def _fail(msg):
-    # Imported lazily (only when a guard fails) so a normal run does not couple the
-    # standalone artifact to torch._precompile's import surface.
-    from torch._precompile import PrecompileError as _PrecompileError
+    from torch import _precompile_driver as driver
 
-    raise _PrecompileError(msg)
-
-
-def _check_structure(pb, names):
-    # Verify the runtime model's extracted param/buffer NAMES match the baked
-    # PARAM_NAMES + BUFFER_NAMES (count AND order/identity), so a reordered or
-    # structurally-drifted same-count model is caught precisely (invariant 2) rather
-    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE, DTYPE and
-    # DEVICE against the baked example: the graph is specialized to the example shapes and
-    # can bake a device literal, so a same-named but differently shaped/typed/placed
-    # runtime tensor would silently miscompute or fail deep in a kernel.
-    expected = list(PARAM_NAMES) + list(BUFFER_NAMES)  # noqa: F821
-    if names != expected:
-        _fail(
-            "precompile: the runtime model's param/buffer names %r do not match the "
-            "traced model's %r; the runtime model must be structurally identical to the "
-            "traced model (invariant 2)." % (names, expected)
-        )
-    expected_shapes = list(PARAM_SHAPES) + list(BUFFER_SHAPES)  # noqa: F821
-    expected_dtypes = list(PARAM_DTYPES) + list(BUFFER_DTYPES)  # noqa: F821
-    expected_devices = list(PARAM_DEVICES) + list(BUFFER_DEVICES)  # noqa: F821
-    for _nm, _t, _shp, _dt, _dev in zip(
-        names, pb, expected_shapes, expected_dtypes, expected_devices
-    ):
-        if tuple(_t.shape) != tuple(_shp):
-            _fail(
-                "precompile: the runtime param/buffer %r has shape %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, tuple(_t.shape), tuple(_shp))
-            )
-        if str(_t.dtype) != _dt:
-            _fail(
-                "precompile: the runtime param/buffer %r has dtype %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.dtype), _dt)
-            )
-        if str(_t.device) != _dev:
-            _fail(
-                "precompile: the runtime param/buffer %r is on device %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.device), _dev)
-            )
-
-
-_MODULE_POSITIONS_SET = set(MODULE_POSITIONS)  # noqa: F821
-
-
-def forward(*args):
-    """Run the compiled computation. Pass the same args the traced fn took -- the
-    module(s) in the same positions plus the runtime inputs. The module(s) must be
-    structurally identical to the ones precompile traced (same param/buffer order
-    and tying); only the weight values may differ.
-
-    Module params/buffers are extracted (no weights are baked into the artifact) and,
-    together with the runtime inputs, passed to the composed ``call`` -- which is the
-    AOTAutograd+Inductor graph with its own prelude/epilogue, so it handles tensor-
-    subclass wrap/unwrap and input mutation (e.g. BatchNorm running stats) internally
-    and disables grad itself. If fn ran a backward, the trailing grad outputs (one per
-    GRAD_PARAM_INDICES entry) are parameter grads: they are scattered (accumulated)
-    onto the params that received one, mirroring eager .backward() (frozen /
-    non-contributing params keep .grad = None), and the artifact returns fn's own
-    result. Nothing here reads an external cache: the kernels JIT-compile from the
-    inlined source on first call. A runtime input whose shape, dtype, or device differs
-    from the traced example is rejected up front (invariants 3 and 6), and a differing
-    stride / memory format is rejected via the inlined assert_size_stride (invariant 6);
-    use backend="eager" for layout-flexible execution."""
-    if len(args) != NUM_POSITIONAL_ARGS:  # noqa: F821
-        _fail(
-            "precompile: expected %d positional args (the same as the traced fn), got "
-            "%d (invariant 2)." % (NUM_POSITIONAL_ARGS, len(args))  # noqa: F821
-        )
-    mods = []
-    for _i in MODULE_POSITIONS:  # noqa: F821
-        if not isinstance(args[_i], _torch.nn.Module):
-            _fail(
-                "precompile: argument at position %d must be the nn.Module the traced "
-                "fn took (invariant 2), got %s." % (_i, type(args[_i]).__name__)
-            )
-        mods.append(args[_i])
-    user_inputs = [a for i, a in enumerate(args) if i not in _MODULE_POSITIONS_SET]  # noqa: F821
-    user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
-    if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
-        )
-    # Reject a SHAPE / DTYPE / DEVICE mismatch (invariants 3 and 6) up front. Mirrors the
-    # eager _EAGER_DRIVER_SOURCE checks (keep the two inlined drivers in sync).
-    # Stride/memory-format is enforced by the inlined assert_size_stride (pinned at capture).
-    if len(user_flat) != len(USER_INPUT_SHAPES):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs flattened to a different number of leaves than "
-            "the traced example (invariant 3); they must match the traced structure."
-        )
-    for _t, _shp, _dt, _dev in zip(
-        user_flat, USER_INPUT_SHAPES, USER_INPUT_DTYPES, USER_INPUT_DEVICES  # noqa: F821
-    ):
-        if _shp is None or not isinstance(_t, _torch.Tensor):
-            continue
-        _act = tuple(_t.shape)
-        if len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp)):
-            _fail(
-                "precompile: a runtime input has shape %s but the artifact was traced "
-                "with shape %s; the graph is specialized to the static dims (invariant "
-                "3). Retrace for this shape, or use backend='eager'." % (_act, tuple(_shp))
-            )
-        if _dt is not None and str(_t.dtype) != _dt:
-            _fail(
-                "precompile: a runtime input has dtype %s but the artifact was traced "
-                "with dtype %s; the graph is specialized to the example dtype "
-                "(invariant 6). Cast the input to the traced dtype, or retrace."
-                % (str(_t.dtype), _dt)
-            )
-        if _dev is not None and str(_t.device) != _dev:
-            _fail(
-                "precompile: a runtime input is on device %r but the artifact was traced "
-                "on device %r; the graph is specialized to the example device "
-                "(invariant 6). Move the input to the traced device, or retrace."
-                % (str(_t.device), _dev)
-            )
-    pb, _names = _extract_param_buffers(mods)
-    _check_structure(pb, _names)
-    try:
-        out = list(call([*pb, *user_flat]))  # noqa: F821 (inlined composed entry point)
-    except AssertionError as _e:
-        # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
-        # mismatch; invariants 3 and 6). assert_size_stride raises one of two messages
-        # -- "expected size A==B, stride C==D at dim=N" or "wrong number of dimensions" --
-        # so match those. Any OTHER AssertionError (a user torch._assert, an internal
-        # inductor invariant) is re-raised unchanged so its real message is not mislabeled.
-        _m = str(_e)
-        if not (("expected size" in _m and "stride" in _m) or "wrong number of dimensions" in _m):  # noqa: B950
-            raise
-        _fail(
-            "precompile: a runtime tensor's shape or memory format differs from the "
-            "traced example; the inductor backend specializes on input shape and memory "
-            "format (invariants 3 and 6). The mismatch can be a user INPUT or a model "
-            "PARAMETER/BUFFER whose layout (memory format) differs from the example "
-            "weight, since the inductor backend also bakes each param/buffer's layout. "
-            "Pass the model/inputs in the example's shape and layout (.contiguous() to "
-            "match a contiguous example, or match the example weight's layout), or use "
-            "backend='eager'. Underlying: %s" % str(_e)
-        )
-    if GRAD_PARAM_INDICES:  # noqa: F821
-        n = len(GRAD_PARAM_INDICES)  # noqa: F821
-        grads = out[len(out) - n:]
-        out = out[:len(out) - n]
-        for idx, g in zip(GRAD_PARAM_INDICES, grads):  # noqa: F821
-            p = pb[idx]
-            if p.grad is None:
-                p.grad = g
-            else:
-                p.grad.add_(g)
-    return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))  # noqa: F821
-
-
-if __name__ == "__main__":
-    print("forward() is ready; call it with the model(s) and inputs the traced")
-    print("fn took, e.g. forward(model, x).")
-'''
+    forward_fn = getattr(driver, forward_fn_name)
+    blocks = [
+        inspect.getsource(driver._extract_param_buffers),
+        inspect.getsource(driver._fail),
+        inspect.getsource(driver._check_structure),
+        inspect.getsource(forward_fn).replace(
+            f"def {forward_fn_name}(", "def forward(", 1
+        ),
+    ]
+    body = "\n\n".join(block.rstrip() for block in blocks)
+    return "\n" + body + "\n\n\n" + _DRIVER_MAIN
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
@@ -1355,12 +1339,17 @@ class PrecompiledModule:
         # params' .grad as None.
         self._grad_param_indices: list[int] = []
         # Per user-input-leaf example shape, dtype, and device (None for a subclass /
-        # non-tensor leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
-        # Stride / memory format is enforced by the inductor artifact's own
-        # assert_size_stride, not recorded here. Populated by _compile().
-        self._user_input_shapes: list[tuple[int, ...] | None] = []
+        # non-tensor leaf; a marked-dynamic dim is None within the shape tuple); the drivers
+        # reject a runtime mismatch (invariants 3 and 6). Stride / memory format is enforced
+        # by the inductor artifact's own assert_size_stride, not recorded here. Populated by
+        # _compile().
+        self._user_input_shapes: list[tuple[int | None, ...] | None] = []
         self._user_input_dtypes: list[str | None] = []
         self._user_input_devices: list[str | None] = []
+        # Per user-input-leaf mark_unbacked min/max bounds (None for a leaf with no
+        # bounded marked dim, else {dim: (lo, hi)}). The drivers reject a runtime size
+        # outside the declared range (invariant 3). Populated by _compile().
+        self._user_input_bounds: list[Any] = []
         # Set only on the load() path, where we wrap a reconstructed callable.
         self._loaded_forward: Callable[..., object] | None = None
 
@@ -1393,6 +1382,11 @@ class PrecompiledModule:
                 f"precompile tracer={self._tracer!r} is not implemented yet; use "
                 "tracer='make_fx' (the default)."
             )
+        if self._backend == "eager" and _has_unbacked_marks(args):
+            raise NotImplementedError(
+                "precompile: mark_unbacked (dynamic shapes) is only supported with "
+                "backend='inductor'; eager + unbacked is not supported."
+            )
         capture = _capture(self._fn, args, self._decompositions)
         self._module_positions = capture.module_positions
         self._num_positional_args = capture.num_positional_args
@@ -1407,6 +1401,7 @@ class PrecompiledModule:
         self._user_input_shapes = capture.user_input_shapes
         self._user_input_dtypes = capture.user_input_dtypes
         self._user_input_devices = capture.user_input_devices
+        self._user_input_bounds = capture.user_input_bounds
         self._in_spec = capture.in_spec
         self._out_spec = capture.out_spec
         self._grad_param_indices = capture.grad_param_indices
@@ -1425,6 +1420,7 @@ class PrecompiledModule:
         # aliasing -- composed in, not reimplemented here) plus an opaque cache (the
         # save_cache_artifacts bundle that primes the inductor cache on load, or None
         # for uncacheable graphs).
+        import torch._inductor.config as _ind_config
         from torch._functorch import aot_autograd
         from torch._inductor.exc import InductorError
         from torch._inductor.standalone_compile import NoRunnableInductorModuleError
@@ -1436,13 +1432,20 @@ class PrecompiledModule:
         # guard is conservative (see the inlined driver checks): an input the graph never
         # reads gets no assert and stays layout-flexible, but a read input is asserted on
         # the example layout even for layout-agnostic ops (matmul/addmm), since precompile
-        # cannot recompile to specialize a new layout the way torch.compile would.
+        # cannot recompile to specialize a new layout the way torch.compile would. A
+        # dynamic (unbacked) capture additionally pins scalar_asserts so the make_fx
+        # ShapeEnv's runtime range asserts survive into the artifact.
         #
-        # This is an inductor config key, so it rides in as ``options`` (aot_autograd.
-        # compile_to_python merges it into the inductor config.patch it wraps the compile
-        # in) rather than being patched around the call. The graph is specialized to the
-        # example shapes.
+        # These are inductor config keys, so they ride in as ``options`` (aot_autograd.
+        # compile_to_python merges them into the inductor config.patch it wraps the
+        # compile in) rather than being patched around the call. The AOT layer detects
+        # dynamic (symbolic) shapes off the captured graph and threads the make_fx
+        # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
+        # no manual TracingContext to install: a static capture specializes to the
+        # example shapes, an unbacked capture keeps the symbols.
         options: dict[str, Any] = {"size_asserts": True}
+        if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
+            options["scalar_asserts"] = True
         try:
             self._graph_python, self._artifact_bytes = aot_autograd.compile_to_python(
                 capture.gm, capture.flat_args, options=options
@@ -1654,6 +1657,24 @@ class _PrecompileApi:
         ``decomposition_table`` during capture, so you can control how ATen ops are
         broken down in the captured graph. Defaults to ``None`` (make_fx's default).
 
+        Dynamic shapes are opt-in via ``torch._dynamo.decorators.mark_unbacked``
+        (inductor backend only), NOT a precompile kwarg: mark dims on the inputs before
+        calling, e.g. ``mark_unbacked(x, 0); precompile(fn, model, x)`` frees ``x``'s
+        batch dim. Marked dims are captured as UNBACKED symints, which cannot be guarded
+        on, so one artifact serves any runtime size of them (invariant 3); a graph that
+        needs to guard on / specialize a marked dim fails at capture with a
+        ``PrecompileError``. Dims sharing a ``shape_id`` reuse one symbol (equal by
+        construction); ``min``/``max`` become runtime asserts. Other dims stay static.
+        Dims that MUST be equal at runtime (e.g. two inputs combined by a broadcast that
+        requires equal sizes, ``model(a) + model(b)``) MUST be given a SHARED ``shape_id``
+        so a mismatch is rejected; marking two such dims INDEPENDENTLY currently bakes a
+        SILENT equal-size assumption and a runtime mismatch does NOT raise the loud failure
+        eager gives (invariant 3). This is a harvesting gap, not an inherent limit of the
+        standalone artifact: the capture ShapeEnv DOES record the equality (as a deferred
+        runtime assert, e.g. ``Eq(u0, u1)``), but precompile does not yet harvest/enforce
+        those relational asserts in the driver -- only the decorator's declared min/max feed
+        the runtime bound checks. A shared ``shape_id`` is the way to get the check today.
+
         Returns ``(python_code, cache)`` -- a self-contained, executable Python
         source string (the single source of truth for the calling convention) and a
         binary cache holding ONLY the backend artifact (NO metadata, NO weights).
@@ -1750,7 +1771,7 @@ class _PrecompileApi:
 
         # The whole calling convention (MODULE_POSITIONS, OUT_SPEC, USER_INPUT_*, PARAM_*,
         # BUFFER_*, IN_SPEC, ...) is consumed by the driver INLINED in python_code
-        # (_DRIVER_SOURCE / _EAGER_DRIVER_SOURCE), so the loaded object needs none of it.
+        # (emitted from torch._precompile_driver), so the loaded object needs none of it.
         # _parse_artifact_metadata still runs to validate python_code is a precompile
         # artifact and to read BACKEND for the cache-pairing check below.
         meta = _parse_artifact_metadata(python_code)

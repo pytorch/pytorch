@@ -67,6 +67,10 @@ jobs:
         with:
           python-version: ${{ inputs.setup_python_version }}
           freethreaded: ${{ inputs.freethreaded }}
+          # 3.15 has no stable release yet; setup_python_version is "3.15" and
+          # setup-python needs this to resolve the latest 3.15 beta. No-op for
+          # the exact stable versions the other Pythons pass.
+          allow-prereleases: true
       - uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ inputs.build_name }}

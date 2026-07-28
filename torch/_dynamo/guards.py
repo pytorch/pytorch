@@ -782,7 +782,7 @@ def from_numpy(a: Any) -> torch.Tensor:
 _async_collective_tensor_type: type | None = None
 
 
-def unwrap_async_collective_tensor(x: Any) -> Any:
+def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
     # Backing callable for UnwrapCollectiveTensorSource: yield an
     # AsyncCollectiveTensor's inner tensor and leave everything else unchanged,
     # so a graph traced on an ACT input is guarded against the unwrapped tensor.
@@ -798,7 +798,7 @@ def unwrap_async_collective_tensor(x: Any) -> Any:
         _async_collective_tensor_type is not None
         and type(x) is _async_collective_tensor_type
     ):
-        return x.elem
+        return x.elem  # type: ignore[attr-defined]
     return x
 
 
