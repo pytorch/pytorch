@@ -14,7 +14,7 @@ import importlib
 import logging
 import re
 import threading
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
     IndentedBuffer,
@@ -39,6 +39,7 @@ from torch._inductor.virtualized import V
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import GemmVariant
+    from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 
 
 log = logging.getLogger(__name__)
@@ -1073,7 +1074,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
-        local_reduce: tuple[str, int, int, str, str, str] | None = None,
+        local_reduce: GemmReductionPlan | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
     ) -> None:
@@ -1237,7 +1238,7 @@ class NVUniversalGemmKernel(Kernel):
             # Build epilogue args if needed (user-specific variable names)
             epi_args_expr = "None"
             epi_source_expr = '""'
-            aux_tensors_expr = "()"
+            aux_tensors: list[str] = []
             if self.epilogue_fn_code:
                 epilogue_kwargs = self._render_epilogue_kwargs()
                 epi_kwargs_str = "epilogue_fn=_EPILOGUE_FN_SRC"
@@ -1246,30 +1247,25 @@ class NVUniversalGemmKernel(Kernel):
                 code.writeline(f"epi_args = EpilogueArguments({epi_kwargs_str})")
                 epi_args_expr = "epi_args"
                 epi_source_expr = "_EPILOGUE_FN_SOURCE"
-                if self.epilogue_reads:
-                    aux_tensors_expr = "(" + ", ".join(self.epilogue_reads) + ",)"
+                aux_tensors.extend(self.epilogue_reads)
 
             run_variant_kwargs = "_VARIANT_KWARGS"
             if self.local_reduce is not None:
-                (
-                    reduce_name,
-                    reduce_group,
-                    reduce_axis,
-                    reduce_type,
-                    reduce_source,
-                    _,
-                ) = self.local_reduce
+                reduction = self.local_reduce
+                reduce_name = cast(str, reduction.reduction_output)
                 reduce_ptr = f"out_ptr{output_buffers.index(reduce_name)}"
                 run_variant_kwargs = (
                     "_VARIANT_KWARGS | {"
                     f"'local_reduce_out': {reduce_ptr}, "
-                    f"'local_reduce_group': {reduce_group}, "
-                    f"'local_reduce_axis': {reduce_axis}, "
-                    f"'local_reduce_type': {reduce_type!r}, "
-                    f"'local_reduce_source': {reduce_source!r}"
+                    f"'local_reduce_group': {reduction.group}, "
+                    f"'local_reduce_axis': {reduction.axis}, "
+                    f"'local_reduce_type': {reduction.reduction_type!r}, "
+                    f"'local_reduce_source': {reduction.source_type!r}"
                     "}"
                 )
-                aux_tensors_expr = f"({reduce_ptr},)"
+                aux_tensors.append(reduce_ptr)
+
+            aux_tensors_expr = f"({', '.join(aux_tensors)},)" if aux_tensors else "()"
 
             code.writeline("_nvgemm_run(")
             with code.indent():
@@ -1328,13 +1324,13 @@ class NVUniversalGemmKernel(Kernel):
         """
         if not self.epilogue_writes:
             primary_output = (
-                self.local_reduce[5]
+                self.local_reduce.primary_output
                 if self.local_reduce is not None
                 else self.output_node.get_name()
             )
             ordered = [primary_output]
             if self.local_reduce is not None:
-                ordered.append(self.local_reduce[0])
+                ordered.extend(self.local_reduce.auxiliary_outputs)
             return ordered
         d_buf = (self.epilogue_var_renames or {}).get("D")
         ordered: list[str] = []
@@ -1343,8 +1339,12 @@ class NVUniversalGemmKernel(Kernel):
         for w in self.epilogue_writes:
             if w != d_buf and w not in ordered:
                 ordered.append(w)
-        if self.local_reduce is not None and self.local_reduce[0] not in ordered:
-            ordered.append(self.local_reduce[0])
+        if self.local_reduce is not None:
+            ordered.extend(
+                output
+                for output in self.local_reduce.auxiliary_outputs
+                if output not in ordered
+            )
         return ordered
 
     def _render_epilogue_kwargs(self) -> str:
@@ -1386,7 +1386,7 @@ class NVUniversalGemmKernel(Kernel):
         wrapper = V.graph.wrapper_code
 
         if self.local_reduce is not None:
-            primary_name = self.local_reduce[5]
+            primary_name = self.local_reduce.primary_output
             V.graph.removed_buffers.discard(primary_name)
             primary_output = V.graph.get_buffer(primary_name)
             wrapper.codegen_allocation(
