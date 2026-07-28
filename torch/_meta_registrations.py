@@ -1144,7 +1144,7 @@ def squareCheckInputs(self: Tensor, f_name: str):
             f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
         )
     # Use torch._check to defer validation to runtime for unbacked symbolic dimensions.
-    torch._check(
+    torch._check_user_error(
         self.size(-1) == self.size(-2),
         lambda: f"{f_name}: A must be batches of square matrices, "
         f"but they are {self.size(-2)} by {self.size(-1)} matrices",
@@ -2248,10 +2248,10 @@ def _pad2d_common(input, padding, *, is_reflection):
         )
 
     torch._check(
-        output_w >= 1 or output_h >= 1,
+        sym_and(output_w >= 1, output_h >= 1),
         lambda: (
-            f"input (H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output H: {output_h} W: {output_w}"
+            f"Calculated output H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -2383,13 +2383,11 @@ def _pad3d_common(input, padding, *, is_reflection):
             ),
         )
 
-    from torch.fx.experimental.symbolic_shapes import sym_or
-
     torch._check(
-        sym_or(output_w >= 1, output_h >= 1, output_d >= 1),
+        sym_and(output_w >= 1, output_h >= 1, output_d >= 1),
         lambda: (
-            f"input (D: {input_d} H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
+            f"Calculated output D: {output_d} H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input D: {input_d}, H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -3845,10 +3843,10 @@ def meta_index_Tensor(self, indices):
     for i, index in enumerate(indices):
         if index is not None:
             torch._check(
-                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                index.dtype in [torch.long, torch.int, torch.uint8, torch.bool],
                 lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
-            if index.dtype in [torch.int8, torch.bool]:
+            if index.dtype in [torch.uint8, torch.bool]:
                 nonzero = index.nonzero()
                 k = len(result)
                 torch._check_index(
@@ -6624,7 +6622,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     if torch.version.hip and torch.cuda.is_available():
         """Please see: https://github.com/pytorch/pytorch/issues/146848
-        longsumexp last dim should be seq length
+        logsumexp last dim should be seq length
         """
         logsumexp_dim = M if compute_log_sumexp else 0
     else:
@@ -6666,7 +6664,9 @@ def meta__scaled_dot_product_efficient_backward(
     scale: float | None = None,
 ):
     batch_size = query.size(0)
-    num_heads = query.size(1)
+    num_heads_q = query.size(1)
+    num_heads_k = key.size(1)
+    num_heads_v = value.size(1)
     max_q = query.size(2)
     head_dim = query.size(3)
     head_dim_v = value.size(3)
@@ -6674,19 +6674,19 @@ def meta__scaled_dot_product_efficient_backward(
     max_k = key.size(2)
 
     grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
+        (batch_size, num_heads_q, max_q, head_dim),
         (0, 2, 1, 3),
         dtype=query.dtype,
         device=query.device,
     )
     grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads_k, max_k, head_dim),
         (0, 2, 1, 3),
         dtype=key.dtype,
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim_v),
+        (batch_size, num_heads_v, max_k, head_dim_v),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
@@ -6971,9 +6971,16 @@ def meta__efficient_attention_forward(
             )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
+
+    if torch.version.hip is not None:
+        # ROCm efficient-attention backends return compact LSE. CUDA's
+        # memory-efficient attention kernel pads LSE to its kernel alignment.
+        logsumexp_dim = actual_max_seqlen_q if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = (
+            math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+        )
+
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
@@ -7020,6 +7027,10 @@ def meta__efficient_attention_backward(
         torch._check(
             query.shape[3] == key.shape[3],
             lambda: "embedding dim must match for `shared_storage_dqdkdv",
+        )
+        torch._check(
+            query.shape[2] == key.shape[2],
+            lambda: "num heads must match for `shared_storage_dqdkdv",
         )
         chunk = torch.empty(
             (*query.shape[0:-2], 3, query.shape[-2], query.shape[-1]),
@@ -8632,10 +8643,8 @@ def _grouped_mm_fp16_cublaslt_supported(
     if torch.version.cuda:
         parts = torch.version.cuda.split(".")
         cuda_version = (int(parts[0]), int(parts[1]))
-    if device_capability[0] == 9:
-        return cuda_version >= (13, 3)
-    return cuda_version >= (13, 2) and (
-        device_capability[0] == 10 or device_capability == (11, 0)
+    return cuda_version >= (13, 3) and (
+        device_capability[0] >= 9 and device_capability[0] <= 11
     )
 
 

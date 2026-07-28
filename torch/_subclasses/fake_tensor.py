@@ -24,6 +24,7 @@ from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_impl import FakeImplError
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
@@ -81,6 +82,14 @@ pytree = torch.utils._pytree
 T = TypeVar("T")
 
 aten = torch._ops.ops.aten
+
+# Only these immutable core operator boundaries contain audited
+# `_check_user_error` validation sites. Mutable/custom fake implementations
+# must suppress the marker even when they dispatch one of these operators.
+_USER_ERROR_META_OPS = {
+    aten.expand.default,
+    aten.linalg_inv_ex.default,
+}
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -192,7 +201,7 @@ class MetadataMismatchError(RuntimeError):
     reason: str
 
 
-class FakeTensorInternalError(RuntimeError):
+class FakeTensorInternalError(FakeImplError):
     pass
 
 
@@ -2870,7 +2879,11 @@ class FakeTensorMode(TorchDispatchMode):
                 else self.shape_env.ignore_fresh_unbacked_symbols
             )
 
-            with self, maybe_ignore_fresh_unbacked_symbols():
+            with (
+                torch._suppress_torch_check_user_error(),
+                self,
+                maybe_ignore_fresh_unbacked_symbols(),
+            ):
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
@@ -2940,6 +2953,13 @@ class FakeTensorMode(TorchDispatchMode):
                     func,
                     exc,
                 )
+            except RuntimeError as exc:
+                # This auxiliary execution uses trace-time example values. Its
+                # errors cannot select a user handler without baking that
+                # value-dependent branch into the graph.
+                raise FakeTensorInternalError(
+                    "propagate_real_tensors real execution raised RuntimeError"
+                ) from exc
 
             if not is_builtin:
                 mutation_checker.check()  # type: ignore[possibly-undefined]
@@ -3047,7 +3067,10 @@ class FakeTensorMode(TorchDispatchMode):
         if has_symbolic_sizes:
             fast_impl = get_fast_op_impls().get(func)
             if fast_impl is not None:
-                return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
+                with torch._suppress_torch_check_user_error():
+                    return maybe_propagate_real_tensors(
+                        fast_impl(self, *args, **kwargs)
+                    )
 
         if func is torch.ops.aten.to_dense.default:
             # The registered fake op impl handles the usual path, but symbolic
@@ -3056,9 +3079,10 @@ class FakeTensorMode(TorchDispatchMode):
             # handle this before generic decomposition.
             dtype = args[1] if len(args) > 1 else kwargs.get("dtype")
             masked_grad = kwargs.get("masked_grad")
-            op_impl_out = maybe_to_dense_mkldnn(
-                self, args[0], dtype=dtype, masked_grad=masked_grad
-            )
+            with torch._suppress_torch_check_user_error():
+                op_impl_out = maybe_to_dense_mkldnn(
+                    self, args[0], dtype=dtype, masked_grad=masked_grad
+                )
             if op_impl_out is not NotImplemented:
                 return maybe_propagate_real_tensors(cast(FakeTensor, op_impl_out))
 
@@ -3084,12 +3108,14 @@ class FakeTensorMode(TorchDispatchMode):
                     and all(not is_sparse_any(e) for e in flat_arg_fake_tensors)
                 )
             ):
-                with self:
+                # decomposition_table is mutable and may contain user-provided
+                # fake substitutes even for aten operators.
+                with self, torch._suppress_torch_check_user_error():
                     return maybe_propagate_real_tensors(
                         decomposition_table[func](*args, **kwargs)
                     )
 
-            with self:
+            with self, torch._suppress_torch_check_user_error():
                 # Decomposes CompositeImplicitAutograd ops
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
@@ -3114,7 +3140,8 @@ class FakeTensorMode(TorchDispatchMode):
         profiles = torch._dynamo.config._custom_ops_profile
         if profiles is not None:
             if func in profiles.data:
-                return profiles.generic_fake_kernel(func, self, *args, **kwargs)
+                with torch._suppress_torch_check_user_error():
+                    return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
         if (
             self.propagate_real_tensors
@@ -3124,7 +3151,8 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             # Automatically infer a Fake kernel if there isn't one.
             if not library_utils.has_fake_kernel(func):
-                result = inferred_fake_kernel_from_real_out(self, func, real_out)
+                with torch._suppress_torch_check_user_error():
+                    result = inferred_fake_kernel_from_real_out(self, func, real_out)
 
                 dtrace_structured(
                     "missing_fake_kernel",
@@ -3142,7 +3170,11 @@ class FakeTensorMode(TorchDispatchMode):
         if maybe_fake_impl:
             try:
                 ctx = torch._library.fake_impl.FakeImplCtx(self, func)
-                with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+                with (
+                    torch._suppress_torch_check_user_error(),
+                    torch._library.fake_impl.set_ctx_getter(lambda: ctx),
+                    self,
+                ):
                     result = maybe_fake_impl(*args, **kwargs)
                     return maybe_propagate_real_tensors(result)
 
@@ -3155,7 +3187,10 @@ class FakeTensorMode(TorchDispatchMode):
                     and not library_utils.is_builtin(func)
                     and self.shape_env is not None
                 ):
-                    result = inferred_fake_kernel_from_real_out(self, func, real_out)
+                    with torch._suppress_torch_check_user_error():
+                        result = inferred_fake_kernel_from_real_out(
+                            self, func, real_out
+                        )
 
                     dtrace_structured(
                         "missing_fake_kernel",
@@ -3172,8 +3207,9 @@ class FakeTensorMode(TorchDispatchMode):
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
-                # pyrefly: ignore [bad-argument-count]
-                op_impl_out = op_impl(self, func, *args, **kwargs)
+                with torch._suppress_torch_check_user_error():
+                    # pyrefly: ignore [bad-argument-count]
+                    op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out is not NotImplemented:
                     # pyrefly: ignore [bad-return]
                     return maybe_propagate_real_tensors(op_impl_out)
@@ -3206,7 +3242,12 @@ class FakeTensorMode(TorchDispatchMode):
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         # It's possible that the kernel will return NotImplementedError
         try:
-            with in_kernel_invocation_manager(self):
+            user_error_context = (
+                contextlib.nullcontext
+                if func in _USER_ERROR_META_OPS
+                else torch._suppress_torch_check_user_error
+            )
+            with in_kernel_invocation_manager(self), user_error_context():
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)

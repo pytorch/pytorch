@@ -12,6 +12,14 @@ from torch._library.utils import Kernel, RegistrationHandle
 log = logging.getLogger(__name__)
 
 
+class FakeImplError(RuntimeError):
+    """Base class for fake-execution failures that do not mirror eager errors."""
+
+
+class MissingFakeImplError(FakeImplError):
+    """Raised when tracing requires a custom operator's missing fake implementation."""
+
+
 class FakeImplHolder:
     """A holder where one can register a fake impl to."""
 

@@ -347,6 +347,31 @@ class AbstractCollectivesTest(C10dBackendTest):
             work = dist.barrier(async_op=async_op)
             self._wait(work, async_op)
 
+    def test_sync_barrier_blocks_host_on_stream(self):
+        # A synchronous barrier must host-block the CPU thread until prior work
+        # on the current stream has completed, not merely stream-order after it.
+        # Downstream code relies on this (e.g. the flashinfer trtllm one-shot
+        # Lamport all_reduce clears its IPC buffers on the stream, then issues a
+        # barrier before the first all_reduce; a stream-order-only barrier lets
+        # the all_reduce race the clear and both ranks spin forever). Enqueue a
+        # long-running kernel, confirm the stream is still busy, then run a
+        # synchronous barrier: once it returns the stream must have drained
+        # (stream.query()). Only the synchronous path (async_op=False) host-
+        # blocks; an async barrier stays stream-ordered and is not tested here.
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} host-block test requires CUDA")
+        self._init_pg()
+        stream = torch.cuda.current_stream()
+        torch.cuda._sleep(1_000_000_000)
+        self.assertFalse(
+            stream.query(), "precondition: enqueued work should leave stream busy"
+        )
+        self.assertIsNone(dist.barrier(async_op=False))
+        self.assertTrue(
+            stream.query(),
+            "synchronous barrier must host-block until prior stream work completes",
+        )
+
     def test_all_reduce_coalesced(self):
         self._init_pg()
         for dtype in self.dtypes:

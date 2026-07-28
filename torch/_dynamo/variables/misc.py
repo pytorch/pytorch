@@ -627,19 +627,13 @@ class ExceptionVariable(VariableTracker):
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
         self.unsafe_to_inspect: bool = False
-        self.fake_tensor_error: BaseException | None = None
-        self.fake_mode: Any | None = None
         self.fake_tensor_explanation: str = ""
 
     def mark_unsafe_to_inspect(
         self,
-        fake_tensor_error: BaseException | None = None,
-        fake_mode: Any | None = None,
         fake_tensor_explanation: str = "",
     ) -> None:
         self.unsafe_to_inspect = True
-        self.fake_tensor_error = fake_tensor_error
-        self.fake_mode = fake_mode
         self.fake_tensor_explanation = fake_tensor_explanation
 
     def check_safe_to_inspect(self) -> None:
@@ -2473,12 +2467,17 @@ class LoggingLoggerVariable(VariableTracker):
         if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
 
+        logger_cls = type(self.value)
+        logger_cls_name = f"{logger_cls.__module__}.{logger_cls.__qualname__}"
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
             context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
             explanation="logging.Logger methods are not supported for non-export cases.",
             hints=[
-                "Add the logging method to `torch._dynamo.config.ignore_logging_functions`.",
+                "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.",
+                f"For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
+                f"Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`{name}`) is checked against the ignore set. Ignoring a method that `{name}` calls internally has no effect.",
+                "If you need the log side effect to run, then you can try one of (1) `torch._higher_order_ops.print(...)`, (2) wrap the logging call in a custom op (marked as mutable), or (3) preserve the logging contents and move the logging call outside the compiled region.",
             ],
         )
 

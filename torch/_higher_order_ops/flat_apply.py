@@ -8,6 +8,7 @@ import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_impl import FakeImplError
 from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator
 
@@ -15,6 +16,10 @@ from torch._ops import HigherOrderOperator
 _R = TypeVar("_R")
 _P = ParamSpec("_P")
 _Ts = TypeVarTuple("_Ts")
+
+
+class NotGraphableError(FakeImplError):
+    pass
 
 
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
@@ -40,7 +45,7 @@ def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     flat_args, spec = pytree.tree_flatten(stuff)
     for arg in flat_args:
         if not is_graphable(arg):
-            raise RuntimeError(
+            raise NotGraphableError(
                 f"Expected all pytree.tree_leaves of (args, kwargs) to be graphable types, but found "
                 f"non-fx-graphable type {type(arg)}. If this type is meant to be constant, mark it as "
                 f"via pytree.register_constant; otherwise, register it as a pytree."

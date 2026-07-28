@@ -206,6 +206,22 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
+_force_eager_nested_compile = threading.local()
+
+
+@contextlib.contextmanager
+def _use_eager_on_nested_compile() -> Generator[None, None, None]:
+    """Run torch.compile wrappers eagerly inside compiler-internal tracing."""
+    prior = getattr(_force_eager_nested_compile, "depth", 0)
+    _force_eager_nested_compile.depth = prior + 1
+    try:
+        yield
+    finally:
+        _force_eager_nested_compile.depth = prior
+
+
+def _is_eager_on_nested_compile() -> bool:
+    return getattr(_force_eager_nested_compile, "depth", 0) > 0
 
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
@@ -686,18 +702,26 @@ def always_false() -> bool:
     return False
 
 
+def _static_getattr(obj: Any, name: str, default: Any = None) -> Any:
+    # Not inspect.getattr_static: this runs while the eval frame callback is
+    # installed, so its Python frames land in Dynamo's frame counters.
+    try:
+        return object.__getattribute__(obj, name)
+    except AttributeError:
+        return default
+
+
 def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
-    # getattr_static so probing for these internal attributes never runs a
-    # user-defined __getattr__, which may not tolerate unknown names.
+    # Probe statically so these lookups never run a user-defined __getattr__,
+    # which may not tolerate unknown names.
     unaltered_fn = fn
     while (
-        inspect.getattr_static(unaltered_fn, "_torchdynamo_orig_callable", None)
-        is not None
+        _static_getattr(unaltered_fn, "_torchdynamo_orig_callable") is not None
         # Only follow the chain if _torchdynamo_wrapper_id matches id(fn).
         # This prevents following chains in two cases:
         # 1. Bound methods: id(bound_method) != id(wrapper_function), so we
@@ -705,8 +729,7 @@ def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
         # 2. functools.wraps copies: When functools.wraps copies
         #    _torchdynamo_orig_callable from a wrapped function, the copied
         #    _torchdynamo_wrapper_id won't match the outer wrapper's id.
-        and inspect.getattr_static(unaltered_fn, "_torchdynamo_wrapper_id", None)
-        == id(unaltered_fn)
+        and _static_getattr(unaltered_fn, "_torchdynamo_wrapper_id") == id(unaltered_fn)
     ):
         # pyrefly: ignore [missing-attribute]
         unaltered_fn = unaltered_fn._torchdynamo_orig_callable
@@ -1113,6 +1136,25 @@ class _TorchDynamoContext:
             prior = set_eval_frame(None)
             prior_error_on_nested_compile: bool | None = None
             fullgraph_count_enabled = False
+            # Fake propagation and AOT metadata collection execute user
+            # subclass code under active fake/functional modes. Nested compile
+            # must run the original function in those regions.  Still honor
+            # explicit/internal requests to compile during FX tracing: HOP export
+            # depends on its internal compile to preserve HOPs, and some tests
+            # intentionally enable force_compile_during_fx_trace to get nested
+            # subgraphs.
+            if (
+                _is_eager_on_nested_compile()
+                and not config.force_compile_during_fx_trace
+            ):
+                from torch._higher_order_ops.utils import _in_hop_compile
+
+                if not _in_hop_compile():
+                    try:
+                        return fn(*args, **kwargs)
+                    finally:
+                        _maybe_set_eval_frame(prior)
+
             if self.fullgraph:
                 prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
                     torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
@@ -1182,14 +1224,20 @@ class _TorchDynamoContext:
                 saved_dynamic_layer_stack_depth = (
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
-                saved_include_set = torch._C._dispatch_tls_local_include_set()
-                saved_exclude_set = torch._C._dispatch_tls_local_exclude_set()
 
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
-                with torch._C._ForceDispatchKeyGuard(
-                    saved_include_set, saved_exclude_set
-                ):
+                # Snapshot the local dispatch key set onto a C++ thread-local
+                # stack so it can be restored after the compiled call, matching
+                # the old _ForceDispatchKeyGuard behavior. Keeping the snapshot
+                # in C++ avoids constructing pybind11 DispatchKeySet /
+                # context-manager instances on every compiled call. The restore
+                # runs in the outer finally below (after the inner finally, i.e.
+                # after pop_dynamic_layer_stack) so the save/restore stack stays
+                # balanced even if the inner finally itself raises (e.g. the
+                # fullgraph "found no compiled frames" error).
+                torch._C._dynamo_save_local_dispatch_key_set()
+                try:
                     call_succeeded = False
                     try:
                         result = fn(*args, **kwargs)
@@ -1245,6 +1293,11 @@ class _TorchDynamoContext:
                         )
                         for cleanup in cleanups:
                             cleanup()
+                finally:
+                    # Restore the local dispatch key set snapshotted above. In an
+                    # outer finally so it runs even if the inner finally raised,
+                    # keeping the save/restore stack balanced.
+                    torch._C._dynamo_restore_local_dispatch_key_set()
                 return result
             finally:
                 if fullgraph_count_enabled:
@@ -1450,33 +1503,39 @@ class DisableContext(_TorchDynamoContext):
             )
 
         def _fn(*args: Any, **kwargs: Any) -> Any:
+            # Hot path (e.g. around custom operators); keep it minimal.
             prior = set_eval_frame(None)
             try:
-                _maybe_set_eval_frame(_callback_from_stance(self.callback))
+                # disable => self.callback is None; _callback_from_stance(None) is
+                # None ("off") for most stances but False (run-only) for
+                # eager_on_recompile. Install only when non-None (skips the
+                # justknob-guarded _maybe_set_eval_frame on the common path).
+                callback = _callback_from_stance(self.callback)
+                if callback is not None:
+                    _maybe_set_eval_frame(callback)
                 try:
-                    fn_name = getattr(fn, "__name__", type(fn).__name__)
-                    # Skip annotation for __torch_dispatch__ to avoid polluting
-                    # node metadata during export. The disable on __torch_dispatch__
-                    # is an internal implementation detail, not user-facing.
-                    # TODO: Ideally we shouldn't need this check because nested
-                    # annotate() calls shouldn't override existing keys.
-                    if (
-                        torch.compiler.is_exporting()
-                        and fn_name != "__torch_dispatch__"
-                    ):
-                        with fx_traceback.annotate(
-                            {
-                                "_torchdynamo_disable": True,
-                                "_torchdynamo_disable_recursive": True,
-                                "_torchdynamo_disable_method": fn_name,
-                            }
-                        ):
-                            return fn(*args, **kwargs)
+                    # Only export needs the annotation work.
+                    if torch.compiler.is_exporting():
+                        fn_name = getattr(fn, "__name__", type(fn).__name__)
+                        # Skip annotation for __torch_dispatch__ (internal detail).
+                        if fn_name != "__torch_dispatch__":
+                            with fx_traceback.annotate(
+                                {
+                                    "_torchdynamo_disable": True,
+                                    "_torchdynamo_disable_recursive": True,
+                                    "_torchdynamo_disable_method": fn_name,
+                                }
+                            ):
+                                return fn(*args, **kwargs)
                     return fn(*args, **kwargs)
                 finally:
-                    set_eval_frame(None)
+                    if callback is not None:
+                        set_eval_frame(None)
             finally:
-                _maybe_set_eval_frame(prior)
+                # Restore via _maybe_set_eval_frame so re-installing honors the
+                # enable_compiler_set_eval_frame killswitch; skip when prior None.
+                if prior is not None:
+                    _maybe_set_eval_frame(prior)
 
         # Under some circumstances (e.g. precompile) we can end up calling @disable
         # decorator in generated bytecode and trigger recompile. This is due to the

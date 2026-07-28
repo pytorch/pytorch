@@ -499,14 +499,10 @@ class FakeTensorObservedException(ObservedException):
     def __init__(
         self,
         *args: Any,
-        fake_tensor_error: BaseException | None = None,
-        fake_mode: Any | None = None,
         fake_tensor_explanation: str = "",
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.fake_tensor_error = fake_tensor_error
-        self.fake_mode = fake_mode
         self.fake_tensor_explanation = fake_tensor_explanation
 
 
@@ -550,8 +546,6 @@ def raise_observed_exception(
     args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
     unsafe_to_inspect: bool = False,
-    fake_tensor_error: BaseException | None = None,
-    fake_mode: Any | None = None,
     fake_tensor_explanation: str = "",
 ) -> NoReturn:
     from .variables import ExceptionVariable
@@ -563,9 +557,7 @@ def raise_observed_exception(
                 "unsafe_to_inspect exceptions cannot carry args or kwargs"
             )
         exception_vt = ExceptionVariable(exc_type, [])
-        exception_vt.mark_unsafe_to_inspect(
-            fake_tensor_error, fake_mode, fake_tensor_explanation
-        )
+        exception_vt.mark_unsafe_to_inspect(fake_tensor_explanation)
     else:
         if args:
             args_: list[VariableTracker] = [

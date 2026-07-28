@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.utils.checkpoint import checkpoint_sequential
 
 
@@ -756,6 +757,27 @@ print(torch.xpu.is_initialized())
         self.assertEqual(src_device, torch.xpu.current_device())
         self.assertEqual(src_prev_stream, torch.xpu.current_stream())
         self.assertEqual(dst_prev_stream, torch.xpu.current_stream(dst_device))
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_sleep(self):
+        # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
+        cycles = torch.xpu.clock_rate() * 1_000_000
+        # Some Xe GPU's bundled IGC is too old to support it.
+        if not Xe2_Or_Later:
+            with self.assertRaisesRegex(
+                NotImplementedError, "is not supported on this device"
+            ):
+                torch.xpu._sleep(cycles)
+            return
+        # Drain the stream to a known idle state, then verify _sleep() enqueues
+        # asynchronously: stream should be busy right after the call and idle only
+        # after synchronize() completes.
+        torch.xpu.synchronize()
+        self.assertTrue(torch.xpu.current_stream().query())
+        torch.xpu._sleep(cycles)
+        self.assertFalse(torch.xpu.current_stream().query())
+        torch.xpu.synchronize()
+        self.assertTrue(torch.xpu.current_stream().query())
 
     def test_generator(self):
         torch.manual_seed(2024)

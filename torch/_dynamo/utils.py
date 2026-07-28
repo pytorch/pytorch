@@ -803,7 +803,7 @@ def dynamo_timed(
 
     cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
-        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        wc_name = waitcounter_name_override or key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
@@ -1340,7 +1340,7 @@ def lazily_unpack(
     iterable: VariableTracker,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+    from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
@@ -1349,7 +1349,7 @@ def lazily_unpack(
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -3982,12 +3982,12 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
 _INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS: tuple[type[BaseException], ...] = (
     # These signal fake/meta execution bookkeeping failures, not eager
     # RuntimeErrors from the user op. New fake tensor internal RuntimeError
-    # subclasses must be listed here or converted to FakeTensorInternalError.
+    # subclasses must be listed here or derive from FakeImplError.
     torch._library.fake_profile.MissingOpProfile,
+    torch._library.fake_impl.FakeImplError,
     torch._subclasses.fake_tensor.DataDependentOutputException,
     torch._subclasses.fake_tensor.DynamicOutputShapeException,
     torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError,
-    torch._subclasses.fake_tensor.FakeTensorInternalError,
     torch._subclasses.fake_tensor.MetadataMismatchError,
     torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
     torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
@@ -3996,8 +3996,19 @@ _INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS: tuple[type[BaseException], ...] = (
 
 
 def _can_raise_fake_runtime_error_to_user(cause: BaseException) -> bool:
-    return isinstance(cause, RuntimeError) and not isinstance(
-        cause, _INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS
+    # Exact RuntimeError is ambiguous: fake execution may use it for internal
+    # failures that eager execution would never raise. Core validation sites
+    # must explicitly mark exact instances after auditing eager parity. An
+    # explicit non-internal subclass is also an opt-in to routing by type.
+    marked_user_error = (
+        type(cause) is RuntimeError
+        and cause.__dict__.get("_torch_check_user_error")
+        is torch._TORCH_CHECK_USER_ERROR
+    )
+    return (
+        isinstance(cause, RuntimeError)
+        and (type(cause) is not RuntimeError or marked_user_error)
+        and not isinstance(cause, _INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS)
     )
 
 
@@ -4101,7 +4112,9 @@ def _get_fake_value_impl(
         )
 
     try:
-        with fake_mode, enable_python_dispatcher():
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
+        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -4229,8 +4242,6 @@ def _get_fake_value_impl(
                 type(runtime_error),
                 tx,
                 unsafe_to_inspect=True,
-                fake_tensor_error=cause,
-                fake_mode=fake_mode,
                 fake_tensor_explanation=msg,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
@@ -4247,7 +4258,9 @@ def _get_fake_value_impl(
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # type: ignore[unbound-name]
         )
 
     if (
