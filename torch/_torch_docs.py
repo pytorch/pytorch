@@ -14415,8 +14415,9 @@ built on it draw from the same stream as, and compose with, the built-in
 random operations. Only Philox-based generators (currently CUDA) support this
 method.
 
-**What the reservation grants.** With ``effective_offset = offset +
-intragraph_offset`` (a uint64 sum that wraps at ``2**64``), the caller owns
+**What the reservation grants.** With ``effective_offset =
+(uint64(offset) + uint64(intragraph_offset)) % 2**64`` (both operands
+reinterpreted back from int64 to uint64 first; see below), the caller owns
 the Philox counter values ``effective_offset / 4`` through
 ``effective_offset / 4 + ceil(increment / 4) - 1`` (the counter advances once
 per 4 generated values), at the fixed ``seed``, for **every** subsequence.
