@@ -524,6 +524,8 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
   return output_t;
 }
 
+// True when dims lo..hi of t can merge into a single dim whose stride is
+// t.stride(hi), i.e. the reduction can treat them as one flat row index.
 static bool strides_collapse(const Tensor& t, int lo, int hi) {
   for (int i = hi; i > lo; i--) {
     if (t.stride(i - 1) != t.stride(i) * t.size(i)) {
@@ -857,11 +859,16 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 // Unified host-side dispatch for value-preserving reductions on MPS, shared
 // by sum/nansum/mean/count_nonzero and min/max/all/any. Kernel name pattern
 // is always `{prefix}reduction_{variant}_{TI}_{TO}` with variant in
-// `""/"outer"/"inner"`. Selects among four code paths:
-//   1. Outer-dim kernel (dim=0 on contiguous input).
-//   2. Inner-dim kernel (last dim on contiguous input).
-//   3. Two-pass full reduction (scalar output, large input).
-//   4. Generic single-pass fallback.
+// `""/"outer"/"inner"/"inner_chunk"/"flat"/"strided"`; every op/dtype pair
+// with a base kernel also has every variant. Selects among these code paths:
+//   1. Last-dim kernels, for contiguous input or a strided view whose batch
+//      dims collapse to one row stride: inner_chunk for short rows, split-K
+//      two-pass for skinny-M/huge-K, inner otherwise.
+//   2. Outer-dim kernel (dim=0 on contiguous input).
+//   3. Full reduction of a 2D-collapsible strided input: per-row partials
+//      via the path-1 kernels, then one combine dispatch.
+//   4. Two-pass full reduction (scalar output, large input).
+//   5. Generic single-pass fallback.
 struct ReductionDispatch {
   std::string prefix; // "sum_", "nansum_", "count_nonzero_", "min_", "max_",
                       // "all_", "any_".
@@ -952,6 +959,9 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
     return best;
   };
+  // Smallest power-of-two lane count L keeping at most 16 elements per lane;
+  // the chunk kernel then packs 32 / L rows into one simdgroup instead of
+  // letting a short row idle most of its 32 lanes.
   auto pick_lanes = [](uint32_t k) -> uint32_t {
     uint32_t l = 1;
     while (l < 32u && c10::metal::ceil_div(k, l) > 16u) {
@@ -991,6 +1001,9 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
     getMPSProfiler().endProfileKernel(ps);
   };
+  // Segments per row G for split-K: aim for ~2048 partials (M * G) so pass 1
+  // fills the GPU, cap so a segment keeps >= 64 elements, then round so the
+  // segments come out equal-sized.
   auto pick_split_segments = [](uint32_t M, uint32_t K) -> uint32_t {
     const auto cap = std::min<uint32_t>(2048u, c10::metal::ceil_div(K, 64u));
     const auto g0 = std::clamp<uint32_t>(c10::metal::ceil_div(2048u, std::max(M, 1u)), 2u, std::max(cap, 2u));
@@ -1006,8 +1019,15 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       reduced_dim = d;
     }
   }
+  // Two-pass paths divide on the final pass only, while the accumulator is
+  // still in opmath_t; sum-family kernels always take the divisor buffer, so
+  // pass 1 binds a no-op 0 (value ops take none, hence the optional).
   const std::optional<float> p1_div = opts.divisor.has_value() ? std::optional<float>(0.0f) : std::nullopt;
 
+  // Last-dim reduction over a strided view whose batch dims collapse to one
+  // row stride (transposes, slices, ::k columns): same kernels and routing
+  // as the contiguous block below, indexing rows with [sK, sRow]. The
+  // kernels index in uint32, which bounds the addressable span.
   if (output.numel() > 1 && !input_orig.is_contiguous() && output.is_contiguous()) {
     if (num_reduced == 1 && reduced_dim == nd - 1 && nd >= 2) {
       const bool collapses = strides_collapse(input_orig, 0, nd - 2);
@@ -1038,6 +1058,9 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           });
           return;
         }
+        // Skinny-M/huge-K: one simdgroup per row (8 per threadgroup) would
+        // leave the GPU under-occupied below 64 threadgroups, so split each
+        // row into G segments and fold the [M, G] partials in pass 2.
         if (c10::metal::ceil_div(M, 8u) < 64u && K >= 2048u) {
           const auto G = pick_split_segments(M, K);
           auto partials = at::empty({(int64_t)M, (int64_t)G}, output.options().dtype(opts.partial_dtype));
@@ -1140,6 +1163,9 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         });
         return;
       }
+      // Same skinny-M/huge-K split as the strided block above, but pass 1
+      // reuses the plain inner kernel on M * G rows of length N / G, which
+      // is only a relabeling of the buffer when G divides N exactly.
       if (c10::metal::ceil_div(M, 8u) < 64u && N >= 2048u) {
         const auto g_cap = std::min(N / 512u, std::max(2u, 16384u / std::max(M, 1u)));
         const auto G = largest_divisor_leq(N, g_cap);
@@ -1173,6 +1199,11 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
   }
 
+  // Full reduction of a 2D-collapsible strided input: reduce each row to
+  // M * G partials in place (instead of the generic strided pass for sum or
+  // a .contiguous() copy for min/max/any/all), then fold the partials with
+  // one 32-lane dispatch. M is capped so that final single-simdgroup pass
+  // stays negligible; negative strides are excluded by uint32 indexing.
   if (output.numel() == 1 && !input_orig.is_contiguous() && nd >= 1) {
     const bool collapses = strides_collapse(input_orig, 0, nd - 2);
     const auto K = static_cast<uint32_t>(input_orig.size(nd - 1));
@@ -1262,15 +1293,8 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       const uint32_t elems_per_group = reduction_size / num_groups;
       auto partials = at::empty({(int64_t)num_groups}, output.options().dtype(opts.partial_dtype));
 
-      const bool vec_ok = opts.input_kernel_dtype == kFloat || opts.input_kernel_dtype == kHalf ||
-          opts.input_kernel_dtype == kBFloat16 || opts.input_kernel_dtype == kInt || opts.input_kernel_dtype == kLong ||
-          opts.input_kernel_dtype == kShort;
-      const bool vec_op = opts.prefix == "sum_" || opts.prefix == "nansum_" || opts.prefix == "min_" ||
-          opts.prefix == "max_" || opts.prefix == "all_" || opts.prefix == "any_";
-      const bool use_vec = !use_strided && vec_op && vec_ok && (elems_per_group % 4 == 0);
-      auto p1_kernel = use_vec
-          ? fmt::format("{}reduction_vec_{}_{}", opts.prefix, in_str, partial_str)
-          : fmt::format("{}reduction{}_{}_{}", opts.prefix, use_strided ? "_strided" : "", in_str, partial_str);
+      auto p1_kernel =
+          fmt::format("{}reduction{}_{}_{}", opts.prefix, use_strided ? "_strided" : "_flat", in_str, partial_str);
       auto p2_kernel = fmt::format("{}reduction_{}_{}", opts.pass2_prefix, partial_str, out_str);
 
       NormParams params1{};
@@ -1281,15 +1305,6 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           params1.input_sizes[d] = input.size(d);
           params1.input_strides[d] = input.stride(d);
         }
-      } else {
-        // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1.
-        params1.ndim = 2;
-        params1.input_sizes[0] = num_groups;
-        params1.input_strides[0] = elems_per_group;
-        params1.output_sizes[0] = num_groups;
-        params1.output_strides[0] = 1;
-        params1.input_sizes[1] = elems_per_group;
-        params1.input_strides[1] = 1;
       }
 
       // Pass 2: partials[num_groups] -> output[1], reduce dim=0. divisor
@@ -1311,15 +1326,20 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           auto ps1 = lib.getPipelineStateForFunc(p1_kernel);
           getMPSProfiler().beginProfileKernel(ps1, opts.prefix + "reduction_pass1", {input});
           [ce setComputePipelineState:ps1];
-          if (use_vec) {
-            const std::array<uint32_t, 2> vparams{num_groups, elems_per_group};
-            mtl_setArgs(ce, input, partials, vparams);
-            constexpr uint32_t TPG = 256;
-            [ce dispatchThreads:MTLSizeMake(num_groups * TPG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TPG, 1, 1)];
-          } else {
+          if (use_strided) {
             mtl_setArgs(ce, input, partials, params1);
+            // Round up to a full simdgroup: c10::metal::simd_max/min<long>
+            // reads its neighbours' registers, and a partially populated
+            // simdgroup yields undefined data (0 in practice) rather than the
+            // op's identity. Padding threads skip the load loop (tid >= rsize)
+            // and contribute Op::identity() instead.
             auto tpg1 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(elems_per_group, 32u));
             [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
+          } else {
+            const std::array<uint32_t, 2> fparams{num_groups, elems_per_group};
+            mtl_setArgs(ce, input, partials, fparams);
+            constexpr uint32_t TPG = 256;
+            [ce dispatchThreads:MTLSizeMake(num_groups * TPG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TPG, 1, 1)];
           }
           getMPSProfiler().endProfileKernel(ps1);
 
