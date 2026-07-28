@@ -25,8 +25,6 @@ class TestDeviceInterfaceCapabilityBits(TestCase):
         """Base DeviceInterface returns safe defaults for all bits."""
         self.assertFalse(DeviceInterface.is_gpu())
         self.assertFalse(DeviceInterface.exposes_streams())
-        # get_multi_processor_count requires device properties; the base
-        # raises NotImplementedError because there is no device to query.
 
     def test_cuda_declares_gpu(self):
         """CUDA is a GPU with streams."""
@@ -34,7 +32,7 @@ class TestDeviceInterfaceCapabilityBits(TestCase):
         self.assertTrue(CudaInterface.exposes_streams())
 
     def test_xpu_declares_gpu(self):
-        """XPU is a GPU with streams and a non-standard multi-processor field."""
+        """XPU is a GPU with streams."""
         self.assertTrue(XpuInterface.is_gpu())
         self.assertTrue(XpuInterface.exposes_streams())
 
@@ -168,31 +166,6 @@ class TestDeviceNeedGuard(TestCase):
 class TestHasTriton(TestCase):
     """Test has_triton() walks the DeviceInterface registry."""
 
-    def test_has_triton_discovers_registered_device(self):
-        """When a registered interface declares is_triton_capable(),
-        has_triton() returns True (provided triton package is present)."""
-        # This test requires the triton package.
-        try:
-            import triton  # noqa: F401
-        except ImportError as err:
-            raise unittest.SkipTest("triton package not available") from err
-
-        from torch.utils._triton import has_triton_package
-
-        if not has_triton_package():
-            raise unittest.SkipTest("triton package not available")
-
-        # Clear the has_triton cache so our registration is seen.
-        torch.utils._triton.has_triton.cache_clear()
-
-        # has_triton() should find at least one triton-capable device
-        # among the standard registrations (cuda/xpu/cpu/mtia).
-        # We cannot assert True unconditionally because the test machine
-        # may not have any of those devices available.
-        result = torch.utils._triton.has_triton()
-        # At minimum, the function should not crash and return a bool.
-        self.assertIsInstance(result, bool)
-
     def test_has_triton_discovers_privateuse1_device(self):
         """A registered PrivateUse1 interface declaring is_triton_capable()
         is discovered by has_triton()."""
@@ -206,7 +179,6 @@ class TestHasTriton(TestCase):
         if not has_triton_package():
             raise unittest.SkipTest("triton package not available")
 
-        # Register a privateuse1 interface that is triton-capable.
         class AccInterface(DeviceInterface):
             @staticmethod
             def is_available() -> bool:
@@ -225,6 +197,7 @@ class TestHasTriton(TestCase):
         try:
             self.assertTrue(torch.utils._triton.has_triton())
         finally:
+            torch.utils._triton.has_triton.cache_clear()
             from torch._dynamo import device_interface as di
 
             di.device_interfaces.pop("acc_triton", None)

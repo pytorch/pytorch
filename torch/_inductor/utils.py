@@ -130,8 +130,6 @@ def _gpu_types() -> list[str]:
 from torch._dynamo.device_interface import get_interface_for_device
 
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
 @functools.cache
 def get_gpu_type() -> str:
     avail_gpus = [t for t in _gpu_types() if get_interface_for_device(t).is_available()]
@@ -141,11 +139,7 @@ def get_gpu_type() -> str:
     # priority of C++ getAccelerator().  Guard that the accelerator is
     # actually present and GPU-class; otherwise fall through to the
     # first available GPU (or "cuda" if none).
-    acc = (
-        torch.accelerator.current_accelerator()
-        if hasattr(torch, "accelerator")
-        else None
-    )
+    acc = torch.accelerator.current_accelerator()
     if acc is not None and is_gpu(acc.type) and acc.type in avail_gpus:
         return acc.type
     # Fallthrough: return the first available GPU (dict-registration order,

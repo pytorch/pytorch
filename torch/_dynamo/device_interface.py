@@ -157,15 +157,6 @@ class DeviceInterface:
         """
         return False
 
-    # -- Device identity and capability bits --------------------
-    # Let Inductor determine device identity (GPU-like?) and capability
-    # (streams? how many compute units?) through the DeviceInterface
-    # contract instead of hard-coded device-name lists.
-    #
-    # Safe defaults: is_gpu=False, exposes_streams=derived from Stream
-    #                override, get_multi_processor_count=reads standard
-    #                field multi_processor_count.
-
     @staticmethod
     def is_gpu() -> bool:
         """Return True if Inductor should treat this device as a GPU-class
@@ -184,22 +175,21 @@ class DeviceInterface:
         return cls.Stream is not DeviceInterface.Stream
 
     @classmethod
-    def get_multi_processor_count(cls, device=None) -> int:
+    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
         reduction heuristics / max-autotune heuristics.  Defaults to
         reading the standard field ``multi_processor_count`` from device
         properties; backends whose native field name differs (XPU, MTIA)
         must override."""
-        try:
-            return cls.get_device_properties(device).multi_processor_count
-        except AttributeError:
+        props = cls.get_device_properties(device)
+        mp_count = getattr(props, "multi_processor_count", None)
+        if mp_count is None:
             raise AttributeError(
                 f"{cls.__name__} must override get_multi_processor_count "
                 f"because its device properties do not expose the standard "
                 f"field 'multi_processor_count'"
-            ) from None
-
-    # --------------------------------------------------
+            )
+        return mp_count
 
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
@@ -422,7 +412,7 @@ class MtiaInterface(DeviceInterface):
         return True
 
     @classmethod
-    def get_multi_processor_count(cls, device=None) -> int:
+    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         return 64
 
     @staticmethod
@@ -513,7 +503,7 @@ class XpuInterface(DeviceInterface):
         return True
 
     @classmethod
-    def get_multi_processor_count(cls, device=None) -> int:
+    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         return cls.get_device_properties(device).gpu_subslice_count
 
     @staticmethod

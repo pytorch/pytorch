@@ -202,18 +202,22 @@ def has_triton() -> bool:
     if triton_disable_device_detection:
         return False
 
-    # Walk the registered DeviceInterface registry and query
-    # is_triton_capable() + raise_if_triton_unavailable() for each,
-    # replacing the previously hard-coded triton_supported_devices dict.
-    # is_triton_capable() is gated first so that raise_if_triton_unavailable()
-    # only surfaces missing-backend RuntimeErrors (and not, e.g., CUDA's
-    # GPUTooOldForTriton for sub-capable devices).
+    # Walk the registered DeviceInterface registry.  is_triton_capable()
+    # is gated first so that raise_if_triton_unavailable() only surfaces
+    # missing-backend RuntimeErrors (and not, e.g., CUDA's
+    # GPUTooOldForTriton for sub-capable devices).  Partially-implemented
+    # out-of-tree interfaces that omit is_available / is_triton_capable
+    # are silently skipped.
     from torch._dynamo.device_interface import get_registered_device_interfaces
 
     for name, iface in get_registered_device_interfaces():
         if ":" in name:
             continue
-        if not (iface.is_available() and iface.is_triton_capable()):
+        try:
+            has_triton_support = iface.is_available() and iface.is_triton_capable()
+        except NotImplementedError:
+            continue
+        if not has_triton_support:
             continue
         try:
             iface.raise_if_triton_unavailable()
