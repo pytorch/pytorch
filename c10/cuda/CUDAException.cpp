@@ -7,6 +7,7 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
+#include <array>
 #include <string>
 #include <utility>
 
@@ -18,37 +19,40 @@ CUDAErrorLogCapture::CUDAErrorLogCapture() noexcept {
   try {
     auto* api = DriverAPI::get();
     if (api->cuLogsCurrent_ && api->cuLogsDumpToMemory_) {
-      CUlogIterator iterator;
+      CUlogIterator iterator{};
       if (api->cuLogsCurrent_(&iterator, 0) == CUDA_SUCCESS) {
         iterator_ = iterator;
         enabled_ = true;
       }
     }
   } catch (...) {
+    return;
   }
 #endif
 }
 
-std::string CUDAErrorLogCapture::get_error_log_suffix() {
+std::string CUDAErrorLogCapture::get_error_log_suffix() noexcept {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
     defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
   if (!enabled_) {
     return {};
   }
 
-  char buffer[25600];
-  size_t size = sizeof(buffer);
+  std::array<char, 25600> buffer{};
+  size_t size = buffer.size();
   auto iterator = static_cast<CUlogIterator>(iterator_);
   try {
     auto* api = DriverAPI::get();
-    if (api->cuLogsDumpToMemory_(&iterator, buffer, &size, 0) == CUDA_SUCCESS &&
-        size > 0 && size <= sizeof(buffer)) {
+    if (api->cuLogsDumpToMemory_(&iterator, buffer.data(), &size, 0) ==
+            CUDA_SUCCESS &&
+        size > 0 && size <= buffer.size()) {
       std::string error_log{
           "\nThe CUDA driver logged these messages, which may provide useful details:\n"};
-      error_log.append(buffer, size);
+      error_log.append(buffer.data(), size);
       return error_log;
     }
   } catch (...) {
+    return {};
   }
 #endif
   return {};
