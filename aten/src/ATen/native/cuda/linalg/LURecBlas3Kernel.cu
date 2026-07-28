@@ -531,6 +531,7 @@ batched_panel_register_resident_fused_kernel(
 // Dispatch helper for register-resident fused panel kernel (NB 1-MAX_RECNB)
 template <typename scalar_t>
 bool try_launch_fused_panel_register_resident(
+  bool compute_pivots,
   scalar_t* dA, int64_t matrix_stride, int lda, int m,
   int col_start, int nb,
   int* dipiv, int ipiv_stride,
@@ -676,6 +677,7 @@ void lu_batched_panel_recursive(
   // Base case: use fused register-resident panel if possible, else fall back
   if (nb <= recnb) {
     if (try_launch_fused_panel_register_resident(
+          compute_pivots,
           dA, matrix_stride, lda, m,
           col_start, nb, dipiv, ipiv_stride, dinfo, batch_count)) {
       return;
