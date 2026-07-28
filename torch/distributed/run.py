@@ -794,13 +794,20 @@ def get_args_parser() -> ArgumentParser:
     # Shell completion.
     #
 
+    try:
+        import shtab
+    except ImportError:
+        # shtab is optional; fall back to the shells it supports today so the
+        # flag still validates its argument when shtab is not installed
+        choices = ["bash", "zsh", "tcsh"]
+    else:
+        choices = shtab.SUPPORTED_SHELLS
+
     parser.add_argument(
         "--print-completion",
         "--print_completion",
         action=_PrintCompletionAction,
-        # mirrors shtab.SUPPORTED_SHELLS, which cannot be imported here since
-        # shtab is optional
-        choices=["bash", "zsh", "tcsh"],
+        choices=choices,
         help="Print a shell completion script for torchrun to stdout and exit "
         "(e.g. [--print-completion zsh > ~/.zsh/completions/_torchrun]). "
         "Requires the optional 'shtab' package.",

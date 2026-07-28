@@ -196,10 +196,15 @@ class RunTest(TestCase):
         self.assertIn("pip install shtab", err)
 
     def test_print_completion_rejects_unknown_shell(self):
-        """The shell choices are validated by argparse."""
+        """The shell choices are validated by argparse.
+
+        Deliberately not a real shell: the choices come from
+        shtab.SUPPORTED_SHELLS when shtab is installed, so naming one shtab
+        could plausibly add later would make this test fail on upgrade.
+        """
         with self.assertRaises(SystemExit):
             with redirect_stderr(io.StringIO()):
-                self._parse_args(["--print-completion=fish"])
+                self._parse_args(["--print-completion=notashell"])
 
 
 if __name__ == "__main__":
