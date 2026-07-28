@@ -168,6 +168,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     }
 
     detachMemoryHook();
+    retireComm();
 
     if (timeout_thread_.joinable()) {
       shutdown_ = true;
