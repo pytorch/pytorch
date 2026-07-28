@@ -1409,6 +1409,81 @@ class TestFunctorchConfigParsingForLogging(TestCase):
         mocked_jk.assert_called_once_with("pytorch/dynamo:log_functorch_config")
 
 
+class TestCleanupHook(TestCase):
+    """Tests for CleanupHook.create idempotency."""
+
+    def test_new_name_installs_normally(self):
+        """Installing a name not in scope adds it and bumps count."""
+        scope = {}
+        val = {"key": "value"}
+        baseline = utils.CleanupManager.count
+        hook = utils.CleanupHook.create(scope, "test_name", val)
+        self.assertIs(scope["test_name"], val)
+        self.assertEqual(utils.CleanupManager.count, baseline + 1)
+        # Cleanup removes the entry.
+        hook()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline)
+
+    def test_same_value_reinstall_is_idempotent(self):
+        """Re-installing the same value (identity) under the same name succeeds."""
+        val = {"key": "value"}
+        scope = {"test_name": val}
+        baseline = utils.CleanupManager.count
+        hook = utils.CleanupHook.create(scope, "test_name", val)
+        self.assertIs(scope["test_name"], val)
+        self.assertEqual(utils.CleanupManager.count, baseline + 1)
+        # Cleanup still works.
+        hook()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline)
+
+    def test_different_value_raises(self):
+        """A name collision with a different value still raises AssertionError."""
+        existing = {"key": "one"}
+        different = {"key": "two"}
+        scope = {"test_name": existing}
+        with self.assertRaises(AssertionError):
+            utils.CleanupHook.create(scope, "test_name", different)
+        # Scope unchanged on failure.
+        self.assertIs(scope["test_name"], existing)
+
+    def test_equal_but_not_identical_raises(self):
+        """Two equal dicts that are not the same object still raise."""
+        val1 = {"key": "value"}
+        val2 = {"key": "value"}
+        self.assertEqual(val1, val2)
+        self.assertIsNot(val1, val2)
+        scope = {"test_name": val1}
+        with self.assertRaises(AssertionError):
+            utils.CleanupHook.create(scope, "test_name", val2)
+
+    def test_double_cleanup_no_keyerror(self):
+        """Two hooks for the same (scope, name, val) can both fire without error.
+
+        Regression test: when two OutputGraphs share a global installed via
+        the idempotent reinstall path, both hold a CleanupHook for the same
+        slot. When both are collected, the second hook's __call__ must not
+        raise KeyError — it should be a no-op since the first already removed
+        the entry.
+        """
+        val = {"key": "value"}
+        scope = {}
+        baseline = utils.CleanupManager.count
+        hook1 = utils.CleanupHook.create(scope, "test_name", val)
+        hook2 = utils.CleanupHook.create(scope, "test_name", val)
+        self.assertEqual(utils.CleanupManager.count, baseline + 2)
+        self.assertIn("test_name", scope)
+        # First cleanup removes the entry.
+        hook1()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline + 1)
+        # Second cleanup is a no-op — must not raise.
+        hook2()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
