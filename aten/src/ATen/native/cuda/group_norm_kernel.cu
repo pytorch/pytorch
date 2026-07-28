@@ -133,8 +133,9 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     const int64_t index = ng * D + i;
     const int64_t c = g * D + i;
     const T_ACC gamma_v = gamma ? static_cast<T_ACC>(gamma[c]) : T_ACC(1);
-    sum1 += dY[index] * X[index] * gamma_v;
-    sum2 += dY[index] * gamma_v;
+    const T_ACC dY_acc = static_cast<T_ACC>(dY[index]);
+    sum1 += dY_acc * static_cast<T_ACC>(X[index]) * gamma_v;
+    sum2 += dY_acc * gamma_v;
   }
   if (blockDim.x <= C10_WARP_SIZE) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);

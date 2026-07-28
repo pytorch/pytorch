@@ -657,10 +657,10 @@ def remove_graph_data(exec_graph_ids: Iterable[int]) -> None:
 # graph code stays free of profiler-registry knowledge; graphs.py arms its destroy
 # callback only while a handler is registered. Keyed by RemovableHandle id, mirroring
 # graphs.py's register_*_hook pattern.
-_graph_destroy_handlers: "OrderedDict[int, Callable[[set[int]], None]]" = OrderedDict()
+_graph_destroy_handlers: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
 
 
-def register_graph_destroy_handler(fn: Callable[[set[int]], None]) -> "RemovableHandle":
+def register_graph_destroy_handler(fn: Callable[[set[int]], None]) -> RemovableHandle:
     """Register ``fn(exec_ids)`` to run when a CUDA graph is destroyed, so a
     consumer can purge its per-graph state. Returns a handle whose ``remove()``
     unregisters it."""
