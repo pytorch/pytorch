@@ -3,8 +3,11 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
+#include <torch/csrc/inductor/static_launcher/module_load_stats.h>
+#include <chrono>
 #include <cstdint>
 
 #include <torch/csrc/utils/python_numbers.h>
@@ -181,18 +184,48 @@ std::pair<CUmodule, CUfunction> loadKernel(
   CUmodule mod = nullptr;
   CUfunction func = nullptr;
 
+  // Module-load telemetry: count + time each driver module load, rate-limited.
+  // Shared by the ROCm/CUDA branches so the two stay in sync; the only
+  // per-platform bits are the driver call (passed as loadFn) and platform tag.
+  auto timedModuleLoad = [](const char* platform, auto&& loadFn) {
+    constexpr int64_t kModuleLoadLogEveryN = 100;
+    constexpr int64_t kModuleLoadSlowUs = 100000; // 100 ms
+    const auto loadStart = std::chrono::steady_clock::now();
+    loadFn();
+    const int64_t loadUs =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - loadStart)
+            .count();
+    // Count only successful loads: a throw from loadFn() leaves the counter
+    // unbumped and emits no marker for the failed attempt.
+    const int64_t loadIndex = facebook::aoti::moduleLoadCounter().fetch_add(
+                                  1, std::memory_order_relaxed) +
+        1;
+    if (loadIndex == 1 || loadIndex % kModuleLoadLogEveryN == 0 ||
+        loadUs > kModuleLoadSlowUs) {
+      LOG(INFO) << "[ModuleLoad] cumulative_count=" << loadIndex
+                << " this_load_us=" << loadUs << " elapsed_s="
+                << facebook::aoti::secondsSinceFirstObservedLoad()
+                << " platform=" << platform;
+    }
+  };
+
 #if defined(USE_ROCM)
   // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
   // HSACO. Load from memory to avoid retaining one FD per static launcher.
   auto image = readKernelImage(filePath);
-  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
+  timedModuleLoad("AMD", [&] {
+    AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
+  });
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
       &shared_optin, hipDeviceAttributeMaxSharedMemoryPerBlock, device));
 
 #else
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
+  timedModuleLoad("NV", [&] {
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
+  });
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
