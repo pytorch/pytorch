@@ -293,6 +293,9 @@ epilogue_fusion_user_defined_triton_kernel = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# Eliminate reductions over values selected by an at-most-one-hot mask.
+singleton_reduction_elimination = True
+
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False
 
