@@ -471,7 +471,11 @@ def run_with_retries(
 def run_git_object_command(
     args: list[str], *, cwd: Path = REPO_ROOT
 ) -> subprocess.CompletedProcess[str]:
-    """Run an object-reading Git command, hydrating partial clones if needed."""
+    """Run an object-reading Git command.
+
+    If on a partial clone, only if the first local attempt fails, retry 3
+    times and allow lazily fetching over the network.
+    """
     no_lazy = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
     try:
         result = subprocess.run(
@@ -496,15 +500,16 @@ def run_git_object_command(
         )
     except RuntimeError as e:
         raise RuntimeError(
-            f"Git command failed without lazy fetching: {local_error}. "
-            f"Promisor hydration also failed: {e}"
+            f"Git command failed first attempt with no lazy fetching: {local_error}. "
+            f"Second, slower, attempt while allowing fetching over the network also "
+            "failed, even with retries: {e}"
         ) from e
 
 
 def read_file_at_revision(
     revision: str, filename: str | Path, *, cwd: Path = REPO_ROOT
 ) -> str | None:
-    """Read a file at `revision`, or return None if that path did not exist."""
+    """Return file contents at `revision`, or None if that path did not exist."""
     path = Path(filename)
     if not path.is_absolute():
         path = cwd / path
