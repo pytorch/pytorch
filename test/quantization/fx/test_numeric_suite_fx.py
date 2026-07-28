@@ -4,7 +4,6 @@
 import copy
 import math
 import operator
-import unittest
 
 import torch
 import torch.nn as nn
@@ -21,6 +20,10 @@ from torch.ao.quantization.quantize_fx import (
     convert_to_reference_fx,
     prepare_fx,
     prepare_qat_fx,
+)
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
@@ -43,7 +46,6 @@ from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_float_to_quantized_operator_mappings,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
 import torch.ao.quantization.fx.quantize_handler as qh
@@ -2045,26 +2047,29 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             mt_shadows_mt_copy, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 1)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_extract_weights_cuda(self):
+
+class TestFXNumericSuiteCoreAPIsDevice(FXNumericSuiteQuantizationTestCase):
+
+    @onlyAccelerator
+    def test_extract_weights_gpu(self, device):
         # Note: this is not using quantization because quantized kernels do not
         # work on cuda yet.
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
         results = extract_weights('a', m1, 'b', m2)
         extend_logger_results_with_comparison(
             results, 'a', 'b', compute_sqnr, 'sqnr')
         self.assert_ns_compare_dict_valid(results)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_add_loggers_cuda(self):
+    @onlyAccelerator
+    def test_add_loggers_gpu(self, device):
         # Note: this is not using quantization because quantized kernels do not
         # work on cuda yet.
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
         m1_ns, m2_ns = add_loggers('a', m1, 'b', m2, OutputLogger)
         datum = torch.randn(1, 1, 1, 1)
-        datum = datum.cuda()
+        datum = datum.to(device)
 
         m1_ns(datum)
         m2_ns(datum)
@@ -2073,15 +2078,15 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         extend_logger_results_with_comparison(
             act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_add_shadow_loggers_cuda(self):
+    @onlyAccelerator
+    def test_add_shadow_loggers_gpu(self, device):
         # Note: this is not using quantization because quantized kernels do not
         # work on cuda yet.
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
         m1_shadows_m2 = add_shadow_loggers('a', m1, 'b', m2, OutputLogger)
         datum = torch.randn(1, 1, 1, 1)
-        datum = datum.cuda()
+        datum = datum.to(device)
 
         m1_shadows_m2(datum)
 
@@ -2931,6 +2936,10 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 3, 224, 224),),
             qconfig_dict=qconfig_dict,
             should_log_inputs=False)
+
+
+instantiate_device_type_tests(TestFXNumericSuiteCoreAPIsDevice, globals(), only_for=("cuda",))
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
