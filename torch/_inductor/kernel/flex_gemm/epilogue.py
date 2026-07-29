@@ -20,6 +20,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
     upcast_compute_type,
+    use_cutedsl_fast_math,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
@@ -955,9 +956,12 @@ class FlexGemmEpilogueEmitter:
         gemm_op: torch._ops.OpOverload,
         analysis: FlexGemmEpilogueAnalysis,
         epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
+        *,
+        fast_math: bool = False,
     ) -> None:
         self.graph_module = graph_module
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
+        self.fast_math = fast_math
         self.gemm = gemm_node(graph_module, gemm_op)
         self.outputs = analysis.outputs
         self.kernel = FlexGemmCuteDSLKernel()
@@ -1229,8 +1233,8 @@ class FlexGemmEpilogueEmitter:
             )
         )
         key_payload = (
-            f"{self.graph_module.code}\n{body}\nreturn {result}"
-            f"{physical_reduction_payload}"
+            f"fast_math={self.fast_math}\n{self.graph_module.code}\n"
+            f"{body}\nreturn {result}{physical_reduction_payload}"
         )
         key = hashlib.sha256(key_payload.encode()).hexdigest()[:16]
         name = f"flex_gemm_epilogue_{key}"
@@ -1262,6 +1266,7 @@ class FlexGemmEpilogueEmitter:
         with (
             V.set_kernel_handler(self.kernel),
             V.set_ops_handler(FlexGemmCuteDSLOpOverrides()),
+            use_cutedsl_fast_math(self.fast_math),
         ):
             self.bind_epilogue_args()
             self.lower_graph()
@@ -1273,6 +1278,8 @@ def materialize_flex_gemm_epilogue(
     gemm_op: torch._ops.OpOverload,
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
+    *,
+    fast_math: bool = False,
 ) -> tuple[str, str]:
     """Materialize an analyzed FlexGEMM body as generated CuTeDSL source.
 
@@ -1287,10 +1294,16 @@ def materialize_flex_gemm_epilogue(
         analysis: Shared output and local-reduction analysis for the graph.
         epilogue_arg_placeholders: Captured tensor placeholders exposed as
             generated epilogue parameters.
+        fast_math: Whether supported CuTeDSL math operations may use approximate
+            fast-math lowering.
 
     Returns:
         The generated epilogue function name and complete CuTeDSL source.
     """
     return FlexGemmEpilogueEmitter(
-        graph_module, gemm_op, analysis, epilogue_arg_placeholders
+        graph_module,
+        gemm_op,
+        analysis,
+        epilogue_arg_placeholders,
+        fast_math=fast_math,
     ).materialize()

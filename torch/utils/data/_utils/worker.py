@@ -243,7 +243,7 @@ def _generate_state(base_seed, worker_id):
 
 def _worker_loop(
     dataset_kind,
-    dataset,
+    dataset_holder,
     index_queue,
     data_queue,
     done_event,
@@ -259,6 +259,7 @@ def _worker_loop(
 ) -> None:
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
+    dataset = dataset_holder.pop()
 
     try:
         # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
@@ -394,6 +395,8 @@ def _worker_loop(
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
+    finally:
+        _worker_info = None
     if done_event.is_set():
         data_queue.cancel_join_thread()
         data_queue.close()
