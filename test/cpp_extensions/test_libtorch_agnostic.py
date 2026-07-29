@@ -268,6 +268,50 @@ class TestLibtorchAgnostic(TestCase):
         # Sparse tensors do not own a contiguous storage.
         self.assertFalse(libtorch_agnostic.ops.my_has_storage(t.to_sparse()))
 
+    # These exercise the use case: a raw PyObject passed straight from Python
+    # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
+    # extension's importable PyMethodDef module (_interop).
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_pyobject_roundtrip(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        x = torch.randn(3, 4, device=device)
+        y = libtorch_agnostic._interop.pyobject_roundtrip(x)
+        self.assertIsInstance(y, torch.Tensor)
+        self.assertEqual(y, x)
+        # from_pyobject / to_pyobject share the underlying TensorImpl.
+        self.assertEqual(y.data_ptr(), x.data_ptr())
+        x.add_(1)
+        self.assertEqual(y, x)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_pyobject_sum(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        x = torch.randn(3, 4, device=device)
+        s = libtorch_agnostic._interop.pyobject_sum(x)
+        self.assertEqual(s, x.sum())
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_pyobject_to_parameter_type(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        x = torch.randn(2, 2, device=device)
+        p = libtorch_agnostic._interop.pyobject_to_type(x, torch.nn.Parameter)
+        self.assertIsInstance(p, torch.nn.Parameter)
+        self.assertEqual(p.detach(), x)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_pyobject_non_tensor_raises(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
+            libtorch_agnostic._interop.pyobject_roundtrip("not a tensor")
+
     # TODO: Debug this:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
     # call_function libtorch_agnostic.my_ones_like.default(*(FakeTensor(..., size=(3, 1)), 'cpu'),
