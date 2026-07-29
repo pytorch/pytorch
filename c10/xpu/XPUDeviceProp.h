@@ -136,7 +136,8 @@ namespace c10::xpu {
   _(memory_clock_rate, memory_clock_rate, 0)                                  \
                                                                               \
   /* the maximum bus width between device and memory in bits. */              \
-  _(memory_bus_width, memory_bus_width, 0)
+  _(memory_bus_width, memory_bus_width, 0)                                    \
+
 
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
   /* sycl::half is supported on device. */              \
@@ -197,10 +198,8 @@ struct C10_XPU_API DeviceProp{
     // ext properties.
     AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
 
-#if SYCL_COMPILER_VERSION >= 20260000
     // device aspects.
     DEFINE_DEVICE_ASPECT(is_integrated_gpu)
-#endif
 
     // device has aspects.
     AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_HAS_ASPECT)
