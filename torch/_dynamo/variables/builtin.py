@@ -1471,14 +1471,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
         cell_and_freevars = set(tx.cell_and_freevars())
         frame_locals = {}
-        # symbolic_cellvars registers all of the frame's cells. Cells are
-        # listed first so that a colliding fast local of the same name
-        # shadows the cell, matching CPython: the two share a name but not a
-        # localsplus slot, and the fast slot wins while it holds a value (an
-        # empty one is skipped below, leaving the cell contents visible).
-        for name, value in itertools.chain(
-            tx.symbolic_cellvars.items(), tx.symbolic_locals.items()
-        ):
+        # symbolic_cellvars registers all of the frame's cells. Cells are listed first so that a colliding fast local of
+        # the same name shadows the cell, matching CPython (except for 3.12, which is backwards): the two share a name
+        # but not a localsplus slot, and the fast slot wins while it holds a value (an empty one is skipped below,
+        # leaving the cell contents visible).
+        if sys.version_info == (3, 12):  # noqa: PYI006
+            its = (tx.symbolic_locals.items(), tx.symbolic_cellvars.items())
+        else:
+            its = (tx.symbolic_cellvars.items(), tx.symbolic_locals.items())
+
+        for name, value in itertools.chain(*its):
             if name not in frame_local_names:
                 continue
             # Match on CellVariable, not name: a colliding fast local shares a
