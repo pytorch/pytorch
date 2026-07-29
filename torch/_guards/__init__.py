@@ -1156,6 +1156,12 @@ class TracingContext:
         self.previously_cleaned_instructions.clear()
         self.inlined_code_cache.clear()
 
+    def add_aotautograd_guard(self, guard: GuardEnvExpr) -> None:
+        """Record an AOTAutograd relational guard (e.g. DuplicateInputs,
+        StorageOverlap) on this tracing context. Prefer this over reaching into
+        ``guards_context.aotautograd_guards`` directly."""
+        self.guards_context.aotautograd_guards.append(guard)
+
     @staticmethod
     @contextmanager
     def patch(**kwargs: Any) -> Generator[None, None, None]:
