@@ -661,7 +661,7 @@ class ExceptionVariable(VariableTracker):
         if name == "__setattr__":
             attr = args[0].as_python_constant()
             # Writable attributes route through their tp_getset/tp_members setter.
-            getset = self.lookup_tp_getset_member(attr)
+            getset = self.lookup_tp_getset(attr)
             if getset is not None and getset.setter is not None:
                 result = getset.setter(self, tx, args[1])
                 if result is not None:
