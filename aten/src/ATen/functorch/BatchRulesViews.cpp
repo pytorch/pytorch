@@ -212,7 +212,6 @@ std::tuple<Tensor, std::optional<int64_t>> squeeze_batch_rule(const Tensor& self
   // ended up moving to. We also ensure we do not drop the batch index.
   auto shape = self.sym_sizes();
   SymDimVector squeezed_sizes;
-  squeezed_sizes.reserve(shape.size());
   bool before_batch_idx = true;
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
