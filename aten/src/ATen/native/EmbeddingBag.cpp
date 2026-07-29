@@ -1570,7 +1570,7 @@ static void _embedding_bag_dense_backward_cpu_sum_mean(
               scale = per_sample_weights_data[*per_sample_weights_stride * j];
             }
             if (scale_grad_by_freq) {
-              scale /= counts[indices_data[i]];
+              scale /= counts[index];
             }
             if (mode == EmbeddingBagMode::MEAN) {
               auto bag_size = bag_size_data[source];

@@ -128,7 +128,9 @@ class TestCuTeDSLReductionWiring(TestCase):
         ]
         for name, x, dim in served:
             self.assertEqual(
-                self._fired_count(lambda: torch.sum(x, dim=dim)), 1, f"{name} should fire"
+                self._fired_count(lambda: torch.sum(x, dim=dim)),
+                1,
+                f"{name} should fire",
             )
         declined = [
             ("3D mid-dim (K0-only)", torch.randn(512, 512, 64, device="cuda"), 1),
@@ -174,6 +176,38 @@ class TestCuTeDSLReductionWiring(TestCase):
         g.replay()
         torch.cuda.synchronize()
         self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
+
+    def test_pow_scalar_base_on_cuda(self):
+        # REGRESSION: aten's pow_Scalar_out builds a wrapped_scalar_tensor on the
+        # EXPONENT's device and redispatches to pow_out (Pow.cpp), so a CUDA
+        # wrapped-number tensor reached our Python router; the boxed->Python
+        # conversion asserts is_cpu() and this raised INTERNAL ASSERT. The assert
+        # fires before any cond runs, so pow's .out overload is left unregistered.
+        x = torch.tensor([1.0, 2.0], device="cuda")
+        self.assertEqual((2.0**x).cpu(), torch.tensor([2.0, 4.0]))
+        self.assertEqual(torch.pow(2.0, x).cpu(), torch.tensor([2.0, 4.0]))
+        # float_power always promotes to double
+        self.assertEqual(
+            torch.float_power(2.0, x).cpu(),
+            torch.tensor([2.0, 4.0], dtype=torch.float64),
+        )
+        xi = torch.tensor([1, 2], dtype=torch.int32, device="cuda")
+        self.assertEqual(torch.ldexp(xi, xi).cpu(), torch.tensor([2.0, 8.0]))
+        # the tensor-tensor overload we DO serve still works
+        self.assertEqual(torch.pow(x, x).cpu(), torch.tensor([1.0, 4.0]))
+
+    def test_sub_warp_row_width_does_not_crash(self):
+        # REGRESSION: the tpr ladder's small-N rungs return 8/16 threads per row,
+        # and the cross-thread reduce divides by warps_per_row = tpr // WARP, which
+        # floored to 0 -> ZeroDivisionError at trace time. That was a hard crash on
+        # ordinary calls (x.sum(dim=1) for N=32/64/128), not a fallback. tpr is now
+        # floored at one warp. Non-monotonic in N, so cover the whole small range.
+        for n in (8, 16, 24, 32, 33, 48, 63, 64, 96, 128, 192):
+            x = torch.rand(257, n, device="cuda")
+            self.assertEqual(
+                torch.sum(x, dim=1), x.double().sum(dim=1).float(), atol=1e-3, rtol=1e-3
+            )
+            torch.linalg.vector_norm(x, 2, dim=1)  # same reduce path, must not raise
 
 
 if __name__ == "__main__":

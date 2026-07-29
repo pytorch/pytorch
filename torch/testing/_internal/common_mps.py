@@ -109,6 +109,7 @@ if torch.backends.mps.is_available():
             "linalg.norm",
             "linalg.normsubgradients_at_zero",
             "linalg.pinvhermitian",
+            "linalg.polar",
             "linalg.svd",
             "linalg.svdvals",
             "linalg.vander",
@@ -126,6 +127,7 @@ if torch.backends.mps.is_available():
             "masked_fill",
             "masked_scatter",
             "masked_select",
+            "matrix_exp",
             "meshgridlist_of_tensors",
             "meshgridvariadic_tensors",
             "movedim",
@@ -353,6 +355,13 @@ if torch.backends.mps.is_available():
             "fft.hfft2": [torch.complex64],
         }
 
+        MACOS_BEFORE_15_0_XFAILLIST = {
+            # matrix_exp is disabled on MPS before macOS 15 (TORCH_CHECK): MPSGraph
+            # complex matmul is numerically unreliable there and breaks the
+            # scale-and-square recurrence, so the op raises for every dtype.
+            "matrix_exp": None,
+        }
+
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
@@ -362,7 +371,6 @@ if torch.backends.mps.is_available():
             "linalg.eigvals": None,
             "put": None,
             "frexp": None,
-            "geqrf": None,
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -370,8 +378,6 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
             "linalg.matrix_sqrth": None,
-            "linalg.polar": None,
-            "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
                 torch.int16,
@@ -563,7 +569,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.norm": None,
             "ormqr": None,
             "rounddecimals_0": [
                 torch.uint8,
@@ -577,15 +582,8 @@ if torch.backends.mps.is_available():
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
             # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
             "scatter_reduceprod": [torch.int64],
-            "segment_reduce": None,
-            "_segment.reduce": None,
-            "segment.reduce": None,
-            "segment_reduce_offsets": None,
-            "_segment_reduce_offsets": None,
-            "_segment_reduce_lengths": None,
             "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
-            "sparse.mm": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
             "special.airy_ai": None,
@@ -595,10 +593,8 @@ if torch.backends.mps.is_available():
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
-            "symeig": None,
             "take": None,
             "to": None,
-            "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
             "cdouble": None,
@@ -627,7 +623,8 @@ if torch.backends.mps.is_available():
                 torch.float16,
             ],
             # Unsupported dtypes
-            # GEMM on MPS is not supported for integral types
+            # _mps_linear rejects non-float inputs; unlike mm/matmul it has no
+            # integral Metal GEMM fallback.
             "nn.functional.linear": [
                 torch.int16,
                 torch.int32,
@@ -635,7 +632,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             # returned output on CPU is float64
             "bincount": [
                 torch.int16,
@@ -837,6 +833,19 @@ if torch.backends.mps.is_available():
                     ),
                 )
 
+            if (
+                key in MACOS_BEFORE_15_0_XFAILLIST
+                and key not in xfail_exclusion
+                and (MACOS_VERSION < 15.0)
+            ):
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.expectedFailure,
+                        dtypes=MACOS_BEFORE_15_0_XFAILLIST[key],
+                    ),
+                )
+
             # If op is not supported for complex types, expect it to fail
             if key not in SUPPORTED_COMPLEX_OPS:
                 addDecorator(
@@ -852,18 +861,16 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
-            "_segment_reduce": [torch.float16, torch.float32],
             "_chunk_cat": [torch.float16, torch.float32],
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
-            # No MPS kernel for linalg_polar.out; the grad test still runs the
-            # forward leg, which raises NotImplementedError on MPS.
+            "geqrf": None,
+            # linalg.polar does not have an autograd implementation yet.
             "linalg.polar": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "masked.scatter": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
@@ -948,6 +955,12 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.float32],
         }
 
+        MACOS_BEFORE_15_0_XFAILLIST_GRAD = {
+            # matrix_exp is disabled on MPS before macOS 15 (TORCH_CHECK), so the
+            # forward leg of the grad test raises for every dtype.
+            "matrix_exp": None,
+        }
+
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             op.decorators = op.decorators + (d,)
 
@@ -957,6 +970,15 @@ if torch.backends.mps.is_available():
                 addDecorator(
                     op,
                     DecorateInfo(unittest.expectedFailure, dtypes=XFAILLIST_GRAD[key]),
+                )
+
+            if key in MACOS_BEFORE_15_0_XFAILLIST_GRAD and MACOS_VERSION < 15.0:
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.expectedFailure,
+                        dtypes=MACOS_BEFORE_15_0_XFAILLIST_GRAD[key],
+                    ),
                 )
 
             if key in SKIPLIST_GRAD:

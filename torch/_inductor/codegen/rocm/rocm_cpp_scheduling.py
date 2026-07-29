@@ -68,6 +68,19 @@ class ROCmCPPScheduling(BaseScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
+            # For JIT cpp_wrapper, the kernel call site emits a bare
+            # `extern "C"` symbol reference; compile the .so now so the
+            # wrapper compile can link against it via extra_flags.
+            # Autotune compiled a .so for the unfused kernel name
+            # (e.g. rocm_<hash>), but at codegen time the kernel name
+            # gains a descriptive prefix (rocm_fused_mm_<hash>), so the
+            # exported symbol differs and we need a fresh compile.
+            if V.graph.cpp_wrapper and not V.graph.aot_mode:
+                from ...codecache import ROCmCodeCache
+
+                so_path, _, _ = ROCmCodeCache.compile(src_code, "so")
+                wrapper.external_kernel_libs.add(so_path)
         return kernel_name
 
     def codegen_template(
