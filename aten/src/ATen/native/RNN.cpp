@@ -761,12 +761,12 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
-      auto result = at::_thnn_fused_lstm_cell(
+      auto [hy_raw, cy, workspace] = at::_thnn_fused_lstm_cell(
           igates, hgates, cx, params.b_ih(), params.b_hh());
       // applying projections if w_hr is defined
-      auto hy = params.matmul_hr(std::get<0>(result));
+      auto hy = params.matmul_hr(hy_raw);
       // Slice off the workspace argument (it's needed only for AD).
-      return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
+      return std::make_tuple(std::move(hy), std::move(cy));
     }
 
     const auto gates = params.linear_hh(hx).add_(
@@ -797,10 +797,10 @@ struct GRUCell : Cell<Tensor, cell_params> {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
-      auto result = at::_thnn_fused_gru_cell(
+      auto [hy, workspace] = at::_thnn_fused_gru_cell(
           igates, hgates, hidden, params.b_ih(), params.b_hh());
       // Slice off the workspace argument (it's needed only for AD).
-      return std::move(std::get<0>(result));
+      return std::move(hy);
     }
     const auto chunked_igates = pre_compute_input
         ? input.unsafe_chunk(3, 1)

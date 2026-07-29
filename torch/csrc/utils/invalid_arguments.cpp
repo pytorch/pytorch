@@ -323,8 +323,8 @@ std::string _argDesc(
   std::string result = "(";
   for (auto& arg : arguments)
     result += std::string(py_typename(arg)) + ", ";
-  for (auto& kwarg : kwargs)
-    result += kwarg.first + "=" + py_typename(kwarg.second) + ", ";
+  for (const auto& [name, value] : kwargs)
+    result += name + "=" + py_typename(value) + ", ";
   if (!arguments.empty())
     result.erase(result.length() - 2);
   result += ')';
@@ -341,16 +341,16 @@ std::vector<std::string> _tryMatchKwargs(
     start_idx--;
   if (start_idx < 0)
     start_idx = 0;
-  for (auto& entry : kwargs) {
+  for (const auto& [name, value] : kwargs) {
     bool found = false;
     for (unsigned int i = start_idx; i < option.arguments.size(); i++) {
-      if (option.arguments[i].name == entry.first) {
+      if (option.arguments[i].name == name) {
         found = true;
         break;
       }
     }
     if (!found)
-      unmatched.push_back(entry.first);
+      unmatched.push_back(name);
   }
   return unmatched;
 }
@@ -388,9 +388,7 @@ std::string format_invalid_args(
   }
 
   if (options.size() == 1) {
-    auto pair = _parseOption(options[0], kwargs);
-    auto& option = pair.first;
-    auto& option_str = pair.second;
+    const auto& [option, option_str] = _parseOption(options[0], kwargs);
     std::vector<std::string> unmatched_kwargs;
     if (has_kwargs)
       unmatched_kwargs = _tryMatchKwargs(option, kwargs);
@@ -414,9 +412,8 @@ std::string format_invalid_args(
     error_msg += _argDesc(args, kwargs);
     error_msg += ", but expected one of:\n";
     for (auto& option_str : options) {
-      auto pair = _parseOption(option_str, kwargs);
-      auto& option = pair.first;
-      auto& printable_option_str = pair.second;
+      const auto& [option, printable_option_str] =
+          _parseOption(option_str, kwargs);
       error_msg += " * ";
       error_msg += printable_option_str;
       error_msg += '\n';

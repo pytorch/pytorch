@@ -695,12 +695,11 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     gy = gy * gy_mult;
 
     constexpr int64_t step = Vec::size();
-    auto interleaved_gGrid = interleave2(gx, gy);
+    auto [gGrid_lo, gGrid_hi] = interleave2(gx, gy);
     auto gGrid_ptr = gGrid_slice.data() + offset * 2;
-    std::get<0>(interleaved_gGrid).store(gGrid_ptr,
-                                         std::min(len * 2, step));
-    std::get<1>(interleaved_gGrid).store(gGrid_ptr + step,
-                                         std::max(static_cast<int64_t>(0), len * 2 - step));
+    gGrid_lo.store(gGrid_ptr, std::min(len * 2, step));
+    gGrid_hi.store(gGrid_ptr + step,
+                   std::max(static_cast<int64_t>(0), len * 2 - step));
   }
 };
 
@@ -1011,12 +1010,11 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     gy = gy * gy_mult;
 
     constexpr int64_t step = Vec::size();
-    auto interleaved_gGrid = interleave2(gx, gy);
+    auto [gGrid_lo, gGrid_hi] = interleave2(gx, gy);
     auto gGrid_ptr = gGrid_slice.data() + offset * 2;
-    std::get<0>(interleaved_gGrid).store(gGrid_ptr,
-                                         std::min(len * 2, step));
-    std::get<1>(interleaved_gGrid).store(gGrid_ptr + step,
-                                         std::max(static_cast<int64_t>(0), len * 2 - step));
+    gGrid_lo.store(gGrid_ptr, std::min(len * 2, step));
+    gGrid_hi.store(gGrid_ptr + step,
+                   std::max(static_cast<int64_t>(0), len * 2 - step));
   }
 };
 

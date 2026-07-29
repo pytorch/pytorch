@@ -1771,8 +1771,8 @@ void jitModuleToPythonCodeAndConstants(
     }
     pp_iter->second.printNamedType(type);
   }
-  for (const auto& kv : grouped_by_prefix) {
-    (*jit_sources)[kv.first] = kv.second.str();
+  for (const auto& [prefix, printer] : grouped_by_prefix) {
+    (*jit_sources)[prefix] = printer.str();
   }
 }
 
