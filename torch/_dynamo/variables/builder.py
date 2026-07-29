@@ -2003,7 +2003,7 @@ class VariableBuilder:
             # and source chains through C-level descriptors break guard
             # evaluation.
             mod = getattr(value, "__module__", None) or ""
-            if not mod.startswith(("torch.", "torch_")):
+            if mod != "torch" and not mod.startswith(("torch.", "torch_")):
                 if value not in self.tx.output.side_effects:
                     return self.tx.output.side_effects.track_object_existing(
                         value, result

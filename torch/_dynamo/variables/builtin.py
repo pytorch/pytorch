@@ -3412,6 +3412,17 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
+            not tx.output.side_effects.is_attribute_mutation(obj)
+            and obj.source is not None
+            and (underlying := obj.get_value_for_setattr()) is not None
+            and hasattr(underlying, "__dict__")
+            and name_var.is_python_constant()
+        ):
+            tx.output.side_effects.track_object_existing(underlying, obj)
+            name = name_var.as_python_constant()
+            tx.output.side_effects.store_attr(obj, name, val)
+            return val
+        elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):

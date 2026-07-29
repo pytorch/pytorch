@@ -519,6 +519,10 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
+
         result = False
 
         if name in fn_known_dunder_attrs or name == "__dict__":
@@ -567,6 +571,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
+
+    def get_value_for_setattr(self) -> object | None:
+        return self.fn
 
     def __init__(
         self,
@@ -2283,6 +2290,12 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
+    def get_value_for_setattr(self) -> object | None:
+        mod = getattr(self.value, "__module__", None) or ""
+        if mod == "torch" or mod.startswith(("torch.", "torch_")):
+            return None
+        return self.value
+
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -3112,6 +3125,9 @@ class PolyfilledFunctionVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
+
+    def get_value_for_setattr(self) -> object | None:
+        return self.fn
 
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)
