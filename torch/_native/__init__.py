@@ -3,6 +3,8 @@ import warnings
 from functools import cache
 from typing import cast
 
+import torch
+
 # This handles collecting registration of all native ops
 # Also need to import DSL utils to make sure DSL registration is ok
 from . import cutedsl_utils, dsl_registry, helion_utils, ops, registry, triton_utils
@@ -57,3 +59,45 @@ with warnings.catch_warnings():
         category=UserWarning,
     )
     registry._register_all_overrides()
+
+
+@cache
+def _native_aot_embedded() -> bool:
+    """True iff this libtorch_cuda was linked with AOT kernel artifacts.
+
+    The artifacts' static initializers registered the stub kernels and
+    the _native_aot covers custom ops at load time (every shipped
+    artifact set registers at least one covers op -- the in-process
+    marker probed here). A build whose stage 2 never ran has no
+    artifacts, no registrations, and the generated wrapper stubs fall
+    through to the stock impls. Nothing here initializes CUDA: kernel
+    cubins load lazily on first use.
+
+    TORCH_DISABLE_NATIVE_AOT=1 masks the kernels by flipping the
+    Context switch every stub consultation checks; gated coverage then
+    declines, so covered calls keep their JIT route.
+    """
+    try:
+        embedded = any(
+            schema.name.startswith("_native_aot::")
+            for schema in torch._C._jit_get_all_schemas()
+        )
+    except Exception:
+        embedded = False
+    if embedded and os.getenv("TORCH_DISABLE_NATIVE_AOT") == "1":
+        torch._C._set_native_aot_enabled(False)
+    return embedded
+
+
+_native_aot_embedded()
+
+
+def set_aot_enabled(enabled: bool) -> None:
+    """Toggle at::globalContext().allowNativeAot(): the switch every
+    generated stub consultation checks, so False gives stock-aten
+    behavior even with the AOT kernel library loaded."""
+    torch._C._set_native_aot_enabled(enabled)
+
+
+def aot_enabled() -> bool:
+    return torch._C._get_native_aot_enabled()
