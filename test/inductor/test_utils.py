@@ -17,6 +17,7 @@ from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -1149,8 +1150,10 @@ class TestFakeTensorUpdater(TestCase):
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
 
 
-# A non-RuntimeError exception mirroring CUDA's GPUTooOldForTriton. The
-# has_triton() loop must never let this escape for a sub-capable device.
+# Stand-in for any exception that is not TritonUnavailableError and must not
+# escape has_triton() for a sub-capable device. (The real GPUTooOldForTriton
+# is a RuntimeError subclass; this one deliberately is not, so an escape
+# cannot be mistaken for anything has_triton() legitimately catches.)
 class _GPUTooOldForTriton(Exception):
     pass
 
@@ -1183,10 +1186,7 @@ class TestHasTriton(TestCase):
             mock.patch.object(
                 triton_utils, "has_triton_package", return_value=has_package
             ),
-            mock.patch(
-                "torch._inductor.config.triton_disable_device_detection",
-                detection_disabled,
-            ),
+            inductor_config.patch(triton_disable_device_detection=detection_disabled),
             mock.patch(
                 "torch._dynamo.device_interface.get_registered_device_interfaces",
                 return_value=registered,

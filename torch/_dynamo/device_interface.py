@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import torch
-from torch._dynamo.exc import TritonUnavailableError
 from torch.utils._pallas import has_torch_tpu
 
 
@@ -168,6 +167,8 @@ class DeviceInterface:
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
+        from torch._dynamo.exc import TritonUnavailableError
+
         if not cls.is_triton_capable():
             raise TritonUnavailableError(
                 "This device is not capable of supporting Triton"
@@ -285,6 +286,7 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._dynamo.exc import TritonUnavailableError
         from torch._inductor.exc import GPUTooOldForTriton
 
         if not CudaInterface.is_triton_capable(device):
@@ -379,6 +381,8 @@ class MtiaInterface(DeviceInterface):
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._dynamo.exc import TritonUnavailableError
+
         import triton.backends
 
         if "mtia" not in triton.backends.backends:
@@ -466,6 +470,8 @@ class XpuInterface(DeviceInterface):
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._dynamo.exc import TritonUnavailableError
+
         import triton.backends
 
         if "intel" not in triton.backends.backends:
@@ -530,6 +536,8 @@ class CpuInterface(DeviceInterface):
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._dynamo.exc import TritonUnavailableError
+
         import triton.backends
 
         if "cpu" not in triton.backends.backends:
