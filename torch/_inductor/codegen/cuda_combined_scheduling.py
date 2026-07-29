@@ -107,6 +107,11 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._nv_universal_gemm_scheduling.can_fuse_vertical(node1, node2)
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
+    def can_fuse_nested_reduction_append(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return self._triton_scheduling.can_fuse_nested_reduction_append(node1, node2)
+
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
