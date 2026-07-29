@@ -517,7 +517,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/hooks/FlightRecorderHook.cpp",
-    "torch/csrc/distributed/c10d/hooks/NanCheckHook.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/gloo/ProcessGroupGlooReconfigure.cpp",
