@@ -164,6 +164,8 @@ class _KinetoProfile:
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -848,6 +850,8 @@ class profile(_KinetoProfile):
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable invoked at the end of each profiling cycle
