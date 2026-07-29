@@ -354,6 +354,45 @@ class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
         return "nccl-lazy"
 
 
+class ProcessGroupNCCLLazyReconfigureTest(_ProcessGroupNCCL2RecoverableWorkTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        cls.rdvz_file = rdvz_file
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_drops_pair_channels(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        tensor = torch.full((1,), float(self.rank), device=self.device)
+        peer = 1 - self.rank
+        if self.rank == 0:
+            dist.send(tensor, peer)
+            dist.recv(tensor, peer)
+        else:
+            dist.recv(tensor, peer)
+            dist.send(tensor, peer)
+        torch.cuda.synchronize()
+        self.assertEqual(backend._num_active_channels(), 1)
+
+        if self.rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
+        store = dist.FileStore(self.rdvz_file, self.world_size)
+        store.set(f"second_work_handle_{self.rank}", dist._get_reconfigure_handle())
+        handles = [
+            store.get(f"second_work_handle_{rank}").decode("utf-8")
+            for rank in range(self.world_size)
+        ]
+        dist._reconfigure(2, handles, timeout=self.timeout).wait()
+
+        self.assertEqual(backend._num_active_channels(), 0)
+        self._check_all_reduce()
+
+
 class ProcessGroupNCCLLazyWorkTimeoutTest(ProcessGroupNCCL2WorkTimeoutTest):
     @classmethod
     def backend_str(cls) -> str:

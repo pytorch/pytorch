@@ -53,9 +53,9 @@ class LazyBackend : public Backend {
  public:
   // Builds the 2-rank sibling backend for a peer. The pair rank is 0 for the
   // lower-numbered global rank and 1 for the higher; pair_name is unique per
-  // allocation for the same pair.
-  using PairFactory = std::function<
-      c10::intrusive_ptr<T>(int pair_rank, const std::string& pair_name)>;
+  // allocation for the same pair, and device is the P2P tensor's device.
+  using PairFactory = std::function<c10::intrusive_ptr<
+      T>(int pair_rank, const std::string& pair_name, at::Device device)>;
 
   LazyBackend(
       int rank,
@@ -88,7 +88,8 @@ class LazyBackend : public Backend {
     if (coalescing_active_) {
       return primary_->send(tensors, dstRank, tag);
     }
-    return channelFor(dstRank)->send(tensors, peerInPair(dstRank), tag);
+    return channelFor(dstRank, tensors.at(0).device())
+        ->send(tensors, peerInPair(dstRank), tag);
   }
   c10::intrusive_ptr<Work> recv(
       std::vector<at::Tensor>& tensors,
@@ -97,7 +98,8 @@ class LazyBackend : public Backend {
     if (coalescing_active_) {
       return primary_->recv(tensors, srcRank, tag);
     }
-    return channelFor(srcRank)->recv(tensors, peerInPair(srcRank), tag);
+    return channelFor(srcRank, tensors.at(0).device())
+        ->recv(tensors, peerInPair(srcRank), tag);
   }
 
   // Batched P2P stays on the primary (multiple peers per group).
@@ -312,7 +314,7 @@ class LazyBackend : public Backend {
 
  protected:
   // Returns the pair comm for the given peer, creating it on first use.
-  c10::intrusive_ptr<T> channelFor(int peer) {
+  c10::intrusive_ptr<T> channelFor(int peer, at::Device device) {
     TORCH_CHECK(
         peer != getRank() && peer >= 0 && peer < getSize(),
         "LazyBackend: invalid peer rank ",
@@ -346,7 +348,7 @@ class LazyBackend : public Backend {
         nextPairAttempt(lo, hi));
 
     const int pair_rank = (getRank() < peer) ? 0 : 1;
-    auto sub = pair_factory_(pair_rank, pair_name);
+    auto sub = pair_factory_(pair_rank, pair_name, device);
     TORCH_CHECK(sub, "LazyBackend: pair factory returned null for peer ", peer);
     if (getBoundDeviceId().has_value()) {
       sub->setBoundDeviceId(getBoundDeviceId());
