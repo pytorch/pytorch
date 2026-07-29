@@ -837,11 +837,6 @@ class TORCH_API TensorBase {
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void_v<typename std::invoke_result_t<T&, TensorBase>>, unsigned>;
-  template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, TensorBase>, TensorBase>, unsigned>;
-
   /// Registers a backward hook.
   ///
   /// The hook will be called every time a gradient with respect to the Tensor is computed.
@@ -873,9 +868,7 @@ class TORCH_API TensorBase {
   /// v.remove_hook(h);  // removes the hook
   /// @endcode
   template <typename T>
-  hook_return_void_t<T> register_hook(T&& hook) const;
-  template <typename T>
-  hook_return_var_t<T> register_hook(T&& hook) const;
+  unsigned register_hook(T&& hook) const;
 
 protected:
   unsigned _register_hook(std::function<TensorBase(const TensorBase&)> hook) const;
@@ -936,20 +929,17 @@ inline DeviceIndex get_device(const TensorBase& self) {
 }
 
 template <typename T>
-auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t<T> {
-  // Return the grad argument in case of a hook with void return type to have an
-  // std::function with Tensor return type
-  static_assert(std::is_same_v<decltype(hook(TensorBase())), void>,
-                "Expected hook to return void");
-  return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad) {
-    fn(grad);
-    return TensorBase();
-  });
-}
-
-template <typename T>
-auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_var_t<T> {
-  return _register_hook(std::forward<T>(hook));
+unsigned TensorBase::register_hook(T&& hook) const {
+  using R = std::invoke_result_t<T, TensorBase>;
+  if constexpr (std::is_same_v<R, TensorBase>) {
+    return _register_hook(std::forward<T>(hook));
+  } else {
+    static_assert(std::is_void_v<R>, "hook must return TensorBase or void");
+    return _register_hook([fn = std::forward<T>(hook)](const TensorBase& grad) {
+      fn(grad);
+      return TensorBase();
+    });
+  }
 }
 
 namespace detail {

@@ -110,6 +110,7 @@ class CUDACombinedScheduling(BaseScheduling):
     def can_fuse_nested_reduction_append(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        # Fused nested reductions are Triton-only, so skip the template ladder.
         return self._triton_scheduling.can_fuse_nested_reduction_append(node1, node2)
 
     def can_fuse_horizontal(
