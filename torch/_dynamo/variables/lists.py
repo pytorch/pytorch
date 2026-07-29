@@ -719,6 +719,13 @@ class RangeVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        if self.python_type() is range:
+            return VariableTracker.build(tx, name in range.__dict__)
+        return super().call_obj_hasattr(tx, name)
+
     def range_equals(self, other: "RangeVariable") -> bool:
         # ref: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/rangeobject.c#L514-L553  (range_equals)
         r0, r1 = self, other
@@ -1214,6 +1221,13 @@ class ListVariable(CommonListMethodsVariable):
                 return VariableTracker.build(tx, class_type, source)
         return super().getattro_impl(tx, name)
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        if self.python_type() is not list:
+            return super().call_obj_hasattr(tx, name)
+        return VariableTracker.build(tx, hasattr([], name))
+
     def sq_ass_item_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1690,6 +1704,13 @@ class DequeVariable(CommonListMethodsVariable):
                 self.state += 1
         return result
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        if self.python_type() is collections.deque:
+            return VariableTracker.build(tx, name in collections.deque.__dict__)
+        return super().call_obj_hasattr(tx, name)
+
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1779,6 +1800,13 @@ class TupleVariable(BaseListVariable):
             class_type = self.python_type()
             return VariableTracker.build(tx, class_type, source=source)
         return super().getattro_impl(tx, name)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        if self.python_type() is not tuple:
+            return super().call_obj_hasattr(tx, name)
+        return VariableTracker.build(tx, hasattr((), name))
 
     def sq_concat_impl(
         self,
@@ -2035,6 +2063,11 @@ class SizeVariable(TupleVariable):
                 )
             return self.items[index]
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(torch.Size, name))
+
     def sq_concat_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
@@ -2188,7 +2221,9 @@ class SliceVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in cmp_name_to_op_mapping or name in ("__hash__", "indices"):
-            return variables.CallMethodVariable(self, name)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(getattr(slice, name))
+            )
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(
@@ -2273,6 +2308,11 @@ class ListIteratorVariable(IteratorVariable):
         tx.output.side_effects.mutation(self)
         self.index += 1
         return self.items[old_index]
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(iter([]), name))
 
     def python_type(self) -> type:
         return type(iter([]))
@@ -2367,6 +2407,14 @@ class RangeIteratorVariable(IteratorVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Range iterators are their own iterator."""
         return self
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        if self.python_type() is range_iterator:
+            ri = iter(range(0))
+            return VariableTracker.build(tx, hasattr(ri, name))
+        return super().call_obj_hasattr(tx, name)
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1072-L1091
