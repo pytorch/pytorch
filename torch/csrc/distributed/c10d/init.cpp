@@ -4121,6 +4121,10 @@ Returns:
       .def(
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_peer_channel",
+          &::c10d::nccl2::ProcessGroupNCCLLazy::getPeerChannel,
           py::call_guard<py::gil_scoped_release>());
 #endif
 

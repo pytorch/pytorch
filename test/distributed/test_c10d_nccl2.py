@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import WorkResult
+from torch._C._distributed_c10d import ErrorType, WorkResult
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
@@ -403,6 +403,25 @@ class ProcessGroupNCCLLazyWorkErrorTest(ProcessGroupNCCL2WorkErrorTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-lazy"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_pair_error_updates_lazy_error(self) -> None:
+        tensor = torch.full((1,), float(self.rank), device=self.device)
+        peer = 1 - self.rank
+        if self.rank == 0:
+            dist.send(tensor, peer)
+            dist.recv(tensor, peer)
+        else:
+            dist.recv(tensor, peer)
+            dist.send(tensor, peer)
+        torch.cuda.synchronize()
+
+        backend = dist.get_backend_impl(device=self.device)
+        pair = backend._get_peer_channel(peer)
+        self.assertIsNotNone(pair)
+        pair.abort()
+        self.assertEqual(backend.get_error(), ErrorType.COMM_ERROR)
 
 
 if __name__ == "__main__":
