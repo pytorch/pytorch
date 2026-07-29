@@ -1230,6 +1230,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
     # relaxation for ACT inputs is exercised here on CPU without a process group.
     # The end-to-end path with a real collective + inductor is covered by
     # test/distributed/test_inductor_collectives.py.
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_async_collective_tensor_input_polymorphism(self):
         # A graph traced on an ACT input must be reused when the resolved plain
         # Tensor is passed at runtime (and vice versa), with no class recompile.
@@ -1248,6 +1249,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             self.assertEqual(fn(x, w), (x @ base).sum())
         self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_async_collective_tensor_input_polymorphism_aot_eager(self):
         # Same as above but through AOTAutograd (aot_eager), which exercises the
         # runtime wrapper that unwraps/waits an ACT input and passes a plain
@@ -1267,6 +1269,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             self.assertEqual(fn(x, w), (x @ base).sum())
         self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_async_collective_tensor_inner_access(self):
         # Reading the ACT inner tensor (w.elem) under fullgraph must trace and
         # reconstruct it correctly -- for an ACT input the inner tensor is guarded
@@ -1290,6 +1293,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         # isinstance(w, ACT) discriminates, so the two classes need separate graphs.
         self.assertEqual(cnt.frame_count, 2)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_async_collective_tensor_reverse_direction_still_guards(self):
         # Reverse direction: trace on a plain Tensor, then pass an ACT at runtime.
         # This must recompile -- the relaxation only applies when the traced value
@@ -1310,6 +1314,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             self.assertEqual(fn(x, w), (x @ base).sum())
         self.assertEqual(cnt.frame_count, 2)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     @parametrize("channel", ["isinstance", "class", "type", "match"])
     def test_async_collective_tensor_type_introspection_recompiles(self, channel):
         # A region that observes the ACT class must recompile on the class change
@@ -1375,6 +1380,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         # ...while the same computation without the class check reuses one graph.
         self.assertEqual(run(control), 1)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     @parametrize("channel", ["isinstance", "isinstance_tuple", "match"])
     def test_async_collective_tensor_nondiscriminating_checks_reuse(self, channel):
         # A class check that is True for both an ACT and the resolved Tensor
@@ -1413,6 +1419,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             self.assertEqual(step(x, w), (x @ base).sum())
         self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_async_collective_tensor_dynamic_shapes(self):
         # The unwrapped inner tensor is guarded through UnwrapCollectiveTensorSource;
         # dynamic shapes over that source must stay correct across ACT/Tensor.
