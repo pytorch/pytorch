@@ -6471,8 +6471,9 @@ scaled_dot_product_attention = _add_docstr(
         For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
     For more information please see :doc:`/notes/numerical_accuracy`
 
-        Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention
-        and math kernel on CUDA tensor, and does not support Nested tensor.
+        Grouped Query Attention (GQA) is an experimental feature. It works with FlashAttention,
+        cuDNN attention, and the math kernel on CUDA tensors. Memory-efficient attention also supports
+        GQA on NVIDIA CUDA. GQA does not support Nested tensors.
         Constraints for GQA:
 
             - number_of_heads_query % number_of_heads_key_value == 0 and,
