@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, MI300_ARCH, set_default_dtype, skipIfRocmArch, skipIfTorchDynamo, TEST_WITH_ROCM
+    gradcheck, gradgradcheck, MI300_ARCH, set_default_dtype, skipIfRocm, skipIfRocmArch, skipIfTorchDynamo, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -1730,7 +1730,9 @@ def get_new_module_tests():
             check_gradgrad=False,
             desc='discontiguous',
             default_dtype=torch.double,
-            decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
+            decorator=lambda fn: skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")(
+                skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/186910")(fn)
+            ),
         ),
         dict(
             module_name='EmbeddingBag',
