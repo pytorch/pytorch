@@ -967,6 +967,47 @@ class TestGraphDestroyHooks(TestCase):
         self.assertEqual(seen, [{exec_id}])
 
 
+# Pure registry-lifecycle logic, no CUDA needed. Seeds the module-level kernel
+# annotation map directly and checks that remove_kernel_annotations purges only the
+# requested exec graph ids (tools_id >> 32). (The graph dependency map lives on the
+# profiler observer, not the module, and is exercised in the CUPTI monitor suite.)
+class TestRemoveKernelAnnotations(TestCase):
+    @staticmethod
+    def _tools_id(graph_id, node_id):
+        return (graph_id << 32) | node_id
+
+    def tearDown(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        super().tearDown()
+
+    def test_removes_only_requested_exec_id(self):
+        import torch.cuda._graph_annotations as ga
+
+        exec_a, exec_b = 1, 2
+        ga.clear_kernel_annotations()
+        ann = ga.get_kernel_annotations()
+        ann[self._tools_id(exec_a, 10)] = ["a"]
+        ann[self._tools_id(exec_b, 10)] = ["b"]
+
+        ga.remove_kernel_annotations([exec_a])
+
+        self.assertEqual(
+            ga.get_kernel_annotations(), {self._tools_id(exec_b, 10): ["b"]}
+        )
+
+    def test_missing_and_empty_ids_are_noops(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        ann = ga.get_kernel_annotations()
+        ann[self._tools_id(2, 10)] = ["b"]
+        ga.remove_kernel_annotations([])  # empty: no-op
+        ga.remove_kernel_annotations([99])  # unknown exec id: no-op
+        self.assertEqual(ga.get_kernel_annotations(), {self._tools_id(2, 10): ["b"]})
+
+
 # Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
 # ("name") and reader tolerance for the two legacy pickle spellings: dicts
 # keyed "str" and bare unwrapped strings.
