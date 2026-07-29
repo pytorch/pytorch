@@ -731,9 +731,9 @@ class BaseListVariable(VariableTracker):
         )
 
     tp_methods = {
-        "index": Method(list_index, "index"),
-        "count": Method(list_count, "count"),
-        "__reversed__": Method(list_reversed, "__reversed__"),
+        "index": Method(list_index),
+        "count": Method(list_count),
+        "__reversed__": Method(list_reversed),
     }
 
 
@@ -1097,9 +1097,9 @@ class RangeVariable(BaseListVariable):
         return RangeIteratorVariable(new_start, 0, new_step, length)
 
     tp_methods = {
-        "count": Method(count, "count"),
-        "index": Method(index, "index"),
-        "__reversed__": Method(range_reversed, "__reversed__"),
+        "count": Method(count),
+        "index": Method(index),
+        "__reversed__": Method(range_reversed),
     }
 
     # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
@@ -1334,15 +1334,15 @@ class ListVariable(BaseListVariable):
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     tp_methods = {
-        "append": Method(BaseListVariable.list_append, "append"),
-        "extend": Method(BaseListVariable.list_extend, "extend"),
-        "insert": Method(BaseListVariable.list_insert, "insert"),
-        "pop": Method(BaseListVariable.list_pop, "pop"),
-        "clear": Method(BaseListVariable.list_clear, "clear"),
-        "copy": Method(BaseListVariable.list_copy, "copy"),
-        "reverse": Method(BaseListVariable.list_reverse, "reverse"),
-        "remove": Method(BaseListVariable.list_remove, "remove"),
-        "sort": Method(BaseListVariable.list_sort, "sort"),
+        "append": Method(BaseListVariable.list_append),
+        "extend": Method(BaseListVariable.list_extend),
+        "insert": Method(BaseListVariable.list_insert),
+        "pop": Method(BaseListVariable.list_pop),
+        "clear": Method(BaseListVariable.list_clear),
+        "copy": Method(BaseListVariable.list_copy),
+        "reverse": Method(BaseListVariable.list_reverse),
+        "remove": Method(BaseListVariable.list_remove),
+        "sort": Method(BaseListVariable.list_sort),
     }
 
 
@@ -1767,19 +1767,19 @@ class DequeVariable(BaseListVariable):
     tp_methods = {
         # append/extend clamp right; appendleft/extendleft clamp left; the rest
         # are the shared list handlers (they don't grow, so need no clamp).
-        "append": Method(append, "append"),
-        "extend": Method(extend, "extend"),
-        "appendleft": Method(appendleft, "appendleft"),
-        "extendleft": Method(extendleft, "extendleft"),
-        "insert": Method(insert, "insert"),
-        "pop": Method(pop, "pop"),
-        "popleft": Method(popleft, "popleft"),
-        "clear": Method(clear, "clear"),
-        "reverse": Method(BaseListVariable.list_reverse, "reverse"),
-        "remove": Method(BaseListVariable.list_remove, "remove"),
-        "copy": Method(copy, "copy"),
-        "__copy__": Method(copy, "__copy__"),
-        "__reversed__": Method(deque_reversed, "__reversed__"),
+        "append": Method(append),
+        "extend": Method(extend),
+        "appendleft": Method(appendleft),
+        "extendleft": Method(extendleft),
+        "insert": Method(insert),
+        "pop": Method(pop),
+        "popleft": Method(popleft),
+        "clear": Method(clear),
+        "reverse": Method(BaseListVariable.list_reverse),
+        "remove": Method(BaseListVariable.list_remove),
+        "copy": Method(copy),
+        "__copy__": Method(copy),
+        "__reversed__": Method(deque_reversed),
     }
 
 
@@ -2022,7 +2022,7 @@ class SizeVariable(TupleVariable):
         return result
 
     tp_methods = {
-        "numel": Method(numel, "numel"),
+        "numel": Method(numel),
     }
 
     def mp_subscript_impl(
@@ -2262,7 +2262,7 @@ class SliceVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         return VariableTracker.build(tx, result)
 
-    tp_methods = {"indices": Method(indices, "indices")}
+    tp_methods = {"indices": Method(indices)}
 
 
 class ListIteratorVariable(IteratorVariable):
@@ -2447,8 +2447,8 @@ class RangeIteratorVariable(IteratorVariable):
         return ConstantVariable.create(self.len)
 
     tp_methods = {
-        "__setstate__": Method(setstate, "__setstate__"),
-        "__length_hint__": Method(length_hint, "__length_hint__"),
+        "__setstate__": Method(setstate),
+        "__length_hint__": Method(length_hint),
     }
 
     def python_type(self) -> type:
