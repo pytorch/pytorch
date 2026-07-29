@@ -1909,8 +1909,8 @@ void scaled_gemm(
   }
 
   // Handle user-passed alpha
-  float *alpha_ptr = &alpha_val;
-  float *beta_ptr = &beta_val;
+  const float* alpha_ptr = &alpha_val;
+  const float* beta_ptr = &beta_val;
 
   if (alpha.has_value()) {
     auto& a = alpha.value();
@@ -1920,8 +1920,7 @@ void scaled_gemm(
       // Tell cublasLt we're using device-side pointers for alpha/beta
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
-      // The allocator delays reuse until work on the allocation stream completes.
-      alpha_ptr = a.data_ptr<float>();
+      alpha_ptr = a.const_data_ptr<float>();
       beta_ptr = at::cuda::detail::get_cublas_device_zero();
     } else {
       alpha_val = a.item<float>();
