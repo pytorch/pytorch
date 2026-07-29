@@ -204,15 +204,6 @@ jobs:
           aws s3 cp --recursive /tmp/advisor_input \
             "s3://ossci-raw-job-status/autorevert_advisor_inputs/$REPO/${RUN_ID}_${RUN_ATTEMPT}/"
 
-      - name: Upload advisor input payload artifact
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: advisor-input
-          path: /tmp/advisor_input/
-          retention-days: 30
-
       - name: Save advisor reasoning trace
         if: always() && steps.claude.outputs.execution_file != ''
         continue-on-error: true
@@ -229,15 +220,6 @@ jobs:
           cp "$EXECUTION_FILE" /tmp/advisor_trace/execution.json
           aws s3 cp /tmp/advisor_trace/execution.json \
             "s3://ossci-raw-job-status/autorevert_advisor_traces/$REPO/${RUN_ID}_${RUN_ATTEMPT}.json"
-
-      - name: Upload advisor reasoning trace artifact
-        if: always() && steps.claude.outputs.execution_file != ''
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: advisor-reasoning-trace
-          path: /tmp/advisor_trace/execution.json
-          retention-days: 30
 
       - name: Upload usage metrics
         if: always()
