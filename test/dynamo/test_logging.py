@@ -1060,6 +1060,46 @@ Mutating object of type dict (source name: L['mod']._buffers)
 
         self.assertTrue(found_funcname)
 
+    def test_flex_gemm_log_levels(self):
+        from torch._logging._internal import _parse_log_settings
+
+        log_name = "torch._inductor.kernel.flex_gemm.debug"
+        concise = _parse_log_settings("flex_gemm")
+        verbose = _parse_log_settings("+flex_gemm")
+
+        self.assertEqual(concise.log_qname_to_level[log_name], logging.INFO)
+        self.assertEqual(verbose.log_qname_to_level[log_name], logging.DEBUG)
+        self.assertEqual(concise.artifact_names, set())
+        self.assertEqual(verbose.artifact_names, set())
+
+    def test_custom_log_format_respects_trace_id_filter(self):
+        from torch._logging._internal import log_registry, TorchLogsFormatter
+
+        log_name = "torch._inductor.kernel.flex_gemm.debug"
+        record = logging.LogRecord(
+            log_name,
+            logging.INFO,
+            __file__,
+            0,
+            "message",
+            (),
+            None,
+        )
+        with (
+            unittest.mock.patch.dict(
+                log_registry.log_formatters,
+                {log_name: logging.Formatter("%(message)s")},
+            ),
+            unittest.mock.patch.object(
+                torch._guards.CompileContext,
+                "current_trace_id",
+                return_value=None,
+            ),
+        ):
+            self.assertEqual(
+                TorchLogsFormatter(trace_id_filter={"missing"}).format(record), ""
+            )
+
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)

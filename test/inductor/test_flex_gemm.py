@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import importlib
+import logging
 import math
 import sys
 import unittest
@@ -18,6 +19,7 @@ from torch._higher_order_ops.flex_gemm import (
     nvfp4_e4m3_scale,
     nvfp4_pack,
 )
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor.exc import InductorError
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import run_and_get_code
@@ -2905,6 +2907,172 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "grouped reshape must split exactly"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    def test_flex_gemm_debug_report(self):
+        from torch._inductor.kernel.flex_gemm.debug import (
+            flex_gemm_log,
+            format_flex_gemm_analysis,
+            format_flex_gemm_analysis_details,
+            format_flex_gemm_config_key,
+            log_flex_gemm_artifact,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b):
+            acc = torch.mm(a, b)
+            return torch.relu(acc), (acc * acc).view(4, -1, 32).sum(-1)
+
+        graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 64))
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+        analysis_report = format_flex_gemm_analysis(analysis)
+        analysis_details = format_flex_gemm_analysis_details(analysis)
+        config_report = format_flex_gemm_config_key(
+            (
+                ("tile_m", 256),
+                ("tile_n", 128),
+                ("tile_k", None),
+                ("cluster_m", 2),
+                ("cluster_n", 1),
+                ("cluster_k", 1),
+            )
+        )
+
+        self.assertIn("outputs:\n  main: relu: shape=(4, 64)", analysis_report)
+        self.assertIn("auxiliary: (none)", analysis_report)
+        self.assertIn("main_transform: none", analysis_report)
+        self.assertIn("value: sum_1", analysis_report)
+        self.assertIn("dataflow: view -> sum(dim=[-1], keepdim=False)", analysis_report)
+        self.assertIn("geometry: axis=N, group=32", analysis_report)
+        self.assertIn("consumers: returned", analysis_report)
+        self.assertIn("output_layout: dense", analysis_report)
+        self.assertIn("config_constraints:\n  axis=N, group=32", analysis_report)
+        self.assertNotIn("recognized_dataflow:", analysis_report)
+        self.assertNotIn("structural_forms:", analysis_report)
+        self.assertIn("structural_forms:\n  view: FlexGemmViewForm", analysis_details)
+        self.assertIn("sum_1: FlexGemmReductionForm", analysis_details)
+        self.assertIn("grouped_layouts:\n  view:", analysis_details)
+        self.assertIn("local_reduce_matches:\n  sum_1:", analysis_details)
+        self.assertIn("grouped_select_indices:\n  (none)", analysis_details)
+        self.assertIn("tile_m: 256", config_report)
+        self.assertIn("tile_k: auto", config_report)
+        self.assertIn("cluster_m: 2", config_report)
+        with self.assertLogs(flex_gemm_log, level="INFO") as records:
+            log_flex_gemm_artifact("analysis", lambda: analysis_report)
+            log_flex_gemm_artifact(
+                "analysis_details", lambda: analysis_details, verbose=True
+            )
+        self.assertEqual(len(records.output), 1)
+        self.assertIn(
+            "FLEXGEMM LOWERING\n ===== ANALYSIS =====\noutputs:\n  main: relu",
+            records.output[0],
+        )
+
+        with self.assertLogs(flex_gemm_log, level="DEBUG") as records:
+            log_flex_gemm_artifact(
+                "analysis_details", lambda: analysis_details, verbose=True
+            )
+        self.assertIn(" ===== ANALYSIS DETAILS =====", records.output[0])
+
+    def test_grouped_main_debug_report(self):
+        from torch._inductor.kernel.flex_gemm.debug import (
+            format_flex_gemm_analysis,
+            format_flex_gemm_analysis_details,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b):
+            grouped = torch.mm(a, b).view(4, 8, 2)
+            return grouped.select(-1, 0) - grouped.select(-1, 1)
+
+        graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 16))
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+
+        self.assertIn(
+            "main_transform: grouped-N, group=2, layout=interleaved",
+            format_flex_gemm_analysis(analysis),
+        )
+        details = format_flex_gemm_analysis_details(analysis)
+        self.assertIn("FlexGemmSelectForm", details)
+        self.assertIn("grouped_select_indices:", details)
+        self.assertNotIn("grouped_select_indices:\n  (none)", details)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_emits_flex_gemm_debug_report(self):
+        from torch._inductor.kernel.flex_gemm.debug import flex_gemm_log
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        with (
+            mock.patch.object(sys.stderr, "isatty", return_value=True),
+            self.assertLogs(flex_gemm_log, level="DEBUG") as records,
+        ):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        self.assertEqual(actual, torch.relu(a @ b))
+        report = "\n".join(
+            record.getMessage()
+            for record in records.records
+            if record.levelno == logging.INFO
+        )
+        phases = (
+            " ===== PROBLEM =====",
+            " ===== ANALYSIS =====",
+            " ===== LOWERING PLAN =====",
+            " ===== SELECTION =====",
+        )
+        positions = tuple(report.index(phase) for phase in phases)
+        self.assertEqual(positions, tuple(sorted(positions)))
+        self.assertIn("gemm_op: aten.mm.default", report)
+        self.assertIn("outputs:\n  main: relu", report)
+        self.assertNotIn("structural_forms:", report)
+        self.assertNotIn("GENERATED EPILOGUE", report)
+        self.assertNotIn("CONFIG CANDIDATES", report)
+        self.assertIn("\x1b[", report)
+        self.assertIn("FLEXGEMM LOWERING [flex_gemm_body_graph_", report)
+        self.assertIn("mode: fixed", report)
+        self.assertIn("lowering_approved_candidates: 1", report)
+        self.assertIn("template: cutedsl_flex_gemm_epilogue_", report)
+        self.assertIn('analysis/codegen: TORCH_LOGS="+flex_gemm"', report)
+
+        verbose_report = "\n".join(
+            record.getMessage()
+            for record in records.records
+            if record.levelno == logging.DEBUG
+        )
+        verbose_phases = (
+            " ===== ANALYSIS DETAILS =====",
+            " ===== GENERATED EPILOGUE =====",
+            " ===== CONFIG CANDIDATES =====",
+        )
+        verbose_positions = tuple(
+            verbose_report.index(phase) for phase in verbose_phases
+        )
+        self.assertEqual(verbose_positions, tuple(sorted(verbose_positions)))
+        self.assertIn("structural_forms:", verbose_report)
+        self.assertIn("@cute.jit", verbose_report)
+        self.assertIn("candidate 0:", verbose_report)
+
     def test_grouped_layout_rejects_inexact_inferred_preserved_dimension(self):
         from torch._inductor.kernel.flex_gemm.quack_reductions import (
             grouped_tensor_layout,
@@ -4103,7 +4271,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with FakeTensorMode() as mode:
             fake_amax = mode.from_tensor(amax)
             for op, eager_stride in zip(ops, eager_strides):
-                with self.subTest(op=op):
+                with self.subTest(op=str(op)):
                     self.assertEqual(op(fake_amax).stride(), eager_stride)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -4260,6 +4428,59 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         FileCheck().check(code_check).check_not("local_reduce_finalize_fn").run(code)
         self.assertLocalReduceAuxCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_aux_scale_via_inline_asm_matches_named_op(self):
+        """TorchAO's inline-PTX rceil spelling lowers like the named MX scale op.
+
+        TorchAO's `_to_mx_rceil` reaches E8M0 encoding through the
+        `inline_asm_elementwise` HOP rather than a FlexGEMM-specific op, so the
+        epilogue must accept that spelling and produce the same scale bytes.
+        """
+        m = 64
+        n = 128
+        k = 64
+        group = 32
+        max_value = 448.0
+
+        def named_epilogue(acc):
+            x = acc.float().view(m, -1, group)
+            return acc, mx_e8m0_scale(x.abs().amax(-1))
+
+        def asm_epilogue(acc):
+            x = acc.float().view(m, -1, group)
+            code = inline_asm_elementwise(
+                x.abs().amax(-1) / max_value,
+                asm_str="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+                constraints="=h,r",
+                dtype=torch.uint16,
+            )
+            # Aux outputs carry float32; narrowing one to uint8 is unsupported
+            # independently of inline asm.
+            return acc, code.to(torch.uint8).float()
+
+        def build(epilogue_fn):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK"},
+                )
+
+            return torch.compile(fn, backend="inductor", fullgraph=True)
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        _, named_scale = build(named_epilogue)(a, b)
+        (_, asm_scale), (code,) = run_and_get_code(build(asm_epilogue), a, b)
+
+        self.assertEqual(asm_scale, named_scale.view(torch.uint8).float())
+        FileCheck().check("inline_asm_elementwise_intrinsic(").check_not(
+            "mx_e8m0_scale_intrinsic("
+        ).run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
