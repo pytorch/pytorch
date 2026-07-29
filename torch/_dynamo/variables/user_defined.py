@@ -1790,6 +1790,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return side_effects.is_modified(self._base_vt)
         return False
 
+    def _maybe_call_if_disabled(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        method: object,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # Shared DisableWrapper arm: route a disable-d callable through
+        # call_disabled_method, else return None so the caller falls through.
+        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
+            return self.call_disabled_method(tx, name, method, args, kwargs)
+        return None
+
     def call_disabled_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2263,8 +2277,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             return self._base_vt.sq_contains(tx, item)
 
-        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
-            return self.call_disabled_method(tx, "__contains__", method, [item], {})
+        disabled = self._maybe_call_if_disabled(tx, "__contains__", method, [item], {})
+        if disabled is not None:
+            return disabled
         if isinstance(method, types.FunctionType):
             method_var = self.resolve_type_attr(tx, "__contains__", method, self.source)
             return method_var.call_function(tx, [item], {})
@@ -2279,8 +2294,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             return self._base_vt.tp_iternext_impl(tx)
 
-        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
-            return self.call_disabled_method(tx, "__next__", method, [], {})
+        disabled = self._maybe_call_if_disabled(tx, "__next__", method, [], {})
+        if disabled is not None:
+            return disabled
         if isinstance(method, types.FunctionType):
             method_var = self.resolve_type_attr(tx, "__next__", method, self.source)
             return method_var.call_function(tx, [], {})
@@ -2299,8 +2315,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             return self._base_vt.tp_iter_impl(tx)
 
-        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
-            return self.call_disabled_method(tx, "__iter__", method, [], {})
+        disabled = self._maybe_call_if_disabled(tx, "__iter__", method, [], {})
+        if disabled is not None:
+            return disabled
         if isinstance(method, types.FunctionType):
             method_var = self.resolve_type_attr(tx, "__iter__", method, self.source)
             return method_var.call_function(tx, [], {})
@@ -2330,8 +2347,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and method in self._base_methods
         ):
             return self._base_vt.mp_subscript_impl(tx, key)
-        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
-            return self.call_disabled_method(tx, "__getitem__", method, [key], {})
+        disabled = self._maybe_call_if_disabled(tx, "__getitem__", method, [key], {})
+        if disabled is not None:
+            return disabled
         if isinstance(method, types.FunctionType):
             return variables.UserMethodVariable(
                 method, self, source_fn=source_fn, source=self.source
@@ -2377,9 +2395,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and method in self._base_methods
         ):
             return self._base_vt.mp_ass_subscript_impl(tx, key, value)
-        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
-            args = [key] if is_delete else [key, value]
-            return self.call_disabled_method(tx, attr, method, args, {})
+        disabled = self._maybe_call_if_disabled(
+            tx, attr, method, [key] if is_delete else [key, value], {}
+        )
+        if disabled is not None:
+            return disabled
         if isinstance(method, types.FunctionType):
             args = [key] if is_delete else [key, value]
             variables.UserMethodVariable(
@@ -2418,8 +2438,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and method in self._base_methods
         ):
             return self._base_vt.call_method(tx, name, list(args), {})
-        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
-            return self.call_disabled_method(tx, name, method, list(args), {})
+        disabled = self._maybe_call_if_disabled(tx, name, method, list(args), {})
+        if disabled is not None:
+            return disabled
         if not isinstance(method, types.FunctionType):
             # C-implemented method descriptors / slot wrappers (e.g.
             # Tensor.__add__) cannot be invoked here without re-entering the
@@ -2898,10 +2919,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
-                # A torch._dynamo.disable-d method dispatched through call_method
-                # (e.g. __setattr__, __delattr__, __call__).
-                return self.call_disabled_method(tx, name, method, args, kwargs)
+            # A torch._dynamo.disable-d method dispatched through call_method
+            # (e.g. __setattr__, __delattr__, __call__).
+            disabled = self._maybe_call_if_disabled(tx, name, method, args, kwargs)
+            if disabled is not None:
+                return disabled
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
