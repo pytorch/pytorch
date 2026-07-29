@@ -20,10 +20,8 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     canonical_tensorssa_reduction_type,
     materialize_tensorssa_reduction,
 )
-from torch._inductor.kernel.gemm_epilogue import (
-    GemmReductionArguments,
-    GemmReductionExpression,
-)
+from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionDescriptor
 from torch.utils._ordered_set import OrderedSet
 
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
@@ -82,9 +80,9 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         secondary_feed = reduction.secondary_feed_output
         secondary_type = reduction.secondary_feed_type
         try:
-            expression = reduction.expression
+            expression = reduction.descriptor
             secondary_expression = (
-                GemmReductionExpression.parse(secondary_type)
+                GemmReductionDescriptor.parse(secondary_type)
                 if secondary_type is not None
                 else None
             )
