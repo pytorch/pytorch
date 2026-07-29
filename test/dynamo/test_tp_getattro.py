@@ -926,6 +926,82 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), x + 20)
         self.assertEqual(cnt.frame_count, 2)
 
+    # --- C descriptor type check (descr_check equivalent) ---
+
+    def test_method_descriptor_incompatible_type(self):
+        class Borrower:
+            append = list.append
+
+        def fn(x, obj):
+            obj.append
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_wrapper_descriptor_incompatible_type(self):
+        class Borrower:
+            add = list.__add__
+
+        def fn(x, obj):
+            obj.add
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_member_descriptor_incompatible_type(self):
+        class Alien:
+            __slots__ = ("x",)
+
+        class Borrower:
+            x = Alien.x
+
+        def fn(x, obj):
+            obj.x
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_getset_descriptor_incompatible_type(self):
+        class Borrower:
+            denominator = int.denominator
+
+        def fn(x, obj):
+            obj.denominator
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_method_descriptor_compatible_type(self):
+        def fn(x):
+            l = [1, 2, 3]
+            l.append(4)
+            return x
+
+        x = torch.randn(4)
+        eager = fn(x).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x).sum()
+        self.assertEqual(eager, compiled)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
