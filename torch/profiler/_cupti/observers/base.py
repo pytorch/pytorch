@@ -142,12 +142,22 @@ class CuptiMonitorObserver:
         *,
         annotations: ObserverAnnotationSettings | None = None,
     ) -> None:
-        # Observer-owned graph node->node dependency map (graph_node_id -> predecessor
-        # graph_node_ids): populated at graph instantiate by our instantiate hook and read by
-        # our dependency resolver. Stays empty unless record_graph_dependencies is set.
-        self._graph_dependencies: dict[int, list[int]] = {}
-        self._instantiate_hook_handles: list[RemovableHandle] = []
         record_deps = annotations is not None and annotations.record_graph_dependencies
+        # Graph node->node dependency map (graph_node_id -> predecessor graph_node_ids), read
+        # by our dependency resolver. When recording, share the process-global recorder's map
+        # by reference: it is armed early (before graphs are captured) and persists across
+        # windows, so it holds topology this per-window observer -- created at prepare_trace,
+        # long after warm-up capture, and torn down each window -- would otherwise never see.
+        if record_deps:
+            from torch.profiler._cupti._graph_deps import (
+                arm_graph_dependency_recording,
+                graph_dependencies,
+            )
+
+            arm_graph_dependency_recording()
+            self._graph_dependencies: dict[int, list[int]] = graph_dependencies()
+        else:
+            self._graph_dependencies = {}
         # Region naming (see ObserverAnnotationSettings): an enabled source folds its
         # required fields into the selection (graph: just graph_node_id; eager: extra kinds).
         if annotations is None:
@@ -184,11 +194,6 @@ class CuptiMonitorObserver:
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
-        # Own the dependency map: record each graph's topology at instantiate into it. Only
-        # while we registered with the monitor (nothing consumes the map otherwise). Removed in
-        # close() so nothing leaks this observer.
-        if record_deps and self.available:
-            self._register_graph_instantiate_hook()
         # Register a graph-destroy hook per installed graph-node resolver so a
         # destroyed CUDA graph purges that resolver's registry and invalidates
         # its cache. Registering any hook is also the "monitor active" gate
@@ -199,7 +204,7 @@ class CuptiMonitorObserver:
             self._register_graph_destroy_hooks()
 
     def _make_dependency_resolver(self) -> GraphDependencyResolver:
-        """A resolver over this observer's own dependency map: graph_node_id -> predecessor
+        """A resolver over the shared graph dependency map: graph_node_id -> predecessor
         graph_node_ids (None when the node has none). Captures the map, not self, so the
         cached resolver never pins the observer."""
         deps = self._graph_dependencies
@@ -210,37 +215,6 @@ class CuptiMonitorObserver:
             return deps.get(graph_node_id)
 
         return resolve
-
-    def _register_graph_instantiate_hook(self) -> None:
-        """Register an instantiate hook that reads each graph's node dependency topology
-        into this observer's map. We hold the live graph here, so get_graph_data() works (it
-        needs keep_graph=True + an instantiated graph, and raises otherwise -- naturally
-        skipping keep_graph=False graphs). Edges are keyed by tools_id (== the CUPTI
-        graph_node_id, joining to profiler kernel records). The hook captures only the map
-        (never self), so the global registry cannot pin this observer; the handle is removed in
-        close()."""
-        from torch.cuda.graphs import register_graph_instantiate_hook
-
-        deps = self._graph_dependencies
-
-        def hook(torch_cuda_graph: Any) -> None:
-            try:
-                nodes = torch_cuda_graph.get_graph_data()["nodes"]
-            except (RuntimeError, AttributeError, KeyError):
-                return
-            recorded = {
-                n["tools_id"]: [nodes[i]["tools_id"] for i in n["dependencies"]]
-                for n in nodes
-                if n["dependencies"]
-            }
-            if not recorded:
-                return
-            deps.update(recorded)
-            # Track the exec graph id (tools_id >> 32, shared by all the graph's nodes) so the
-            # graph-destroy callback purges these edges from our map on destruction.
-            torch_cuda_graph._recorded_exec_ids.add(next(iter(recorded)) >> 32)
-
-        self._instantiate_hook_handles.append(register_graph_instantiate_hook(hook))
 
     @property
     def available(self) -> bool:
@@ -389,9 +363,6 @@ class CuptiMonitorObserver:
 
     def close(self) -> None:
         """Unregister from the monitor. Idempotent."""
-        for handle in self._instantiate_hook_handles:
-            handle.remove()
-        self._instantiate_hook_handles.clear()
         for handle in self._destroy_hook_handles:
             handle.remove()
         self._destroy_hook_handles = []
