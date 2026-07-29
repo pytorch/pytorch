@@ -384,7 +384,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         colored_payload_fn=partial(problem_report, colored=True),
     )
     # This is where we figure out what the fx-graph body is doing
-    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
+    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
     log_flex_gemm_artifact(
         "analysis",
         lambda: format_flex_gemm_analysis(epilogue_analysis),
@@ -475,7 +475,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
-        gemm_op,
         epilogue_analysis,
         epilogue_arg_placeholders,
         fast_math=fast_math,

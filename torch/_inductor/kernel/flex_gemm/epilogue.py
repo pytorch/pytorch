@@ -6,7 +6,9 @@ carry grouped TensorSSA layouts, matches supported local reductions, and plans
 the main, auxiliary, and local-reduction consumers.
 
 ``materialize_flex_gemm_epilogue`` uses that analysis to generate the CuTeDSL
-epilogue and physical reduction callbacks.
+epilogue and physical reduction callbacks. Structural FX schemas are normalized
+once during analysis; materialization consumes those forms while ordinary
+pointwise nodes remain on the open-ended ops-handler path.
 """
 
 import dataclasses
@@ -842,20 +844,22 @@ class FlexGemmEpilogueAnalysis:
     """Bundle the immutable analysis consumed by FlexGEMM lowering and emission.
 
     Attributes:
+        gemm: The validated GEMM node shared by lowering and emission.
         outputs: Classification of main, auxiliary, and local-reduction outputs.
         local_reduce: Grouped layouts and local-reduction matches from the FX graph.
     """
 
+    gemm: torch.fx.Node
     outputs: FlexGemmOutputPlan
     local_reduce: FlexGemmLocalReduceAnalysis
 
     @classmethod
     def from_graph_module(
-        cls, graph_module: torch.fx.GraphModule
+        cls, graph_module: torch.fx.GraphModule, gemm: torch.fx.Node
     ) -> "FlexGemmEpilogueAnalysis":
         """Run the one-pass local-reduction analysis and classify graph outputs."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
-        return cls(output_plan(graph_module, local_reduce), local_reduce)
+        return cls(gemm, output_plan(graph_module, local_reduce), local_reduce)
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
@@ -870,6 +874,7 @@ class FlexGemmEpilogueAnalysis:
 
 def analyze_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
+    gemm: torch.fx.Node,
 ) -> FlexGemmEpilogueAnalysis:
     """Analyze FlexGEMM body for output planning and epilogue code generation.
 
@@ -880,11 +885,12 @@ def analyze_flex_gemm_epilogue(
 
     Args:
         graph_module: FlexGEMM body graph containing GEMM and epilogue nodes.
+        gemm: The validated GEMM node within ``graph_module``.
 
     Returns:
         Output and local-reduction analysis shared by later lowering phases.
     """
-    return FlexGemmEpilogueAnalysis.from_graph_module(graph_module)
+    return FlexGemmEpilogueAnalysis.from_graph_module(graph_module, gemm)
 
 
 def gemm_node(
@@ -939,7 +945,6 @@ class FlexGemmEpilogueEmitter:
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
-        gemm_op: torch._ops.OpOverload,
         analysis: FlexGemmEpilogueAnalysis,
         epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
         *,
@@ -948,7 +953,7 @@ class FlexGemmEpilogueEmitter:
         self.graph_module = graph_module
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.fast_math = fast_math
-        self.gemm = gemm_node(graph_module, gemm_op)
+        self.gemm = analysis.gemm
         self.outputs = analysis.outputs
         self.graph = analysis.local_reduce.graph
         self.kernel = FlexGemmCuteDSLKernel()
@@ -1267,7 +1272,6 @@ class FlexGemmEpilogueEmitter:
 
 def materialize_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
-    gemm_op: torch._ops.OpOverload,
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
     *,
@@ -1282,8 +1286,7 @@ def materialize_flex_gemm_epilogue(
 
     Args:
         graph_module: FlexGEMM body graph containing the GEMM and epilogue nodes.
-        gemm_op: GEMM overload expected to occur exactly once in the body.
-        analysis: Shared output and local-reduction analysis for the graph.
+        analysis: Shared GEMM, output, and local-reduction analysis for the graph.
         epilogue_arg_placeholders: Captured tensor placeholders exposed as
             generated epilogue parameters.
         fast_math: Whether supported CuTeDSL math operations may use approximate
@@ -1294,7 +1297,6 @@ def materialize_flex_gemm_epilogue(
     """
     return FlexGemmEpilogueEmitter(
         graph_module,
-        gemm_op,
         analysis,
         epilogue_arg_placeholders,
         fast_math=fast_math,
