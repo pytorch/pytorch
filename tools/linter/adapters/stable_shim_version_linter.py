@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -20,13 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
-    ensure_diff_blob_local,
     get_current_version,
     LintMessage,
     LintSeverity,
     merge_base_with_main,
     MULTILINE_MATCHERS,
     PreprocessorTracker,
+    run_git_object_command,
 )
 
 
@@ -71,6 +72,8 @@ def get_added_lines(filename: str) -> set[int]:
         # Check uncommitted changes (working directory vs HEAD)
         result = subprocess.run(
             ["git", "diff", "HEAD", filename],
+            cwd=REPO_ROOT,
+            env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
             capture_output=True,
             text=True,
             timeout=5,
@@ -80,19 +83,7 @@ def get_added_lines(filename: str) -> set[int]:
 
         # Get merge-base with origin/main to check all PR commits
         merge_base = merge_base_with_main()
-        # Prefetch the merge-base blob so the diff below stays fully local (CI
-        # uses a blobless partial clone; otherwise git lazily fetches mid-diff).
-        ensure_diff_blob_local(merge_base, filename)
-        result = subprocess.run(
-            ["git", "diff", f"{merge_base}..HEAD", filename],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to get git diff information for {filename}. Error: {result.stderr}"
-            )
+        result = run_git_object_command(["diff", f"{merge_base}..HEAD", "--", filename])
         added_lines.update(parse_diff(result.stdout))
 
     except Exception as e:
