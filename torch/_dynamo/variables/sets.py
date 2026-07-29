@@ -747,13 +747,15 @@ class OrderedSetClassVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__new__":
-            from .misc import CallMethodVariable
+            from .misc import GetAttrVariable
 
             if self.source:
                 attr_source = AttrSource(self.source, name)
             else:
                 attr_source = None
-            return CallMethodVariable(self, name, source=attr_source)
+            return GetAttrVariable(
+                self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
+            )
         else:
             return super().getattro_impl(tx, name)
 
