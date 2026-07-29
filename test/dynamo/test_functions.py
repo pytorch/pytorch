@@ -3,6 +3,7 @@
 import collections
 import collections.abc
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -598,6 +599,38 @@ partial_fn = functools.partial(fn, scale=2)
         res = opt_fn(torch.zeros(1))
         self.assertEqual(res[1], (0, 0, 0))
         self.assertEqual(ref[1], res[1])
+
+    def test_bin_oct_hex_index_int_subclass(self):
+        # For an int subclass (incl. IntEnum/IntFlag members) __index__ is the
+        # inherited int slot. hex/oct/bin/operator.index must const-fold to the
+        # underlying int rather than re-dispatching into the slot, which would
+        # recurse forever (regression for PR #191408).
+        class MyInt(int):
+            def __new__(cls, v):
+                return super().__new__(cls, v)
+
+        class Color(enum.IntEnum):
+            RED = 1
+            GREEN = 2
+
+        class Perm(enum.IntFlag):
+            R = 4
+            W = 2
+
+        for obj in (MyInt(10), Color.RED, Color.GREEN, Perm.R | Perm.W):
+
+            def fn(t, obj=obj):
+                return t + 1, bin(obj), oct(obj), hex(obj), operator.index(obj)
+
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            ref = fn(torch.zeros(1))
+            res = opt_fn(torch.zeros(1))
+            self.assertEqual(res[1:], ref[1:])
+            self.assertEqual(
+                res[1:],
+                (bin(int(obj)), oct(int(obj)), hex(int(obj)), int(obj)),
+            )
 
     @make_test
     def test_obj_eq(a, b):
