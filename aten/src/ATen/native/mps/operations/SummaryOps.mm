@@ -1,7 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/bincount_native.h>
+#include <ATen/ops/stack.h>
 namespace at::native {
 
 static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tensor& output) {
@@ -88,14 +90,17 @@ Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_op
   if (self.dim() == 1 && self.numel() == 0) {
     return at::zeros({minlength}, kLong, std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */);
   }
-  TORCH_CHECK(self.dim() == 1 && self.min().item<int64_t>() >= 0,
-              "bincount only supports 1-d non-negative integral inputs.");
+  TORCH_CHECK(self.dim() == 1, "bincount only supports 1-d non-negative integral inputs.");
+
+  auto [min, max] = at::aminmax(self);
+  auto minmax = at::stack({min, max}).cpu();
+  TORCH_CHECK(minmax[0].item<int64_t>() >= 0, "bincount only supports 1-d non-negative integral inputs.");
 
   bool has_weights = weights.defined();
   TORCH_CHECK(!(has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))),
               "weights should be 1-d and have the same length as input");
 
-  const int64_t nbins = std::max(self.max().item<int64_t>() + 1L, minlength);
+  const int64_t nbins = std::max(minmax[1].item<int64_t>() + 1L, minlength);
   Tensor output;
 
   Tensor weights_ = weights;

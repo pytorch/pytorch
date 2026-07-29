@@ -45,24 +45,25 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def _validate_error(self, exception, op_type, rank, tensor, verify_diff=True):
         err = str(exception)
         self.assertTrue(
-            op_type in err, f"Got {err} but expected {op_type} to be in error."
+            op_type in err,
+            lambda msg: f"{msg}\nGot {err} but expected {op_type} to be in error.",
         )
         # User doesn't call barrier with tensor.
         if op_type != "BARRIER":
             self.assertTrue(
                 f"{list(tensor.shape)}" in err,
-                f"Did not find shapes {list(tensor.shape)} in error {err}",
+                lambda msg: f"{msg}\nDid not find shapes {list(tensor.shape)} in error {err}",
             )
             # For CUDA, only assert on device type, not index
             if device_type in str(tensor.device):
                 self.assertTrue(
                     device_type in err,
-                    f"Did not find {device_type} device in error {err}",
+                    lambda msg: f"{msg}\nDid not find {device_type} device in error {err}",
                 )
             else:
                 self.assertTrue(
                     str(tensor.device) in err,
-                    f"Did not find tensor device {str(tensor.device)} in error {err}",
+                    lambda msg: f"{msg}\nDid not find tensor device {str(tensor.device)} in error {err}",
                 )
             # C++ and python type strings are not exactly the same.
             if "float" in str(tensor.dtype):
@@ -77,7 +78,8 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             # Ensure info about how collectives diff is in the error.
             if verify_diff:
                 self.assertTrue(
-                    "Collectives differ in the following" in err, f"Got error {err}"
+                    "Collectives differ in the following" in err,
+                    lambda msg: f"{msg}\nGot error {err}",
                 )
 
     def _test_collective_hang(self, wrapper_pg, use_accel=False):

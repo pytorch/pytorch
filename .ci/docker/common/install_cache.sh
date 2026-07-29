@@ -2,24 +2,45 @@
 
 set -ex
 
-install_ubuntu() {
-  echo "Installing pkg-config and libssl-dev"
-  apt-get update && apt-get install -y pkg-config libssl-dev curl
-  echo "Installing rust"
+# Build sccache from source at v0.16.0 with the nvcc 13.3 dryrun-parsing fix
+# backported from mozilla/sccache#2722 (see
+# patches/sccache-nvcc-13.3-dryrun-parsing.patch). The prebuilt release binary
+# mis-parses nvcc 13.3+ --dryrun output (it skips the device compile, leaving
+# "fatbinary: Could not open input file '*.cubin'"), so build from source until
+# a fixed sccache release ships. Reverts #189365 (prebuilt-binary download).
+build_sccache_from_source() {
+  local VERSION=0.16.0
+  echo "Building sccache ${VERSION} from source with the nvcc 13.3 dryrun fix"
+  apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev curl git ca-certificates
   curl https://sh.rustup.rs -sSf | sh -s -- -y
-  echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.16.0
-  cd sccache
-  echo "Building sccache"
-  . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
-  cp target/release/sccache /opt/cache/bin
-  cp target/release/sccache-dist /opt/cache/bin
-  echo "Cleaning up"
-  cd ..
-  rm -rf sccache
-  rustup self uninstall -y
-  apt-get remove -y pkg-config libssl-dev
-  apt-get autoclean && apt-get clean
+  # shellcheck disable=SC1091
+  . "$HOME/.cargo/env"
+  git clone --depth 1 --branch "v${VERSION}" https://github.com/mozilla/sccache /tmp/sccache
+  local patch=/opt/cache/patches/sccache-nvcc-13.3-dryrun-parsing.patch
+  [ -f "$patch" ] || { echo "ERROR: $patch missing; the Dockerfile must 'COPY ./common/patches /opt/cache/patches'"; exit 1; }
+  git -C /tmp/sccache apply "$patch"
+  cargo build --manifest-path /tmp/sccache/Cargo.toml --release --features="dist-client dist-server"
+  cp /tmp/sccache/target/release/sccache /opt/cache/bin
+  cp /tmp/sccache/target/release/sccache-dist /opt/cache/bin
+  chmod a+x /opt/cache/bin/sccache /opt/cache/bin/sccache-dist
+  rm -rf /tmp/sccache "$HOME/.cargo" "$HOME/.rustup"
+}
+
+install_ubuntu() {
+  # riscv64 (built under QEMU emulation) has no nvcc, so it is unaffected by the
+  # --simt-only bug; it also has no sccache-dist, and a from-source build under
+  # emulation would be impractically slow. Use the prebuilt binary there and
+  # build from source everywhere else.
+  if [[ "$(uname -m)" == "riscv64" ]]; then
+    local VERSION=0.16.0
+    # Rust's riscv64 arch is riscv64gc; sccache-dist is not available on riscv64.
+    echo "Downloading prebuilt sccache ${VERSION} for riscv64"
+    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/sccache-v${VERSION}-riscv64gc-unknown-linux-musl.tar.gz | \
+      tar -xz -C /opt/cache/bin --strip-components=1 sccache-v${VERSION}-riscv64gc-unknown-linux-musl/sccache
+    chmod a+x /opt/cache/bin/sccache
+  else
+    build_sccache_from_source
+  fi
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
@@ -38,7 +59,6 @@ export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
 install_ubuntu
-chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues

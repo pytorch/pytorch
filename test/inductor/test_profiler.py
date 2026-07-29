@@ -281,21 +281,30 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
                 args["kernel_backend"], "triton", msg=lambda msg: f"{msg}\nevent = {e}"
             )
 
-            self.assertTrue("stream" in args, msg=f"event = {e}")
-            self.assertTrue("kernel_file" in args, msg=f"event = {e}")
+            self.assertTrue("stream" in args, msg=lambda msg: f"{msg}\nevent = {e}")
+            self.assertTrue(
+                "kernel_file" in args, msg=lambda msg: f"{msg}\nevent = {e}"
+            )
             kernel_file = args["kernel_file"]
-            self.assertTrue(os.path.isfile(kernel_file), msg=f"event = {e}")
+            self.assertTrue(
+                os.path.isfile(kernel_file), msg=lambda msg: f"{msg}\nevent = {e}"
+            )
 
-            self.assertTrue("kernel_hash" in args, msg=f"event = {e}")
+            self.assertTrue(
+                "kernel_hash" in args, msg=lambda msg: f"{msg}\nevent = {e}"
+            )
             self.assertEqual(
                 args["kernel_hash"],
                 get_hash(kernel_file),
                 msg=lambda msg: f"{msg}\nevent = {e}",
             )
 
-            self.assertTrue("kernel_kwargs" in args, msg=f"event = {e}")
             self.assertTrue(
-                args["kernel_kwargs"].startswith("XBLOCK="), msg=f"event = {e}"
+                "kernel_kwargs" in args, msg=lambda msg: f"{msg}\nevent = {e}"
+            )
+            self.assertTrue(
+                args["kernel_kwargs"].startswith("XBLOCK="),
+                msg=lambda msg: f"{msg}\nevent = {e}",
             )
 
         for e in triton_events:

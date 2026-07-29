@@ -74,6 +74,16 @@ class PointwiseDef(NamedTuple):
     # is float-only, the int versions use the DSL's truncating int division). None -> the
     # one `fn` serves all compute dtypes (the common case; +,-,*,&,| are dtype-generic).
     int_fn: str | None = None
+    # Skip the .out variant because an ATEN kernel redispatches a WRAPPED-NUMBER tensor
+    # into it. aten's pow_Scalar_out builds wrapped_scalar_tensor(base, exp.device()) --
+    # a CUDA tensor flagged is_wrapped_number -- and calls at::pow_out (Pow.cpp:66). Our
+    # router is a Python kernel, and converting a boxed wrapped-number tensor to Python
+    # asserts it is CPU (pybind_utils.cpp toPyObject), so registering the .out overload
+    # turns `2.0 ** cuda_tensor` / pow(2.0, t) / float_power(2.0, t) / integer ldexp into
+    # an INTERNAL ASSERT. The assert fires in the boxed->Python conversion, BEFORE any
+    # cond runs, so it cannot be declined in Python -- the overload must not be
+    # registered at all. Functional and in-place still are.
+    skip_out_variant: bool = False
 
 
 _DEFAULT = PromotionKind.DEFAULT
@@ -154,7 +164,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
     # pow keeps integers integer (aten int^int -> int); the float fn is the exp2/log2
     # composite with full sign/edge handling. Integer pow needs a repeated-multiply
     # loop the DSL can't express over a runtime exponent -> float-only.
-    PointwiseDef("pow.Tensor_Tensor", 2, "_pow"),
+    PointwiseDef("pow.Tensor_Tensor", 2, "_pow", skip_out_variant=True),
     # fmod/remainder/floor_divide: integer math differs from float (truncating int
     # division vs cute.math.floor) -> int_fn picks the Int-compute variant.
     PointwiseDef("fmod.Tensor", 2, "_fmod", int_dtypes=_INT_DTYPES, int_fn="_fmod_int"),
