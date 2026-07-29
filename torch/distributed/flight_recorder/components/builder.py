@@ -65,6 +65,19 @@ Flat DB builder
 """
 
 
+def _parse_ranks(value: Any) -> list[int]:
+    try:
+        ranks = ast.literal_eval(value)
+        if isinstance(ranks, str):
+            ranks = ast.literal_eval(ranks)
+    except (SyntaxError, TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid process group ranks: {value!r}") from exc
+
+    if not isinstance(ranks, list) or any(type(rank) is not int for rank in ranks):
+        raise ValueError(f"Process group ranks must be a list of integers: {value!r}")
+    return ranks
+
+
 def build_groups_memberships(
     pg_config: Any,
 ) -> tuple[
@@ -108,15 +121,12 @@ def build_groups_memberships(
     for global_rank in pg_config:
         for pg_uid in pg_config[global_rank]:
             desc = pg_config[global_rank][pg_uid]["desc"]
-            ranks = ast.literal_eval(pg_config[global_rank][pg_uid]["ranks"])
+            ranks = _parse_ranks(pg_config[global_rank][pg_uid]["ranks"])
             # With the adoption of the split_group API, we can have multiple PGs with the same pg_guid (PG Name)
             # So we need to add the hash of all its ranks within the PG as well.
             # Also guid must be a string because `_process_group_name` returns a string.
             pg_guid = pg_uid + str(hash(frozenset(ranks)))
             _pg_guids[(pg_uid, global_rank)] = pg_guid
-            if isinstance(ranks, str):
-                # TODO Bug in FR data format? ranks is '[0, 1,...]'
-                ranks = eval(ranks)
 
             if pg_guid not in _groups:
                 groups.append(Group(id=pg_guid, desc=desc, size=len(ranks)))
@@ -398,7 +408,7 @@ def transform_ft(
         rank = dump["rank"]
         for key, pg_config in dump["pg_config"].items():
             if pg_config["desc"] == "default_pg":
-                ranks = eval(pg_config["ranks"])
+                ranks = _parse_ranks(pg_config["ranks"])
                 replica_id = rank // group_world_size
                 first_rank = replica_id * group_world_size
                 new_ranks = [r + first_rank for r in ranks]
