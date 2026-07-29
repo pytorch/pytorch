@@ -1,6 +1,10 @@
 # Owner(s): ["oncall: distributed"]
+import io
 import os
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
 import torch
 import torch.nn as nn
@@ -9,6 +13,37 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestMemoryTracker(TestCase):
+    def test_load_restores_op_index(self):
+        with patch.object(torch, "get_device_module"):
+            tracker = MemoryTracker()
+            loaded_tracker = MemoryTracker()
+
+        tracker.memories_allocated = {
+            0: ("initial", 1.0),
+            1: ("aten.mm", 3.0),
+        }
+        tracker.memories_active = {
+            0: ("initial", 1.0),
+            1: ("aten.mm", 2.0),
+        }
+        tracker.memories_reserved = {
+            0: ("initial", 2.0),
+            1: ("aten.mm", 4.0),
+        }
+        tracker._op_index = 2
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "memory.trace")
+            tracker.save_stats(path)
+            loaded_tracker.load(path)
+
+        self.assertEqual(loaded_tracker._op_index, tracker._op_index)
+        with redirect_stdout(io.StringIO()) as expected_output:
+            tracker.summary()
+        with redirect_stdout(io.StringIO()) as actual_output:
+            loaded_tracker.summary()
+        self.assertEqual(actual_output.getvalue(), expected_output.getvalue())
+
     @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_local_model(self):
         """
