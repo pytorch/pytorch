@@ -1,15 +1,15 @@
-#include <gtest/gtest.h>
+#include <test/cpp/aoti_abi_check/cuda/utils.cuh>
 
 #include <torch/headeronly/cuda/AtomicAdd.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Half.h>
 
-#include <cuda_runtime.h>
-
 #include <cstdint>
 #include <vector>
 
 namespace {
+
+using torch::test::DeviceBuffer;
 
 template <typename scalar_t>
 __global__ void scatter_add_kernel(
@@ -26,15 +26,10 @@ __global__ void scatter_add_kernel(
   }
 }
 
-bool hasCudaDevice() {
-  int count = 0;
-  return cudaGetDeviceCount(&count) == cudaSuccess && count > 0;
-}
-
-// Accumulates ones into a buffer of buf_numel elements through
-// fastAtomicAdd on the sub-buffer starting at out_offset with out_numel
-// elements, then returns the whole buffer so callers can also check the
-// elements outside the sub-buffer.
+// Accumulates ones into a buffer of buf_numel elements through fastAtomicAdd
+// on the sub-buffer starting at out_offset with out_numel elements, then
+// returns the whole buffer so callers can also check the elements outside
+// the sub-buffer.
 template <typename scalar_t>
 std::vector<scalar_t> launchScatterAdd(
     const std::vector<int64_t>& indices,
@@ -43,52 +38,29 @@ std::vector<scalar_t> launchScatterAdd(
     int64_t out_numel,
     bool fast_atomics) {
   const int64_t n = static_cast<int64_t>(indices.size());
-  const std::vector<scalar_t> values(n, scalar_t(1.0f));
-  std::vector<scalar_t> buf(buf_numel, scalar_t(0.0f));
-
-  scalar_t* d_buf = nullptr;
-  int64_t* d_indices = nullptr;
-  scalar_t* d_values = nullptr;
-  EXPECT_EQ(cudaMalloc(&d_buf, buf_numel * sizeof(scalar_t)), cudaSuccess);
-  EXPECT_EQ(cudaMalloc(&d_indices, n * sizeof(int64_t)), cudaSuccess);
-  EXPECT_EQ(cudaMalloc(&d_values, n * sizeof(scalar_t)), cudaSuccess);
-  EXPECT_EQ(
-      cudaMemcpy(
-          d_buf, buf.data(), buf_numel * sizeof(scalar_t), cudaMemcpyDefault),
-      cudaSuccess);
-  EXPECT_EQ(
-      cudaMemcpy(
-          d_indices, indices.data(), n * sizeof(int64_t), cudaMemcpyDefault),
-      cudaSuccess);
-  EXPECT_EQ(
-      cudaMemcpy(
-          d_values, values.data(), n * sizeof(scalar_t), cudaMemcpyDefault),
-      cudaSuccess);
+  DeviceBuffer<scalar_t> d_buf(std::vector<scalar_t>(buf_numel, scalar_t(0.0f)));
+  DeviceBuffer<int64_t> d_indices(indices);
+  DeviceBuffer<scalar_t> d_values(std::vector<scalar_t>(n, scalar_t(1.0f)));
 
   constexpr int threads = 256;
   const int blocks = static_cast<int>((n + threads - 1) / threads);
   scatter_add_kernel<scalar_t><<<blocks, threads>>>(
-      d_buf + out_offset, d_indices, d_values, n, out_numel, fast_atomics);
-  EXPECT_EQ(cudaGetLastError(), cudaSuccess);
-  EXPECT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-
-  EXPECT_EQ(
-      cudaMemcpy(
-          buf.data(), d_buf, buf_numel * sizeof(scalar_t), cudaMemcpyDefault),
-      cudaSuccess);
-  EXPECT_EQ(cudaFree(d_buf), cudaSuccess);
-  EXPECT_EQ(cudaFree(d_indices), cudaSuccess);
-  EXPECT_EQ(cudaFree(d_values), cudaSuccess);
-  return buf;
+      d_buf.get() + out_offset,
+      d_indices.get(),
+      d_values.get(),
+      n,
+      out_numel,
+      fast_atomics);
+  CUDA_EXPECT_OK(cudaGetLastError());
+  CUDA_EXPECT_OK(cudaDeviceSynchronize());
+  return d_buf.to_host();
 }
 
 // indices arange(2048) % 33 hit both __half2 alignments and the boundary
 // fallbacks; ones sum to small integer counts, exact in every dtype.
 template <typename scalar_t>
 void testScatterAdd(bool fast_atomics) {
-  if (!hasCudaDevice()) {
-    GTEST_SKIP() << "No CUDA device available";
-  }
+  SKIP_IF_NO_CUDA_DEVICE();
   constexpr int64_t n = 2048;
   constexpr int64_t out_numel = 33;
   std::vector<int64_t> indices(n);
@@ -111,9 +83,7 @@ void testScatterAdd(bool fast_atomics) {
 // likewise must not pair with buf[buf_numel - 1].
 template <typename scalar_t>
 void testStaysInBounds() {
-  if (!hasCudaDevice()) {
-    GTEST_SKIP() << "No CUDA device available";
-  }
+  SKIP_IF_NO_CUDA_DEVICE();
   constexpr int64_t buf_numel = 34;
   constexpr int64_t out_numel = 32;
   const std::vector<int64_t> indices = {0, out_numel - 1};

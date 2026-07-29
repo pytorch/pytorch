@@ -227,6 +227,6 @@ HeaderOnlyGenericPackedTensorAccessor
 # tested under test/.
 
 # torch/headeronly/cuda/AtomicAdd.h
-# device-only, so tested in test/cpp/aoti_abi_check/test_atomic_add.cu
+# device-only, so tested in test/cpp/aoti_abi_check/cuda/test_atomic_add.cu
 fastAtomicAdd
 # fastSpecializedAtomicAdd is tested through fastAtomicAdd
