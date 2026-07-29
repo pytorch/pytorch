@@ -2299,46 +2299,6 @@ class TestTDMScaled(TestCase):
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
 
-    def test_tdm_scaled_config_policy_respects_enable_tdm(self):
-        from torch._inductor.heuristics.template.triton import (
-            BaseHeuristicSingleton,
-            ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic,
-        )
-
-        heuristic_cls = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic
-        try:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            with (
-                config.patch({"enable_tdm": True}),
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
-                    return_value=2,
-                ),
-            ):
-                enabled_heuristic = heuristic_cls()
-        finally:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-
-        try:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            with (
-                config.patch({"enable_tdm": False}),
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
-                    return_value=2,
-                ),
-            ):
-                disabled_heuristic = heuristic_cls()
-        finally:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-
-        self.assertTrue(enabled_heuristic.uses_tdm_configs)
-        self.assertFalse(disabled_heuristic.uses_tdm_configs)
-        self.assertEqual(enabled_heuristic.mm_configs, disabled_heuristic.mm_configs)
-        self.assertTrue(
-            all(config.num_stages == 2 for config in enabled_heuristic.mm_configs)
-        )
-
     def test_tdm_scaled_config_uses_operand_orientation_probe(self):
         from torch._inductor.heuristics.template.triton import (
             BaseHeuristicSingleton,

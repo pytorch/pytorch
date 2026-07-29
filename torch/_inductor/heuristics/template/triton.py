@@ -3313,8 +3313,7 @@ class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
 
     def __init__(self) -> None:
         super().__init__()
-        if config.enable_tdm:
-            self.uses_tdm_configs = True
+        self.uses_tdm_configs = True
 
     def _get_template_configs_impl(
         self,
