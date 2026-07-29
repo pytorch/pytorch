@@ -561,9 +561,7 @@ def is_docker_affecting_files(files: Iterable[str]) -> bool:
     changes under that directory matter (changes to docker-builds.yml or
     .lintrunner.toml re-trigger the build workflow but do not change the tag).
     """
-    return any(
-        f == DOCKER_CI_PATH or f.startswith(f"{DOCKER_CI_PATH}/") for f in files
-    )
+    return any(f == DOCKER_CI_PATH or f.startswith(f"{DOCKER_CI_PATH}/") for f in files)
 
 
 def get_docker_build_checks(checks: JobNameToStateDict) -> JobNameToStateDict:
