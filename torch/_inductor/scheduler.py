@@ -574,6 +574,7 @@ class NestedReduction:
         # Parent tile with the grouped axis packed two lanes at a time.
         PARENT_HALF = enum.auto()
 
+    # Fused nested reductions currently support only factor-2 interleaved packing.
     PARENT_HALF_FACTOR = 2
 
     class GroupedAxis(enum.Enum):
@@ -661,6 +662,7 @@ class NestedReduction:
             fused_buffer_names,
             full_numel,
             reduction_reads,
+            {},
             sub_parent_factor,
         )
         if not source_deps:
@@ -787,6 +789,7 @@ class NestedReduction:
         fused_buffer_names: OrderedSet[str],
         full_numel: sympy.Expr,
         reduction_reads: dict[str, list[MemoryDep]],
+        source_writes: dict[str, list[MemoryDep]],
         sub_parent_factor: int,
         renames: dict[str, str] | None = None,
     ) -> tuple[tuple[MemoryDep, NestedReduction.SubParentSourceLayout], ...] | None:
@@ -822,16 +825,25 @@ class NestedReduction:
                     ):
                         return None
                     continue
-                if dep.name in fused_buffer_names and dep.name not in reduction_reads:
+                source_deps_for_name = reduction_reads.get(
+                    dep.name, source_writes.get(dep.name, [])
+                )
+                reduction_deps = [
+                    source_dep
+                    for source_dep in source_deps_for_name
+                    if V.graph.sizevars.statically_known_equals(
+                        sympy_product(source_dep.ranges.values()), full_numel
+                    )
+                ]
+                if dep.name in fused_buffer_names and not reduction_deps:
                     continue
-                reduction_deps = reduction_reads.get(dep.name, [])
                 if not reduction_deps:
                     if dep.name in V.graph.removed_buffers:
                         return None
                     continue
                 if len(reduction_deps) != 1:
                     return None
-                reduction_dep = reduction_deps[0]
+                source_dep = reduction_deps[0]
                 lane = V.graph.sizevars.simplify(
                     sympy.Mod(dep.index, sub_parent_factor)
                 )
@@ -842,11 +854,11 @@ class NestedReduction:
                         for value in range(sub_parent_factor)
                     )
                     and cls._interleaved_sub_parent_epilogue_read_matches_reduction_read(
-                        dep, reduction_dep, lane, sub_parent_factor
+                        dep, source_dep, lane, sub_parent_factor
                     )
                 ):
                     if not add_source(
-                        reduction_dep,
+                        source_dep,
                         cls.SubParentSourceLayout.INTERLEAVED,
                     ):
                         return None
@@ -3532,6 +3544,34 @@ class FusedNestedReductions(FusedSchedulerNode):
         self.grouped_pointwise_domains: tuple[
             tuple[SchedulerNode, NestedReduction.PointwiseDomain], ...
         ] = tuple(grouped_pointwise_domains)
+        self.grouped_reduced_output_names: OrderedSet[str] = OrderedSet(
+            name
+            for sn, domain in self.grouped_pointwise_domains
+            if domain is NestedReduction.PointwiseDomain.REDUCED
+            for name in sn.get_buffer_names()
+        )
+        self.grouped_reduced_output_names.update(grouped_reduction.get_buffer_names())
+        self.sub_parent_broadcast_source_names: OrderedSet[str] = OrderedSet(
+            self.grouped_reduced_output_names
+        )
+        for sn in self.node1.get_nodes():
+            if sn.is_reduction():
+                self.sub_parent_broadcast_source_names.update(sn.get_buffer_names())
+        parent_half_nodes = [
+            sn
+            for sn, domain in self.grouped_pointwise_domains
+            if domain is NestedReduction.PointwiseDomain.PARENT_HALF
+        ]
+        self.parent_half_source_layouts: dict[
+            str, NestedReduction.SubParentSourceLayout
+        ] = {}
+        if parent_half_nodes:
+            source_layouts = self._parent_half_source_layouts(
+                parent_half_nodes, self.node2.get_nodes()
+            )
+            if source_layouts is None:
+                raise AssertionError("expected parent-half sources to be planned")
+            self.parent_half_source_layouts = source_layouts
 
     def can_fuse_with(self, other: BaseSchedulerNode, *, can_reorder: bool) -> bool:
         """Allow downstream pointwise of the grouped reduction to fuse in.
@@ -3578,41 +3618,33 @@ class FusedNestedReductions(FusedSchedulerNode):
         # that read a half-resolution output buffer are rejected. Checking the
         # whole combined set makes this independent of fusion order.
         combined_nodes = [*self.node2.get_nodes(), *other.get_nodes()]
-        candidate_half_resolution_nodes: list[SchedulerNode] | None = None
         candidate_domains = NestedReduction._classify_grouped_pointwise_nodes(
             self.domain_context,
             combined_nodes,
         )
         if candidate_domains is None:
-            if any(
-                domain is NestedReduction.PointwiseDomain.PARENT_HALF
-                for _, domain in [*self.grouped_pointwise_domains, *pointwise_domains]
-            ):
-                return False
-        else:
-            candidate_half_resolution_nodes = [
-                sn
-                for sn, domain in candidate_domains
-                if domain is NestedReduction.PointwiseDomain.PARENT_HALF
-            ]
-            if not NestedReduction._sub_parent_epilogue_outputs_unread(
+            return False
+        candidate_half_resolution_nodes = [
+            sn
+            for sn, domain in candidate_domains
+            if domain is NestedReduction.PointwiseDomain.PARENT_HALF
+        ]
+        if not NestedReduction._sub_parent_epilogue_outputs_unread(
+            combined_nodes,
+            OrderedSet(candidate_half_resolution_nodes),
+            self.scheduler.mutation_renames,
+        ):
+            return False
+        if candidate_half_resolution_nodes and (
+            self._parent_half_source_layouts(
+                candidate_half_resolution_nodes,
                 combined_nodes,
-                OrderedSet(candidate_half_resolution_nodes),
-                self.scheduler.mutation_renames,
-            ):
-                return False
+            )
+            is None
+        ):
+            return False
 
         if half_resolution_nodes:
-            if candidate_half_resolution_nodes is None:
-                return False
-            if (
-                self._parent_half_source_layouts(
-                    candidate_half_resolution_nodes,
-                    combined_nodes,
-                )
-                is None
-            ):
-                return False
             return self.scheduler._can_fuse_nested_reduction_append(
                 self.node2,
                 other,
@@ -3644,21 +3676,26 @@ class FusedNestedReductions(FusedSchedulerNode):
             if isinstance(raw_dep, MemoryDep):
                 dep = raw_dep.rename(renames)
                 reduction_reads[dep.name].append(dep)
+        source_writes: dict[str, list[MemoryDep]] = collections.defaultdict(list)
+        half_node_set = OrderedSet(half_nodes)
+        for node in [*self.node1.get_nodes(), *all_grouped_nodes]:
+            if node in half_node_set:
+                continue
+            for raw_dep in node.read_writes.writes:
+                if isinstance(raw_dep, MemoryDep):
+                    dep = raw_dep.rename(renames)
+                    source_writes[dep.name].append(dep)
 
         source_deps = NestedReduction._sub_parent_epilogue_source_deps(
             half_nodes,
             fused_buffer_names,
             fullres_numel,
             reduction_reads,
+            source_writes,
             NestedReduction.PARENT_HALF_FACTOR,
             renames,
         )
-        if source_deps is None:
-            return None
-        if any(
-            layout is not NestedReduction.SubParentSourceLayout.INTERLEAVED
-            for _dep, layout in source_deps
-        ):
+        if not source_deps:
             return None
         planned_source_deps = tuple(dep for dep, _layout in source_deps)
         if not NestedReduction._sub_parent_epilogue_source_loads_are_unambiguous(
@@ -3668,7 +3705,27 @@ class FusedNestedReductions(FusedSchedulerNode):
             renames,
         ):
             return None
-        return {dep.name: layout for dep, layout in source_deps}
+        source_layouts = {dep.name: layout for dep, layout in source_deps}
+        broadcast_source_names = OrderedSet(
+            renames.get(name, name) for name in self.sub_parent_broadcast_source_names
+        )
+        half_output_names = OrderedSet(
+            renames.get(name, name)
+            for node in half_nodes
+            for name in node.get_buffer_names()
+        )
+        allowed_internal_names = (
+            OrderedSet(source_layouts) | broadcast_source_names | half_output_names
+        )
+        for node in half_nodes:
+            for raw_dep in node.read_writes.reads:
+                dep_name = renames.get(raw_dep.name, raw_dep.name)
+                if (
+                    dep_name in fused_buffer_names
+                    and dep_name not in allowed_internal_names
+                ):
+                    return None
+        return source_layouts
 
     def fuse_with(self, other: BaseSchedulerNode) -> FusedNestedReductions:
         device = self.node2.get_device()
@@ -7411,10 +7468,13 @@ class Scheduler:
 
                     if self.can_fuse(node1, node2, is_reorder_round):
                         possible_fusions.append(key)
-                    elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
-                        node2, node1, is_reorder_round
-                    ):
-                        # foreach fusions and epilogue fusions are order dependent
+                    elif (
+                        node2.is_template()
+                        or node2.is_foreach()
+                        or isinstance(node2, FusedNestedReductions)
+                    ) and self.can_fuse(node2, node1, is_reorder_round):
+                        # These fusions are order dependent. Fused nested reductions
+                        # must remain the producer for scheduler bookkeeping.
                         possible_fusions.append((node2, node1))
 
         buffer_names_grouping = collections.defaultdict(list)
@@ -8409,10 +8469,12 @@ class Scheduler:
         # broadcasted parent-tile views. Relax matching only for those named
         # producer outputs; all other deps use normal vertical legality.
         if producer_node is not None:
-            return self.can_fuse_vertical(
+            return self._can_fuse(
                 producer_node,
                 other,
+                can_reorder=can_reorder,
                 index_equivalent_dep_names=index_equivalent_dep_names,
+                _skip_fused_nested_dispatch=True,
             )
         return self._can_fuse(
             grouped_node,
@@ -8468,6 +8530,7 @@ class Scheduler:
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
         index_equivalent_dep_names: OrderedSet[str] | None = None,
+        _skip_fused_nested_dispatch: bool = False,
     ) -> bool:
         if node1 is node2:
             return False
@@ -8489,12 +8552,10 @@ class Scheduler:
             if mempool1 != mempool2:
                 return False
 
-        if isinstance(node1, FusedNestedReductions):
+        if isinstance(node1, FusedNestedReductions) and not _skip_fused_nested_dispatch:
             return node1.can_fuse_with(node2, can_reorder=can_reorder)
         if isinstance(node2, FusedNestedReductions):
-            # Candidate scoring can present a downstream consumer first.
-            # can_fuse_with still verifies it really consumes the grouped stage.
-            return node2.can_fuse_with(node1, can_reorder=can_reorder)
+            return False
 
         if isinstance(node1, FusedMixOrderReductions):
             return node1.can_fuse_with(node2)
@@ -8767,6 +8828,12 @@ class Scheduler:
 
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
+            backend = self.get_backend(device)
+            backend_can_fuse = (
+                backend.can_fuse_nested_reduction_append
+                if isinstance(node1, FusedNestedReductions)
+                else backend.can_fuse_vertical
+            )
             if (
                 self.can_fuse_vertical(
                     node1,
@@ -8774,7 +8841,7 @@ class Scheduler:
                     index_equivalent_dep_names=index_equivalent_dep_names,
                 )
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
-                and self.get_backend(device).can_fuse_vertical(node1, node2)
+                and backend_can_fuse(node1, node2)
             ):
                 return True
 
@@ -8795,7 +8862,7 @@ class Scheduler:
                     and V.choices.can_fuse_vertical(
                         self, node1, node2, shared_data_score
                     )
-                    and self.get_backend(device).can_fuse_vertical(node1, node2)
+                    and backend_can_fuse(node1, node2)
                 )
 
             return False
@@ -10937,6 +11004,11 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         raise NotImplementedError
 
+    def can_fuse_nested_reduction_append(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return self.can_fuse_vertical(node1, node2)
+
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -10987,8 +11059,6 @@ class BaseScheduling:  # noqa: docstring_linter
             return FusedMixOrderReductions(node1, node2)
         elif isinstance(node1, FusedNestedReductions):
             return node1.fuse_with(node2)
-        elif isinstance(node2, FusedNestedReductions):
-            return node2.fuse_with(node1)
         elif isinstance(node1, FusedMixOrderReductions):
             return node1.fuse_with(node2)
         elif isinstance(node1, ExternKernelSchedulerNode) and isinstance(
