@@ -7,8 +7,8 @@ or N, then reduces only that grouped dimension. N-axis groups up to one 32-lane
 fragment lower as ordinary in-fragment TensorSSA reductions; larger N groups
 produce TensorSSA partials that QuACK combines physically.
 M-axis groups currently always use QuACK's physical row-lane/warp combine path,
-even when the group is small enough to fit in one fragment. Inductor owns the
-FX pattern matching and output contracts; these helpers describe the supported
+even when the group is small enough to fit in one fragment. Inductor owns FX
+normalization and output contracts; these helpers describe the supported
 TensorSSA shapes and generated combine/finalize expressions QuACK needs.
 
 The main caller is ``materialize_flex_gemm_epilogue`` in ``epilogue.py``.
@@ -20,11 +20,9 @@ and ``lower_tensorssa_reduce`` to emit CuTeDSL source.
 
 import dataclasses
 import math
-import operator
 from typing import Any, cast
 
 import torch
-from torch._inductor import inductor_prims
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLOpOverrides,
     tensorssa_reduction,
@@ -36,6 +34,13 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known_equal,
+)
+from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
+    FlexGemmNormalizedGetItem,
+    FlexGemmNormalizedPrepareSoftmax,
+    FlexGemmNormalizedReduction,
+    FlexGemmNormalizedSqueeze,
+    FlexGemmNormalizedView,
 )
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
@@ -341,69 +346,9 @@ def iter_fx_node_inputs(value: Any):
     yield from result
 
 
-@dataclasses.dataclass(frozen=True)
-class FlexGemmViewForm:
-    """Canonical source and shape for one view or reshape node."""
-
-    source: torch.fx.Node
-    shape: tuple[Any, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmReductionForm:
-    """Canonical arguments for one supported reduction node."""
-
-    source: torch.fx.Node
-    dim: Any
-    keepdim: Any
-    dtype: Any
-    reduction_type: str
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmPrepareSoftmaxForm:
-    """Canonical source and dimension for online softmax preparation."""
-
-    source: torch.fx.Node
-    dim: Any
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmSqueezeForm:
-    """Canonical source for one squeeze alias."""
-
-    source: torch.fx.Node
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmGetItemForm:
-    """Canonical aggregate source and literal index for one getitem node."""
-
-    source: torch.fx.Node
-    index: int
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmUnsupportedReductionForm:
-    """Record an unsupported reduction for shared error handling."""
-
-    source: torch.fx.Node
-    target: str
-
-
-FlexGemmStructuralForm = (
-    FlexGemmViewForm
-    | FlexGemmReductionForm
-    | FlexGemmPrepareSoftmaxForm
-    | FlexGemmSqueezeForm
-    | FlexGemmGetItemForm
-    | FlexGemmUnsupportedReductionForm
-)
-
-
 def lower_view_or_reshape(
     node: torch.fx.Node,
-    form: FlexGemmViewForm,
+    normalized: FlexGemmNormalizedView,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
@@ -412,7 +357,7 @@ def lower_view_or_reshape(
     preserve_value_layout: bool = False,
 ) -> Any | None:
     """Emit an analyzed view using grouped provenance."""
-    source_node = form.source
+    source_node = normalized.source
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
         return _cute_arg(source_node, env)
@@ -431,108 +376,6 @@ def lower_view_or_reshape(
     return None
 
 
-FUNCTION_REDUCTION_TYPES = {
-    torch.ops.aten.sum.dim_IntList: ("sum", True),
-    torch.ops.aten.mean.dim: ("mean", True),
-    torch.ops.aten.prod.dim_int: ("prod", True),
-    torch.ops.aten.amax.default: ("max", False),
-    torch.ops.aten.amin.default: ("min", False),
-}
-
-FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
-    (
-        torch.ops.aten.all.dim,
-        torch.ops.aten.all.dims,
-        torch.ops.aten.all.default,
-        torch.ops.aten.any.dim,
-        torch.ops.aten.any.dims,
-        torch.ops.aten.any.default,
-        torch.ops.aten.argmax.default,
-        torch.ops.aten.argmin.default,
-        torch.ops.aten.std.correction,
-        torch.ops.aten.std.dim,
-        torch.ops.aten.var.correction,
-        torch.ops.aten.var.dim,
-    )
-)
-
-
-def flex_gemm_structural_form(
-    node: torch.fx.Node,
-) -> FlexGemmStructuralForm | None:
-    """Parse one structural FX node into the shared analysis/emission form."""
-    if node.op != "call_function":
-        return None
-    if node.target in (
-        torch.ops.aten.view.default,
-        torch.ops.aten.reshape.default,
-    ):
-        source = node.args[0]
-        shape = node.args[1]
-        if not isinstance(source, torch.fx.Node) or not isinstance(
-            shape, (tuple, list, torch.Size)
-        ):
-            raise AssertionError(f"malformed FlexGEMM view node: {node.format_node()}")
-        return FlexGemmViewForm(
-            source,
-            tuple(
-                arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
-                for arg in shape
-            ),
-        )
-    if node.target in FUNCTION_REDUCTION_TYPES:
-        source = node.args[0]
-        if not isinstance(source, torch.fx.Node):
-            raise AssertionError(
-                f"malformed FlexGEMM reduction node: {node.format_node()}"
-            )
-        reduction_type, has_dtype = FUNCTION_REDUCTION_TYPES[node.target]
-        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        keepdim = (
-            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-        )
-        dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-        return FlexGemmReductionForm(
-            source,
-            dim,
-            keepdim,
-            dtype if has_dtype else None,
-            reduction_type,
-        )
-    if node.target is inductor_prims.prepare_softmax_online:
-        source = node.args[0]
-        if not isinstance(source, torch.fx.Node):
-            raise AssertionError(
-                f"malformed FlexGEMM softmax node: {node.format_node()}"
-            )
-        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        return FlexGemmPrepareSoftmaxForm(source, dim)
-    if node.target in (
-        torch.ops.aten.squeeze.dim,
-        torch.ops.aten.squeeze.dims,
-        torch.ops.aten.squeeze.default,
-    ):
-        source = node.args[0]
-        if not isinstance(source, torch.fx.Node):
-            raise AssertionError(
-                f"malformed FlexGEMM squeeze node: {node.format_node()}"
-            )
-        return FlexGemmSqueezeForm(source)
-    if node.target is operator.getitem:
-        source, index = node.args
-        if isinstance(source, torch.fx.Node) and isinstance(index, int):
-            return FlexGemmGetItemForm(source, index)
-        return None
-    if node.target in FUNCTION_UNSUPPORTED_REDUCTIONS:
-        source = node.args[0]
-        if not isinstance(source, torch.fx.Node):
-            raise AssertionError(
-                f"malformed FlexGEMM reduction node: {node.format_node()}"
-            )
-        return FlexGemmUnsupportedReductionForm(source, str(node.target))
-    return None
-
-
 def lower_full_scalar(node: torch.fx.Node) -> Any | None:
     if node.op != "call_function" or node.target is not torch.ops.aten.full.default:
         return None
@@ -545,12 +388,12 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
 
 def lower_squeeze(
     node: torch.fx.Node,
-    form: FlexGemmSqueezeForm,
+    normalized: FlexGemmNormalizedSqueeze,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
     """Forward an analyzed squeeze alias."""
-    source_node = form.source
+    source_node = normalized.source
     if source_node not in env:
         return None
     if source_node in local_reduce_store_sources:
@@ -560,12 +403,12 @@ def lower_squeeze(
 
 def lower_getitem(
     node: torch.fx.Node,
-    form: FlexGemmGetItemForm,
+    normalized: FlexGemmNormalizedGetItem,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
     """Index an analyzed aggregate value."""
-    source_node, index = form.source, form.index
+    source_node, index = normalized.source, normalized.index
     source = _cute_arg(source_node, env)
     if not isinstance(source, (tuple, list)) or not -len(source) <= index < len(source):
         return None
@@ -578,14 +421,14 @@ def lower_getitem(
 
 def lower_prepare_softmax_online(
     node: torch.fx.Node,
-    form: FlexGemmPrepareSoftmaxForm,
+    normalized: FlexGemmNormalizedPrepareSoftmax,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any:
     """Lower analyzed online-softmax preparation."""
-    input_node, dim = form.source, form.dim
+    input_node, dim = normalized.source, normalized.dim
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]
@@ -620,7 +463,7 @@ def lower_prepare_softmax_online(
 
 def lower_tensorssa_reduce(
     node: torch.fx.Node,
-    form: FlexGemmReductionForm,
+    normalized: FlexGemmNormalizedReduction,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
@@ -628,11 +471,11 @@ def lower_tensorssa_reduce(
     local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction],
 ) -> Any:
     """Lower an analyzed reduction while deferring physical finalization."""
-    input_node = form.source
-    dim = form.dim
-    keepdim = form.keepdim
-    dtype = form.dtype
-    reduction_type = form.reduction_type
+    input_node = normalized.source
+    dim = normalized.dim
+    keepdim = normalized.keepdim
+    dtype = normalized.dtype
+    reduction_type = normalized.reduction_type
     if dtype is not None:
         raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
     if input_node not in grouped_tensors:
