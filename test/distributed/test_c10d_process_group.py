@@ -23,6 +23,8 @@ from torch.testing._internal.common_utils import run_tests
 
 class AbstractProcessGroupTest(C10dBackendTest):
     def test_sequence_numbers(self):
+        if not self.supports_work_sequence_number:
+            self.skipTest(f"{self.backend_name} does not report sequence numbers")
         self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertEqual(default_pg._get_sequence_number_for_group(), 0)
@@ -57,6 +59,8 @@ class AbstractProcessGroupTest(C10dBackendTest):
         work.wait()
 
     def test_work_duration(self):
+        if not self.supports_collectives_timing:
+            self.skipTest(f"{self.backend_name} does not support collectives timing")
         self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
         tensor = torch.ones(1024, device=self.device)
@@ -67,9 +71,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
         # Timing is only enabled for collectives issued afterwards.
         with self.assertRaises(RuntimeError):
             untimed_work._get_duration()
-
-        if not self.supports_collectives_timing:
-            self.skipTest(f"{self.backend_name} does not support collectives timing")
 
         work = dist.all_reduce(tensor, async_op=True)
         work.wait()

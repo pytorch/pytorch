@@ -80,6 +80,15 @@ C10D_BACKENDS = (
         supports_gather_single=True,
         float8_dtypes=FLOAT8_DTYPES,
     ),
+    BackendConfig(
+        "nccl-lazy",
+        "cuda",
+        supports_coalescing=True,
+        supports_cuda_graph_barrier=True,
+        supports_dropped_p2p_work=True,
+        supports_gather_single=True,
+        float8_dtypes=FLOAT8_DTYPES,
+    ),
 )
 
 CUDA_BACKENDS = tuple(

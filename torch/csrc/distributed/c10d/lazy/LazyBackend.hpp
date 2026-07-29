@@ -166,6 +166,12 @@ class LazyBackend : public Backend {
       const GatherOptions& opts) override {
     return primary_->gather(outputTensors, inputTensors, opts);
   }
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts) override {
+    return primary_->gather_single(outputBuffer, inputBuffer, opts);
+  }
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
