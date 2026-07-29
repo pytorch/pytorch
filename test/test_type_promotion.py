@@ -8,7 +8,7 @@ import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
-                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo)
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -37,7 +37,8 @@ def float_double_default_dtype(fn):
 
     return wrapped_fn
 
-class TestTypePromotion(TestCase):
+class TestTypePromotionDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # In-place operations don't promote.
     # `int+float -> float` but `int.add_(float)` is rejected as an error.
@@ -1158,8 +1159,9 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(y, y_promo.to(dtype=dtype))
 
 
-class TestTypePromotionCPU(TestCase):
+class TestTypePromotion(TestCase):
     """Pure dtype-algebra tests that don't require any accelerator."""
+    hw_classification = HardwareClassification.GENERIC
 
     @float_double_default_dtype
     def test_can_cast(self):
@@ -1183,7 +1185,7 @@ class TestTypePromotionCPU(TestCase):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
 
-instantiate_device_type_tests(TestTypePromotion, globals())
+instantiate_device_type_tests(TestTypePromotionDevice, globals())
 
 if __name__ == '__main__':
     run_tests()

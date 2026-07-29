@@ -101,8 +101,8 @@ class ComposabilityTest(MultiProcContinuousTest):
         return self.rank
 
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     def test_pp_and_dcp(self):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
@@ -178,14 +178,14 @@ class ComposabilityTest(MultiProcContinuousTest):
                 self.assertIn(
                     param_name,
                     sd_param_names,
-                    f"Parameter name '{param_name}' not found in state_dict.",
+                    lambda msg: f"{msg}\nParameter name '{param_name}' not found in state_dict.",
                 )
 
         _dcp_test(self)
 
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     @parametrize(
         "ScheduleClass",
         [
@@ -327,8 +327,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                 optimizer.step()
 
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     @parametrize(
         "ScheduleClass",
         [
@@ -511,8 +511,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                 ref_optimizer.step()
 
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     @parametrize(
         "ScheduleClass",
         [
