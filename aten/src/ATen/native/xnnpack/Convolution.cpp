@@ -25,7 +25,6 @@ namespace {
 // TODO: Decouple and improve error handling and messages.
 bool available(
     const Tensor& weight,
-    // NOLINTNEXTLINE(facebook-hte-ConstantArgumentPassByValue)
     const at::OptionalIntArrayRef bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
@@ -103,7 +102,7 @@ Tensor create_and_run(
       output_padding,
       stride,
       dilation,
-      static_cast<uint32_t>(groups),
+      groups,
       transposed,
       output_min,
       output_max);
@@ -127,10 +126,11 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
 
   TORCH_CHECK(weight_nhwc.size(0) % num_groups == 0, "The number of groups cannot be satisfied by the provided weight tensor.");
 
-  int input_channels_per_group = static_cast<int>(weight_nhwc.size(0) / num_groups);
-  int output_channels_per_group = static_cast<int>(weight_nhwc.size(1));
-  int kernel_width = static_cast<int>(weight_nhwc.size(3));
-  int kernel_height = static_cast<int>(weight_nhwc.size(2));
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  int input_channels_per_group = weight_nhwc.size(0) / num_groups;
+  int output_channels_per_group = weight_nhwc.size(1);
+  int kernel_width = weight_nhwc.size(3);
+  int kernel_height = weight_nhwc.size(2);
 
   int o_offset = 1;
   int h_offset = output_channels_per_group;
@@ -204,22 +204,22 @@ ContextConv2D create(
   std::array<int64_t, 4> weight_sizes{};
 
   if (transposed) {
-    const Tensor weight_reordered = reorder_weights_for_transpose_conv(weight_nhwc, static_cast<int>(groups));
+    const Tensor weight_reordered = reorder_weights_for_transpose_conv(weight_nhwc, groups);
     for (const auto i : c10::irange(4)) {
       weight_sizes[i] = weight_reordered.size(i);
     }
     create_status = xnn_create_deconvolution2d_nhwc_f32(
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::height]),                    // output_padding_top
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::width]),                     // output_padding_right
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::height]),                    // output_padding_bottom
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::width]),                     // output_padding_left
-      static_cast<uint32_t>(weight_reordered.size(Layout::Filter::height)),                  // kernel_height
-      static_cast<uint32_t>(weight_reordered.size(Layout::Filter::width)),                   // kernel_width
-      static_cast<uint32_t>(stride_expanded[Layout::Parameter::height]),                     // subsampling_height
-      static_cast<uint32_t>(stride_expanded[Layout::Parameter::width]),                      // subsampling_width
-      static_cast<uint32_t>(dilation_expanded[Layout::Parameter::height]),                   // dilation_height
-      static_cast<uint32_t>(dilation_expanded[Layout::Parameter::width]),                    // dilation_width
-      static_cast<uint32_t>(groups),                                                         // groups
+      padding_expanded[Layout::Parameter::height],                    // output_padding_top
+      padding_expanded[Layout::Parameter::width],                     // output_padding_right
+      padding_expanded[Layout::Parameter::height],                    // output_padding_bottom
+      padding_expanded[Layout::Parameter::width],                     // output_padding_left
+      weight_reordered.size(Layout::Filter::height),                  // kernel_height
+      weight_reordered.size(Layout::Filter::width),                   // kernel_width
+      stride_expanded[Layout::Parameter::height],                     // subsampling_height
+      stride_expanded[Layout::Parameter::width],                      // subsampling_width
+      dilation_expanded[Layout::Parameter::height],                   // dilation_height
+      dilation_expanded[Layout::Parameter::width],                    // dilation_width
+      groups,                                                         // groups
       weight_reordered.size(Layout::Filter::output) / groups,         // group_input_channels
       weight_reordered.size(Layout::Filter::input),                   // group_output_channels
       weight_reordered.size(Layout::Filter::output),                  // input_pixel_stride
@@ -231,9 +231,7 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
-#ifndef XNNPACK_NO_CODE_CACHE
       nullptr,                                                        // xnn_caches_t
-#endif
       nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   } else {
@@ -241,17 +239,17 @@ ContextConv2D create(
       weight_sizes[i] = weight_nhwc.size(i);
     }
     create_status = xnn_create_convolution2d_nhwc_f32(
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::height]),                    // input_padding_top
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::width]),                     // input_padding_right
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::height]),                    // input_padding_bottom
-      static_cast<uint32_t>(padding_expanded[Layout::Parameter::width]),                     // input_padding_left
-      static_cast<uint32_t>(weight_nhwc.size(Layout::Filter::height)),                       // kernel_height
-      static_cast<uint32_t>(weight_nhwc.size(Layout::Filter::width)),                        // kernel_width
-      static_cast<uint32_t>(stride_expanded[Layout::Parameter::height]),                     // subsampling_height
-      static_cast<uint32_t>(stride_expanded[Layout::Parameter::width]),                      // subsampling_width
-      static_cast<uint32_t>(dilation_expanded[Layout::Parameter::height]),                   // dilation_height
-      static_cast<uint32_t>(dilation_expanded[Layout::Parameter::width]),                    // dilation_width
-      static_cast<uint32_t>(groups),                                                         // groups
+      padding_expanded[Layout::Parameter::height],                    // input_padding_top
+      padding_expanded[Layout::Parameter::width],                     // input_padding_right
+      padding_expanded[Layout::Parameter::height],                    // input_padding_bottom
+      padding_expanded[Layout::Parameter::width],                     // input_padding_left
+      weight_nhwc.size(Layout::Filter::height),                       // kernel_height
+      weight_nhwc.size(Layout::Filter::width),                        // kernel_width
+      stride_expanded[Layout::Parameter::height],                     // subsampling_height
+      stride_expanded[Layout::Parameter::width],                      // subsampling_width
+      dilation_expanded[Layout::Parameter::height],                   // dilation_height
+      dilation_expanded[Layout::Parameter::width],                    // dilation_width
+      groups,                                                         // groups
       weight_nhwc.size(Layout::Filter::input),                        // group_input_channels
       weight_nhwc.size(Layout::Filter::output) / groups,              // group_output_channels
       weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
@@ -263,9 +261,7 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
-#ifndef XNNPACK_NO_CODE_CACHE
       nullptr,                                                        // xnn_caches_t
-#endif
       nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   }
@@ -337,14 +333,13 @@ Tensor run(
    */
 
   if (context.transposed_) {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     setup_status = xnn_reshape_deconvolution2d_nhwc_f32(
       context.op.get(),
       padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-      static_cast<uint32_t>(context.output_padding_[0]),                            // adjustment_height
-      static_cast<uint32_t>(context.output_padding_[1]),                            // adjustment_width
+      context.output_padding_[0],                            // adjustment_height
+      context.output_padding_[1],                            // adjustment_width
       nullptr,                                               // output_height_out
       nullptr,                                               // output_width_out
       caffe2::pthreadpool_());                               // threadpool
@@ -355,20 +350,15 @@ Tensor run(
       output.data_ptr<float>());                             // output
   } else {
     size_t workspace_size = SIZE_MAX;
-#ifndef XNNPACK_NO_CODE_CACHE
     size_t workspace_alignment = SIZE_MAX;
-#endif
 
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     setup_status = xnn_reshape_convolution2d_nhwc_f32(
       context.op.get(),
       padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       &workspace_size,                                       // workspace_size
-#ifndef XNNPACK_NO_CODE_CACHE
       &workspace_alignment,                                  // workspace_alignment
-#endif
       nullptr,                                               // output_height_out
       nullptr,                                               // output_width_out
       caffe2::pthreadpool_());
@@ -472,7 +462,6 @@ Tensor conv2d_transpose_clamp_run(
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    // NOLINTNEXTLINE(facebook-hte-ConstantArgumentPassByValue)
     const at::OptionalIntArrayRef bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
@@ -508,7 +497,7 @@ Tensor convolution2d(
       {0, 0}, // output_padding
       stride,
       dilation,
-      static_cast<uint32_t>(groups),
+      groups,
       false,  // transposed
       ContextConv2D::kMin,
       ContextConv2D::kMax);

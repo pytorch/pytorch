@@ -915,23 +915,26 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         first_tree = tree_map_args[1]
         rest = tree_map_args[2:]
 
-        if is_tree_map_with_path:
-            return first_tree.call_tree_map_with_path(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-                keypath=(),
-            )
-        else:
-            return first_tree.call_tree_map(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-            )
+        # The tree_map fast path doesn't create an InliningIT for tree_map,
+        # so NGB resume functions would miss the tree_map continuation.
+        with torch._dynamo.disable_nested_graph_breaks():
+            if is_tree_map_with_path:
+                return first_tree.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                    keypath=(),
+                )
+            else:
+                return first_tree.call_tree_map(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                )
 
     def _is_tree_map_function(self) -> bool:
         return (
@@ -2302,7 +2305,9 @@ class SkipFunctionVariable(VariableTracker):
             guard_on_source = source
             guard_on_value = value
 
-            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
+            while inspect.getattr_static(
+                guard_on_value, "_torchdynamo_orig_callable", False
+            ):
                 guard_on_value = guard_on_value._torchdynamo_orig_callable
                 guard_on_source = AttrSource(
                     guard_on_source, "_torchdynamo_orig_callable"
@@ -2352,7 +2357,29 @@ class SkipFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+        def unimplemented_direct_disable_call(api_name: str) -> Never:
+            # The registry linter keys off this helper name and records concrete
+            # entries from the call sites below. Use an alias here so the
+            # parameterized helper body is not recorded as a generic
+            # `{api_name}` entry.
+            _unimplemented = unimplemented
+            _unimplemented(
+                gb_type=f"Call to `{api_name}()`",
+                context=f"Called `{api_name}()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"`{api_name}()` was called inside a compiled region. "
+                "This API disables compilation when used as a decorator or wrapper "
+                "outside the compiled region.",
+                hints=[
+                    f"Move the `{api_name}()` call outside the compiled function and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+                ],
+            )
+
+        if self.value is torch._dynamo.disable:
+            unimplemented_direct_disable_call("torch._dynamo.disable")
+        elif self.value is torch.compiler.disable:
+            unimplemented_direct_disable_call("torch.compiler.disable")
+        elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
@@ -2662,9 +2689,11 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
             self.attr_to_trace == "_torchdynamo_inline"
-            and getattr(self.wrapper_obj, "_is_torch_compile", False)
+            and inspect.getattr_static(self.wrapper_obj, "_is_torch_compile", False)
             and getattr(
-                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
+                inspect.getattr_static(
+                    self.wrapper_obj, "_torchdynamo_orig_callable", None
+                ),
                 "__code__",
                 None,
             )
@@ -2685,7 +2714,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def get_real_python_backed_value(self) -> object:
-        return getattr(self.wrapper_obj, self.attr_to_trace)
+        # This VT stands for the wrapper, which is also what self.source
+        # denotes. The inline target is reached via attr_to_trace and is a
+        # different object.
+        return self.wrapper_obj
 
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):
@@ -3911,6 +3943,37 @@ class TritonSetAllocatorVariable(VariableTracker):
 # ---------------------------------------------------------------------------
 
 
+def _check_descriptor_obj_type(
+    tx: "InstructionTranslatorBase",
+    descriptor: types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.GetSetDescriptorType,
+    obj: "VariableTracker",
+) -> None:
+    """Check that obj's type is compatible with descriptor.__objclass__.
+
+    Mirrors CPython's descr_check which raises TypeError when a C descriptor
+    is bound to an object whose type is not a subtype of the descriptor's
+    __objclass__.
+
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L96
+    """
+    if obj is None:
+        return
+    try:
+        obj_type = obj.python_type()
+    except NotImplementedError:
+        return
+    if not issubclass(obj_type, descriptor.__objclass__):
+        raise_type_error(
+            tx,
+            f"descriptor '{descriptor.__name__}' for "
+            f"'{descriptor.__objclass__.__name__}' objects "
+            f"doesn't apply to a '{obj_type.__name__}' object",
+        )
+
+
 class WrapperDescriptorVariable(VariableTracker):
     """Unbound C slot wrapper (wrapper_descriptor on a type).
 
@@ -3981,6 +4044,7 @@ class WrapperDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
@@ -3999,6 +4063,7 @@ class WrapperDescriptorVariable(VariableTracker):
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4165,17 +4230,7 @@ class MethodDescriptorVariable(VariableTracker):
             )
         obj, *rest = args
         name = self.descriptor.__name__
-        try:
-            obj_type = obj.python_type()
-            if not issubclass(obj_type, self.descriptor.__objclass__):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for "
-                    f"'{self.descriptor.__objclass__.__name__}' objects "
-                    f"doesn't apply to a '{obj_type.__name__}' object",
-                )
-        except NotImplementedError:
-            pass
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses.
@@ -4191,6 +4246,7 @@ class MethodDescriptorVariable(VariableTracker):
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4485,6 +4541,7 @@ class MemberDescriptorVariable(VariableTracker):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
         attr_name = self.descriptor.__name__
@@ -4575,6 +4632,7 @@ class GetSetDescriptorVariable(VariableTracker):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to getattro_impl for
         # proxy-based VTs like TensorVariable.
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             from .object_protocol import _UnhandledDescriptorError
