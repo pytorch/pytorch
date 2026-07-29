@@ -543,6 +543,87 @@ class TestNVUniversalGemm(TestCase):
             out.float().view(m, -1, group).sum(-1),
         )
 
+    def test_scaled_gemm_unit_dim_epilogue_non_current_stream(self):
+        from cutlass import Float32
+        from cutlass.operators import ScaleMode, ScaleSwizzleMode
+        from cutlass.operators.arguments import EpilogueArguments
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _scaled_candidates,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+
+        m, n, k = 1, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        bias = torch.randn((1, 1), device="cuda", dtype=torch.bfloat16)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        expected = (
+            torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            + bias
+        )
+        epilogue = EpilogueArguments(
+            epilogue_fn="def epilogue(accum, bias):\n    D = accum + bias\n    return D\n",
+            bias=bias,
+            D=out,
+        )
+        mode = ScaleMode.Blockwise1x16
+        swizzle = ScaleSwizzleMode.Swizzle32x4x4
+        args = _create_gemm_arguments(
+            "SCALED_GEMM",
+            (a, b, scale_a, scale_b),
+            out,
+            Float32,
+            scale_mode_a=mode,
+            swizzle_mode_a=swizzle,
+            scale_mode_b=mode,
+            swizzle_mode_b=swizzle,
+            epilogue=epilogue,
+        )
+        selection_args = _create_gemm_arguments(
+            "SCALED_GEMM",
+            (a, b, scale_a, scale_b),
+            out,
+            Float32,
+            scale_mode_a=mode,
+            swizzle_mode_a=swizzle,
+            scale_mode_b=mode,
+            swizzle_mode_b=swizzle,
+        )
+        kernel = next(
+            candidate
+            for candidate in _scaled_candidates(selection_args, 100, efc_only=True)
+            if candidate.metadata.design.tile_shape[1] == n
+        )
+        artifact = kernel.compile(args)
+        torch.cuda.synchronize()
+        torch.cuda._sleep(10_000_000)
+        stream = torch.cuda.Stream()
+        kernel.run(args, artifact, stream=stream, assume_supported_args=True)
+        stream.synchronize()
+        self.assertEqual(out, expected)
+
     @parametrize("out_dtype", (torch.float32, torch.bfloat16))
     @parametrize(
         "layout_a",
@@ -714,6 +795,99 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertIsNone(classify(fp16_then_fp32))
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
+
+    def test_local_reduce_cache_specialization(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _local_reduce_specialization,
+        )
+
+        base = {
+            "local_reduce_group": 4,
+            "local_reduce_axis": 1,
+            "local_reduce_type": "mean",
+            "local_reduce_source": "identity",
+            "local_reduce_feeds_main": False,
+            "local_reduce_secondary_feed_type": None,
+        }
+        specialization = _local_reduce_specialization(base)
+        for key, value in (
+            ("local_reduce_group", 8),
+            ("local_reduce_axis", 0),
+            ("local_reduce_feeds_main", True),
+            ("local_reduce_secondary_feed_type", "direct_bool_gt_zero"),
+        ):
+            variant = dict(base)
+            variant[key] = value
+            self.assertNotEqual(specialization, _local_reduce_specialization(variant))
+
+        tensor = torch.empty((4, 8))
+        tensor_specialization = _local_reduce_specialization(
+            base | {"local_reduce_out": tensor}
+        )
+        self.assertNotEqual(
+            tensor_specialization,
+            _local_reduce_specialization(base | {"local_reduce_out": None}),
+        )
+        self.assertNotEqual(
+            tensor_specialization,
+            _local_reduce_specialization(
+                base | {"local_reduce_out": torch.empty((8, 4))}
+            ),
+        )
+        self.assertNotEqual(
+            tensor_specialization,
+            _local_reduce_specialization(base | {"local_reduce_feed_out": tensor}),
+        )
+
+    def test_local_reduce_plan_deduplicates_outputs(self):
+        from torch._inductor.kernel.gemm_epilogue import (
+            GemmReductionExpression,
+            GemmReductionPlan,
+        )
+
+        plan = GemmReductionPlan(
+            reduction_output="aux",
+            group=4,
+            axis=1,
+            reduction_type="sum",
+            source_type="identity",
+            primary_output="output",
+            feed_output="aux",
+            secondary_feed_output="output",
+        )
+        self.assertEqual(plan.auxiliary_outputs, ("aux",))
+        expression = GemmReductionExpression.parse("mean_linear:1:2:3")
+        self.assertEqual(expression.serialize(), "mean_linear:1:2:3")
+        with self.assertRaisesRegex(ValueError, "expects 3"):
+            GemmReductionExpression.parse("mean_linear:1:2")
+
+    def test_reduction_pattern_near_misses(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            is_absmax_normalize_ir,
+            is_logsumexp_ir,
+            is_softmax_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+        scale = Expr("load", ("scale", 0, None))
+        one = Expr("constant", (1.0, torch.float32))
+        near_softmax = Expr("truediv", (Expr("exp", (load,)), Expr("add", (load, one))))
+        near_absmax = Expr(
+            "mul", (load, Expr("reciprocal", (Expr("add", (scale, one)),)))
+        )
+        near_logsumexp = Expr(
+            "add", (Expr("log", (Expr("exp", (load,)),)), Expr("maximum", (load, one)))
+        )
+
+        self.assertFalse(is_softmax_ir(GemmEpilogueIRStore(0, near_softmax), "gemm", 4))
+        self.assertFalse(
+            is_absmax_normalize_ir(GemmEpilogueIRStore(0, near_absmax), "gemm", "scale")
+        )
+        self.assertFalse(
+            is_logsumexp_ir(GemmEpilogueIRStore(0, near_logsumexp), "gemm", 4)
+        )
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
@@ -1040,7 +1214,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertTrue(epilogue_fused, "pointwise consumer was NOT fused")
         self.assertIn("out_ptr1", code)
 
-    @parametrize("operation", ("mul", "sigmoid"))
+    @parametrize("operation", ("mul", "sigmoid", "gelu"))
     def test_scaled_mm_pointwise_epilogue_fusion(self, operation):
         """Unary pointwise op is fused into an NVFP4 scaled GEMM epilogue."""
         m, n, k = self.M, self.N, self.K
@@ -1068,7 +1242,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 scale_b=scale_b,
                 out_dtype=torch.bfloat16,
             )
-            return torch.sigmoid(result) if operation == "sigmoid" else result * 0.5
+            if operation == "sigmoid":
+                return torch.sigmoid(result)
+            if operation == "gelu":
+                return torch.nn.functional.gelu(result)
+            return result * 0.5
 
         result, code, epilogue_fused = self._compile_and_check(
             fn, a, b, scale_a, scale_b
