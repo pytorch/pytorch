@@ -9,6 +9,7 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor import ir
+from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -16,6 +17,7 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    get_triton_reduction_function,
     TritonKernel,
     TritonKernelOverrides,
     TritonSymbols,
@@ -59,6 +61,47 @@ class TestCodegenTriton(InductorTestCase):
         self._stack.close()
         super().tearDown()
 
+    def test_strict_signed_zero_reduction_function(self):
+        for reduction_type in ("min", "max"):
+            self.assertEqual(
+                get_triton_reduction_function(reduction_type),
+                f"triton_helpers.{reduction_type}2",
+            )
+            with inductor_config.patch(strict_signed_zero=True):
+                self.assertEqual(
+                    get_triton_reduction_function(reduction_type),
+                    f"triton_helpers.{reduction_type}2_strict",
+                )
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_strict_signed_zero_unrolled_reduction(self):
+        def fn(x):
+            return torch.amin(x, dim=1), torch.amax(x, dim=1)
+
+        x = torch.tensor(
+            [
+                [0.0, -0.0, -0.0, -0.0],
+                [-0.0, 0.0, 0.0, 0.0],
+                [1.0, float("nan"), -1.0, 0.0],
+            ],
+            device=GPU_TYPE,
+        )
+        expected_min, expected_max = fn(x)
+        with inductor_config.patch(strict_signed_zero=True):
+            (actual_min, actual_max), code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+        actual_min_bits = actual_min[:2].view(torch.int32)
+        actual_max_bits = actual_max[:2].view(torch.int32)
+        expected_min_bits = expected_min[:2].view(torch.int32)
+        expected_max_bits = expected_max[:2].view(torch.int32)
+        self.assertEqual(actual_min_bits, expected_min_bits)
+        self.assertEqual(actual_max_bits, expected_max_bits)
+        self.assertTrue(torch.isnan(actual_min[2]).item())
+        self.assertTrue(torch.isnan(actual_max[2]).item())
+        self.assertIn("tl.where", " ".join(code))
+
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
             def block_size(self):
@@ -101,6 +144,27 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_persistent_reduction_choice_two_arg_override(self):
+        seen_scores = []
+
+        class CustomChoices(InductorChoices):
+            @staticmethod
+            def should_use_persistent_reduction(features, cooperative_reduction):
+                seen_scores.append(features.tiling_scores)
+                return False
+
+        tiling_scores = {"x": sympy.Integer(1), "r0_": sympy.Integer(32)}
+        with V.set_choices_handler(CustomChoices()):
+            kernel = TritonKernel(
+                {"x": sympy.Integer(4), "r0_": sympy.Integer(512)},
+                features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512)),
+                tiling_scores=tiling_scores,
+                override_cooperative_reduction=False,
+            )
+
+        self.assertFalse(kernel.persistent_reduction)
+        self.assertEqual(seen_scores, [tiling_scores])
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
@@ -626,6 +690,31 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
+        # Regression: a backend whose import_get_raw_stream_as returns a
+        # multi-line snippet (e.g. the CPU override, which MTIA uses) must not
+        # break the textwrap.dedent of the benchmark-kernel imports. Formatting
+        # before dedenting used to leave the imports indented (IndentationError).
+        # TritonKernel and ComboKernel carry identical copies of this helper.
+        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
+
+        class FakeDeviceOps:
+            def import_get_raw_stream_as(self, name):
+                return f"def {name}(_):\n    return 0"
+
+        class FakeGraph:
+            device_ops = FakeDeviceOps()
+
+        for kernel_cls in (TritonKernel, ComboKernel):
+            with V.set_graph_handler(FakeGraph()):
+                # imports_for_benchmark_kernel does not use self.
+                imports = kernel_cls.imports_for_benchmark_kernel(None)
+            # Compiles without IndentationError and the top-level imports stay at
+            # column 0 (they would be indented if dedent ran after substitution).
+            compile(imports, "<benchmark_kernel_imports>", "exec")
+            self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
+            self.assertIn("\nimport torch\n", imports)
 
 
 if __name__ == "__main__":
