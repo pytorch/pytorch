@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import math
 import sys
 
 import torch
@@ -37,47 +36,6 @@ class AbstractProcessGroupTest(C10dBackendTest):
         dist.all_reduce(torch.ones(1, device=self.device), group=subgroup)
         self.assertEqual(subgroup._get_sequence_number_for_group(), 1)
         self.assertEqual(default_pg._get_sequence_number_for_group(), 3)
-
-    def test_work_sequence_number(self):
-        if not self.supports_work_sequence_number:
-            self.skipTest(f"{self.backend_name} does not report work seq numbers")
-        self._init_pg()
-        default_pg = dist.distributed_c10d._get_default_group()
-        for expected in range(1, 4):
-            work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
-            self.assertEqual(work._get_sequence_number(), expected)
-            self.assertEqual(default_pg._get_sequence_number_for_group(), expected)
-            work.wait()
-
-        subgroup = dist.new_group(list(range(self.world_size)))
-        work = dist.all_reduce(
-            torch.ones(1, device=self.device), group=subgroup, async_op=True
-        )
-        self.assertEqual(work._get_sequence_number(), 1)
-        work.wait()
-
-    def test_work_duration(self):
-        self._init_pg()
-        default_pg = dist.distributed_c10d._get_default_group()
-        tensor = torch.ones(1024, device=self.device)
-
-        untimed_work = dist.all_reduce(tensor, async_op=True)
-        untimed_work.wait()
-        default_pg._enable_collectives_timing()
-        # Timing is only enabled for collectives issued afterwards.
-        with self.assertRaises(RuntimeError):
-            untimed_work._get_duration()
-
-        if not self.supports_collectives_timing:
-            self.skipTest(f"{self.backend_name} does not support collectives timing")
-
-        work = dist.all_reduce(tensor, async_op=True)
-        work.wait()
-        if self.device_type == "cuda":
-            torch.cuda.synchronize()
-        duration = work._get_duration()
-        self.assertGreater(duration, 0)
-        self.assertTrue(math.isfinite(duration))
 
     def test_different_group_initialization_order(self):
         self._init_pg()

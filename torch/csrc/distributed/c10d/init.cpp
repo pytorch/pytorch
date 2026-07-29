@@ -4353,15 +4353,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   TORCH_NCCL_ENABLE_TIMING environment variable.
             )")
           .def(
-              "_get_sequence_number",
-              &::c10d::Work::getSequencenumber,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-              Returns:
-                  The process group collective sequence number of the
-                  corresponding collective communication.
-            )")
-          .def(
               "boxed",
               [](c10::intrusive_ptr<::c10d::Work> self) {
                 return torch::jit::toPyObject(c10::IValue(std::move(self)));
