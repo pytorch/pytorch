@@ -42,6 +42,14 @@ void checkSameDtype(
 
 } // namespace
 
+ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
+  ncclConfig_t clone = config;
+  if (clone.netName != nullptr) {
+    clone.netName = strdup(clone.netName);
+  }
+  return clone;
+}
+
 ncclResult_t NCCLException::getResult() const noexcept {
   return result_;
 }
@@ -77,7 +85,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
     // Abort the NCCL communicator since we can't do a clean finalization
     // Note: We don't call the full abortNcclComm() to avoid potential abort()
-    // calls from options_.abort_process_on_timeout_or_error
+    // calls from abort_process_on_timeout_or_error_
     if (nccl_comm_) {
       // Drop our symmetric-memory registration while nccl_comm_ is still valid
       // (it is nulled below, before detachMemoryHook runs).
@@ -122,7 +130,7 @@ void ProcessGroupNCCL::init(at::Device device) {
     device_ = bootstrap->getDevice();
 
     if (nccl_comm_ == nullptr) {
-      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->hints);
+      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->config);
     }
   }
 
@@ -154,10 +162,6 @@ void ProcessGroupNCCL::initNcclResources() {
   }
 
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
-  if (auto it = options_c10d_->hints.find(std::string(kHintMaxEventPoolSize));
-      it != options_c10d_->hints.end()) {
-    max_event_pool_size_ = static_cast<size_t>(std::stoull(it->second));
-  }
 
   NCCL_CHECK(
       nccl_api_,
@@ -331,7 +335,7 @@ void ProcessGroupNCCL::abortNcclComm() {
   }
   // Never abort the process in reconfigurable mode: callers fall back to
   // revoke + throw so the failure can be handled by reconfiguring.
-  if (options_c10d_->abort_process_on_timeout_or_error &&
+  if (abort_process_on_timeout_or_error_ &&
       !options_c10d_->enable_reconfigure) {
     TC_LOG(ERROR, this) << "Aborting process due to timeout";
     runAbortHooks();
