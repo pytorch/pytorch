@@ -21,6 +21,8 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from torch.utils.hooks import RemovableHandle
+
 
 # graph_node_id -> annotation name (or None). The graph naming mechanism shared by
 # observers: map a CUDA-graph node id to its registered region name (survives graph
