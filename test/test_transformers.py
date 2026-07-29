@@ -2489,6 +2489,69 @@ class TestSDPA(NNTestCase):
             expected_shape[-1] = v_shape[-1]
             self.assertEqual(actual.shape, torch.Size(expected_shape))
 
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("broadcast", ["q_batch", "kv_batch", "q_head", "kv_head"])
+    @parametrize(
+        "qL,kL,head_dim",
+        [(4, 16, 64), (4, 1024, 64), (32, 32, 64), (4, 16, 8)],  # MPS vector, 2-pass, prefill, MPSGraph paths
+    )
+    def test_sdpa_math_broadcast_batch_and_heads(self, device, dtype, broadcast, qL, kL, head_dim):
+        torch.manual_seed(1729)
+        B, NH = 2, 4
+        qb = 1 if broadcast == "q_batch" else B
+        kb = 1 if broadcast == "kv_batch" else B
+        qh = 1 if broadcast == "q_head" else NH
+        kh = 1 if broadcast == "kv_head" else NH
+        q = torch.randn(qb, qh, qL, head_dim, dtype=dtype, device=device)
+        k = torch.randn(kb, kh, kL, head_dim, dtype=dtype, device=device)
+        v = torch.randn(kb, kh, kL, head_dim, dtype=dtype, device=device)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            actual = F.scaled_dot_product_attention(q, k, v)
+            expected = F.scaled_dot_product_attention(
+                q.expand(B, NH, qL, head_dim), k.expand(B, NH, kL, head_dim), v.expand(B, NH, kL, head_dim)
+            )
+        self.assertEqual(actual, expected)
+
+    @parametrize(
+        "q_shape,kv_shape,mask_shape,enable_gqa,is_causal",
+        [
+            ((4, 4, 64), (2, 4, 16, 64), None, False, False),
+            ((2, 1, 4, 4, 64), (1, 3, 4, 16, 64), (1, 3, 1, 4, 16), False, False),
+            ((2, 0, 4, 8), (2, 1, 16, 8), None, False, False),
+            ((1, 8, 4, 64), (2, 2, 16, 64), None, True, False),
+            ((1, 4, 4, 64), (2, 1, 16, 64), None, False, True),
+        ],
+    )
+    def test_sdpa_math_broadcast_prefix_and_empty_dims(
+        self, device, q_shape, kv_shape, mask_shape, enable_gqa, is_causal
+    ):
+        torch.manual_seed(1729)
+        q = torch.randn(q_shape, device=device)
+        k = torch.randn(kv_shape, device=device)
+        v = torch.randn(kv_shape, device=device)
+        mask = None if mask_shape is None else torch.randn(mask_shape, device=device)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            actual = F.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask, is_causal=is_causal, enable_gqa=enable_gqa
+            )
+            outer_dims = 3 if enable_gqa else 2
+            outer_shape = torch.broadcast_shapes(
+                q.shape[:-outer_dims], k.shape[:-outer_dims], v.shape[:-outer_dims]
+            )
+            expanded = tuple(t.expand(outer_shape + t.shape[-outer_dims:]) for t in (q, k, v))
+            if enable_gqa:
+                factor = q.size(-3) // k.size(-3)
+                q_expanded, k_expanded, v_expanded = expanded
+                expanded = (
+                    q_expanded,
+                    k_expanded.repeat_interleave(factor, -3),
+                    v_expanded.repeat_interleave(factor, -3),
+                )
+            mask = None if mask is None else mask.expand(outer_shape + (q.size(-2), k.size(-2)))
+            expected = F.scaled_dot_product_attention(*expanded, attn_mask=mask, is_causal=is_causal)
+        self.assertEqual(actual, expected)
+
     def test_sdpa_export_unbacked_attn_mask(self, device):
         """SDPA backend selection should not crash on unbacked symbolic mask shapes."""
 
