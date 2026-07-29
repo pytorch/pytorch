@@ -577,25 +577,23 @@ class SetVariable(VariableTracker):
         return ConstantVariable.create(None)
 
     tp_methods = {
-        "add": Method(add, "add"),
-        "pop": Method(pop, "pop"),
-        "isdisjoint": Method(isdisjoint, "isdisjoint"),
-        "intersection": Method(intersection, "intersection"),
-        "intersection_update": Method(intersection_update, "intersection_update"),
-        "union": Method(union, "union"),
-        "difference": Method(difference, "difference"),
-        "difference_update": Method(difference_update, "difference_update"),
-        "symmetric_difference": Method(symmetric_difference, "symmetric_difference"),
-        "symmetric_difference_update": Method(
-            symmetric_difference_update, "symmetric_difference_update"
-        ),
-        "update": Method(update, "update"),
-        "remove": Method(remove, "remove"),
-        "discard": Method(discard, "discard"),
-        "issubset": Method(issubset, "issubset"),
-        "issuperset": Method(issuperset, "issuperset"),
-        "copy": Method(copy, "copy"),
-        "clear": Method(clear, "clear"),
+        "add": Method(add),
+        "pop": Method(pop),
+        "isdisjoint": Method(isdisjoint),
+        "intersection": Method(intersection),
+        "intersection_update": Method(intersection_update),
+        "union": Method(union),
+        "difference": Method(difference),
+        "difference_update": Method(difference_update),
+        "symmetric_difference": Method(symmetric_difference),
+        "symmetric_difference_update": Method(symmetric_difference_update),
+        "update": Method(update),
+        "remove": Method(remove),
+        "discard": Method(discard),
+        "issubset": Method(issubset),
+        "issuperset": Method(issuperset),
+        "copy": Method(copy),
+        "clear": Method(clear),
     }
 
     def getitem_const(
@@ -1007,10 +1005,10 @@ class FrozensetVariable(SetVariable):
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
     tp_methods = {
-        "copy": Method(copy, "copy"),
-        "difference": Method(difference, "difference"),
-        "intersection": Method(intersection, "intersection"),
-        "symmetric_difference": Method(symmetric_difference, "symmetric_difference"),
+        "copy": Method(copy),
+        "difference": Method(difference),
+        "intersection": Method(intersection),
+        "symmetric_difference": Method(symmetric_difference),
     }
 
     def tp_init_impl(

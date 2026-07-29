@@ -1570,9 +1570,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return throw_here()
 
     tp_methods = {
-        "send": Method(gen_send, "send"),
-        "close": Method(gen_close, "close"),
-        "throw": Method(gen_throw, "throw"),
+        "send": Method(gen_send),
+        "close": Method(gen_close),
+        "throw": Method(gen_throw),
     }
 
 
@@ -3602,7 +3602,7 @@ class TritonKernelVariable(VariableTracker):
             return ConstantVariable.create(arg.evaluate_expr())
         return arg
 
-    tp_methods = {"run": Method(run, "run")}
+    tp_methods = {"run": Method(run)}
 
 
 class TMADescriptorExperimentalVariable(VariableTracker):
