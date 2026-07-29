@@ -1,4 +1,5 @@
 import operator
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeAlias
 
 import torch.fx
@@ -7,6 +8,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import get_current_stream, new_event
 from torch.fx.node import map_arg
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._runtime_estimation import (
     _FLOAT_TYPES,
     _IGNORE_OPS,
@@ -25,6 +27,11 @@ aten = torch.ops.aten
 
 Node: TypeAlias = torch.fx.Node
 Graph: TypeAlias = torch.fx.Graph
+Partition: TypeAlias = bool
+
+FORWARD: Partition = False
+BACKWARD: Partition = True
+_EMPTY_LOCATIONS: frozenset[tuple[Partition, int]] = frozenset()
 
 _SYNC_OPS = (
     torch.ops.streams.record_event.default,
@@ -71,7 +78,7 @@ def is_gradient_acc(node: Node) -> bool:
     return node.meta.get("is_gradient_acc", False)
 
 
-def is_bwd_node(node: Node) -> bool:
+def is_bwd_node(node: Node) -> Partition:
     tag = node.meta.get("partitioner_tag")
     return tag == "is_backward" or tag == "must_be_in_backward"
 
@@ -441,24 +448,36 @@ def _wrap_sync_node(
     )
 
     graph = gm.graph
+    if partition_scoped_deps is None:
+        partition_scoped_deps = set()
 
     sync_is_bwd = is_bwd_node(sync_node)
 
-    def _should_rewrite(dep: Node, user: Node) -> bool:
-        if user in visited:
-            return False
-        if partition_scoped_deps is not None and dep in partition_scoped_deps:
-            if user.op == "output":
-                return sync_is_bwd
-            return is_bwd_node(user) == sync_is_bwd
-        return user.op != "output" or is_bwd_node(dep)
+    def _user_rewrite_pred(dep: Node) -> Callable[[Node], bool]:
+        if dep in partition_scoped_deps:
+
+            def pred(user: Node) -> bool:
+                if user in visited:
+                    return False
+                if user.op == "output":
+                    return sync_is_bwd
+                return is_bwd_node(user) == sync_is_bwd
+
+            return pred
+
+        dep_is_bwd = is_bwd_node(dep)
+
+        def pred(user: Node) -> bool:
+            return user not in visited and (user.op != "output" or dep_is_bwd)
+
+        return pred
 
     # Use dep.users to find deps with uses after the sync — avoids a forward walk.
-    deps_with_uses_after_sync = [
-        dep
-        for dep in deps_before_sync
-        if any(_should_rewrite(dep, user) for user in dep.users)
-    ]
+    deps_with_uses_after_sync = []
+    for dep in deps_before_sync:
+        pred = _user_rewrite_pred(dep)
+        if any(pred(user) for user in dep.users):
+            deps_with_uses_after_sync.append(dep)
 
     # Expand dict-returning nodes (triton_kernel_wrapper_functional) into
     # individual getitem outputs.  Passing a dict-valued node through
@@ -522,10 +541,11 @@ def _wrap_sync_node(
     # Replace uses of dependencies that come after sync_node.
     # Use map_arg to handle nested structures (e.g. output node's list args).
     for dep, getitem_node in replacements.items():
+        pred = _user_rewrite_pred(dep)
         for user in list(dep.users.keys()):
             if user is control_deps_node:
                 continue
-            if not _should_rewrite(dep, user):
+            if not pred(user):
                 continue
 
             def _replace(n: Node) -> Node:
@@ -535,9 +555,11 @@ def _wrap_sync_node(
                 user.op == "call_function"
                 and user.target is torch.ops.aten.copy_.default
                 and user.args[0] is dep
-                and partition_scoped_deps is not None
                 and dep in partition_scoped_deps
             ):
+                # AOT functionalization leaves keep_input_mutations epilogue
+                # copy_ as the only writer of a partition-scoped placeholder.
+                # Preserve the destination identity used by mutation bookkeeping.
                 user.args = (dep, *map_arg(user.args[1:], _replace))
             else:
                 user.args = map_arg(user.args, _replace)
@@ -551,7 +573,7 @@ def _wrap_sync_node(
 
 def _collect_sync_forward_deps(
     graph: torch.fx.Graph,
-) -> tuple[dict[Node, list[Node]], dict[Node, list[Node]]]:
+) -> tuple[dict[Node, OrderedSet[Node]], dict[Node, OrderedSet[Node]]]:
     """Collect values that must cross sync boundaries.
 
     ``live_inputs[partition][stream]`` tracks values whose passthrough can anchor
@@ -560,29 +582,38 @@ def _collect_sync_forward_deps(
     single reverse liveness traversal; the forward pass still handles sync/event
     state introduced while rewriting the graph.
     """
-    stream_sync_deps: dict[Node, list[Node]] = {}
-    full_barrier_deps: dict[Node, list[Node]] = {}
-    live_inputs: dict[bool, dict[int, dict[Node, None]]] = {False: {}, True: {}}
-    locations: dict[Node, dict[tuple[bool, int], None]] = {}
+    stream_sync_deps: dict[Node, OrderedSet[Node]] = {}
+    full_barrier_deps: dict[Node, OrderedSet[Node]] = {}
+    live_inputs: dict[Partition, dict[int, OrderedSet[Node]]] = {
+        FORWARD: {},
+        BACKWARD: {},
+    }
+    locations: dict[Node, OrderedSet[tuple[Partition, int]]] = {}
     full_barriers = (
         torch.ops.streams.synchronize_device.default,
         torch.ops.streams.synchronize_event.default,
         torch.ops.streams.synchronize_stream.default,
     )
 
-    def _add_live(node: Node, partition: bool, stream: int) -> None:
-        live_inputs[partition].setdefault(stream, {})[node] = None
-        locations.setdefault(node, {})[(partition, stream)] = None
+    def _add_live(node: Node, partition: Partition, stream: int) -> None:
+        stream_inputs = live_inputs[partition].get(stream)
+        if stream_inputs is None:
+            stream_inputs = live_inputs[partition][stream] = OrderedSet()
+        stream_inputs.add(node)
+        node_locations = locations.get(node)
+        if node_locations is None:
+            node_locations = locations[node] = OrderedSet()
+        node_locations.add((partition, stream))
 
-    for node in reversed(list(graph.nodes)):
+    for node in reversed(graph.nodes):
         if node.op == "call_function" and node.target in full_barriers:
-            deps = dict.fromkeys(
+            deps = OrderedSet(
                 dep
                 for stream_inputs in live_inputs[is_bwd_node(node)].values()
                 for dep in stream_inputs
             )
             if deps:
-                full_barrier_deps[node] = list(deps)
+                full_barrier_deps[node] = deps
             continue
         if (
             node.op == "call_function"
@@ -591,7 +622,7 @@ def _collect_sync_forward_deps(
             waiting_stream: int = node.args[0]  # type: ignore[assignment]
             deps = live_inputs[is_bwd_node(node)].get(waiting_stream)
             if deps:
-                stream_sync_deps[node] = list(deps)
+                stream_sync_deps[node] = deps.copy()
             continue
         if (
             node.op == "call_function"
@@ -599,20 +630,20 @@ def _collect_sync_forward_deps(
         ):
             waiting_stream: int = node.args[1]  # type: ignore[assignment]
             deps = live_inputs[is_bwd_node(node)].get(waiting_stream, ())
-            graph_inputs = [dep for dep in deps if dep.op == "placeholder"]
+            graph_inputs = OrderedSet(dep for dep in deps if dep.op == "placeholder")
             if graph_inputs:
                 stream_sync_deps[node] = graph_inputs
             continue
         if node.op != "call_function" or node.target in _SYNC_OPS:
             continue
 
-        inherited_locations = locations.pop(node, {})
+        inherited_locations = locations.pop(node, _EMPTY_LOCATIONS)
         for partition, stream in inherited_locations:
-            live_inputs[partition][stream].pop(node, None)
+            live_inputs[partition][stream].discard(node)
         execution_stream = get_stream(node)
         if execution_stream is None:
             execution_stream = 0
-        target_locations = dict.fromkeys(
+        target_locations = OrderedSet(
             (*inherited_locations, (is_bwd_node(node), execution_stream))
         )
 
@@ -649,13 +680,13 @@ def _collect_full_barrier_deps(
     depends on forward activations.
     """
     all_deps = [n for nodes in stream_to_nodes.values() for n in nodes]
-    seen = {id(n) for n in all_deps}
+    seen = set(all_deps)
     for deps in stream_sync_deps.values():
         for dep in deps:
-            if id(dep) in seen or (bwd and not is_bwd_node(dep)):
+            if dep in seen or (bwd and not is_bwd_node(dep)):
                 continue
             all_deps.append(dep)
-            seen.add(id(dep))
+            seen.add(dep)
     return all_deps
 
 
@@ -714,11 +745,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     all_stream_deps = _collect_full_barrier_deps(
                         stream_to_nodes, stream_sync_deps, bwd=is_bwd_node(node)
                     )
-                    existing_ids = {id(dep) for dep in all_stream_deps}
+                    existing_deps = set(all_stream_deps)
                     for dep in full_barrier_forward_deps.get(node, ()):
-                        if id(dep) not in existing_ids:
+                        if dep not in existing_deps:
                             all_stream_deps.append(dep)
-                            existing_ids.add(id(dep))
+                            existing_deps.add(dep)
                     if all_stream_deps:
                         found_sync = True
                         ctrl_node_sync, passthrough_sync = _wrap_sync_node(
@@ -766,11 +797,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     # so they get threaded through control_deps, creating a
                     # forward ordering constraint (waiting-stream work must
                     # come after wait_stream).
-                    existing_ids = {id(d) for d in deps_before_sync}
+                    existing_deps = set(deps_before_sync)
                     for dep in stream_sync_forward_deps.get(node, ()):
-                        if id(dep) not in existing_ids:
+                        if dep not in existing_deps:
                             deps_before_sync.append(dep)
-                            existing_ids.add(id(dep))
+                            existing_deps.add(dep)
                     if deps_before_sync:
                         found_sync = True
                         ctrl_node_ws, passthrough_ws = _wrap_sync_node(
@@ -884,12 +915,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
 
                 # Deduplicate (preserving order): the folded stream_sync_deps and
                 # the event's own anchor/passthrough can overlap.
-                seen_deps: set[int] = set()
-                deps_before_sync = [
-                    d
-                    for d in deps_before_sync
-                    if id(d) not in seen_deps and not seen_deps.add(id(d))
-                ]
+                deps_before_sync = list(OrderedSet(deps_before_sync))
 
                 if deps_before_sync:
                     found_sync = True
