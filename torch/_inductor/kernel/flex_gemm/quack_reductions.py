@@ -245,6 +245,7 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
         "clamp_max",
         "clamp_min",
         "convert_element_type",
+        "inline_asm_elementwise",
         "mx_e8m0_scale",
         "nvfp4_e4m3_scale",
     )
@@ -375,6 +376,10 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
     if op_name in ("mx_e8m0_scale", "nvfp4_e4m3_scale"):
         return _cute_scale_call(op_name, args, kwargs)
+    if op_name == "inline_asm_elementwise":
+        # The HOP spells the asm text `asm_str`; the ops handler spells it `asm`.
+        kwargs = dict(kwargs)
+        kwargs["asm"] = kwargs.pop("asm_str")
     if op_name == "nvfp4_pack":
         return V.kernel.cse.generate(
             V.kernel.body,
@@ -524,9 +529,10 @@ class FlexGemmNVFP4PackForm:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmUnsupportedReductionForm:
-    """Record an unsupported reduction source for shared error handling."""
+    """Record an unsupported reduction for shared error handling."""
 
     source: torch.fx.Node
+    target: str
 
 
 FlexGemmStructuralForm = (
@@ -733,7 +739,7 @@ def flex_gemm_structural_form(
             raise AssertionError(
                 f"malformed FlexGEMM reduction node: {node.format_node()}"
             )
-        return FlexGemmUnsupportedReductionForm(source)
+        return FlexGemmUnsupportedReductionForm(source, str(node.target))
     return None
 
 
