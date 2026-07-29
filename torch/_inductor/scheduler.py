@@ -2603,6 +2603,10 @@ class SchedulerNode(BaseSchedulerNode):
             return False
         if any(out.get_aliases() for out in self.get_outputs()):
             return False
+        # A masked store only partially defines its buffer, so reusing the input
+        # would leave the input's values in the masked-off region.
+        if isinstance(self._body, LoopBody) and self._body.has_op("masked_store"):
+            return False
         if len(self.read_writes.writes) == 1 and isinstance(
             read_dep, dependencies.MemoryDep
         ):
