@@ -16,11 +16,14 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..utils import is_view
 
 
 aten = torch.ops.aten
 prims = torch.ops.prims
 _RESHAPE_OPS = (aten.reshape.default, aten.view.default)
+# Non-aggregating lowerings without Tag.pointwise.
+_DOWNSTREAM_NON_AGGREGATING_OPS = (aten.constant_pad_nd.default,)
 _MAX_ANALYSIS_NODES = 64
 _MIN_LIVE_REDUCTION_ROW_BYTES = 32_000
 _Scalar = int | float
@@ -360,10 +363,27 @@ def _has_expanding_pointwise_consumer(
         if (
             torch.Tag.pointwise in user.target.tags
             and user_val is not None
-            and statically_known_true(user_val.numel() > reduction_val.numel())
+            and _shape_expands(user_val.shape, reduction_val.shape)
         ):
             return True
     return False
+
+
+def _shape_expands(user_shape: torch.Size, source_shape: torch.Size) -> bool:
+    if len(user_shape) < len(source_shape):
+        return False
+    source_shape = (1,) * (len(user_shape) - len(source_shape)) + tuple(source_shape)
+    expanded = False
+    for user_size, source_size in zip(user_shape, source_shape):
+        if statically_known_true(sym_eq(user_size, source_size)):
+            continue
+        if not (
+            statically_known_true(source_size == 1)
+            and statically_known_true(user_size > 1)
+        ):
+            return False
+        expanded = True
+    return expanded
 
 
 def _find_downstream_reductions(
@@ -386,6 +406,12 @@ def _find_downstream_reductions(
         if isinstance(user.target, torch._ops.OpOverload):
             if torch.Tag.reduction in user.target.tags:
                 reductions.add(user)
+            elif (
+                torch.Tag.pointwise not in user.target.tags
+                and not is_view(user.target)
+                and user.target not in _DOWNSTREAM_NON_AGGREGATING_OPS
+            ):
+                return None
             pending.extend(user.users)
         elif user.target is operator.getitem:
             pending.extend(user.users)

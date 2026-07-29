@@ -4,11 +4,15 @@ from unittest import mock
 
 import torch
 from torch._dynamo.utils import counters
+from torch._guards import detect_fake_mode
 from torch._inductor import config
 from torch._inductor.fx_passes import singleton_reduction
 from torch._inductor.fx_passes.singleton_reduction import eliminate_singleton_reductions
+from torch._inductor.fx_utils import FakeTensorUpdater, get_fake
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -72,9 +76,11 @@ class SingletonReductionTests(TestCase):
             row_sum = torch.ops.aten.sum.dim_IntList(dense, [1], True)
             return torch.ops.aten.sub.Tensor(dense, row_sum)
 
-        target = torch.tensor([[0], [LIVE_VOCAB]], device=device)
-        scale = torch.randn(2, 1, device=device)
-        return make_fx(fn)(target, scale).graph
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            target = torch.tensor([[0], [LIVE_VOCAB]], device=device)
+            scale = torch.randn(2, 1, device=device)
+            return make_fx(fn, tracing_mode="fake")(target, scale).graph
 
     @parametrize("force_shape_pad,expected_fold", ((False, True), (True, False)))
     @parametrize("bf16_roundtrip", (False, True))
@@ -88,10 +94,18 @@ class SingletonReductionTests(TestCase):
             if bf16_roundtrip:
                 dense = dense.to(torch.bfloat16).to(torch.float32)
             row_sum = dense.sum(dim=1, keepdim=True)
-            return dense, dense - row_sum
+            return dense, row_sum, dense - row_sum
 
         targets = [-100, -1, 0, LIVE_VOCAB - 1, LIVE_VOCAB, LIVE_VOCAB + 2]
-        scales = [0.0, -0.0, 0.3333, float("inf"), -float("inf"), float("nan")]
+        scales = [
+            0.0,
+            -0.0,
+            0.3333,
+            -0.3333,
+            float("inf"),
+            -float("inf"),
+            float("nan"),
+        ]
         target = torch.tensor(targets, device=device).repeat_interleave(len(scales))[
             :, None
         ]
@@ -106,7 +120,14 @@ class SingletonReductionTests(TestCase):
         self.assertEqual(torch.signbit(actual[1]), torch.signbit(expected[1]))
 
     @parametrize(
-        "variant", ("explicit_expand", "reversed_mask", "reversed_mul", "reshape")
+        "variant",
+        (
+            "constant_pad",
+            "explicit_expand",
+            "reversed_mask",
+            "reversed_mul",
+            "reshape",
+        ),
     )
     def test_equivalent_graph_forms(self, device, variant):
         def fn(target, scale):
@@ -130,7 +151,12 @@ class SingletonReductionTests(TestCase):
                 product = scale * selected
             dense = product.to(torch.bfloat16).to(torch.float32)
             row_sum = dense.sum(dim=1, keepdim=True)
-            return dense - row_sum
+            output = dense - row_sum
+            return (
+                torch.constant_pad_nd(output, (0, 1))
+                if variant == "constant_pad"
+                else output
+            )
 
         target = torch.tensor([[0], [LIVE_VOCAB - 1]], device=device)
         scale = torch.randn(2, 1, device=device)
@@ -214,17 +240,19 @@ class SingletonReductionTests(TestCase):
     @parametrize(
         "case",
         (
-            "small_row",
+            "below_row_threshold",
+            "constant_pad_sum",
             "no_expanding_user",
             "downstream_sum",
             "row_sum_downstream_sum",
+            "untagged_reduction",
             "transitive_sum",
             "cat_sum",
             "split_sum",
         ),
     )
     def test_live_reuse_profitability(self, device, case):
-        vocab = 128 if case == "small_row" else LIVE_VOCAB
+        vocab = LIVE_VOCAB - 1 if case == "below_row_threshold" else LIVE_VOCAB
 
         def fn(target, scale):
             iota = torch.arange(vocab, device=target.device).view(1, vocab)
@@ -238,6 +266,12 @@ class SingletonReductionTests(TestCase):
                 return output, dense.sum(dim=0, keepdim=True)
             if case == "row_sum_downstream_sum":
                 return output, row_sum.expand(2, vocab).sum(dim=1, keepdim=True)
+            if case == "constant_pad_sum":
+                return output, torch.constant_pad_nd(dense, (0, 1)).sum(
+                    dim=1, keepdim=True
+                )
+            if case == "untagged_reduction":
+                return output, torch.cumsum(dense, dim=1)
             if case == "transitive_sum":
                 return output, (dense + 1).transpose(0, 1).sum(dim=1)
             if case == "cat_sum":
@@ -249,6 +283,78 @@ class SingletonReductionTests(TestCase):
         target = torch.tensor([[0], [vocab]], device=device)
         scale = torch.randn(2, 1, device=device)
         self._run_and_check(fn, (target, scale), False)
+
+    def test_unbacked_batch(self, device):
+        def fn(target, scale):
+            iota = torch.arange(LIVE_VOCAB, device=target.device).view(1, LIVE_VOCAB)
+            dense = torch.where(target == iota, -1.0, 0.0) * scale
+            dense = dense.to(torch.bfloat16).to(torch.float32)
+            row_sum = dense.sum(dim=1, keepdim=True)
+            return dense - row_sum
+
+        target = torch.randint(0, LIVE_VOCAB, (3, 1), device=device)
+        scale = torch.randn((), device=device)
+        torch._dynamo.decorators.mark_unbacked(target, 0)
+        self._run_and_check(fn, (target, scale), True)
+
+    def test_metadata_update(self, device):
+        graph = self._make_pass_graph(device)
+        gm = torch.fx.GraphModule({}, graph)
+        fake_mode = detect_fake_mode(get_fake(next(iter(graph.nodes)), gm))
+        if fake_mode is None:
+            raise AssertionError("expected fake mode")
+        updater = FakeTensorUpdater(gm)
+        original_nodes = set(graph.nodes)
+        reduction = next(
+            node
+            for node in graph.nodes
+            if node.target is torch.ops.aten.sum.dim_IntList
+        )
+        consumer = next(iter(reduction.users))
+
+        self.assertEqual(eliminate_singleton_reductions(graph), 1)
+        inserted = set(graph.nodes) - original_nodes
+        with V.set_fake_mode(fake_mode):
+            updated = updater.incremental_update()
+
+        self.assertGreater(updated, 0)
+        for node in inserted:
+            if node.op == "call_function":
+                self.assertIn("val", node.meta)
+        replayed_casts = [
+            node
+            for node in inserted
+            if node.target is torch.ops.prims.convert_element_type.default
+        ]
+        self.assertEqual(len(replayed_casts), 4)
+        for node in replayed_casts:
+            self.assertEqual(node.meta["val"].shape, (2, 1))
+        replacement = consumer.args[1]
+        self.assertEqual(replacement.meta["val"].shape, (2, 1))
+        self.assertEqual(replacement.meta["val"].dtype, torch.float32)
+        graph.lint()
+
+    def test_post_grad_metadata_update(self, device):
+        def fn(target, scale):
+            iota = torch.arange(LIVE_VOCAB, device=target.device).view(1, LIVE_VOCAB)
+            dense = torch.where(target == iota, -1.0, 0.0) * scale
+            dense = dense.to(torch.bfloat16).to(torch.float32)
+            row_sum = dense.sum(dim=1, keepdim=True)
+            return dense - row_sum
+
+        def assert_metadata(graph):
+            for node in graph.nodes:
+                if node.op == "call_function":
+                    self.assertIn("val", node.meta)
+
+        target = torch.tensor([[0], [LIVE_VOCAB]], device=device)
+        scale = torch.randn(2, 1, device=device)
+        self._run_and_check(
+            fn,
+            (target, scale),
+            True,
+            {"post_grad_custom_post_pass": assert_metadata},
+        )
 
     def test_dynamic_reduction_extent(self, device):
         def fn(target, scale, dense):
