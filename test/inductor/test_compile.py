@@ -10,7 +10,7 @@ from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
-from torch._inductor import config
+from torch._inductor import config, cpp_builder
 from torch._inductor.codecache import _cuda_fatbin_command, write
 from torch._inductor.cpp_builder import (
     BuildOptionsBase,
@@ -74,6 +74,17 @@ class TestStandaloneInductor(TestCase):
     These test check that you can call TorchInductor directly without
     going through TorchDynamo.
     """
+
+    def _clear_cpp_builder_compiler_caches(self):
+        for func in (
+            cpp_builder._compiler_version_string,
+            cpp_builder._is_apple_clang,
+            cpp_builder._is_clang,
+            cpp_builder._is_gcc,
+            cpp_builder._is_intel_compiler,
+            cpp_builder.get_compiler_version_info,
+        ):
+            func.cache_clear()
 
     def test_inductor_via_fx(self):
         mod = MyModule3().eval()
@@ -488,6 +499,131 @@ class TestStandaloneInductor(TestCase):
         self.assertEqual(bin_type, "cubin")
         self.assertEqual(asm, "current ptx")
         self.assertEqual(asm_type, "ptx")
+
+    @unittest.skipIf(_IS_WINDOWS, "compiler command splitting is for POSIX shells")
+    def test_cpp_compiler_search_splits_compiler_command(self):
+        cpp_builder.cpp_compiler_search.cache_clear()
+
+        def fake_check_output(cmd, *args, **kwargs):
+            self.assertEqual(cmd, ["zig", "c++", "--version"])
+            return b"clang version fake-zig"
+
+        try:
+            with mock.patch("subprocess.check_output", side_effect=fake_check_output):
+                self.assertEqual(
+                    cpp_builder.cpp_compiler_search(("zig c++",)), "zig c++"
+                )
+        finally:
+            cpp_builder.cpp_compiler_search.cache_clear()
+
+    @unittest.skipIf(_IS_WINDOWS, "compiler command splitting is for POSIX shells")
+    def test_compiler_version_info_splits_compiler_command(self):
+        self._clear_cpp_builder_compiler_caches()
+
+        try:
+            with mock.patch(
+                "subprocess.check_output",
+                return_value=b"clang version fake-zig\nTarget: fake\n",
+            ) as check_output_mock:
+                self.assertEqual(
+                    cpp_builder.get_compiler_version_info("zig c++"),
+                    "clang version fake-zig_Target: fake_",
+                )
+            self.assertEqual(
+                check_output_mock.call_args[0][0],
+                ["zig", "c++", "-v"],
+            )
+        finally:
+            self._clear_cpp_builder_compiler_caches()
+
+    @unittest.skipIf(_IS_WINDOWS, "compiler command splitting is for POSIX shells")
+    def test_is_clang_uses_version_output_for_multiword_compiler(self):
+        self._clear_cpp_builder_compiler_caches()
+
+        def fake_check_output(cmd, *args, **kwargs):
+            self.assertEqual(cmd, ["zig", "c++", "--version"])
+            return b"clang version fake-zig\nTarget: fake\n"
+
+        try:
+            with mock.patch("subprocess.check_output", side_effect=fake_check_output):
+                self.assertTrue(cpp_builder._is_clang("zig c++"))
+                self.assertFalse(cpp_builder._is_gcc("zig c++"))
+        finally:
+            self._clear_cpp_builder_compiler_caches()
+
+    @unittest.skipIf(_IS_WINDOWS, "compiler command splitting is for POSIX shells")
+    def test_is_clang_preserves_apple_clang_detection(self):
+        self._clear_cpp_builder_compiler_caches()
+
+        try:
+            with (
+                mock.patch("torch._inductor.cpp_builder.sys.platform", "darwin"),
+                mock.patch(
+                    "subprocess.check_output",
+                    return_value=b"Apple LLVM version 10.0.0 (clang-1000.0.42)\n",
+                ),
+            ):
+                self.assertTrue(cpp_builder._is_apple_clang("gcc"))
+                self.assertTrue(cpp_builder._is_clang("gcc"))
+                self.assertFalse(cpp_builder._is_gcc("gcc"))
+        finally:
+            self._clear_cpp_builder_compiler_caches()
+
+    @unittest.skipIf(_IS_WINDOWS, "compiler command splitting is for POSIX shells")
+    def test_cpp_options_use_clang_identity_for_multiword_compiler(self):
+        self._clear_cpp_builder_compiler_caches()
+
+        def fake_check_output(cmd, *args, **kwargs):
+            self.assertEqual(cmd, ["zig", "c++", "--version"])
+            return b"clang version fake-zig\nTarget: fake\n"
+
+        try:
+            with (
+                config.patch({"cpp.march": ""}),
+                mock.patch("subprocess.check_output", side_effect=fake_check_output),
+                mock.patch(
+                    "torch._inductor.cpp_builder.platform.system",
+                    return_value="Darwin",
+                ),
+                mock.patch("torch._inductor.cpp_builder.sys.platform", "darwin"),
+                mock.patch("torch._inductor.cpp_builder.is_gcc", return_value=False),
+            ):
+                cflags = cpp_builder.get_cpp_options(
+                    "zig c++", do_link=True, warning_all=False
+                )[2]
+
+            self.assertTrue(
+                any(flag.endswith("ignored-optimization-argument") for flag in cflags)
+            )
+            self.assertIn("undefined dynamic_lookup", cflags)
+        finally:
+            self._clear_cpp_builder_compiler_caches()
+
+    def test_is_msvc_cl_handles_invalid_help_bytes(self):
+        help_output = (
+            b"Compilateur d'optimisation Microsoft (R) C/C++ version"
+            b"\xff19.35.32216.1\r\n"
+        )
+        completed_process = subprocess.CompletedProcess(
+            ["cl", "/help"], 0, stdout=help_output
+        )
+
+        cpp_builder._is_msvc_cl.cache_clear()
+        try:
+            # Keep decode settings strict; this probe should not decode /help output.
+            with (
+                mock.patch("torch._inductor.cpp_builder._IS_WINDOWS", True),
+                mock.patch(
+                    "torch._inductor.cpp_builder.SUBPROCESS_DECODE_ARGS", ("utf-8",)
+                ),
+                mock.patch(
+                    "torch._inductor.cpp_builder.subprocess.run",
+                    return_value=completed_process,
+                ),
+            ):
+                self.assertTrue(cpp_builder._is_msvc_cl("cl"))
+        finally:
+            cpp_builder._is_msvc_cl.cache_clear()
 
 
 if __name__ == "__main__":

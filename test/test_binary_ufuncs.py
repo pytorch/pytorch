@@ -59,6 +59,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     iter_indices,
     numpy_to_torch_dtype_dict,
@@ -90,6 +91,8 @@ _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 @instantiate_parametrized_tests
 class TestBinaryUfuncs(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_cop(self, torchfn, mathfn, dtype):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -282,6 +285,8 @@ class TestBinaryUfuncs(TestCase):
 
 
 class TestBinaryUfuncsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Generic tests for elementwise binary (AKA binary universal (u) functions (funcs))
     # TODO: below contiguous tensor results are compared with a variety of noncontiguous results.
     #   It would be interesting to have the lhs and rhs have different discontinuities.
@@ -4660,6 +4665,8 @@ class TestBinaryUfuncsDevice(TestCase):
 
 
 class TestChebyshevNanPropagation(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_chebyshev_nan_noncontiguous(self, device):
         if self.device_type not in ("cpu", "cuda"):
             self.skipTest("NaN uninitialized return is only fixed for CPU and CUDA")
@@ -4693,6 +4700,8 @@ class TestChebyshevNanPropagation(TestCase):
 
 
 class TestBinaryUfuncsCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @dtypes(torch.float16, torch.bfloat16)
     def test_copysign_nan_sign(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/181804
