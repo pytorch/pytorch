@@ -398,7 +398,7 @@ def compute_overlapping_inputs(
             aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
         ]
 
-        tracing_context.guards_context.aotautograd_guards.append(
+        tracing_context.add_aotautograd_guard(
             StorageOverlap(overlapping_sources, non_overlapping_sources)
         )
 
