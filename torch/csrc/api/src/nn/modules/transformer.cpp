@@ -44,7 +44,7 @@ void TransformerEncoderLayerImpl::reset() {
 }
 
 void TransformerEncoderLayerImpl::reset_parameters() {
-  // TODO xinyu: standardrize reset_parameters virtual funcs
+  // TODO xinyu: standardize reset_parameters virtual funcs
   self_attn->_reset_parameters();
 
   linear1->reset_parameters();
@@ -140,7 +140,7 @@ void TransformerDecoderLayerImpl::reset() {
 }
 
 void TransformerDecoderLayerImpl::reset_parameters() {
-  // TODO xinyu: standardrize reset_parameters virtual funcs
+  // TODO xinyu: standardize reset_parameters virtual funcs
   self_attn->_reset_parameters();
   multihead_attn->_reset_parameters();
 

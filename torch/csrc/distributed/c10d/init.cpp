@@ -2461,6 +2461,17 @@ Arguments:
 
               See :func:`torch.distributed.gather` for more details.)")
           .def(
+              "gather_into_tensor",
+              &::c10d::ProcessGroup::gather_into_tensor,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Gathers the input tensor from all processes into a single
+              output tensor on the root rank.
+
+              See :func:`torch.distributed.gather_into_tensor` for more details.)")
+          .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
               py::arg("output_tensors"),
@@ -3215,6 +3226,13 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "gather_into_tensor",
+              &::c10d::Backend::gather_into_tensor,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "scatter",
               &::c10d::Backend::scatter,
               py::arg("output_tensors"),
@@ -3770,6 +3788,14 @@ for details.
 #endif
 #ifdef NCCL_HAS_MAX_P2P_PEERS
       .def_readwrite("max_p2p_peers", &ncclConfig_t::maxP2pPeers)
+#endif
+#ifdef NCCL_HAS_COMM_NAME
+      .def_property(
+          "comm_name",
+          [](const ncclConfig_t& self) { return self.commName; },
+          [](ncclConfig_t& self, const char* tmp) {
+            self.commName = strdup(tmp);
+          })
 #endif
       .def(
           "unsafe_get_ptr",

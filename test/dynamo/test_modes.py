@@ -131,12 +131,34 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
 
         x = torch.tensor([3.0])
+        compiled_fn = torch.compile(fn, backend=cnt)
         with RewriteAddToMul():
             eager_res = fn(x)
-            compiled_res = torch.compile(fn, backend=cnt)(x)
+            compiled_res = compiled_fn(x)
 
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
+
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_flop_counter_mode_compile_skip_is_transient(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def fn(x, y):
+            return (x @ y).sin()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with FlopCounterMode(display=False):
+            compiled_fn = torch.compile(fn, backend=cnt)
+            self.assertEqual(compiled_fn(x, y), fn(x, y))
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(compiled_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_get_current_dispatch_mode_stack_no_graph_break(self):
         from torch.utils._python_dispatch import _get_current_dispatch_mode_stack

@@ -1016,16 +1016,26 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        # match full()'s fill_value cast
+        fill_value = int(bool(fill_value) if is_boolean_dtype(dtype) else fill_value)
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
+    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
+    # pyrefly: ignore[bad-argument-type]
+    integral_out = bool_out or is_integer_dtype(out_dtype)
+    if integral_out:
+        fill_value = int(bool(fill_value) if bool_out else fill_value)
+    acc_dtype = torch.int64 if integral_out else torch.float64
+
     def repl(*shape):
         dim_size = shape[dim]
-        idx = torch.arange(1, dim_size + 1, device=device, dtype=dtype)
+        idx = torch.arange(1, dim_size + 1, device=device, dtype=acc_dtype)
 
         inter_shape = [1] * len(shape)
         inter_shape[dim] = dim_size
-        return (idx * fill_value).view(inter_shape).expand(shape)
+        return (idx * fill_value).view(inter_shape).expand(shape).to(out_dtype)
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
@@ -1991,62 +2001,6 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
-
-
-def _is_addcdiv_fma_eligible(match: Match) -> bool:
-    """Guards for the addcdiv FMA re-fusion pass."""
-    # aten.addcdiv requires floating-point self; check inp, not output, because
-    # aten.div promotes integers to float so the output is float even for int inp.
-    inp_val = match.kwargs["inp"].meta.get("val")
-    if not (isinstance(inp_val, torch.Tensor) and inp_val.dtype.is_floating_point):
-        return False
-    # tl.fma / div_rn are Triton GPU-only
-    out_val = match.output_node().meta.get("val")
-    if not (
-        isinstance(out_val, torch.Tensor) and out_val.device.type in ("cuda", "xpu")
-    ):
-        return False
-    # aten.addcdiv requires all tensor args to be floating-point; integer
-    # constants and SymInts can appear as t1/t2 in decomposed graphs.
-    for key in ("t1", "t2"):
-        node = match.kwargs.get(key)
-        val = node.meta.get("val") if isinstance(node, torch.fx.Node) else node
-        if not (isinstance(val, torch.Tensor) and val.dtype.is_floating_point):
-            return False
-    # aten.addcdiv requires a scalar value, not a tensor
-    return not isinstance(match.kwargs.get("value"), torch.fx.Node)
-
-
-@register_graph_pattern(
-    CallFunction(
-        aten.add.Tensor,
-        KeywordArg("inp"),
-        CallFunction(
-            aten.mul.Tensor,
-            CallFunction(aten.div.Tensor, KeywordArg("t1"), KeywordArg("t2")),
-            KeywordArg("value"),
-        ),
-    ),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[2],
-    extra_check=_is_addcdiv_fma_eligible,
-)
-def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
-    """Re-fuse ``inp + (t1/t2)*value`` back into ``aten.addcdiv``.
-
-    torch.addcdiv is CompositeImplicitAutograd: it decomposes into
-    aten.div + aten.mul + aten.add before Inductor sees the graph, making the
-    FMA-aware lowering in lowering.py unreachable.  Re-inserting a single
-    aten.addcdiv node lets that lowering fire (tl.fma + triton.language.div_rn).
-    """
-
-    def repl(
-        inp: torch.Tensor, t1: torch.Tensor, t2: torch.Tensor, value
-    ) -> torch.Tensor:
-        return torch.ops.aten.addcdiv(inp, t1, t2, value=value)
-
-    counters["inductor"]["addcdiv_fma_fused"] += 1
-    match.replace_by_example(repl, [inp, t1, t2, value])
 
 
 def register_partial_reduction_pattern():

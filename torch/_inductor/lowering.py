@@ -757,12 +757,13 @@ def make_pointwise(
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                # Use FMA for add-with-alpha on Triton GPU floating-point.
-                # Eager CUDA/ROCm computes a + alpha * b as fma(b, alpha, a).
+                # Use FMA for add-with-alpha on CUDA floating-point.
+                # Eager CUDA computes a + alpha * b as fma(b, alpha, a).
                 if use_fma_for_alpha and isinstance(inputs[0], IRNode):
                     inp_device = inputs[0].get_device()
                     if (
                         inputs[0].get_dtype().is_floating_point
+                        and not torch.version.hip
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
@@ -980,6 +981,40 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+_FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
+    torch.float32,
+    torch.float64,
+    torch.float16,
+    torch.bfloat16,
+)
+
+
+def _float8_e8m0fnu_to_dtype(x: TensorBox, dtype: torch.dtype) -> TensorBox:
+    x_u8 = to_dtype_bitcast(x, torch.uint8)
+
+    def _to_float(value):
+        # E8M0's exponent bits map directly to FP32; only encodings 0 and 255
+        # need special handling for 2^-127 and NaN, respectively.
+        value_i32 = ops.to_dtype(value, torch.int32)
+        f32_bits = ops.bitwise_left_shift(value_i32, ops.constant(23, torch.int32))
+        f32_bits = ops.where(
+            ops.eq(value, ops.constant(0, torch.uint8)),
+            ops.constant(0x00400000, torch.int32),
+            f32_bits,
+        )
+        f32_bits = ops.where(
+            ops.eq(value, ops.constant(255, torch.uint8)),
+            ops.constant(0x7F800001, torch.int32),
+            f32_bits,
+        )
+        dequant = ops.to_dtype_bitcast(f32_bits, torch.float32, src_dtype=torch.int32)
+        if dtype != torch.float32:
+            return ops.to_dtype(dequant, dtype)
+        return dequant
+
+    return make_pointwise(_to_float, override_return_dtype=dtype)(x_u8)
+
+
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
 def _foreach_map(subgraph, *args, **kwargs):
     """
@@ -1041,6 +1076,9 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
                 prims.convert_element_type.default, add_to_fallback_set=False
             )(x, dtype)
     src_dtype = x.get_dtype()
+    if src_dtype == torch.float8_e8m0fnu and dtype in _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES:
+        return _float8_e8m0fnu_to_dtype(x, dtype)
+
     low_pr_fp = (torch.bfloat16, torch.float16)
     # In precision-emulation mode, explicit lowp casts must materialize the
     # storage dtype. Later pointwise barriers will widen from that rounded value.
@@ -1497,8 +1535,11 @@ def repeat(x, repeats):
 @register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
-def view(x: TensorBox, sizes: Sequence[sympy.Expr]) -> TensorBox:
-    return TensorBox(View.create(x.data, sizes))
+def view(x: ir.IRNode, sizes: Sequence[sympy.Expr]) -> TensorBox:
+    # post-mm_args operands are raw ReinterpretView/StorageBox nodes, and taking
+    # .data on those would drop the view itself
+    data = x.data if isinstance(x, TensorBox) else x
+    return TensorBox(View.create(data, sizes))
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)
@@ -2757,20 +2798,24 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         if not node:
             return True
 
-        # allow bitcast, views, memory movement, but not arithmetic
+        # Allow bitcasts, views, memory movement, and supported conversions,
+        # but not arithmetic.
         # TODO: delete once triton adds native support
-        return not (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target
-            in (
-                aten.view.dtype,
-                aten.cat.default,
-                aten.clone.default,
-                aten._scaled_mm.default,
-                aten._scaled_mm_v2.default,
+        if not isinstance(node.target, torch._ops.OpOverload):
+            return True
+        if node.target in (
+            aten.view.dtype,
+            aten.cat.default,
+            aten.clone.default,
+            aten._scaled_mm.default,
+            aten._scaled_mm_v2.default,
+        ) or is_view(node.target):
+            return False
+        if node.target == torch.ops.prims.convert_element_type.default:
+            return not (
+                len(node.args) >= 2 and node.args[1] in _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES
             )
-            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
-        )
+        return True
 
     return False
 
@@ -6232,9 +6277,6 @@ fallback_adaptive_avg_pool2d = fallback_handler(
 
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
-    if x.get_dtype() == torch.int64:
-        # not supported in eager
-        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
     if not (isinstance(x, TensorBox)):
         raise AssertionError("expected: isinstance(x, TensorBox)")
     if len(output_size) != 2:
@@ -6248,13 +6290,18 @@ def _adaptive_avg_pool2d(x, output_size):
 
     h_out, w_out = output_size
 
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
+
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
+
     # no-op if the same input and output
     if h_in == h_out and w_in == w_out:
         return clone(x)
 
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [FloorDiv(h_in, h_out), FloorDiv(w_in, w_out)]
         return avg_pool2d(x, kernel_size)
@@ -7652,9 +7699,13 @@ def _div_rn(a, b):
 
 
 def _floor_div_floating(a, b):
-    nan = constant_like(float("nan"))(a)
-    neg_one = constant_like(-1.0)(a)
-    zero = constant_like(0.0)(a)
+    # Either operand may be a python scalar (e.g. torch.floor_divide(scalar,
+    # tensor)); constant_like needs a tensor for dtype/device/size, so seed the
+    # constants from whichever operand is a tensor.
+    ref = a if isinstance(a, (TensorBox, IRNode)) else b
+    nan = constant_like(float("nan"))(ref)
+    neg_one = constant_like(-1.0)(ref)
+    zero = constant_like(0.0)(ref)
 
     def fn(a, b, nan, neg_one, zero):
         quotient = ops.div_rn(a, b)
@@ -8327,14 +8378,13 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
     This is computed as: fma(value, tensor1 * tensor2, self)
 
-    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma). For
-    integer types we fall back to regular arithmetic since FMA doesn't support integers.
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
+    we fall back to regular arithmetic since FMA doesn't support integers.
 
     For floating-point types, we use mul_rn (round-to-nearest multiplication)
     to force rounding of the product before the FMA. This prevents Triton's
     compiler from fusing the multiplication with the FMA, matching eager's
-    rounding behavior. On ROCm, mul_rn falls back to regular multiplication since
-    libdevice.mul_rn is not available; the FMA itself (tl.fma) is still used.
+    rounding behavior.
     """
     dtype = get_promoted_dtype(
         self,
@@ -8347,6 +8397,7 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
@@ -8403,13 +8454,11 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
     For value=1: self + tensor1 / tensor2 (no FMA needed, just add the division)
     For value!=1: fma(value, div_rn(tensor1, tensor2), self)
 
-    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma). For
-    integer types we fall back to regular arithmetic since FMA doesn't support integers.
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
+    we fall back to regular arithmetic since FMA doesn't support integers.
 
     We use div_rn (round-to-nearest division) to force proper rounding, preventing
     Triton from fusing operations in ways that change the rounding behavior.
-    div_rn emits triton.language.div_rn on both CUDA and ROCm (unlike mul_rn, which
-    falls back to regular multiplication on ROCm where libdevice.mul_rn is unavailable).
     """
     dtype = get_promoted_dtype(
         self,
@@ -8422,9 +8471,11 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
+        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
@@ -8434,12 +8485,15 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
+        # Compute tensor1 / tensor2 first
+        # Use div_rn for round-to-nearest division on CUDA to match eager behavior
         if use_fma:
             t1_div_t2 = ops.div_rn(t1_val, t2_val)
         else:
             t1_div_t2 = ops.truediv(t1_val, t2_val)
 
         if value == 1:
+            # For value=1, just add the division result (no FMA needed)
             return ops.add(self_val, t1_div_t2)
 
         # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
@@ -8449,8 +8503,10 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
             value_expr = ops.constant(value, dtype)
 
         if use_fma:
+            # Use FMA for floating-point types for better precision
             return ops.fma(value_expr, t1_div_t2, self_val)
         else:
+            # Fall back to regular arithmetic for integer types
             return ops.add(self_val, ops.mul(value_expr, t1_div_t2))
 
     return Pointwise.create(
@@ -9000,7 +9056,22 @@ def cond(
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    # The branches are reordered to [false_fn, true_fn]
+    # because during codegen the pred is converted to an integer with True -> 1 and False -> 0.
+    # When iterating over the branches the false_fn is associated index 0.
+    result = ir.Switch.create(pred, [false_fn, true_fn], operands, is_cond=True)
+    return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
+
+
+@register_lowering(torch.ops.higher_order.switch, type_promotion_kind=None)
+def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
+    # TODO: cudagraph support for torch.switch is not yet implemented; always disable.
+    msg = "control flow operator: torch.switch."
+    if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+        msg = f"{msg} Found from : \n {stack_trace}"
+    V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.Switch.create(index, branches, operands)
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
@@ -9333,15 +9404,6 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
-    # An effectful op may retain its tensor inputs in state that inductor cannot
-    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
-    # must outlive the op and must never be reused for another buffer.
-    if effect_type:
-        for arg in pytree.tree_leaves((args, kwargs)):
-            if isinstance(arg, TensorBox):
-                arg.realize()
-                V.graph.never_reuse_buffers.add(arg.get_name())
-
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9371,9 +9433,7 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = (
-                    new_op.get_operation_name()
-                )  # pyrefly: ignore[missing-attribute]
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
