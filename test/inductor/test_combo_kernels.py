@@ -306,6 +306,90 @@ class ComboKernelPartitionLoggingTests(TestCase):
         self.assertEqual(len(large_pointwise_logs), 2)
 
 
+class ComboKernelDataIndependentCSETests(TestCase):
+    def test_cse_scope(self):
+        from torch._inductor.fx_passes.post_grad import (
+            _annotate_data_independent_cse_tokens,
+        )
+        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            lhs = torch.sin(x)
+            rhs = torch.sin(x)
+            first = torch.full((4,), 1.0)
+            second = torch.full((4,), 1.0)
+            return lhs + rhs + first + second
+
+        gm = make_fx(fn)(torch.randn(4))
+        _annotate_data_independent_cse_tokens(gm)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(targets.count(torch.ops.aten.sin.default), 2)
+        self.assertEqual(targets.count(torch.ops.aten.full.default), 2)
+        sin_groups = [
+            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.sin.default
+        ]
+        full_groups = [
+            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.full.default
+        ]
+        self.assertEqual(sin_groups, [None, None])
+        self.assertEqual(len(set(full_groups)), 1)
+        self.assertIsNotNone(full_groups[0])
+
+    def test_cse_symbolic_shape_dependencies(self):
+        from torch._inductor.fx_passes.post_grad import (
+            _annotate_data_independent_cse_tokens,
+        )
+        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            size = x.shape[0]
+            first = torch.arange(size)
+            second = torch.arange(size)
+            return x + first + second
+
+        gm = make_fx(fn, tracing_mode="symbolic")(torch.randn(4))
+        _annotate_data_independent_cse_tokens(gm)
+        groups = [
+            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.arange.default
+        ]
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(len(set(groups)), 1)
+        self.assertIsNotNone(groups[0])
+
+    def test_cse_preserves_distinct_mutation_bases(self):
+        from torch._inductor.fx_passes.post_grad import (
+            _annotate_data_independent_cse_tokens,
+        )
+        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
+
+        graph = torch.fx.Graph()
+        bases = [
+            graph.call_function(torch.ops.aten.zeros.default, ((4,),)) for _ in range(2)
+        ]
+        mutations = [
+            graph.call_function(
+                torch.ops.aten.add_.Tensor,
+                (base, 1),
+            )
+            for base in bases
+        ]
+        graph.output(tuple(mutations))
+        gm = torch.fx.GraphModule({}, graph)
+
+        _annotate_data_independent_cse_tokens(gm)
+
+        tokens = [base.meta.get(DATA_INDEPENDENT_CSE_TOKEN) for base in bases]
+        self.assertEqual(tokens, [None, None])
+
+
 @instantiate_parametrized_tests
 class ComboKernelTests(TestCase):
     check_model_gpu = check_model_gpu
@@ -354,6 +438,158 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @parametrize("identical", [False, True])
+    def test_data_independent_mask_cse_combo(self, identical):
+        import torch.nn.functional as F
+
+        def make_mask(size, dtype, other):
+            idx = torch.arange(size, device=GPU_TYPE)
+            causal = idx[:, None] >= idx[None, :]
+            return torch.where(causal, 0.0, other).to(dtype)
+
+        def fn(q, k, v):
+            size = q.shape[-2]
+            m1 = make_mask(size, q.dtype, float("-inf"))
+            o1 = F.scaled_dot_product_attention(q, k, v, attn_mask=m1)
+            m2 = make_mask(size, q.dtype, float("-inf") if identical else -1e4)
+            o2 = F.scaled_dot_product_attention(q, k, v, attn_mask=m2)
+            return o1 + o2
+
+        inps = [
+            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        out_eager = fn(*inps)
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+
+        self.assertEqual(out_eager, out)
+        source = "\n".join(code)
+        if identical:
+            self.assertNotIn("'num_kernels': 2", source)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        else:
+            self.assertIn("'num_kernels': 2", source)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch("cse", False)
+    def test_data_independent_cse_same_consumer_can_combo(self):
+        def make_matrix(size, dtype):
+            idx = torch.arange(size, device=GPU_TYPE)
+            return (idx[:, None] >= idx[None, :]).to(dtype)
+
+        def fn(x):
+            size = x.shape[0]
+            lhs = make_matrix(size, x.dtype)
+            rhs = make_matrix(size, x.dtype)
+            return torch.mm(lhs, rhs)
+
+        inp = torch.randn(128, device=GPU_TYPE, dtype=torch.float16)
+        out, code = run_and_get_code(torch.compile(fn), inp)
+
+        self.assertEqual(out, fn(inp))
+        self.assertIn("'num_kernels': 2", "\n".join(code))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch("cse", False)
+    @parametrize("memory_gate", [False, True])
+    @parametrize("second_consumer_copies", [1, 2])
+    def test_data_independent_cse_mixed_consumers(
+        self, memory_gate, second_consumer_copies
+    ):
+        import torch.nn.functional as F
+        from torch._inductor import ir
+        from torch._inductor.scheduler import Scheduler
+
+        def make_mask(size, dtype):
+            idx = torch.arange(size, device=GPU_TYPE)
+            causal = idx[:, None] >= idx[None, :]
+            return torch.where(causal, 0.0, -1.0).to(dtype)
+
+        def fn(q, k, v):
+            size = q.shape[-2]
+            lhs = make_mask(size, q.dtype)
+            rhs = make_mask(size, q.dtype)
+            mm = torch.mm(lhs, rhs)
+            if second_consumer_copies == 1:
+                other = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=make_mask(size, q.dtype)
+                )
+            else:
+                other = torch.mm(make_mask(size, q.dtype), make_mask(size, q.dtype))
+            return mm, other
+
+        inps = [
+            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        expected = fn(*inps)
+        observed_partitions = set()
+        cross_consumer_partitions = []
+        speedup_by_combo_kernel = Scheduler.speedup_by_combo_kernel
+
+        def cse_signature(node):
+            if node.read_writes.reads:
+                return None
+            output_signatures = []
+            for output in node.get_outputs():
+                signature = output.node.annotations.get(
+                    ir.DATA_INDEPENDENT_CSE_SIGNATURE
+                )
+                if not isinstance(signature, tuple):
+                    return None
+                output_signatures.append(
+                    (
+                        output.node.get_device(),
+                        output.node.get_dtype(),
+                        tuple(output.node.get_size()),
+                        signature,
+                    )
+                )
+            return tuple(output_signatures)
+
+        def capture_candidates(scheduler, nodes):
+            signature_groups = {}
+            for node in nodes:
+                if (signature := cse_signature(node)) is not None:
+                    signature_groups.setdefault(signature, []).append(node)
+            for equivalent_nodes in signature_groups.values():
+                if len(equivalent_nodes) < 2:
+                    continue
+                partition = frozenset(equivalent_nodes)
+                consumer_sets = {
+                    scheduler._combo_canonical_consumers(node)
+                    for node in equivalent_nodes
+                }
+                observed_partitions.add(partition)
+                if len(consumer_sets) > 1:
+                    cross_consumer_partitions.append(partition)
+            return speedup_by_combo_kernel(scheduler, nodes)
+
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "combo_kernel_peak_memory_pct_threshold": (
+                        0.05 if memory_gate else None
+                    )
+                }
+            ),
+            patch.object(Scheduler, "speedup_by_combo_kernel", capture_candidates),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), *inps)
+
+        self.assertEqual(out, expected)
+        self.assertEqual(cross_consumer_partitions, [])
+        self.assertEqual(
+            sorted(len(partition) for partition in observed_partitions),
+            [2] * second_consumer_copies,
+        )
+        self.assertIn("'num_kernels': 2", "\n".join(code))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu_and_triton
     def test_reduce_functions(self):
@@ -2288,6 +2524,7 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         FileCheck().check("'num_kernels': 3").run(code[0])
 
 
+
 @instantiate_parametrized_tests
 class ComboKernelPDLTests(TestCase):
     """Tests for PDL (Programmatic Dependent Launch) support in combo kernels."""
@@ -3312,6 +3549,29 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         combo, combo_step = run(self._thresholds(abs_thr_gb=1.0))
         self.assertIsNotNone(combo)
         self.assertEqual(combo_step, 0)
+
+    def test_cse_consumers_use_fused_nodes(self):
+        from torch._inductor.scheduler import NodeUser, Scheduler
+
+        producer1 = _PeakMemFakeNode("producer1")
+        producer2 = _PeakMemFakeNode("producer2")
+        consumer1 = _PeakMemFakeNode("consumer1")
+        consumer2 = _PeakMemFakeNode("consumer2")
+        fused_consumer = _PeakMemFakeNode("fused_consumer")
+        producer1._outputs = [SimpleNamespace(users=[NodeUser(consumer1)])]
+        producer2._outputs = [SimpleNamespace(users=[NodeUser(consumer2)])]
+        scheduler = _PeakMemFakeScheduler(
+            [producer1, producer2, fused_consumer],
+            {
+                consumer1.get_name(): fused_consumer,
+                consumer2.get_name(): fused_consumer,
+            },
+        )
+
+        self.assertEqual(
+            Scheduler._combo_canonical_consumers(scheduler, producer1),
+            Scheduler._combo_canonical_consumers(scheduler, producer2),
+        )
 
     def test_region_carry_in_uses_post_free_boundary(self):
         a = _PeakMemFakeNode("a")

@@ -6163,6 +6163,16 @@ class Scheduler:
         "Look up the node in Scheduler name_to_fused_node"
         return self.name_to_fused_node[node.get_first_name()]
 
+    def _combo_canonical_consumers(
+        self, node: BaseSchedulerNode
+    ) -> frozenset[BaseSchedulerNode]:
+        return frozenset(
+            self.name_to_fused_node[user.node.get_first_name()]
+            for output in node.get_outputs()
+            for user in output.users
+            if not user.is_weak and isinstance(user.node, BaseSchedulerNode)
+        )
+
     def fuse_two_nodes(
         self,
         node1: BaseSchedulerNode,
@@ -6547,6 +6557,74 @@ class Scheduler:
         else:
             node_to_idx = {n: i for i, n in enumerate(self.nodes)}
 
+        def cse_signature(node: BaseSchedulerNode) -> tuple[Any, ...] | None:
+            if node.read_writes.reads:
+                return None
+            output_signatures = []
+            for output in node.get_outputs():
+                signature = output.node.annotations.get(
+                    ir.DATA_INDEPENDENT_CSE_SIGNATURE
+                )
+                if not isinstance(signature, tuple):
+                    return None
+                output_signatures.append(
+                    (
+                        output.node.get_device(),
+                        output.node.get_dtype(),
+                        tuple(output.node.get_size()),
+                        signature,
+                    )
+                )
+            return tuple(output_signatures)
+
+        def _partition_cse_equivalent_nodes(
+            window: list[BaseSchedulerNode],
+        ) -> list[list[BaseSchedulerNode]]:
+            node_cse_signatures = {node: cse_signature(node) for node in window}
+            signature_groups: dict[tuple[Any, ...], list[BaseSchedulerNode]] = (
+                defaultdict(list)
+            )
+            for node in window:
+                if (signature := node_cse_signatures.get(node)) is not None:
+                    signature_groups[signature].append(node)
+
+            consumer_sets: dict[BaseSchedulerNode, frozenset[BaseSchedulerNode]] = {}
+            protected_signatures = OrderedSet()
+            for signature, nodes in signature_groups.items():
+                if len(nodes) < 2:
+                    continue
+                for node in nodes:
+                    consumer_sets[node] = self._combo_canonical_consumers(node)
+                if len(OrderedSet(consumer_sets[node] for node in nodes)) > 1:
+                    protected_signatures.add(signature)
+
+            kept: list[BaseSchedulerNode] = []
+            consumer_groups: dict[
+                tuple[tuple[Any, ...], frozenset[BaseSchedulerNode]],
+                list[BaseSchedulerNode],
+            ] = defaultdict(list)
+            for node in window:
+                signature = node_cse_signatures.get(node)
+                if signature is not None and signature in protected_signatures:
+                    consumer_groups[(signature, consumer_sets[node])].append(node)
+                    continue
+                kept.append(node)
+
+            candidates = [kept]
+            for nodes in consumer_groups.values():
+                if len(nodes) > 1:
+                    candidates.append(nodes)
+                else:
+                    fusion_log.debug(
+                        "ComboKernels: excluding per-consumer CSE copy %s",
+                        nodes[0].get_name(),
+                    )
+            position = {node: idx for idx, node in enumerate(window)}
+            return sorted(
+                (candidate for candidate in candidates if len(candidate) > 1),
+                key=lambda candidate: position[candidate[0]],
+            )
+
         def _register_accept(
             combo_node: ForeachKernelSchedulerNode,
             accepted: list[BaseSchedulerNode],
@@ -6595,29 +6673,32 @@ class Scheduler:
             ):
                 if num_ck_nodes is not None and count > num_ck_nodes:
                     break
-                if len(window) < 2 or not self.speedup_by_combo_kernel(window):
-                    continue
-                if memory_check:
-                    if mem_ctx is None:
-                        raise AssertionError("expected mem_ctx to be set")
-                    sim_start = time.perf_counter()
-                    self._try_combo_with_halving(
-                        window,
-                        num,
-                        mem_ctx,
-                        enable_autotune=enable_autotune,
-                        on_accept=_register_accept,
-                    )
-                    memory_sim_time += time.perf_counter() - sim_start
-                else:
-                    combo_node = ForeachKernelSchedulerNode(
-                        window[0].scheduler,
-                        window,
-                        use_custom_partition_algo=True,
-                        enable_autotune=enable_autotune,
-                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
-                    )
-                    _register_accept(combo_node, window, num)
+                for candidate in _partition_cse_equivalent_nodes(window):
+                    if num_ck_nodes is not None and count > num_ck_nodes:
+                        break
+                    if not self.speedup_by_combo_kernel(candidate):
+                        continue
+                    if memory_check:
+                        if mem_ctx is None:
+                            raise AssertionError("expected mem_ctx to be set")
+                        sim_start = time.perf_counter()
+                        self._try_combo_with_halving(
+                            candidate,
+                            num,
+                            mem_ctx,
+                            enable_autotune=enable_autotune,
+                            on_accept=_register_accept,
+                        )
+                        memory_sim_time += time.perf_counter() - sim_start
+                    else:
+                        combo_node = ForeachKernelSchedulerNode(
+                            candidate[0].scheduler,
+                            candidate,
+                            use_custom_partition_algo=True,
+                            enable_autotune=enable_autotune,
+                            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+                        )
+                        _register_accept(combo_node, candidate, num)
 
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)

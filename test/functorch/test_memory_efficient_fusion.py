@@ -10,7 +10,7 @@ import torch.fx as fx
 import torch.nn as nn
 from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
-from torch._functorch.compile_utils import fx_graph_cse
+from torch._functorch.compile_utils import fx_graph_cse, fx_graph_cse_replacements
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -311,6 +311,29 @@ class NoChangeTestCase(TestCase):
 
 
 class ReduceTestCase(TestCase):
+    def test_replacements_preserve_graph(self):
+        def fn(x):
+            first = torch.cos(x)
+            second = torch.cos(x)
+            return first + second
+
+        gm = make_fx(fn)(torch.randn(2))
+        nodes_before = tuple(gm.graph.nodes)
+        cos_nodes = [
+            node for node in gm.graph.nodes if node.target == torch.ops.aten.cos.default
+        ]
+
+        replacements = fx_graph_cse_replacements(gm.graph)
+
+        self.assertEqual(tuple(gm.graph.nodes), nodes_before)
+        self.assertIs(replacements[cos_nodes[1]], cos_nodes[0])
+        self.assertEqual(
+            fx_graph_cse_replacements(
+                gm.graph, node_filter=lambda node: node is not cos_nodes[0]
+            ),
+            {},
+        )
+
     def test_immutable_list_type(self):
         def f(x):
             a = x.sum(dim=1)
