@@ -138,7 +138,6 @@ namespace c10::xpu {
   /* the maximum bus width between device and memory in bits. */              \
   _(memory_bus_width, memory_bus_width, 0)
 
-
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
   /* sycl::half is supported on device. */              \
   _(fp16)                                               \
