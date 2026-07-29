@@ -391,7 +391,7 @@ class _PTRRLoadBalancer(_LoadBalancer):
             (i.e. `self.block_mask` must have shape (B, 1, seq_len, seq_len) or (1, 1, seq_len, seq_len)).
 
         Example:
-            Here is the document causal mask for attention whereq_len == kv_len == 16 * BLOCK_SIZE
+            Here is the document causal mask for attention where q_len == kv_len == 16 * BLOCK_SIZE
             (each entry is a block):
                                         KV_index
                     [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 1
