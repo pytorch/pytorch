@@ -1222,7 +1222,6 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
         ),
     )
     dummy_out_leaves, dummy_out_spec = pytree.tree_flatten(dummy_out)
-    num_leaves = len(dummy_out_leaves)
 
     for ind in op(range(inp_leaves[0].size(dim))):
         xs = [elem.select(dim, ind) for elem in inp_leaves]
