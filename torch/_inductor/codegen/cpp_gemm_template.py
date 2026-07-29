@@ -1601,6 +1601,12 @@ class CppGemmTemplate(CppTemplate):
                 layout=template_buffer.layout,
             )
             current_input_buffer = gemm_output_buffer
+            # The in-template epilogues are created over the ranges of the GEMM output
+            # buffer, whose rank may be higher than the 2D tiles the template stores into
+            # (e.g. for the BMM template the GEMM output buffer keeps a leading batch dim).
+            # Ask the template for the reindexers that map the 2D template indices onto the
+            # ranges of these epilogues.
+            creator_reindexers = self.get_default_reindexers(epilogue_creators)
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
                     buffer_name = template_buffer.get_name()
@@ -1616,7 +1622,7 @@ class CppGemmTemplate(CppTemplate):
                 )
                 fake_buffers.append(current_input_buffer)
                 Y_aliases.add(current_input_buffer.get_name())
-                reindexers.append(None)
+                reindexers.append(creator_reindexers[i])
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
                         name=buffer_name,
