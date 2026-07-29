@@ -720,6 +720,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # different "bar"
         check_with_meta({"foo": 5, "bar": "world"}, False)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_transparent_subclass_tensor_match(self):
         # AsyncCollectiveTensor is a transparent traceable wrapper subclass: its
         # __torch_dispatch__ desugars ops to the inner tensor, so
