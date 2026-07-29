@@ -445,7 +445,7 @@ class FlexGemmLocalReduceAnalysis:
                 return
         elif isinstance(form, FlexGemmUnsupportedReductionForm):
             if form.source in self.grouped_layouts:
-                raise local_reduce_unsupported_tensorssa_error(str(node.target))
+                raise local_reduce_unsupported_tensorssa_error(form.target)
         elif isinstance(form, (FlexGemmSqueezeForm, FlexGemmGetItemForm)):
             if self.propagate_local_reduce_match(node, form.source):
                 return
@@ -1619,9 +1619,7 @@ class FlexGemmEpilogueEmitter:
             )
             return
         elif isinstance(form, FlexGemmUnsupportedReductionForm):
-            raise local_reduce_unsupported_tensorssa_error(
-                str(node.target), value_only=True
-            )
+            raise local_reduce_unsupported_tensorssa_error(form.target, value_only=True)
         is_shape_preserving = is_shape_preserving_pointwise_node(node)
         if is_shape_preserving and self.feed_main is None:
             if self.aux is None and any(
@@ -1669,6 +1667,7 @@ class FlexGemmEpilogueEmitter:
 
     def render(self) -> tuple[str, str]:
         """Render the generated epilogue and physical callback source."""
+        from torch._inductor.codegen.cutedsl.inline_asm import inline_asm_cache_key
         from torch._inductor.kernel.flex_gemm.quant_intrinsics import (
             quant_intrinsics_cache_key,
         )
@@ -1709,6 +1708,7 @@ class FlexGemmEpilogueEmitter:
         )
         key_payload = (
             f"quant_intrinsics={quant_intrinsics_cache_key()}\n"
+            f"inline_asm={inline_asm_cache_key()}\n"
             f"fast_math={self.fast_math}\n{self.graph_module.code}\n"
             f"{body}\nreturn {result}{physical_reduction_payload}"
         )
@@ -1733,6 +1733,9 @@ class FlexGemmEpilogueEmitter:
             "import operator\n"
             "from cutlass._mlir.dialects import math as mlir_math\n"
             "from cutlass._mlir_helpers import math as cutlass_math\n"
+            "from torch._inductor.codegen.cutedsl.inline_asm import (\n"
+            "    inline_asm_elementwise_intrinsic,\n"
+            ")\n"
             "from torch._inductor.kernel.flex_gemm.quant_intrinsics import (\n"
             "    mx_e8m0_scale_intrinsic,\n"
             "    nvfp4_pack_intrinsic,\n"
