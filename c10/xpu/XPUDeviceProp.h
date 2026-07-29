@@ -197,10 +197,8 @@ struct C10_XPU_API DeviceProp{
     // ext properties.
     AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
 
-#if SYCL_COMPILER_VERSION >= 20260000
     // device aspects.
     DEFINE_DEVICE_ASPECT(is_integrated_gpu)
-#endif
 
     // device has aspects.
     AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_HAS_ASPECT)
