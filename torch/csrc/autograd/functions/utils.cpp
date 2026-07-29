@@ -40,6 +40,7 @@ variable_list wrap_outputs(
         result.emplace_back();
       }
     }
+    fire_node_creation_hooks(grad_fn);
   }
   return result;
 }
