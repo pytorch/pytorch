@@ -6633,6 +6633,12 @@
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
+- func: _philox_normal_shards_(Tensor(a!) self, SymInt[] global_shape, SymInt[] global_offsets, SymInt[] local_offsets, SymInt[] local_sizes, int chunk_count, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
+  tags: nondeterministic_seeded
+  dispatch:
+    CUDA: _philox_normal_shards_symint
+  autogen: _philox_normal_shards, _philox_normal_shards.out
+
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
     CPU: _dirichlet_grad_cpu
