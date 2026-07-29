@@ -14,12 +14,12 @@ import torch
 from torch._logging import LazyString, trace_structured
 
 from .epilogue_nodes import (
-    FlexGemmNormalizedGetItem,
-    FlexGemmNormalizedPrepareSoftmax,
-    FlexGemmNormalizedReduction,
-    FlexGemmNormalizedSqueeze,
-    FlexGemmNormalizedUnsupportedReduction,
-    FlexGemmNormalizedView,
+    NormalizedGetItem,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSqueeze,
+    NormalizedUnsupportedReduction,
+    NormalizedView,
 )
 
 
@@ -155,21 +155,21 @@ def _format_geometry(geometry: Any) -> str:
 def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
     """Render one normalized FX operation as compact dataflow."""
     match normalized:
-        case FlexGemmNormalizedView(shape=shape):
+        case NormalizedView(shape=shape):
             operation = f"view(shape={shape})"
-        case FlexGemmNormalizedReduction(
+        case NormalizedReduction(
             dim=dim,
             keepdim=keepdim,
             reduction_type=reduction_type,
         ):
             operation = f"{reduction_type}(dim={dim}, keepdim={keepdim})"
-        case FlexGemmNormalizedPrepareSoftmax(dim=dim):
+        case NormalizedPrepareSoftmax(dim=dim):
             operation = f"prepare_softmax(dim={dim})"
-        case FlexGemmNormalizedSqueeze():
+        case NormalizedSqueeze():
             operation = "squeeze"
-        case FlexGemmNormalizedGetItem(index=index):
+        case NormalizedGetItem(index=index):
             operation = f"getitem(index={index})"
-        case FlexGemmNormalizedUnsupportedReduction():
+        case NormalizedUnsupportedReduction():
             operation = f"unsupported_reduction({node.target})"
         case _:
             return repr(normalized)
