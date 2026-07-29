@@ -1,5 +1,6 @@
 if(USE_CUDA)
   add_library(c10d_cuda_test CUDATest.cu)
+  torch_cuda_suppress_if_clang(c10d_cuda_test deprecated-literal-operator)
   target_include_directories(c10d_cuda_test PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   target_link_libraries(c10d_cuda_test torch_cuda)
   add_dependencies(c10d_cuda_test torch_cuda)
