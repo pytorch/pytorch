@@ -2462,22 +2462,8 @@ Arguments:
 
               See :func:`torch.distributed.gather` for more details.)")
           .def(
-              "gather_single",
-              &::c10d::ProcessGroup::gather_single,
-              py::arg("output"),
-              py::arg("input"),
-              py::arg("opts") = ::c10d::GatherOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Gathers the input tensor from all processes into a single
-              output tensor on the root rank.
-
-              See :func:`torch.distributed.gather_single` for more details.)")
-          // Deprecated alias of gather_single, kept for backward
-          // compatibility. Bound to gather_single to avoid referencing the
-          // deprecated C++ method.
-          .def(
               "gather_into_tensor",
-              &::c10d::ProcessGroup::gather_single,
+              &::c10d::ProcessGroup::gather_into_tensor,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -2485,7 +2471,7 @@ Arguments:
               R"(Gathers the input tensor from all processes into a single
               output tensor on the root rank.
 
-              See :func:`torch.distributed.gather_single` for more details.)")
+              See :func:`torch.distributed.gather_into_tensor` for more details.)")
           .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
@@ -3241,18 +3227,8 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "gather_single",
-              &::c10d::Backend::gather_single,
-              py::arg("output"),
-              py::arg("input"),
-              py::arg("opts") = ::c10d::GatherOptions(),
-              py::call_guard<py::gil_scoped_release>())
-          // Deprecated alias of gather_single, kept for backward
-          // compatibility. Bound to gather_single to avoid referencing the
-          // deprecated C++ method.
-          .def(
               "gather_into_tensor",
-              &::c10d::Backend::gather_single,
+              &::c10d::Backend::gather_into_tensor,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
