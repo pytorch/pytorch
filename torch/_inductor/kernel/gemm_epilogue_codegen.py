@@ -53,6 +53,7 @@ class GemmEpilogueCuteDSLKernel:
 class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
     """Normalize ATen spellings before emitting CuTeDSL expressions."""
 
+    # Aten add/sub carry alpha as schema sugar; CuTeDSL only needs the scaled RHS.
     @staticmethod
     def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:
         rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
