@@ -16,12 +16,7 @@ def has_meta_ws() -> bool:
 
 
 def meta_ws_enabled() -> bool:
-    """Whether Meta Triton autoWS is available and enabled via its knob.
-
-    Reads the live ``knobs.nvidia.use_meta_ws`` value (backed by
-    TRITON_USE_META_WS) rather than the env var directly, so it honors the knob
-    set programmatically or within a ``knobs.nvidia.scope()``.
-    """
+    """Whether Meta Triton autoWS is available and enabled via its knob."""
     if not has_meta_ws():
         return False
     from triton import knobs
