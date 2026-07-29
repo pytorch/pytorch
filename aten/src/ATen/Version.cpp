@@ -48,7 +48,7 @@ std::string get_mkldnn_version() {
   #else
     ss << "MKLDNN not found";
   #endif
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string get_openmp_version() {
@@ -86,7 +86,7 @@ std::string get_openmp_version() {
   #else
     ss << "OpenMP not found";
   #endif
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string get_cpu_capability() {
@@ -124,7 +124,7 @@ static std::string used_cpu_capability() {
   // environment variable
   std::ostringstream ss;
   ss << "CPU capability usage: " << get_cpu_capability();
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string show_config() {
@@ -210,7 +210,7 @@ std::string show_config() {
   // TODO: do XLA
   // TODO: do MPS
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string get_cxx_flags() {
