@@ -7966,11 +7966,15 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if node1.get_template_node() is not None and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_epilogue(node1, node2):
+        if (
+            node1.is_template() or isinstance(node1, FusedSchedulerNode)
+        ) and self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+            node1, node2
+        ):
             return True
-        if self.get_backend(node1.get_device()).can_fuse_reduction_chain(node1, node2):
+        if any(node.is_reduction() for node in node1.get_nodes()) and self.get_backend(
+            node1.get_device()
+        ).can_fuse_reduction_chain(node1, node2):
             return True
 
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
