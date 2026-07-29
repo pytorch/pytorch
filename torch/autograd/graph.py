@@ -508,6 +508,7 @@ class node_creation_hook:
         >>> a = torch.ones(5, requires_grad=True)
         >>> with torch.autograd.graph.node_creation_hook(lambda node: print(node)):
         ...     b = a * 2
+        <AccumulateGrad object at ...>
         <MulBackward0 object at ...>
 
     .. note::
