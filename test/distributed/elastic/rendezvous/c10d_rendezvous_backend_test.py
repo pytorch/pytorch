@@ -274,6 +274,27 @@ class CreateBackendTest(TestCase):
         ):
             create_backend(self._params_filestore)
 
+    def test_create_backend_file_store_does_not_leak_fd(self) -> None:
+        # Set the endpoint to empty so it defaults to creating a temp file
+        self._params_filestore.endpoint = ""
+
+        def open_fd_count() -> int:
+            # The lowest free descriptor number approximates the open fd count.
+            fd = os.open(os.devnull, os.O_RDONLY)
+            os.close(fd)
+            return fd
+
+        baseline = open_fd_count()
+        paths = []
+        for _ in range(20):
+            _, store = create_backend(self._params_filestore)
+            paths.append(store.path)  # type: ignore[attr-defined]
+        growth = open_fd_count() - baseline
+        for path in paths:
+            os.remove(path)
+
+        self.assertLessEqual(growth, 2)
+
     @mock.patch(
         "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
     )
