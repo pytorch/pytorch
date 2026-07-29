@@ -1396,7 +1396,7 @@ SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
 Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const std::string_view reduce) {
   // result: out, arg_out
   auto result = at::_sparse_mm_reduce_impl(mat1, mat2, reduce);
-  return std::get<0>(result);
+  return std::get<0>(std::move(result));
 }
 
 // --------------------------------------------------------------------
@@ -1886,7 +1886,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       });
     }
     else {
-      grad_input_values = grad_values_expand;
+      grad_input_values = std::move(grad_values_expand);
     }
     bool grad_is_coalesced = input.is_coalesced();
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options(), grad_is_coalesced);

@@ -644,7 +644,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
                 else:
                     last_quantized_node = node
 
-    # Post-processing again to remove legacy ScriptObjects and quantizated tensors
+    # Post-processing again to remove legacy ScriptObjects and quantized tensors
     # stored as attributes or in the buffer. This is used to clean up the GraphModule
     # to not trigger tracing errors like missing __obj_flatten__ functions.
     def _clean_attr(mod: torch.nn.Module):
