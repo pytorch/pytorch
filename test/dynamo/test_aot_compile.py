@@ -819,15 +819,15 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         ).aot_compile(  # noqa: UNSPECIFIED_BACKEND
             ((x,), {})
         )
-        expected = batched_grad((x,))
-        actual = compiled_fn((x,))
+        expected = batched_grad(x)
+        actual = compiled_fn(x)
         self.assertEqual(expected, actual)
         compiled_fn.save_compiled_function(self.path())
         torch._dynamo.reset()
         with torch.compiler.set_stance("fail_on_recompile"):
             with open(self.path(), "rb") as f:
                 loaded_fn = torch.compiler.load_compiled_function(f)
-            actual = loaded_fn((x,))
+            actual = loaded_fn(x)
             self.assertEqual(expected, actual)
 
     def test_aot_compile_source_info(self):

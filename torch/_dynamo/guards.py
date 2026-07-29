@@ -4918,6 +4918,16 @@ class CheckFunctionManager:
         )
 
         for guard in sorted_guards:
+            # guard_types/code_list are per-build export info, but they
+            # accumulate on the shared Guard objects across builds. Reset them
+            # so results from a previous build (e.g. the pre-filtering build or
+            # an earlier non-save CheckFunctionManager) don't leak into this
+            # build; serialize_guards relies on them to detect unserializable
+            # guards, and a non-save build may derive different guards (e.g.
+            # DICT_VERSION for SUPPORTED_NODES) than a save build.
+            guard.guard_types = None
+            guard.code_list = None
+
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
