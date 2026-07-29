@@ -259,8 +259,8 @@ class BackwardHookVariable(VariableTracker):
         return self._setup_hook(tx, "setup_output_hook", *args, **kwargs)
 
     tp_methods = {
-        "setup_input_hook": Method(setup_input_hook, "setup_input_hook"),
-        "setup_output_hook": Method(setup_output_hook, "setup_output_hook"),
+        "setup_input_hook": Method(setup_input_hook),
+        "setup_output_hook": Method(setup_output_hook),
     }
 
     def _setup_hook(
