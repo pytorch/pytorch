@@ -110,14 +110,30 @@ jobs:
       cuda-arch-list: '7.5 8.9'
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 6, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 7, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 8, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 9, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 10, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 11, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 12, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 13, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 14, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.metal.nvidia.gpu" },
         ]}
       python-version: "3.10"
@@ -370,10 +386,18 @@ jobs:
       runner: windows.4xlarge.nonephemeral
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 4, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 4, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 5, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 6, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 7, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 8, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 9, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 10, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 11, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 12, num_shards: 12, runner: "windows.4xlarge.nonephemeral" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
@@ -571,11 +595,14 @@ jobs:
       # Periodic AArch64 tests for SVE256 coverage
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
         ]}
       python-version: "3.10"
       compiler: gcc13
