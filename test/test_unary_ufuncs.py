@@ -804,10 +804,10 @@ class TestUnaryUfuncs(TestCase):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
     @dtypes(torch.complex64)
-    @parametrize("eps", [1e-3])
-    def test_tan_complex_matches_numpy(self, device, dtype, eps):
+    def test_tan_complex_matches_numpy(self, device, dtype):
         # Focused accuracy check for complex tan against NumPy reference
         # Includes values near tan singularities on the real axis
+        eps = 1e-3
         specials = torch.tensor(
             [
                 math.pi / 2 - eps,
