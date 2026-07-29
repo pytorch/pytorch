@@ -17,6 +17,12 @@
 #include <thrust/inner_product.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#if defined(USE_ROCM)
+namespace TORCH_CUDA_STD = ::thrust;
+#else
+#include <cuda/std/functional>
+namespace TORCH_CUDA_STD = ::cuda::std;
+#endif
 
 namespace at::native {
 
@@ -50,8 +56,8 @@ struct ModeImpl {
                     iter_end - 1,
                     iter_begin + 1,
                     0,
-                    thrust::plus<int>(),
-                    thrust::not_equal_to<scalar_t>());
+                    TORCH_CUDA_STD::plus<int>(),
+                    TORCH_CUDA_STD::not_equal_to<scalar_t>());
 
     // Count frequency of each element
     auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
