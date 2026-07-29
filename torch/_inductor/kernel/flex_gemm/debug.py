@@ -13,15 +13,15 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._logging import LazyString, trace_structured
 
-from .quack_reductions import (
-    FlexGemmGetItemForm,
-    FlexGemmPrepareSoftmaxForm,
-    FlexGemmReductionForm,
-    FlexGemmSelectForm,
-    FlexGemmSplitForm,
-    FlexGemmSqueezeForm,
-    FlexGemmUnsupportedReductionForm,
-    FlexGemmViewForm,
+from .epilogue_nodes import (
+    FlexGemmNormalizedGetItem,
+    FlexGemmNormalizedPrepareSoftmax,
+    FlexGemmNormalizedReduction,
+    FlexGemmNormalizedSelect,
+    FlexGemmNormalizedSplit,
+    FlexGemmNormalizedSqueeze,
+    FlexGemmNormalizedUnsupportedReduction,
+    FlexGemmNormalizedView,
 )
 
 
@@ -162,32 +162,32 @@ def _format_main_transform(transform: Any | None) -> str:
     return f"grouped-N, group={transform.group}, layout={layout}"
 
 
-def _format_structural_dataflow(node: torch.fx.Node, form: Any) -> str:
-    """Render one canonical FX structural operation as compact dataflow."""
-    match form:
-        case FlexGemmViewForm(shape=shape):
+def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
+    """Render one normalized FX operation as compact dataflow."""
+    match normalized:
+        case FlexGemmNormalizedView(shape=shape):
             operation = f"view(shape={shape})"
-        case FlexGemmReductionForm(
+        case FlexGemmNormalizedReduction(
             dim=dim,
             keepdim=keepdim,
             reduction_type=reduction_type,
         ):
             operation = f"{reduction_type}(dim={dim}, keepdim={keepdim})"
-        case FlexGemmPrepareSoftmaxForm(dim=dim):
+        case FlexGemmNormalizedPrepareSoftmax(dim=dim):
             operation = f"prepare_softmax(dim={dim})"
-        case FlexGemmSqueezeForm():
+        case FlexGemmNormalizedSqueeze():
             operation = "squeeze"
-        case FlexGemmGetItemForm(index=index):
+        case FlexGemmNormalizedGetItem(index=index):
             operation = f"getitem(index={index})"
-        case FlexGemmSplitForm(split_size=split_size, dim=dim):
+        case FlexGemmNormalizedSplit(split_size=split_size, dim=dim):
             operation = f"split(size={split_size}, dim={dim})"
-        case FlexGemmSelectForm(dim=dim, index=index):
+        case FlexGemmNormalizedSelect(dim=dim, index=index):
             operation = f"select(dim={dim}, index={index})"
-        case FlexGemmUnsupportedReductionForm():
+        case FlexGemmNormalizedUnsupportedReduction():
             operation = f"unsupported_reduction({node.target})"
         case _:
-            return repr(form)
-    return f"{form.source.name} -> {operation}"
+            return repr(normalized)
+    return f"{normalized.source.name} -> {operation}"
 
 
 def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
@@ -217,13 +217,13 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
             consumers.append("main")
         if store is not None:
             consumers.append("returned")
-        form = analysis.local_reduce.graph.structural_forms.get(
+        normalized = analysis.local_reduce.graph.normalized_nodes.get(
             local_reduce.match.value_node
         )
         dataflow = (
             str(local_reduce.match.value_node.target)
-            if form is None
-            else _format_structural_dataflow(local_reduce.match.value_node, form)
+            if normalized is None
+            else _format_normalized_dataflow(local_reduce.match.value_node, normalized)
         )
         lines.extend(
             (
@@ -254,10 +254,10 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
 def format_flex_gemm_analysis_details(
     analysis: "FlexGemmEpilogueAnalysis",
 ) -> str:
-    """Render raw recognizer records for deep FlexGEMM debugging."""
+    """Render normalized nodes and recognizer records for deep debugging."""
     lines: list[str] = []
     for label, values in (
-        ("structural_forms", analysis.local_reduce.graph.structural_forms),
+        ("normalized_nodes", analysis.local_reduce.graph.normalized_nodes),
         ("grouped_layouts", analysis.local_reduce.grouped_layouts),
         ("local_reduce_matches", analysis.local_reduce.matches),
         ("grouped_select_indices", analysis.grouped_select_indices),
