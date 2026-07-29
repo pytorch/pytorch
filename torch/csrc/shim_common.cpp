@@ -670,6 +670,15 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_has_storage = t->has_storage();
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \

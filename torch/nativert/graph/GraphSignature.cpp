@@ -403,7 +403,7 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
                     torch::_export::SymBoolArgument::Tag::AS_NAME) {
                   userOutputs_.emplace_back(symBool.get_as_name());
                 }
-                // Skip AS_BOOL (constant) symbools
+                // Skip AS_BOOL (constant) symbols
               }
               break;
             }
