@@ -213,7 +213,9 @@ class TestTyping(TestCase):
 
             target_line = lines[lineno - 1]
             self.assertIn(
-                "# E:", target_line, f"Unexpected mypy output\n\n{errors[lineno]}"
+                "# E:",
+                target_line,
+                lambda msg: f"{msg}\nUnexpected mypy output\n\n{errors[lineno]}",
             )
             marker = target_line.split("# E:")[-1].strip()
             expected_error = errors.get(lineno)

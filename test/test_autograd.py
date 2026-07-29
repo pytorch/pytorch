@@ -122,7 +122,7 @@ def graph_desc(fn):
 class TestAutograd(TestCase):
     def tearDown(self):
         torch.autograd._force_original_view_tracking(False)
-        super(TestCase, self).tearDown()
+        super().tearDown()
 
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
@@ -2288,6 +2288,32 @@ class TestAutograd(TestCase):
         sum(rx, ry).sum().backward()
         self.assertTrue(was_called[0])
 
+    @parametrize("num_inputs", [2, 25])
+    def test_needs_input_grad_setter_roundtrip(self, num_inputs):
+        sentinel = ([False, True],)
+
+        class NeedsInputGradSetter(Function):
+            @staticmethod
+            def forward(ctx, *inputs):
+                return inputs[0] + inputs[1]
+
+            @staticmethod
+            def backward(ctx, grad):
+                original = ctx.needs_input_grad
+                self.assertEqual(original, (True,) + (False,) * (num_inputs - 1))
+                ctx.needs_input_grad = sentinel
+                self.assertIs(ctx.needs_input_grad, sentinel)
+                ctx.needs_input_grad = None
+                self.assertIsNone(ctx.needs_input_grad)
+                ctx.needs_input_grad = original
+                self.assertIs(ctx.needs_input_grad, original)
+                return (grad,) + (None,) * (num_inputs - 1)
+
+        x = torch.randn((), requires_grad=True)
+        inputs = (x,) + tuple(torch.randn(()) for _ in range(num_inputs - 1))
+        NeedsInputGradSetter.apply(*inputs).backward()
+        self.assertEqual(x.grad, torch.ones_like(x))
+
     def test_retain_grad(self):
         input = torch.rand(1, 3, requires_grad=True)
         h1 = input * 3
@@ -4355,6 +4381,10 @@ class TestAutograd(TestCase):
             torch._dynamo.reset()
 
             prev = torch.get_default_device()
+            had_default_device = (
+                getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+                is not None
+            )
             try:
                 # Using torch.device("cuda") directly doesn't work here because
                 # it has some issues. In particular, unlike set_default_device or
@@ -4365,7 +4395,8 @@ class TestAutograd(TestCase):
                 out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
                 out.sum().backward()
             finally:
-                torch.set_default_device(prev)
+                # None clears the DeviceContext mode; "cpu" would leak it.
+                torch.set_default_device(prev if had_default_device else None)
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             if expect_fail:
@@ -4378,12 +4409,17 @@ class TestAutograd(TestCase):
     def test_checkpoint_device_context_fn(self):
         @contextlib.contextmanager
         def apply_device(device):
+            prev = torch.get_default_device()
+            had_default_device = (
+                getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+                is not None
+            )
             try:
-                prev = torch.get_default_device()
                 torch.set_default_device(device)
                 yield
             finally:
-                torch.set_default_device(prev)
+                # None clears the DeviceContext mode; "cpu" would leak it.
+                torch.set_default_device(prev if had_default_device else None)
 
         def context_fn():
             return contextlib.nullcontext(), apply_device("cuda")
@@ -6623,7 +6659,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -6639,7 +6675,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -14083,6 +14119,113 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
 
+    @dtypes(torch.double)
+    def test_cdist_gradgrad(self, device, dtype):
+        # Second-order (double) backward for cdist / _cdist_backward. p < 1 is
+        # excluded here because |diff|^(p-2) makes the second derivative too
+        # singular for a reliable finite-difference gradgradcheck.
+        make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        shape_pairs = [
+            ((4, 3), (5, 3)),  # unbatched
+            ((2, 4, 3), (2, 5, 3)),  # batched
+            ((1, 4, 3), (2, 5, 3)),  # broadcast batch
+        ]
+        for p in [1.0, 1.5, 2.0, 2.5, 3.0, float("inf")]:
+            # p == 2 dispatches to _euclidean_dist (mm) or the fused kernel
+            # depending on compute_mode; exercise both backward paths.
+            modes = (
+                ["use_mm_for_euclid_dist", "donot_use_mm_for_euclid_dist"]
+                if p == 2.0
+                else ["donot_use_mm_for_euclid_dist"]
+            )
+            for s1, s2 in shape_pairs:
+                for mode in modes:
+                    x1, x2 = make(s1), make(s2)
+
+                    def fn(a, b, p=p, mode=mode):
+                        return torch.cdist(a, b, p, compute_mode=mode)
+
+                    with self.subTest(p=p, shapes=(s1, s2), mode=mode):
+                        self.assertTrue(gradcheck(fn, (x1, x2)))
+                        # Compiled autograd cannot reproduce eager's undefined-grad
+                        # accumulation. Check with eager compilation.
+                        self.assertTrue(
+                            gradgradcheck(
+                                fn,
+                                (x1, x2),
+                                check_undefined_grad=not TEST_WITH_TORCHDYNAMO,
+                            )
+                        )
+
+    @dtypes(torch.double)
+    def test_pdist_gradgrad(self, device, dtype):
+        make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        for p in [1.0, 1.5, 2.0, 2.5, 3.0, float("inf")]:
+            for shape in [(4, 3), (5, 2)]:
+                x = make(shape)
+
+                def fn(a, p=p):
+                    return torch.nn.functional.pdist(a, p)
+
+                with self.subTest(p=p, shape=shape):
+                    self.assertTrue(gradcheck(fn, (x,)))
+                    # See test_cdist_gradgrad: undefined-grad mode is eager-only.
+                    self.assertTrue(
+                        gradgradcheck(
+                            fn, (x,), check_undefined_grad=not TEST_WITH_TORCHDYNAMO
+                        )
+                    )
+
+    @dtypes(torch.double)
+    def test_cdist_gradgrad_small_p(self, device, dtype):
+        # p < 1 is too singular for finite-difference gradgradcheck, so compare
+        # the analytic double backward to an autograd reference. Point clouds are
+        # separated so no pairwise difference is near zero.
+        def ref_cdist(a, b, p):
+            return (a.unsqueeze(-2) - b.unsqueeze(-3)).abs().pow(p).sum(-1).pow(1.0 / p)
+
+        def second_order(fn, x1, x2, v, p):
+            d = fn(x1, x2, p)
+            g1 = torch.autograd.grad(d, x1, grad_outputs=v, create_graph=True)[0]
+            return torch.autograd.grad(g1.sum(), (x1, x2, v))
+
+        mk = partial(make_tensor, device=device, dtype=dtype)
+        for p in [0.5, 0.75]:
+            x1 = mk((4, 3), requires_grad=True)
+            x2 = (mk((5, 3)).abs() + 20).detach().requires_grad_()
+            v = mk((4, 5), requires_grad=True)
+            with self.subTest(p=p):
+                self.assertEqual(
+                    second_order(torch.cdist, x1, x2, v, p),
+                    second_order(ref_cdist, x1, x2, v, p),
+                )
+
+    @dtypes(torch.double)
+    def test_pdist_gradgrad_small_p(self, device, dtype):
+        # See test_cdist_gradgrad_small_p; rows separated to avoid near-zero diffs.
+        def ref_pdist(a, p):
+            # Gather only the off-diagonal pairs; including self-distances would
+            # put a |0|^(p-1) singularity in the graph for p < 1.
+            i, j = torch.triu_indices(a.size(0), a.size(0), 1, device=a.device).unbind()
+            return (a[i] - a[j]).abs().pow(p).sum(-1).pow(1.0 / p)
+
+        def second_order(fn, x, v, p):
+            d = fn(x, p)
+            g = torch.autograd.grad(d, x, grad_outputs=v, create_graph=True)[0]
+            return torch.autograd.grad(g.sum(), (x, v))
+
+        mk = partial(make_tensor, device=device, dtype=dtype)
+        for p in [0.5, 0.75]:
+            n, m = 4, 3
+            sep = torch.arange(n, device=device, dtype=dtype).view(n, 1) * 50
+            x = (mk((n, m)) + sep).detach().requires_grad_()
+            v = mk((n * (n - 1) // 2,), requires_grad=True)
+            with self.subTest(p=p):
+                self.assertEqual(
+                    second_order(torch.nn.functional.pdist, x, v, p),
+                    second_order(ref_pdist, x, v, p),
+                )
+
 
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
@@ -15799,6 +15942,90 @@ class TestNestedCheckpoint(TestCase):
             expected_grads = torch.autograd.grad(out, (a, b))
             for actual, expected in zip(actual_grads, expected_grads):
                 self.assertTrue(torch.allclose(actual, expected))
+
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
+    def test_checkpoint_curried_kwargs_do_not_collide_with_checkpoint_kwargs(self):
+        def fn(
+            a,
+            preserve_rng_state,
+            use_reentrant,
+            context_fn,
+            determinism_check,
+            debug,
+            early_stop,
+        ):
+            return (
+                a.sin()
+                * preserve_rng_state
+                * use_reentrant
+                * context_fn
+                * determinism_check
+                * debug
+                * early_stop
+            )
+
+        a = torch.tensor(2.0, requires_grad=True)
+        wrapped_fn = checkpoint(use_reentrant=False, preserve_rng_state=False)(fn)
+        out = wrapped_fn(
+            a,
+            preserve_rng_state=2,
+            use_reentrant=3,
+            context_fn=5,
+            determinism_check=7,
+            debug=11,
+            early_stop=13,
+        )
+        actual_grad = torch.autograd.grad(out, (a,))
+
+        out = fn(
+            a,
+            preserve_rng_state=2,
+            use_reentrant=3,
+            context_fn=5,
+            determinism_check=7,
+            debug=11,
+            early_stop=13,
+        )
+        expected_grad = torch.autograd.grad(out, (a,))
+        self.assertEqual(actual_grad, expected_grad)
+
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
+    def test_checkpoint_zero_arg_function(self):
+        a = torch.tensor(2.0, requires_grad=True)
+
+        def fn():
+            return a.sin().exp()
+
+        old_out = checkpoint(fn, use_reentrant=False)
+        new_out = checkpoint(use_reentrant=False)(fn)()
+        expected_out = fn()
+        self.assertEqual(old_out, expected_out)
+        self.assertEqual(new_out, expected_out)
+
+        old_grad = torch.autograd.grad(old_out, (a,), retain_graph=True)
+        new_grad = torch.autograd.grad(new_out, (a,), retain_graph=True)
+        expected_grad = torch.autograd.grad(expected_out, (a,))
+        self.assertEqual(old_grad, expected_grad)
+        self.assertEqual(new_grad, expected_grad)
+
+    @skipIfTorchDynamo("Dynamo support for curried checkpoint added in later commit")
+    def test_checkpoint_curried_method(self):
+        class Model:
+            @checkpoint(use_reentrant=False)
+            def fn(self, x, scale):
+                return x.sin() * scale
+
+        x = torch.tensor(2.0, requires_grad=True)
+        scale = torch.tensor(3.0, requires_grad=True)
+        model = Model()
+
+        actual = model.fn(x, scale)
+        expected = x.sin() * scale
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual, (x, scale)),
+            torch.autograd.grad(expected, (x, scale)),
+        )
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint_same_graph(self, early_stop):

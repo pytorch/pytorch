@@ -679,9 +679,9 @@ class TensorLikePair(Pair):
     Kwargs:
         allow_subclasses (bool):
         rtol (Optional[float]): Relative tolerance. If specified ``atol`` must also be specified. If omitted, default
-            values based on the type are selected. See :func:assert_close: for details.
+            values based on the type are selected. See :func:`assert_close` for details.
         atol (Optional[float]): Absolute tolerance. If specified ``rtol`` must also be specified. If omitted, default
-            values based on the type are selected. See :func:assert_close: for details.
+            values based on the type are selected. See :func:`assert_close` for details.
         equal_nan (bool): If ``True``, two ``NaN`` values are considered equal. Defaults to ``False``.
         check_device (bool): If ``True`` (default), asserts that corresponding tensors are on the same
             :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different

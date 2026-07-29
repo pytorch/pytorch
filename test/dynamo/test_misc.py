@@ -96,8 +96,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
+    skipCUDAMemoryLeakCheckIf,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -230,6 +232,34 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
+
+    @torch.testing._internal.common_utils.scoped_load_inline
+    def test_pybind11_enum_conversion(self, load_inline):
+        cpp_source = """
+        #include <torch/extension.h>
+
+        enum class E { A = 0, B = 1 };
+
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+            py::enum_<E>(m, "E")
+                .value("A", E::A)
+                .value("B", E::B);
+        }
+        """
+        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+        e = mod.E.A
+        self.assertEqual(
+            torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: float(x), backend="eager", fullgraph=True)(e), 0.0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
+                mod.E.B
+            ),
+            20,
+        )
 
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -425,6 +455,62 @@ graph():
         with YoloMode():
             with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
                 torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+
+    def test_dispatch_key_set_preserved_across_compile(self):
+        # compile_wrapper snapshots and restores the local dispatch key set
+        # around every compiled call. Make sure cache-hit calls, and a call that
+        # raises a user error, leave the include/exclude sets unchanged.
+        def f(x):
+            return x + 1
+
+        cf = torch.compile(f, backend="eager")
+        x = torch.randn(3)
+        cf(x)  # warm up / compile
+
+        include = torch._C._dispatch_tls_local_include_set()
+        exclude = torch._C._dispatch_tls_local_exclude_set()
+        for _ in range(5):
+            cf(x)
+        self.assertEqual(include, torch._C._dispatch_tls_local_include_set())
+        self.assertEqual(exclude, torch._C._dispatch_tls_local_exclude_set())
+
+        def raises(x):
+            raise ValueError("boom")
+
+        with self.assertRaises(ValueError):
+            torch.compile(raises, backend="eager")(x)
+        self.assertEqual(include, torch._C._dispatch_tls_local_include_set())
+        self.assertEqual(exclude, torch._C._dispatch_tls_local_exclude_set())
+
+    def test_dispatch_key_set_stack_balanced_on_fullgraph_error(self):
+        # compile_wrapper pushes the local dispatch key set onto a C++ stack and
+        # must pop it even when the wrapper's own finally raises. The
+        # fullgraph=True "found no compiled frames" error is raised from inside
+        # that finally, so a naive restore-at-end-of-finally would be skipped and
+        # leak a stack entry. Verify the save/restore stack stays balanced.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            for _ in range(3):
+                with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                    torch.compile(torch.add, backend="eager", fullgraph=True)(x, x)
+
+        # A normal compiled call after the error loop must still work. This
+        # guards against an over-restore / double-pop regression, which would
+        # leave the stack empty and make the wrapper's own restore raise.
+        cf = torch.compile(lambda t: t + 1, backend="eager")
+        self.assertEqual(cf(x), x + 1)
+
+        # If any push had leaked, the stack would be non-empty here. When
+        # balanced it is empty, so a manual restore raises instead of silently
+        # popping a stale entry.
+        with self.assertRaisesRegex(RuntimeError, "empty stack"):
+            torch._C._dynamo_restore_local_dispatch_key_set()
 
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
@@ -1910,7 +1996,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             b = max((1, 2), (3, 4))
             return a, b
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         result = opt_fn()
         self.assertEqual(result, ((1, 2), (3, 4)))
 
@@ -2921,7 +3007,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     def test_structseq2(self):
         def fn(x, y):
-            return tuple(torch.return_types.qr((2 * x, y - 1)))
+            return tuple(torch.return_types.linalg_qr((2 * x, y - 1)))
 
         x = torch.randn(3, 2)
         y = torch.randn(2, 4)
@@ -4717,7 +4803,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
         self.assertEqual(o, x * y)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -8888,6 +8973,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result.shape, expected.shape)
         self.assertEqual(result, expected)
 
+    def test_python_type_name_mirrors_cpython_tp_name(self):
+        """Test python_type_name() mirrors CPython's tp_name slot."""
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        # python_type_name() should return CPython's tp_name string
+        test_cases = [
+            (42, "int"),
+            ("hello", "str"),
+            (None, "NoneType"),
+            (..., "ellipsis"),
+        ]
+
+        for value, expected_tp_name in test_cases:
+            vt = ConstantVariable(value)
+            self.assertEqual(vt.python_type_name(), expected_tp_name)
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
@@ -9051,6 +9152,123 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(out, opt_out)
         self.assertEqual(guard_failure, None)
 
+    def test_no_guard_for_unused_input(self):
+        def fn(x, y):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        opt_fn(torch.randn(3), torch.randn(5))
+        opt_fn(torch.randn(3), 42)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_no_guard_for_unused_scalar_input(self):
+        def fn(x, n):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), 5)
+        opt_fn(torch.randn(3), 99)
+        opt_fn(torch.randn(3), "hello")
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_no_guard_for_unused_input_when_locals_called(self):
+        # locals() is handled at trace time by _call_frame_locals_snapshot, which
+        # adds pruned locals back from tx.f_locals and installs guards on them.
+        # So y still causes a recompile when its shape changes.
+        def fn(x, y):
+            return locals()["x"] + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        opt_fn(torch.randn(3), torch.randn(5))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_locals_dict_access_of_unused_param_works(self):
+        def fn(x, y):
+            return locals()["y"] + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_locals_alias_access_of_unused_param_works(self):
+        # locals() called via an alias (locals2 = locals in global scope) must
+        # still expose pruned locals; _call_frame_locals_snapshot adds them back.
+        locals2 = locals
+
+        def fn(x, y):
+            return locals2()["y"] + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_no_guard_for_unused_input_varargs(self):
+        def fn(x, *args, **kwargs):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3)
+        result = opt_fn(x, torch.randn(2), extra=torch.randn(1))
+        self.assertEqual(result, fn(x))
+
+    def test_no_guard_for_unused_input_still_recompiles_on_used(self):
+        def fn(x, y):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        opt_fn(torch.randn(3), torch.randn(5))
+        self.assertEqual(cnt.frame_count, 1)
+        opt_fn(torch.randn(4), torch.randn(3))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_no_guard_for_unused_input_with_graph_break(self):
+        def fn(x, y):
+            z = x + 1
+            torch._dynamo.graph_break()
+            return z + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        opt_fn(torch.randn(3), torch.randn(3))
+        after_first = cnt.frame_count
+        opt_fn(torch.randn(3), torch.randn(5))
+        self.assertEqual(cnt.frame_count, after_first)
+
+    def test_no_guard_for_input_unused_before_graph_break(self):
+        # y is not read before the break, so the first subgraph must not
+        # guard on it. Only the resume function (which reads y) should guard.
+        def fn(x, y):
+            z = x + 1
+            torch._dynamo.graph_break()
+            return z + y.sum()
+
+        recompiled_names = []
+
+        def guard_failures(failure):
+            recompiled_names.append(failure.orig_code.co_name)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(
+            cnt, nopython=False, guard_fail_fn=guard_failures
+        )(fn)
+
+        x = torch.randn(3)
+        y1, y2, y3 = torch.randn(3), torch.randn(5), torch.randn(9)
+        self.assertEqual(opt_fn(x, y1), fn(x, y1))
+
+        self.assertEqual(opt_fn(x, y2), fn(x, y2))
+        self.assertEqual(opt_fn(x, y3), fn(x, y3))
+        # Resume function recompiled (y's shape changed), base frame did not.
+        self.assertTrue(recompiled_names)
+        self.assertNotIn(fn.__code__.co_name, recompiled_names)
+
     def test_guard_sym_node_fstring_when_used(self):
         def fn(x):
             # assign fstring to a variable causes the fstring to be used,
@@ -9079,6 +9297,34 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(out, opt_out)
         self.assertTrue(guard_failure is not None)
         self.assertIn("""tensor 'x' size mismatch at index 0""", guard_failure[0])
+
+    def test_fstring_dynamic_symint_across_graph_break(self):
+        class Arch(torch.nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.register_buffer("w", torch.randn(n))
+                self.msg = ""
+
+            def forward(self, idx):
+                max_idx = self.w.size(0) - 1
+                idx = idx.long()
+                mask = (idx < 0) | (idx > max_idx)
+                if mask.any():
+                    self.msg = f"max_idx={max_idx}, bad={idx[mask].tolist()}"
+                    idx = torch.clamp(idx, 0, max_idx)
+                return torch.index_select(self.w, 0, idx)
+
+        @torch.compile(backend="eager")
+        def run(arch, idx):
+            return arch(idx)
+
+        idx = torch.tensor([0, -1, 2])
+        # Distinct buffer sizes across the shared compiled forward force
+        # automatic-dynamic, turning w.size(0) into a SymNodeVariable.
+        for n in (8, 6, 7):
+            arch = Arch(n)
+            run(arch, idx)
+            self.assertEqual(arch.msg, f"max_idx={n - 1}, bad=[-1]")
 
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
@@ -9611,7 +9857,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_cast_no_recompile_after_graph_break(self):
         # In FSDP, cast(nn.Module, self) can be called after a
         # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
@@ -9646,11 +9891,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         fn(a, x)
         fn(b, x)
-        self.assertEqual(cnt.frame_count, 1)
-        # 5 frames: fn (x2), get_state before graph_break (x2),
-        # get_state resume after graph_break (x1, no recompile).
-        # Without skip_code, typing.cast would add 2 more frames (7 total).
-        self.assertEqual(counters["frames"]["total"], 5)
+        if torch._dynamo.config.nested_graph_breaks:
+            # NGB inlines get_state() and handles the graph break inline,
+            # producing 2 subgraphs (before/after break) per call.
+            self.assertEqual(cnt.frame_count, 2)
+        else:
+            self.assertEqual(cnt.frame_count, 1)
+            # 5 frames: fn (x2), get_state before graph_break (x2),
+            # get_state resume after graph_break (x1, no recompile).
+            # Without skip_code, typing.cast would add 2 more frames (7 total).
+            self.assertEqual(counters["frames"]["total"], 5)
 
     def test_T_tensor_attribute(self):
         def fn(x, y):
@@ -10199,6 +10449,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(RuntimeError):
             fn(torch.tensor([9, 0]))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_sym_min_simplifies_with_checked_upper_bound(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            x0, _ = x.tolist()
+            torch._check(x0 <= 5)
+            if torch.sym_min(x0, 5) == x0:
+                return torch.tensor(True)
+            return torch.tensor(False)
+
+        self.assertEqual(fn(torch.tensor([3, 5])), torch.tensor(True))
+
     def test_unbacked_2d_expand(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="eager")
         def func(a, b):
@@ -10243,7 +10505,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(y, 0)
-        opt = torch.compile(fn, fullgraph=True)
+        opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         opt(*inputs)
         with self.assertRaises(RuntimeError):
             inputs = (
@@ -10848,6 +11110,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch.compile(my_dyn_fn, backend=counter)(x012)
         self.assertEqual(counter.frame_count, 3)
 
+    @recover_orig_fp32_precision
     def test_recompile_on_global_state_change(self):
         last_state = []
         cnt = 0
@@ -15688,7 +15951,7 @@ fn
     @unittest.expectedFailure
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return_obj___build_class__(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(t):
             # class is created with an EphemeralSource and
             # UserDefinedClassVariable has no `reconstruct` method
@@ -16405,7 +16668,7 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
             torch._dynamo.exc.Unsupported,
             r"requires_grad_\(\)(.|\n)*\.detach\(\)",
         ):
-            torch.compile(fn, fullgraph=True)(x)
+            torch.compile(fn, fullgraph=True)(x)  # noqa: UNSPECIFIED_BACKEND
 
         # Without fullgraph, falls back to eager and is correct
         result = torch.compile(fn, backend="eager")(x)
@@ -16425,7 +16688,7 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
             torch._dynamo.exc.Unsupported,
             r"requires_grad_\(\)(.|\n)*\.detach\(\)",
         ):
-            torch.compile(fn, fullgraph=True)(x)
+            torch.compile(fn, fullgraph=True)(x)  # noqa: UNSPECIFIED_BACKEND
 
         # Without fullgraph, falls back to eager and is correct
         result = torch.compile(fn, backend="eager")(x)
@@ -17051,7 +17314,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.qr((2 * x, None)),
+                        "e": torch.return_types.linalg_qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -17079,7 +17342,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.qr((2 * x, None)),
+                        "e": torch.return_types.linalg_qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -17130,7 +17393,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.qr((2 * x, None)),
+                        "e": torch.return_types.linalg_qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -17144,7 +17407,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                         "d",
                         {
                             "f": MyTuple(torch.ones(4, 3), -y, y + 1),
-                            "e": torch.return_types.qr((2 * y, None)),
+                            "e": torch.return_types.linalg_qr((2 * y, None)),
                         },
                     ),
                 ],
@@ -17525,6 +17788,10 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
+    # Known CUDA memory leak: under propagate_real_tensors, a data-dependent
+    # .tolist() retains the real input tensor (via FakeTensor.real_tensor held by
+    # a TrackedFake) past torch._dynamo.reset(). See #190093.
+    @skipCUDAMemoryLeakCheckIf(True)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -17841,6 +18108,30 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
         result = compiled(torch.randn(1024), 256)
         self.assertEqual(result, 4)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorify_add_sub_alpha_from_item(self):
+        """add/sub with a non-unit `alpha` and a `.item()` scalar operand must
+        preserve `alpha`. The tensorify pass rebuilds the op from node.args
+        only; `alpha` is keyword-only (node.kwargs) and was previously dropped,
+        turning add(a, b, alpha=k) into a + b. Must run on aot_eager/inductor
+        (the pass does not run under backend="eager")."""
+
+        def fn(a, b):
+            s = b.item()
+            return (
+                torch.add(torch.sigmoid(a), s, alpha=-0.9248),
+                torch.sub(torch.sigmoid(a), s, alpha=3.5),
+            )
+
+        a = torch.tensor(0.5)
+        b = torch.tensor(2.0)
+        expected = fn(a, b)
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                got = torch.compile(fn, backend=backend, fullgraph=True)(a, b)
+                self.assertEqual(got, expected)
 
 
 if __name__ == "__main__":

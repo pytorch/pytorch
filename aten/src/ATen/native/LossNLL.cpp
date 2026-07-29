@@ -621,7 +621,7 @@ static Tensor cross_entropy_loss_label_smoothing(
         ret = smooth_loss.sum();
         break;
       case Reduction::None:
-        ret = smooth_loss;
+        ret = std::move(smooth_loss);
         break;
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);

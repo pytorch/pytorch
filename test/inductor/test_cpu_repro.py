@@ -158,6 +158,22 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    @parametrize("p", ("fro", "nuc"))
+    @skipIfNoLapack
+    def test_linalg_cond_string_dynamic_shapes(self, p):
+        def fn(x):
+            condition_number = torch.linalg.cond(x, p=p)
+            observer = (
+                condition_number > torch.tensor(0.0, dtype=condition_number.dtype)
+            ).count_nonzero()
+            return condition_number, observer
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)
+        expected = fn(x)
+        compiled = torch.compile(fn, backend="inductor", dynamic=True, fullgraph=True)
+        actual = compiled(x)
+        self.assertEqual(actual, expected)
+
     def _check_conv_stride_constraints(self, formats):
         for fmt in formats:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -189,11 +205,11 @@ class CPUReproTests(TestCase):
                             expected_fmt = torch.channels_last
                         test_self.assertTrue(
                             args[0].is_contiguous(memory_format=expected_fmt),
-                            f"input stride {args[0].stride()} is not {expected_fmt}",
+                            lambda msg: f"{msg}\ninput stride {args[0].stride()} is not {expected_fmt}",
                         )
                         test_self.assertTrue(
                             args[1].is_contiguous(memory_format=expected_fmt),
-                            f"weight stride {args[1].stride()} is not {expected_fmt}",
+                            lambda msg: f"{msg}\nweight stride {args[1].stride()} is not {expected_fmt}",
                         )
                         nonlocal conv_seen
                         conv_seen = True
@@ -339,6 +355,39 @@ class CPUReproTests(TestCase):
                             (v,),
                             **tol_kwargs,
                         )
+
+    def test_conv_max_pool_where_backward_mutation_dep(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/185509
+        def fn(x, weight, bias, mask):
+            conv = F.conv2d(x, weight, bias, padding=1)
+            pool = F.max_pool2d(conv, kernel_size=3, stride=1, padding=1)
+            return torch.where(mask, conv, pool)
+
+        def clone_inputs(inputs):
+            return [x.detach().clone().requires_grad_(True) for x in inputs]
+
+        def run(f, inputs, mask):
+            out = f(*inputs, mask)
+            out.sum().backward()
+            return out.detach(), [x.grad.detach().clone() for x in inputs]
+
+        torch.manual_seed(0)
+        inputs = [
+            torch.randn(2, 3, 6, 7, requires_grad=True),
+            torch.randn(4, 3, 3, 3, requires_grad=True),
+            torch.zeros(4, requires_grad=True),
+        ]
+        mask = (torch.rand(2, 4, 6, 7) > 0.5).detach()
+
+        expected_out, expected_grads = run(fn, clone_inputs(inputs), mask)
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn, backend="inductor")
+        actual_out, actual_grads = run(compiled_fn, clone_inputs(inputs), mask)
+
+        torch.testing.assert_close(actual_out, expected_out)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            torch.testing.assert_close(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -2911,7 +2960,8 @@ class CPUReproTests(TestCase):
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(
-            set(cpp_op_list).issubset(union), f"unexpected: {set(cpp_op_list) - union}"
+            set(cpp_op_list).issubset(union),
+            lambda msg: f"{msg}\nunexpected: {set(cpp_op_list) - union}",
         )
 
     def test_atomic_add_lowp_fp(self):
@@ -3295,6 +3345,19 @@ class CPUReproTests(TestCase):
                         metrics.reset()
                         self.common(fn, (x,))
                         check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_vec_expm1_small_values(self):
+        def fn(x):
+            return torch.expm1(x)
+
+        x = torch.linspace(-1e-6, 1e-6, 1024)
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,), atol=1e-9, rtol=1e-6)
+            check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)

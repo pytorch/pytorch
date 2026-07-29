@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import \
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
+     largeTensorTest)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -944,6 +945,20 @@ class TestFFT(TestCase):
 
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
+
+    @onlyCUDA
+    @largeTensorTest("18GB")
+    def test_fft_conjugate_symmetry_fill_int64_indexing(self, device):
+        # The CUDA conjugate-symmetry fill uses 32-bit index math when numel and
+        # every element offset fit in int32, else a 64-bit fallback. Space the
+        # output rows 2**31 elements apart so max_out_offset exceeds INT32_MAX and
+        # the 64-bit path is taken, while the filled region itself stays tiny.
+        rows, cols, stride = 2, 8, 2 ** 31
+        x = torch.randn(rows, cols, device=device)
+        buf = torch.empty((rows - 1) * stride + cols, dtype=torch.complex64, device=device)
+        out = buf.as_strided((rows, cols), (stride, 1))
+        torch.fft.fft(x, dim=-1, out=out)
+        self.assertEqual(out, torch.fft.fft(x, dim=-1))
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")

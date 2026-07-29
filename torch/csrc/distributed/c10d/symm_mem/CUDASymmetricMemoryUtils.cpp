@@ -259,7 +259,7 @@ std::string IpcChannel::get_socket_name(int pid) {
   }
   std::ostringstream oss;
   oss << tmp_dir << "/symm_mem-" << pid;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void map_block(
