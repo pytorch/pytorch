@@ -39,6 +39,14 @@ on:
         default: ""
         description: |
           List of tests to include (empty string implies default list)
+      compile-threads:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If non-empty, pins TORCHINDUCTOR_COMPILE_THREADS for the test container
+          so the Inductor compile-worker fan-out is fixed instead of derived from
+          the visible CPU count. Empty leaves the default behavior.
       dashboard-tag:
         required: false
         type: string
@@ -204,6 +212,7 @@ jobs:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          TORCHINDUCTOR_COMPILE_THREADS: ${{ inputs.compile-threads }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
@@ -218,12 +227,21 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
+          # Optionally forward a pinned Inductor compile-worker count into the
+          # container. Only forward when non-empty: an empty value would be parsed
+          # as int("") and crash decide_compile_threads().
+          COMPILE_THREADS_FLAG=""
+          if [[ -n "${TORCHINDUCTOR_COMPILE_THREADS}" ]]; then
+            COMPILE_THREADS_FLAG="-e TORCHINDUCTOR_COMPILE_THREADS"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            ${COMPILE_THREADS_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
