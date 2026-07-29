@@ -1086,11 +1086,11 @@ static Tensor convolution_same(
     auto d = dilation.size() == 1 ? dilation[0] : dilation[i];
     auto pad = pooling_same_mode_padding_lr(
         input_sizes[i + 2], weight_sizes[i + 2], s, d);
-    padding_l.push_back(pad.first);
-    padding_r.push_back(pad.second);
     if (!TORCH_GUARD_OR_FALSE(pad.first.sym_eq(pad.second))) {
       symmetric_padding = false;
     }
+    padding_l.push_back(std::move(pad.first));
+    padding_r.push_back(std::move(pad.second));
   }
 
   if (symmetric_padding) {
