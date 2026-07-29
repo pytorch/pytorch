@@ -3225,8 +3225,12 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
 
-        if value is torch.utils._pytree.SUPPORTED_NODES:
+        if value is torch.utils._pytree.SUPPORTED_NODES and not self.save_guards:
             # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
+            # DICT_VERSION is not serializable, so fall back to a keys match when
+            # guards are being serialized. Deserialization rebuilds guards without
+            # save_guards, so a loaded artifact still gets DICT_VERSION here,
+            # re-baselined on the loading process's dict.
             self.DICT_VERSION(guard)
             return
 

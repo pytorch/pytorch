@@ -970,14 +970,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
-    def test_dict_version(self):
+    def test_supported_nodes_dict_keys_match(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
 
-        with self.assertRaisesRegex(
-            PackageError, "DICT_VERSION guard cannot be serialized."
-        ):
-            self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
+        ref, loaded = self._test_serialization(
+            "DICT_KEYS_MATCH", fn, {"t": torch.randn(3)}
+        )
+        self._test_check_fn(ref, loaded, {"x": {"t": torch.randn(3)}}, True)
+        self._test_check_fn(ref, loaded, {"x": {}}, False)
 
     def test_dict_contains(self):
         def fn(x):
