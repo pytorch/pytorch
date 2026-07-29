@@ -571,25 +571,49 @@ class AOTInductorModelContainer {
     auto& source = use_inactive ? active() : inactive();
     target.fold_state = ConstantState::INITIALIZED;
 
+    // constants_map is bound by rvalue-ref to the caller's folded-constant map
+    // and owns raw AtenTensorHandles. Each is handed to target.map (as an
+    // RAIIAtenTensorHandle) below and its source slot nulled the instant it is
+    // transferred. If a call in the loop throws (node alloc in
+    // insert_or_assign, string ctor), free the not-yet-transferred handles;
+    // already-transferred slots are null so they are skipped -- no double free.
+    // On success every consumed slot is null, so the caller's map is discarded
+    // without freeing (unchanged semantics). model.so-embedded, so stable C ABI
+    // only.
     auto num_constants = models_[0]->num_constants();
-    for (size_t idx = 0; idx < num_constants; idx++) {
-      auto constant_name =
-          std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
-      auto it = constants_map.find(constant_name);
-      if (it == constants_map.end() &&
-          !(use_inactive && _is_tensor_constant_type(idx))) {
-        continue;
-      }
+    try {
+      for (size_t idx = 0; idx < num_constants; idx++) {
+        auto constant_name =
+            std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
+        auto it = constants_map.find(constant_name);
+        if (it == constants_map.end() &&
+            !(use_inactive && _is_tensor_constant_type(idx))) {
+          continue;
+        }
 
-      AtenTensorHandle tensor;
-      if (it == constants_map.end()) {
-        aoti_torch_clone(
-            source.map->find(constant_name)->second.get(), &tensor);
-      } else {
-        tensor = it->second;
-      }
+        AtenTensorHandle tensor;
+        if (it == constants_map.end()) {
+          aoti_torch_clone(
+              source.map->find(constant_name)->second.get(), &tensor);
+        } else {
+          tensor = it->second;
+          // Null the source slot before RAIIAtenTensorHandle takes ownership so
+          // a throw in insert_or_assign (which frees the temporary) cannot
+          // leave a dangling handle in constants_map to double free.
+          it->second = nullptr;
+        }
 
-      target.map->insert_or_assign(constant_name, RAIIAtenTensorHandle(tensor));
+        target.map->insert_or_assign(
+            constant_name, RAIIAtenTensorHandle(tensor));
+      }
+    } catch (...) {
+      for (auto& kv : constants_map) {
+        if (kv.second != nullptr) {
+          (void)aoti_torch_delete_tensor_object(kv.second);
+          kv.second = nullptr;
+        }
+      }
+      throw;
     }
     target.update_array(models_[0].get());
   }
