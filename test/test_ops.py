@@ -752,6 +752,7 @@ class TestCommon(TestCase):
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @onlyAccelerator
+    @skipIfMPS
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
