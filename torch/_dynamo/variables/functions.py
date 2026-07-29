@@ -1199,7 +1199,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def pygen_yf(self) -> VariableTracker | None:
         if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
-            return self.inline_tracer.stack[-1]
+            if sys.version_info >= (3, 15):
+                ind = -2
+            else:
+                ind = -1
+            return self.inline_tracer.stack[ind]
         return None
 
     def gen_send_ex2(
