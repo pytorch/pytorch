@@ -5,6 +5,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -192,6 +193,13 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
+  if (fake_device.type() == c10::DeviceType::Meta) {
+    auto mode = c10::impl::FakeTensorModeTLS::get_state();
+    TORCH_CHECK(
+        mode == nullptr || mode->allow_meta_,
+        "device.type must not be 'meta' when allow_meta is False");
+  }
+
   // in python FakeTensor, it checks whether or not
   // we are in in_kernel_invocation manager to determine
   // which device we return

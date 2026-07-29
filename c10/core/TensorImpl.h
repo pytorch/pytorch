@@ -1509,12 +1509,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
-    auto fake_device = this->fake_device();
-    TORCH_CHECK(
-        mode == nullptr || mode->allow_meta_ ||
-            !(fake_device.has_value() &&
-              fake_device->type() == c10::DeviceType::Meta),
-        "device.type must not be 'meta' when allow_meta is False");
     get_extra_meta().fake_tensor_mode_ = std::move(mode);
   }
 
