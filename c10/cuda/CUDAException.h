@@ -32,10 +32,6 @@ class C10_CUDA_API CUDAErrorLogCapture {
  public:
   CUDAErrorLogCapture() noexcept;
   std::string get_error_log_suffix() noexcept;
-
- private:
-  uint32_t iterator_{0};
-  bool enabled_{false};
 };
 
 } // namespace c10::cuda

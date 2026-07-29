@@ -40,7 +40,7 @@ TEST(CUDAErrorTest, IncludesDriverErrorLog) {
   }
 
   auto* log_api = c10::cuda::DriverAPI::get();
-  if (!log_api->cuLogsCurrent_ || !log_api->cuLogsDumpToMemory_) {
+  if (!log_api->cuLogsRegisterCallback_) {
     GTEST_SKIP() << "The CUDA driver log APIs are unavailable";
   }
 

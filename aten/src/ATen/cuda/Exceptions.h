@@ -184,11 +184,11 @@ constexpr const char* _hipsolver_backend_suggestion =           \
     c10::cuda::CUDAErrorLogCapture __cuda_error_log;                        \
     CUresult __err = EXPR;                                                  \
     if (__err != CUDA_SUCCESS) {                                            \
+      const auto __cuda_error_log_message =                                 \
+          __cuda_error_log.get_error_log_suffix();                          \
       const char* err_str;                                                  \
       [[maybe_unused]] CUresult get_error_str_err =                         \
           at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str); \
-      const auto __cuda_error_log_message =                              \
-          __cuda_error_log.get_error_log_suffix();                       \
       if (get_error_str_err != CUDA_SUCCESS) {                              \
         TORCH_CHECK(                                                        \
             false,                                                          \
