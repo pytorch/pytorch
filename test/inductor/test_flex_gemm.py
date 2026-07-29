@@ -346,20 +346,20 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         mark_flex_gemm_body_gemm_node(graph_module, gemm_op)
         self.assertFalse(check(match))
 
-    def test_epilogue_graph_normalizes_structural_nodes(self):
+    def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
 
         from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueGraph
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            FlexGemmGetItemForm,
-            FlexGemmNVFP4PackForm,
-            FlexGemmReductionForm,
-            FlexGemmSelectForm,
-            FlexGemmSplitForm,
-            FlexGemmSqueezeForm,
-            FlexGemmToBlockedForm,
-            FlexGemmUnsupportedReductionForm,
-            FlexGemmViewForm,
+        from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
+            FlexGemmNormalizedGetItem,
+            FlexGemmNormalizedNVFP4Pack,
+            FlexGemmNormalizedReduction,
+            FlexGemmNormalizedSelect,
+            FlexGemmNormalizedSplit,
+            FlexGemmNormalizedSqueeze,
+            FlexGemmNormalizedToBlocked,
+            FlexGemmNormalizedUnsupportedReduction,
+            FlexGemmNormalizedView,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -378,56 +378,59 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             )
 
         graph_module = make_fx(body)(torch.randn(4, 8))
-        nodes = {node.target: node for node in graph_module.graph.nodes}
-        forms = FlexGemmEpilogueGraph.from_graph_module(graph_module).structural_forms
+        normalized_nodes = FlexGemmEpilogueGraph.from_graph_module(
+            graph_module
+        ).normalized_nodes
+        nodes = {
+            node.target: node
+            for node in graph_module.graph.nodes
+            if node.target is not operator.getitem
+        }
         placeholder = next(
             node for node in graph_module.graph.nodes if node.op == "placeholder"
         )
-        view_node = nodes[torch.ops.aten.view.default]
-        view = forms[view_node]
-        self.assertIsInstance(view, FlexGemmViewForm)
-        self.assertEqual(view.source, placeholder)
-        self.assertEqual(view.shape, (4, 4, 2))
-
-        reduction_node = nodes[torch.ops.aten.sum.dim_IntList]
-        reduction = forms[reduction_node]
-        self.assertEqual(
-            reduction,
-            FlexGemmReductionForm(view_node, [-1], True, None, "sum"),
-        )
-        squeeze_node = next(
+        view = nodes[torch.ops.aten.view.default]
+        reduction = nodes[torch.ops.aten.sum.dim_IntList]
+        maximum = nodes[torch.ops.aten.max.dim]
+        getitem = next(
             node
             for node in graph_module.graph.nodes
-            if node.target is torch.ops.aten.squeeze.dim
-            and node.args[0] is reduction_node
+            if node.target is operator.getitem and node.args == (maximum, 0)
         )
-        self.assertEqual(forms[squeeze_node], FlexGemmSqueezeForm(reduction_node))
-
-        maximum_node = nodes[torch.ops.aten.max.dim]
-        getitem_node = next(
+        squeeze = next(
             node
             for node in graph_module.graph.nodes
-            if node.target is operator.getitem and node.args[0] is maximum_node
+            if node.target is torch.ops.aten.squeeze.dim and node.args[0] is reduction
+        )
+        unsupported = nodes[torch.ops.aten.var.correction]
+        self.assertEqual(
+            normalized_nodes[view], FlexGemmNormalizedView(placeholder, (4, 4, 2))
         )
         self.assertEqual(
-            forms[getitem_node],
-            FlexGemmGetItemForm(maximum_node, getitem_node.args[1]),
+            normalized_nodes[reduction],
+            FlexGemmNormalizedReduction(view, [-1], True, None, "sum"),
         )
         self.assertEqual(
-            forms[nodes[torch.ops.aten.var.correction]],
-            FlexGemmUnsupportedReductionForm(
-                view_node,
+            normalized_nodes[squeeze], FlexGemmNormalizedSqueeze(reduction)
+        )
+        self.assertEqual(
+            normalized_nodes[getitem], FlexGemmNormalizedGetItem(maximum, 0)
+        )
+        self.assertEqual(
+            normalized_nodes[unsupported],
+            FlexGemmNormalizedUnsupportedReduction(
+                view,
                 str(torch.ops.aten.var.correction),
             ),
         )
         expected = {
-            torch.ops.aten.split.Tensor: FlexGemmSplitForm,
-            torch.ops.aten.select.int: FlexGemmSelectForm,
-            torch.ops.flex_gemm.nvfp4_pack.default: FlexGemmNVFP4PackForm,
-            torch.ops.flex_gemm.to_blocked.default: FlexGemmToBlockedForm,
+            torch.ops.aten.split.Tensor: FlexGemmNormalizedSplit,
+            torch.ops.aten.select.int: FlexGemmNormalizedSelect,
+            torch.ops.flex_gemm.nvfp4_pack.default: FlexGemmNormalizedNVFP4Pack,
+            torch.ops.flex_gemm.to_blocked.default: FlexGemmNormalizedToBlocked,
         }
-        for target, form_type in expected.items():
-            self.assertIsInstance(forms[nodes[target]], form_type)
+        for target, normalized_type in expected.items():
+            self.assertIsInstance(normalized_nodes[nodes[target]], normalized_type)
 
     def test_local_reduce_propagates_before_grouped_view_matching(self):
         from torch._inductor.kernel.flex_gemm.epilogue import (
@@ -1973,7 +1976,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
         match = FlexGemmLocalReduceMatch(aux, geometry)
-        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}, {}))
+        analysis = FlexGemmLocalReduceAnalysis(
+            FlexGemmEpilogueGraph(dependencies={}, normalized_nodes={})
+        )
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
@@ -3572,9 +3577,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("output_layout: dense", analysis_report)
         self.assertIn("config_constraints:\n  axis=N, group=32", analysis_report)
         self.assertNotIn("recognized_dataflow:", analysis_report)
-        self.assertNotIn("structural_forms:", analysis_report)
-        self.assertIn("structural_forms:\n  view: FlexGemmViewForm", analysis_details)
-        self.assertIn("sum_1: FlexGemmReductionForm", analysis_details)
+        self.assertNotIn("normalized_nodes:", analysis_report)
+        self.assertIn(
+            "normalized_nodes:\n  view: FlexGemmNormalizedView", analysis_details
+        )
+        self.assertIn("sum_1: FlexGemmNormalizedReduction", analysis_details)
         self.assertIn("grouped_layouts:\n  view:", analysis_details)
         self.assertIn("local_reduce_matches:\n  sum_1:", analysis_details)
         self.assertIn("grouped_select_indices:\n  (none)", analysis_details)
@@ -3624,7 +3631,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             format_flex_gemm_analysis(analysis),
         )
         details = format_flex_gemm_analysis_details(analysis)
-        self.assertIn("FlexGemmSelectForm", details)
+        self.assertIn("FlexGemmNormalizedSelect", details)
         self.assertIn("grouped_select_indices:", details)
         self.assertNotIn("grouped_select_indices:\n  (none)", details)
 
@@ -3647,7 +3654,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertIn(
-            "FlexGemmNVFP4PackForm", format_flex_gemm_analysis_details(analysis)
+            "FlexGemmNormalizedNVFP4Pack",
+            format_flex_gemm_analysis_details(analysis),
         )
 
     def test_to_blocked_debug_report(self):
@@ -3679,7 +3687,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "output_layout: blocked_128x4", format_flex_gemm_analysis(analysis)
         )
         self.assertIn(
-            "FlexGemmToBlockedForm", format_flex_gemm_analysis_details(analysis)
+            "FlexGemmNormalizedToBlocked",
+            format_flex_gemm_analysis_details(analysis),
         )
         lowering_plan = format_flex_gemm_lowering_plan(
             (4, 64),
@@ -3734,7 +3743,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("gemm_op: aten.mm.default", report)
         self.assertIn("outputs:\n  main: relu", report)
         self.assertIn("swap_ab_alignment: 8 elements", report)
-        self.assertNotIn("structural_forms:", report)
+        self.assertNotIn("normalized_nodes:", report)
         self.assertNotIn("GENERATED EPILOGUE", report)
         self.assertNotIn("CONFIG CANDIDATES", report)
         self.assertIn("\x1b[", report)
@@ -3758,7 +3767,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             verbose_report.index(phase) for phase in verbose_phases
         )
         self.assertEqual(verbose_positions, tuple(sorted(verbose_positions)))
-        self.assertIn("structural_forms:", verbose_report)
+        self.assertIn("normalized_nodes:", verbose_report)
         self.assertIn("@cute.jit", verbose_report)
         self.assertIn("candidate 0:", verbose_report)
 
