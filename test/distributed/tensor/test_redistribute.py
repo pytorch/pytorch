@@ -45,8 +45,8 @@ from torch.distributed.tensor._redistribute import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -3158,6 +3158,7 @@ DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
     base_class=LocalDTensorContinuousTestBase,
 )
 
+
 class _CollectiveDtypeTracer(torch.utils._python_dispatch.TorchDispatchMode):
     """Records the dtype of the first tensor argument for each _c10d_functional op."""
 
@@ -3242,7 +3243,9 @@ class RedistributeBackwardDtypeTest(TestCase):
 
 
 instantiate_device_type_tests(MultiDimRedistributeTest, globals(), except_for="cpu")
-instantiate_device_type_tests(DistributeWithDeviceOrderTest, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    DistributeWithDeviceOrderTest, globals(), except_for="cpu"
+)
 instantiate_device_type_tests(
     DistributeWithStridedShardTest, globals(), except_for="cpu"
 )
