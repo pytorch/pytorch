@@ -568,6 +568,7 @@ def checkpoint(
             determinism_check=determinism_check,
             debug=debug,
             early_stop=early_stop,
+            respect_saved_tensors_hooks=respect_saved_tensors_hooks,
         )
 
     return _checkpoint_impl(
@@ -580,6 +581,7 @@ def checkpoint(
         determinism_check=determinism_check,
         debug=debug,
         early_stop=early_stop,
+        respect_saved_tensors_hooks=respect_saved_tensors_hooks,
     )
 
 
@@ -594,6 +596,7 @@ def _checkpoint_impl(
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     early_stop: bool = True,
+    respect_saved_tensors_hooks: bool | None = None,
 ):
     preserve = preserve_rng_state
 
