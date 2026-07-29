@@ -384,11 +384,6 @@ class BaseBuiltinVariable(VariableTracker):
             self, name, py_type=type(attr) if attr is not None else None, source=source
         )
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
-
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
