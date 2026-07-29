@@ -299,7 +299,7 @@ struct ChunkDatasetOptions {
 };
 
 /// A stateful dataset that support hierarchical sampling and prefetching of
-/// entre chunks.
+/// entire chunks.
 ///
 /// Unlike regular dataset, chunk dataset require two samplers to operate and
 /// keeps an internal state. `ChunkSampler` selects, which chunk to load next,

@@ -101,19 +101,19 @@ class DistConvolutionOpsTest(DTensorTestBase):
         bias_mse_rel = torch.mean(bias_diff_rel * bias_diff_rel).item()
         self.assertTrue(
             weight_mse_abs <= 1e-6,
-            f"Too large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
         )
         self.assertTrue(
             bias_mse_abs <= 1e-6,
-            f"Too large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
         )
         self.assertTrue(
             weight_mse_rel <= 1e-6,
-            f"Too large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
         )
         self.assertTrue(
             bias_mse_rel <= 1e-6,
-            f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
 
     # TODO: test_depthwise_convolution is broken in CI with gloo backend.
@@ -171,19 +171,19 @@ class DistConvolutionOpsTest(DTensorTestBase):
         bias_mse_rel = torch.mean(bias_diff_rel * bias_diff_rel).item()
         self.assertTrue(
             weight_mse_abs <= 1e-6,
-            f"Too large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
         )
         self.assertTrue(
             bias_mse_abs <= 1e-6,
-            f"Too large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
+            lambda msg: f"{msg}\nToo large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
         )
         self.assertTrue(
             weight_mse_rel <= 1e-6,
-            f"Too large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
         )
         self.assertTrue(
             bias_mse_rel <= 1e-6,
-            f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
+            lambda msg: f"{msg}\nToo large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
 
     @with_comms

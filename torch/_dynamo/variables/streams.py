@@ -336,7 +336,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
         self.stream = stream
         super().__init__(
-            target_values={"stream": self.get_stream().user_object_index},
+            annotation={"stream": self.get_stream().user_object_index},
             initial_values=None,
             **kwargs,
         )
@@ -633,7 +633,7 @@ class EventVariable(VariableTracker):
         return object_richcompare(self, tx, other, op)
 
     def python_type(self) -> type:
-        return torch.Event
+        return type(self.value)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
