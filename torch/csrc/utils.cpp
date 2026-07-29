@@ -277,7 +277,7 @@ namespace torch::gdb {
  */
 
 // This is a helper needed by the torch-tensor-repr gdb command.
-// Return an human-readable representation of the given Tensor. The resulting
+// Return a human-readable representation of the given Tensor. The resulting
 // string is stored into a malloc()ed buffer. The caller is responsible to
 // free() it. We use malloc() instead of new[] because it's much easier to
 // call free than delete[] from within gdb.

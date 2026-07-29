@@ -3,7 +3,7 @@
 import unittest
 
 import onnx_test_common
-import onnxruntime  # noqa: F401
+import onnxruntime
 import parameterized
 from onnx_test_common import MAX_ONNX_OPSET_VERSION, MIN_ONNX_OPSET_VERSION
 from pytorch_test_common import (
@@ -26,6 +26,14 @@ from torch.testing._internal import common_utils
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
+    ort_backend = "CUDAExecutionProvider"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if cls.ort_backend not in onnxruntime.get_available_providers():
+            raise unittest.SkipTest(f"onnxruntime {cls.ort_backend} is not available")
+
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfNoCuda
     def test_gelu_fp16(self):

@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #ifdef USE_KINETO
+#include <MetadataFieldCatalog.h>
 #include <libkineto.h>
 #endif
 
@@ -989,7 +990,10 @@ void passEventsToKineto(
 
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
-      addMetadata(activity, indexKey, std::to_string(i));
+#ifdef USE_KINETO
+      activity->addMetadata(
+          libkineto::GenericMetadataFields::kEvIdx, static_cast<int64_t>(i));
+#endif
 
       // In the normal (synchronous) path, kineto_activity_ is set later
       // by TransferEvents::reassociate(). For global (async) profiling
