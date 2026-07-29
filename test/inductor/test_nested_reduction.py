@@ -1989,7 +1989,7 @@ class _InternalsBase:
 
     def test_nested_kernel_disables_cooperative_reduction(self):
         if self.force_persistent_outer_reduction is False:
-            return
+            self.skipTest("cooperative reduction only applies to persistent kernels")
 
         class _CooperativeChoices(InductorChoices):
             @staticmethod
