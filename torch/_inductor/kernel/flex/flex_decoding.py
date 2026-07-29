@@ -418,6 +418,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
                         cur_kernel_options["V_HEAD_DIM_ROUNDED"],
                     ),
                 ],
+                add_guards=True,
             )
 
         # Add ROCm-specific parameters if they exist in the config

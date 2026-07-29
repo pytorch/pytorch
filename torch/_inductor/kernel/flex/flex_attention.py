@@ -506,6 +506,7 @@ def flex_attention(
                         cur_kernel_options["V_HEAD_DIM_ROUNDED"],
                     ),
                 ],
+                add_guards=True,
             )
 
         # Blocksparse options

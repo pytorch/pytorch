@@ -2270,6 +2270,7 @@ def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
 def use_flex_tdm_descriptor(
     *matrices: IRNode,
     block_shapes: Sequence[Sequence[sympy.Expr | int]] | None = None,
+    add_guards: bool = False,
 ) -> bool:
     """Return whether flex operands satisfy TDM descriptor and request constraints."""
     from .virtualized import V
@@ -2291,21 +2292,27 @@ def use_flex_tdm_descriptor(
         strides = mat.get_stride()
         if len(sizes) != 4 or len(strides) != 4:
             return False
-        if not _descriptor_shape_fits_in_int32(sizes):
+        if not _descriptor_shape_fits_in_int32(sizes, add_guards=add_guards):
             return False
         if mat.get_name() in V.graph.unaligned_buffers:
             return False
 
-        sizes_i = [
-            V.graph.sizevars.replace_backed_symbols_with_hints(size) for size in sizes
-        ]
-        strides_i = [
-            V.graph.sizevars.replace_backed_symbols_with_hints(stride)
-            for stride in strides
-        ]
-        offset = V.graph.sizevars.replace_backed_symbols_with_hints(
-            mat.get_layout().offset
-        )
+        if add_guards:
+            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
+            strides_i = V.graph.sizevars.guard_int_seq(strides)
+            offset = V.graph.sizevars.guard_int(mat.get_layout().offset)
+        else:
+            sizes_i = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(size)
+                for size in sizes
+            ]
+            strides_i = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(stride)
+                for stride in strides
+            ]
+            offset = V.graph.sizevars.replace_backed_symbols_with_hints(
+                mat.get_layout().offset
+            )
         itemsize = mat.get_dtype().itemsize
 
         def aligned(expr: sympy.Expr, alignment: int) -> bool:
@@ -2325,7 +2332,7 @@ def use_flex_tdm_descriptor(
         if block_shape:
             if len(block_shape) != 2:
                 return False
-            if not _descriptor_shape_fits_in_int32(block_shape):
+            if not _descriptor_shape_fits_in_int32(block_shape, add_guards=add_guards):
                 return False
             if not aligned(block_shape[-1] * itemsize, TMA_ALIGNMENT):
                 return False
