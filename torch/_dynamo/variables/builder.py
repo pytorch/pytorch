@@ -60,6 +60,7 @@ from torch._dynamo.utils import (
     normalize_count_iter,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -162,6 +163,7 @@ from ..source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -261,11 +263,11 @@ from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
-    CallMethodVariable,
     ComptimeVariable,
     ConstantLikeVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
+    GetAttrVariable,
     IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
@@ -1479,12 +1481,13 @@ class VariableBuilder:
                     GuardBuilder.CLOSURE_MATCH
                 )
             )
-            return CallMethodVariable(
+            return GetAttrVariable(
                 AutogradFunctionVariable(
                     value.__self__,
                     source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
+                py_type=type(value),
             )
         elif (
             isinstance(value, types.MethodType)
@@ -1502,13 +1505,18 @@ class VariableBuilder:
             random_self = value.__self__
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
-            return CallMethodVariable(obj_vt, value.__name__)
+            return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
         elif (
             isinstance(value, types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
             and value in UserDefinedObjectVariable._supported_random_functions()
         ):
+            # Module-level random.random is a C builtin method bound to the
+            # module-global random.Random instance (unlike randint/randrange/
+            # uniform, which are Python-level methods). Route it through
+            # UserDefinedObjectVariable so its call_random_fn / RandomValueSource
+            # path models the RNG value instead of skipping into the C builtin.
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedObjectVariable(value, source=self.source)
         elif isinstance(value, torch._C._ImperativeEngine):
@@ -1838,9 +1846,10 @@ class VariableBuilder:
             return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return CallMethodVariable(
+            return GetAttrVariable(
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
+                py_type=type(value),
             )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
@@ -3092,7 +3101,28 @@ class VariableBuilder:
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
         )
-        if not is_dtensor:
+
+        # An AsyncCollectiveTensor (ACT) flattens to a single inner tensor whose
+        # metadata mirrors the wrapper, and the AOTAutograd runtime wrapper
+        # unwraps ACT inputs before the compiled graph. So a graph traced on an
+        # ACT is equivalent to one traced on its resolved plain Tensor. Guard on
+        # the unwrapped inner tensor (via UnwrapCollectiveTensorSource) instead
+        # of the ACT-locked type/metadata guards, so the ACT class no longer
+        # forces a recompile when the runtime value alternates between an
+        # un-awaited ACT and an awaited Tensor. Type-introspecting code stays
+        # sound because observation sites reinstall the class guard on demand
+        # (see BuiltinVariable.call_isinstance and TensorVariable.var_getattr).
+        # Caveat: ACT-only member access (e.g. w.wait()) is not a class-observation
+        # channel and does not reinstall the guard, so such code reuses the
+        # ACT-traced graph for a resolved plain Tensor. It stays numerically
+        # correct (ACT desugars ops to the inner tensor), but a compiled region
+        # can succeed where eager would raise AttributeError on the plain Tensor;
+        # that only bites user code already broken in eager on the resolved input.
+        is_polymorphic_act = not is_dtensor and is_async_collective_tensor_type(
+            type(value)
+        )
+
+        if not is_dtensor and not is_polymorphic_act:
             # We guard on the _local_tensor and the _spec, and therefore we don't
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -3144,6 +3174,11 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+            elif is_polymorphic_act:
+                # Guard only on the unwrapped inner tensor (inner_source below).
+                # Installing no type/metadata guard on the ACT wrapper is what
+                # lets the resolved plain Tensor reuse this cache entry.
+                pass
             else:
                 self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
                 self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -3152,6 +3187,16 @@ class VariableBuilder:
                 )
 
             attrs, _ = value.__tensor_flatten__()
+            if is_polymorphic_act and attrs != ["elem"]:
+                # The unwrap accessor below assumes ACT's single inner tensor.
+                # Unreachable today (ACT always flattens to ["elem"]); if that
+                # ever changes we fail hard rather than misguard -- the wrapper's
+                # type/metadata guards were already skipped above, so there is no
+                # safe fallback left at this point.
+                raise RuntimeError(
+                    f"Expected AsyncCollectiveTensor to flatten to ['elem'], "
+                    f"got {attrs}"
+                )
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 # FakeScriptObject wraps the real opaque object during
@@ -3171,7 +3216,13 @@ class VariableBuilder:
                         "Only tensors and reference-type opaques are allowed "
                         "in tensor attrs."
                     )
-                inner_source = AttrSource(self.source, attr)
+                if is_polymorphic_act:
+                    # ACT flattens to the single attr "elem"; guard it through
+                    # an unwrap accessor so a plain Tensor at runtime (the
+                    # resolved collective) matches the same guard.
+                    inner_source = UnwrapCollectiveTensorSource(self.source)
+                else:
+                    inner_source = AttrSource(self.source, attr)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )
@@ -5064,7 +5115,7 @@ class SourcelessBuilder:
             # NamedTuple._make uses an alias of tuple.__new__
             # pyrefly: ignore[not-callable, bad-argument-count, missing-attribute]
             obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
-            return CallMethodVariable(obj, "__new__")
+            return GetAttrVariable(obj, "__new__", py_type=type(value))
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)
