@@ -803,7 +803,7 @@ def dynamo_timed(
 
     cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
-        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        wc_name = waitcounter_name_override or key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
@@ -1340,7 +1340,7 @@ def lazily_unpack(
     iterable: VariableTracker,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+    from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
@@ -1349,7 +1349,7 @@ def lazily_unpack(
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -2479,7 +2479,10 @@ class CleanupHook:
         # Make sure we're not shutting down
         if CleanupManager is not None:
             CleanupManager.count -= 1
-        del self.scope[self.name]
+        # During interpreter shutdown the scope's module __dict__ may already
+        # have been cleared, so the name can be gone. Use pop to avoid a
+        # KeyError surfacing as an "Exception ignored in weakref callback".
+        self.scope.pop(self.name, None)
 
     @staticmethod
     def create(scope: dict[str, Any], name: str, val: Any) -> CleanupHook:
@@ -2976,11 +2979,10 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
 def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
-    from .variables.lazy import ComputedLazyConstantVariable
 
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized() and not isinstance(arg, ComputedLazyConstantVariable):
+        if not arg.is_realized():
             # Find if the arg would be realized as SymNodeVariable later on. If yes,
             # realize it and specialize. Else return the arg.
 
@@ -3302,6 +3304,55 @@ def raise_args_mismatch(
         tx,
         args=[msg_str],
     )
+
+
+def check_positional(
+    tx: InstructionTranslatorBase,
+    funcname: str,
+    nargs: int,
+    min_args: int,
+    max_args: int,
+) -> None:
+    # Mirrors CPython _PyArg_CheckPositional (Python/getargs.c): enforce
+    # min_args <= nargs <= max_args with CPython's exact TypeError text. Used
+    # for METH_FASTCALL methods, whose positional count MethodFlags (derived
+    # from ml_flags) cannot check.
+    from torch._dynamo.exc import raise_type_error
+
+    if nargs < min_args:
+        rel = "" if min_args == max_args else "at least "
+        s = "" if min_args == 1 else "s"
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{min_args} argument{s}, got {nargs}"
+        )
+    if nargs > max_args:
+        rel = "" if min_args == max_args else "at most "
+        s = "" if max_args == 1 else "s"
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{max_args} argument{s}, got {nargs}"
+        )
+
+
+def no_positional(
+    tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoPositional (Python/getargs.c).
+    from torch._dynamo.exc import raise_type_error
+
+    if args:
+        raise_type_error(tx, f"{funcname}() takes no positional arguments")
+
+
+def no_keywords(
+    tx: InstructionTranslatorBase, funcname: str, kwargs: dict[str, VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoKeywords / _PyArg_NoKwnames (Python/getargs.c).
+    # For methods reached via tp_methods, MethodFlags already rejects kwargs;
+    # use this only where MethodFlags does not run (e.g. tp_init constructors).
+    from torch._dynamo.exc import raise_type_error
+
+    if kwargs:
+        raise_type_error(tx, f"{funcname}() takes no keyword arguments")
 
 
 def iter_contains(
