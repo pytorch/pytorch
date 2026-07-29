@@ -16,6 +16,7 @@
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/distributed/c10d/NCCLCommRegistrationHook.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -40,6 +41,14 @@ void checkSameDtype(
 }
 
 } // namespace
+
+ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
+  ncclConfig_t clone = config;
+  if (clone.netName != nullptr) {
+    clone.netName = strdup(clone.netName);
+  }
+  return clone;
+}
 
 ncclResult_t NCCLException::getResult() const noexcept {
   return result_;
@@ -76,8 +85,11 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
     // Abort the NCCL communicator since we can't do a clean finalization
     // Note: We don't call the full abortNcclComm() to avoid potential abort()
-    // calls from options_.abort_process_on_timeout_or_error
+    // calls from abort_process_on_timeout_or_error_
     if (nccl_comm_) {
+      // Drop our symmetric-memory registration while nccl_comm_ is still valid
+      // (it is nulled below, before detachMemoryHook runs).
+      retireComm();
       // Best effort to abort the communicator - ignore errors since we're
       // in the destructor
       if (nccl_api_) {
@@ -118,7 +130,7 @@ void ProcessGroupNCCL::init(at::Device device) {
     device_ = bootstrap->getDevice();
 
     if (nccl_comm_ == nullptr) {
-      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->hints);
+      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->config);
     }
   }
 
@@ -150,10 +162,6 @@ void ProcessGroupNCCL::initNcclResources() {
   }
 
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
-  if (auto it = options_c10d_->hints.find(std::string(kHintMaxEventPoolSize));
-      it != options_c10d_->hints.end()) {
-    max_event_pool_size_ = static_cast<size_t>(std::stoull(it->second));
-  }
 
   NCCL_CHECK(
       nccl_api_,
@@ -172,6 +180,7 @@ void ProcessGroupNCCL::initNcclResources() {
   }
 
   attachMemoryHook();
+  publishComm();
 }
 
 void ProcessGroupNCCL::abort() {
@@ -302,6 +311,7 @@ void ProcessGroupNCCL::finalize() {
   // is skipped. We must not call commDestroy after commAbort per NCCL docs.
   if (nccl_comm_) {
     detachMemoryHook();
+    retireComm();
     // Deregister comm from the CachingAllocator
     NCCL_CHECK(
         nccl_api_,
@@ -314,6 +324,7 @@ void ProcessGroupNCCL::finalize() {
 
 void ProcessGroupNCCL::abortNcclComm() {
   detachMemoryHook();
+  retireComm();
   if (nccl_comm_) {
     NCCL_CHECK(
         nccl_api_,
@@ -324,7 +335,7 @@ void ProcessGroupNCCL::abortNcclComm() {
   }
   // Never abort the process in reconfigurable mode: callers fall back to
   // revoke + throw so the failure can be handled by reconfiguring.
-  if (options_c10d_->abort_process_on_timeout_or_error &&
+  if (abort_process_on_timeout_or_error_ &&
       !options_c10d_->enable_reconfigure) {
     TC_LOG(ERROR, this) << "Aborting process due to timeout";
     runAbortHooks();
@@ -343,6 +354,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   TC_LOG(INFO, this) << "Calling abort hooks before commRevoke.";
   runAbortHooks();
   detachMemoryHook();
+  retireComm();
   if (nccl_comm_) {
     // Best-effort: this may run on the timeout watchdog thread, so log instead
     // of throwing on failure (the communicator is already being torn down).
@@ -353,6 +365,16 @@ void ProcessGroupNCCL::revokeNcclComm() {
 
 int64_t ProcessGroupNCCL::getCommPtr() const {
   return reinterpret_cast<int64_t>(nccl_comm_);
+}
+
+void ProcessGroupNCCL::publishComm() {
+  ::c10d::publishNCCLComm(
+      getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
+}
+
+void ProcessGroupNCCL::retireComm() {
+  ::c10d::retireNCCLComm(
+      getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
 }
 
 // Point-to-Point Operations
@@ -1264,6 +1286,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   TracingGuard tracingGuard(name_, comm_size_, "barrier", rank_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout);
+
+  // A synchronous barrier host-blocks the CPU thread in synchronizeInternal(),
+  // matching stock ProcessGroupNCCL; async barriers stay stream-ordered.
+  work->hostBlocking_ = !async_op;
 
   // Record start event before NCCL operation
   work->recordStart("barrier");
