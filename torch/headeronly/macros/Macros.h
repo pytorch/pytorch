@@ -123,6 +123,15 @@
 #define C10_HAS_CPP_ATTRIBUTE(x) (0)
 #endif
 
+/// Bind a returned reference/pointer's lifetime to a parameter (or *this) so
+/// Clang can warn when it would dangle. Expands to nothing on compilers that
+/// lack the attribute (e.g. non-clang, older nvcc).
+#if C10_HAS_CPP_ATTRIBUTE(clang::lifetimebound)
+#define C10_LIFETIMEBOUND [[clang::lifetimebound]]
+#else
+#define C10_LIFETIMEBOUND
+#endif
+
 #ifndef FBCODE_CAFFE2
 /// DEPRECATED: Warn if a type or return value is discarded.
 #define C10_NODISCARD [[nodiscard]]
