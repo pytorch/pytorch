@@ -12,11 +12,14 @@ import dataclasses
 import enum
 
 from torch._C._dynamo import (
+    get_tp_flags,
     get_type_slots,
     has_slot,
+    has_tp_flag,
     PyMappingSlots,
     PyNumberSlots,
     PySequenceSlots,
+    PyTypeFlags,
     PyTypeSlots,
 )
 from torch._dynamo.test_case import run_tests, TestCase
@@ -321,6 +324,58 @@ class TestTypeSlots(TestCase):
                 has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
                 lambda msg: f"{msg}\n{t.__name__} should have mp_subscript",
             )
+
+
+class TestTypeFlags(TestCase):
+    """Test suite for type flag detection (managed dict / instance __dict__)."""
+
+    def _has_dict(self, t):
+        # Mirrors CPython _PyObject_GetDictPtr: managed-dict flag or nonzero
+        # tp_dictoffset.
+        return (
+            has_tp_flag(get_tp_flags(t), PyTypeFlags.MANAGED_DICT)
+            or t.__dictoffset__ != 0
+        )
+
+    def test_builtin_bases_have_no_dict(self):
+        for t in [object, int, float, str, bytes, tuple, list, dict, set]:
+            self.assertFalse(self._has_dict(t), f"{t.__name__} should have no dict")
+
+    def test_slots_class_has_no_dict(self):
+        class SlotsCls:
+            __slots__ = ("a",)
+
+        self.assertFalse(has_tp_flag(get_tp_flags(SlotsCls), PyTypeFlags.MANAGED_DICT))
+        self.assertFalse(self._has_dict(SlotsCls))
+
+    def test_python_class_has_managed_dict(self):
+        class PyCls:
+            pass
+
+        self.assertTrue(has_tp_flag(get_tp_flags(PyCls), PyTypeFlags.MANAGED_DICT))
+        self.assertTrue(self._has_dict(PyCls))
+
+    def test_c_base_subclass_has_managed_dict(self):
+        # Subclassing a C base in Python adds a managed __dict__.
+        class MyBytes(bytes):
+            pass
+
+        self.assertTrue(has_tp_flag(get_tp_flags(MyBytes), PyTypeFlags.MANAGED_DICT))
+        self.assertTrue(self._has_dict(MyBytes))
+
+    def test_legacy_dictoffset_has_dict(self):
+        # BaseException carries a __dict__ via nonzero tp_dictoffset, not the flag.
+        self.assertFalse(
+            has_tp_flag(get_tp_flags(BaseException), PyTypeFlags.MANAGED_DICT)
+        )
+        self.assertTrue(self._has_dict(BaseException))
+
+    def test_get_tp_flags_accepts_instance(self):
+        # Like get_type_slots, accepts either a type or an instance.
+        class PyCls:
+            pass
+
+        self.assertEqual(get_tp_flags(PyCls), get_tp_flags(PyCls()))
 
 
 if __name__ == "__main__":
