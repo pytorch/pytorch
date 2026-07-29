@@ -180,6 +180,11 @@ def check_node_safe(node: Node) -> None:
         "torch.amp.autocast_mode._exit_autocast",
         "torch.autograd.grad_mode._enter_inference_mode",
         "torch.autograd.grad_mode._exit_inference_mode",
+        # torch.tensor(data) with a data-dependent scalar in `data` traces a raw
+        # torch._refs.tensor node instead of decomposing. Its behavior is fully
+        # determined by its args (the data list), which are in the graph and
+        # hashed into the cache key. See #191106.
+        "torch._refs.tensor",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
