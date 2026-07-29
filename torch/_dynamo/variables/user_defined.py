@@ -2100,10 +2100,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(None)
         source = self.get_source_by_walking_mro(tx, name) if self.source else None
 
-        if isinstance(
+        # C slot wrapper / C method as a dunder: no Python body to trace.
+        # pybind11 exposes methods as CPython instancemethods wrapping a builtin
+        # function (e.g. ScriptDict.__repr__); those are equally untraceable,
+        # detected by a __func__ that is not a Python function.
+        is_c_special_method = isinstance(
             type_attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
-        ):
-            # C slot wrapper / C method as a dunder: no Python body to trace.
+        ) or (
+            torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            and not isinstance(
+                inspect.getattr_static(type_attr, "__func__", None), types.FunctionType
+            )
+        )
+        if is_c_special_method:
             if not (
                 self._base_vt is not None
                 and self._base_methods is not None
