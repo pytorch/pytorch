@@ -2681,6 +2681,26 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_function(self):
         return getattr(self.wrapper_obj, self.attr_to_trace)
 
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # self.source denotes the wrapper, not the inline target reached via
+        # attr_to_trace. Resolve instance-dict attrs (e.g. functools.wraps'
+        # __wrapped__) against the wrapper so the built value matches the source;
+        # the base impl reflects on get_function() (the inline target), which
+        # would pair the inline target's value with the wrapper's source and
+        # yield a self-inconsistent guard (issue: swap/getfullargspec repro).
+        wrapper_dict = getattr(self.wrapper_obj, "__dict__", None)
+        if not wrapper_dict or name not in wrapper_dict:
+            return None
+        source = self.get_source()
+        source = AttrSource(source, name) if source is not None else None
+        if source is not None:
+            return variables.LazyVariableTracker.create(
+                wrapper_dict[name], source, tx=tx
+            )
+        return VariableTracker.build(tx, wrapper_dict[name])
+
     def self_args(self) -> list[VariableTracker]:
         return []
 
@@ -4150,6 +4170,22 @@ class MethodWrapperVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.MethodWrapperType
+
+    # A method-wrapper's own dunders come from the descriptor / bound obj and do
+    # not depend on obj's contents. Resolving them via these tables (consulted
+    # before the generic getset-descriptor path) avoids forcing self.obj to a
+    # python constant, which would break e.g. a list holding non-constant items.
+    tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__name__)
+        ),
+        "__qualname__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__qualname__)
+        ),
+    }
+    tp_members = {
+        "__self__": Member(lambda s, tx: s.obj),
+    }
 
     def get_real_python_backed_value(self) -> types.MethodWrapperType:
         return self.as_python_constant()
