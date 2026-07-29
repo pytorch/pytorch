@@ -1,11 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 
+import argparse
 import copy
+import gc
 import math
+import os
+import pickle
+import tempfile
 from typing import Any
 
 from torch.distributed.flight_recorder.components.builder import build_db
 from torch.distributed.flight_recorder.components.config_manager import JobConfig
+from torch.distributed.flight_recorder.components.loader import read_dir
 from torch.distributed.flight_recorder.components.types import (
     COLLECTIVES,
     MatchInfo,
@@ -424,6 +430,38 @@ class FlightRecorderE2ETest(TestCase):
         self.assertEqual(db.collectives[1].collective_name, "nccl:_reduce_oop")
         self.assertEqual(db.collectives[1].record_id, 1)
         self.assertEqual(db.collectives[1].pass_check, True)
+
+
+class FlightRecorderLoaderGCTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        was_enabled = gc.isenabled()
+        self.addCleanup(gc.enable if was_enabled else gc.disable)
+
+    def _write_trace_dir(self, tmpdir):
+        dump = {"entries": [], "version": "2.4", "pg_config": {}}
+        with open(os.path.join(tmpdir, "trace_0"), "wb") as f:
+            pickle.dump(dump, f)
+        return argparse.Namespace(trace_dir=tmpdir, prefix="trace_")
+
+    def test_gc_restored_on_success(self):
+        gc.enable()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            read_dir(self._write_trace_dir(tmpdir))
+        self.assertTrue(gc.isenabled())
+
+    def test_gc_restored_on_failure(self):
+        gc.enable()
+        args = argparse.Namespace(trace_dir="/does/not/exist", prefix=None)
+        with self.assertRaises(AssertionError):
+            read_dir(args)
+        self.assertTrue(gc.isenabled())
+
+    def test_gc_left_disabled_when_caller_disabled_it(self):
+        gc.disable()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            read_dir(self._write_trace_dir(tmpdir))
+        self.assertFalse(gc.isenabled())
 
 
 if __name__ == "__main__":
