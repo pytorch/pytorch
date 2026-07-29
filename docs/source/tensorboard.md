@@ -10,7 +10,7 @@ Before going further, more details on TensorBoard can be found at
 Once you've installed TensorBoard, these utilities let you log PyTorch models
 and metrics into a directory for visualization within the TensorBoard UI.
 Scalars, images, histograms, graphs, and embedding visualizations are all
-supported for PyTorch models and tensors as well as Caffe2 nets and blobs.
+supported for PyTorch models and tensors.
 
 The SummaryWriter class is your main entry to log data for consumption
 and visualization by TensorBoard. For example:

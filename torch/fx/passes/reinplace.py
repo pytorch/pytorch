@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -108,9 +108,9 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
         if "view_of" in node.meta:
             # We're linking the current node with its first argument as views.
             # Assert here that this is actually the case, and their storages are the same.
-            if not isinstance(node.meta["fake_result"], FakeTensor):
+            if not is_fake_tensor(node.meta["fake_result"]):
                 raise AssertionError("Expected FakeTensor in fake_result")
-            if not isinstance(node.meta["view_of"].meta["fake_result"], FakeTensor):
+            if not is_fake_tensor(node.meta["view_of"].meta["fake_result"]):
                 raise AssertionError("Expected FakeTensor in view_of fake_result")
             view_storage = StorageWeakRef(node.meta["fake_result"]._typed_storage())
             base_storage = StorageWeakRef(
@@ -212,7 +212,7 @@ _VIEW_INVERSE_MAP: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {
 # in the node ordering.
 def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int) -> set[Node]:
     def _add_if_tensor(x: object, set_: set[StorageWeakRef]) -> None:
-        if isinstance(x, FakeTensor):
+        if is_fake_tensor(x):
             set_.add(StorageWeakRef(x._typed_storage()))
 
     nodes_used_after = set()
@@ -262,13 +262,15 @@ def _get_view_inverse_node_usages(
         mutated_view = n.args[1]
         if not isinstance(base, Node):
             raise AssertionError(f"Expected Node for base, got {type(base)}")
-        if not isinstance(base.meta["fake_result"], FakeTensor):
+        if not isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            base.meta["fake_result"], FakeTensor
+        ):
             raise AssertionError("Expected FakeTensor in base.meta['fake_result']")
         if not isinstance(mutated_view, Node):
             raise AssertionError(
                 f"Expected Node for mutated_view, got {type(mutated_view)}"
             )
-        if not isinstance(mutated_view.meta["fake_result"], FakeTensor):
+        if not is_fake_tensor(mutated_view.meta["fake_result"]):
             raise AssertionError(
                 "Expected FakeTensor in mutated_view.meta['fake_result']"
             )
@@ -529,7 +531,7 @@ def reinplace(gm: torch.fx.GraphModule, *sample_args: Any) -> torch.fx.GraphModu
 
     # Useful debug printing
     # def _print(x):
-    # if isinstance(x, FakeTensor):
+    # if is_fake_tensor(x):
     # print(f'fake_result: {StorageWeakRef(x._typed_storage()).cdata}')
 
     # for n in gm.graph.nodes:
@@ -561,7 +563,7 @@ def reinplace(gm: torch.fx.GraphModule, *sample_args: Any) -> torch.fx.GraphModu
         if "fake_result" in n.meta:
             # Tree-mapping because some ops can return lists of tensors.
             def _add_to_map(x: object) -> None:
-                if isinstance(x, FakeTensor):
+                if is_fake_tensor(x):
                     storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
 
             pytree.tree_map_(_add_to_map, n.meta["fake_result"])
@@ -747,12 +749,12 @@ def reinplace(gm: torch.fx.GraphModule, *sample_args: Any) -> torch.fx.GraphModu
                     old_res_storage = {
                         StorageWeakRef(x._typed_storage())
                         for x in old_flattened_res
-                        if isinstance(x, FakeTensor)
+                        if is_fake_tensor(x)
                     }
                     node_res_storage = {
                         StorageWeakRef(x._typed_storage())
                         for x in node_flattened_res
-                        if isinstance(x, FakeTensor)
+                        if is_fake_tensor(x)
                     }
 
                     # This will happen if we're updating a view op, e.g.
@@ -775,7 +777,7 @@ def reinplace(gm: torch.fx.GraphModule, *sample_args: Any) -> torch.fx.GraphModu
                         new_res_storage = {
                             StorageWeakRef(x._typed_storage())
                             for x in new_flattened_res
-                            if isinstance(x, FakeTensor)
+                            if is_fake_tensor(x)
                         }
                         if len(new_res_storage) != 1:
                             raise AssertionError(

@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -31,8 +32,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -90,6 +89,11 @@ class TORCH_API CuptiMonitorBuffers {
   // Block until a completed buffer is available or shutdown() is called.
   // Callers must release the GIL before calling this.
   std::optional<CompletedCuptiBuffer> get_completed();
+  // Like get_completed(), but waits at most `timeout` -- returns nullopt on
+  // timeout as well as on shutdown. Lets the decode thread wake on a flush
+  // cadence. Callers must release the GIL before calling this.
+  std::optional<CompletedCuptiBuffer> get_completed_for(
+      std::chrono::nanoseconds timeout);
 
   void return_buffer(uint8_t* ptr);
   size_t pending_count();
@@ -99,6 +103,8 @@ class TORCH_API CuptiMonitorBuffers {
 
  private:
   CuptiMonitorBuffers() = default;
+  // Pop the front completed buffer (nullopt if none). Caller holds mutex_.
+  std::optional<CompletedCuptiBuffer> pop_completed_locked();
 
   std::mutex mutex_;
   std::condition_variable cv_;
@@ -148,24 +154,21 @@ class TORCH_API CuptiMonitorDecoder {
   // SYNCHRONIZATION record + its END field so the decoder can track the max
   // sync timestamp for flush(sync) (the native analog of the old Python
   // _advance_decoded_clock); 0 disables it.
+  //
+  // When self_flush is true the decode thread also drives the periodic plain
+  // flush itself -- calling cuptiActivityFlushAll(0) (completed buffers only)
+  // through flush_fn (the function's address, passed from Python like
+  // get_next_record_fn) every flush_period_ns -- so no separate flush thread is
+  // needed. self_flush false disables it (the caller drives flush()).
   void configure(
       uintptr_t subscriber,
       uintptr_t get_next_record_fn,
       uint32_t fence_kind,
-      int fence_end_field);
+      int fence_end_field,
+      bool self_flush,
+      uint64_t flush_period_ns,
+      uintptr_t flush_fn);
 
-  // Drop noisy RUNTIME/DRIVER records by cbid during decode, so the noise (e.g.
-  // cudaGetDevice / cuDevicePrimaryCtxGetState) never reaches the columns.
-  // CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under user-defined
-  // records, so it is done here. ``cbid_field_id`` is the field carrying the
-  // cbid; ``filters`` maps a kind to (keep_mode, cbids): keep_mode true keeps
-  // only the listed cbids (the driver allowlist), false drops the listed cbids
-  // (the runtime blocklist).
-  void set_cbid_filter(
-      int cbid_field_id,
-      std::unordered_map<
-          uint32_t,
-          std::pair<bool, std::unordered_set<uint32_t>>> filters);
   void start();
   void stop();
 
@@ -215,12 +218,12 @@ class TORCH_API CuptiMonitorDecoder {
   uintptr_t get_next_record_fn_ = 0;
   uint32_t fence_kind_ = 0;
   int fence_end_field_ = -1;
-  // Noisy-cbid filter (see set_cbid_filter): the field carrying the cbid and,
-  // per kind, (keep_mode, cbids). Read-only during decode after configure, so
-  // unguarded.
-  int cbid_field_id_ = -1;
-  std::unordered_map<uint32_t, std::pair<bool, std::unordered_set<uint32_t>>>
-      cbid_filters_;
+  // Whether the decode thread drives the periodic cuptiActivityFlushAll(0)
+  // itself, the plain-flush cadence it uses, and the address of
+  // cuptiActivityFlushAll (from Python, so this file needs no libcupti link).
+  bool self_flush_ = false;
+  uint64_t flush_period_ns_ = 0;
+  uintptr_t flush_fn_ = 0;
 };
 
 // Process-global store of per-annotation metadata. A producer on the training

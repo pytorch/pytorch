@@ -31,7 +31,6 @@ from torch.utils import _pytree as pytree
 # following are failing with regular torch.export.export
 export_failures = {
     xfail("allclose"),
-    xfail("combinations"),
     xfail("corrcoef"),
     xfail("cov"),
     xfail("equal"),
@@ -39,13 +38,11 @@ export_failures = {
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("sparse.sampled_addmm"),
     xfail("tensor_split"),
 }
 
 # following are failing fake export on cuda device
 fake_export_failures = {
-    xfail("geqrf"),
     xfail("histogram"),
     xfail("masked.amax"),
     xfail("masked.amin"),
@@ -58,15 +55,19 @@ fake_export_failures = {
     xfail("masked.std"),
     xfail("masked.sum"),
     xfail("masked.var"),
-    xfail("nn.functional.grid_sample"),
-    xfail("to_sparse"),
-    # following are failing due to OptionalDeviceGuard
-    xfail("__getitem__"),
-    xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nonzero"),
 }
+
+# These pass with CUDA enabled but still fail fake CUDA export on CPU-only builds.
+if not torch.backends.cuda.is_built():
+    fake_export_failures.add(xfail("geqrf"))
+    fake_export_failures.add(xfail("sparse.sampled_addmm"))
+    fake_export_failures.add(xfail("to_sparse"))
+    fake_export_failures.add(xfail("__getitem__"))
+    fake_export_failures.add(xfail("nn.functional.batch_norm"))
+    fake_export_failures.add(xfail("nn.functional.grid_sample"))
+    fake_export_failures.add(xfail("nn.functional.instance_norm"))
+    fake_export_failures.add(xfail("nn.functional.multi_margin_loss"))
+    fake_export_failures.add(xfail("nonzero"))
 
 fake_decomposition_failures = {
     xfail("linalg.matrix_rank"),

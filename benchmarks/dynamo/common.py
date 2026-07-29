@@ -4351,7 +4351,8 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         if (
-            args.training
+            torch.version.hip is not None
+            and args.training
             and args.only is not None
             and args.only
             in {
@@ -4360,13 +4361,14 @@ def run(runner, args, original_dir=None):
         ):
             # With the harness-wide fallback_random=True, inductor falls back
             # to ATen rng for the dropout decomposition. That fallback Philox
-            # path indexes randoms by flat element offset, whereas eager CUDA
+            # path indexes randoms by flat element offset, whereas eager ROCm
             # rng indexes by (thread_id, intra_thread_iter), so the two produce
             # different dropout masks for the same seed and trip DistillGPT2's
-            # tight accuracy tolerance (observed on gfx942). Setting
+            # tight accuracy tolerance (observed on ROCm/gfx942). Setting
             # fallback_random=False re-enables inductor's replace_random passes,
-            # which align the masks with eager. This is correct/harmless on
-            # other backends since it only changes how inductor lowers rng.
+            # which align the masks with eager on that backend. Leave CUDA on
+            # the default fallback path; the Triton RNG path is not
+            # eager-equivalent there and regresses A100 DistillGPT2 accuracy.
             inductor_config.fallback_random = False
 
         # Some models e.g. yolov3 assert batch size on n_gpus

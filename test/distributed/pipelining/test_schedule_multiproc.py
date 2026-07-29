@@ -1034,7 +1034,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.assertIn(
                     stage_idx,
                     stage_indices,
-                    f"Callback called for stage {stage_idx} not on rank {self.rank}",
+                    lambda msg: f"{msg}\nCallback called for stage {stage_idx} not on rank {self.rank}",
                 )
 
         # Check gradients using helper method

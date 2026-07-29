@@ -229,7 +229,14 @@ class RowReduce(ReductionBase):
         # keeps the occupancy-friendly small tpr.
         vec = math.gcd(self.N, 128 // self.dtype.width)
         even = self.N % (vec * tpr) == 0
-        return tpr if even else nt
+        tpr = tpr if even else nt
+        # Floor at ONE WARP. The ladder's small-N rungs give tpr 8/16, but the
+        # cross-thread reduce below divides by warps_per_row = tpr // WARP, which
+        # floors to 0 for a sub-warp tpr -> ZeroDivisionError at trace time (a hard
+        # user-facing crash, not a fallback: x.sum(dim=1) died for N=32/64/128).
+        # A sub-warp tpr cannot work anyway -- warp_reduce shuffles across a full
+        # warp, so a partial warp would fold lanes belonging to other rows.
+        return max(tpr, WARP)
 
     @cute.jit
     def __call__(self, mX: cute.Tensor, mOuts: list, stream: cuda.CUstream):
