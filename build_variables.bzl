@@ -956,6 +956,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/profiler_python.cpp",
     "torch/csrc/autograd/python_anomaly_mode.cpp",
+    "torch/csrc/autograd/python_node_creation_hook.cpp",
     "torch/csrc/autograd/python_saved_variable_hooks.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_engine.cpp",
@@ -1262,6 +1263,7 @@ aten_cpu_source_non_codegen_list = [
     # has limited use and hence does not seem to really make sense.
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
+    "aten/src/ATen/NodeCreationHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
     "aten/src/ATen/native/prim_native_functions.cpp",
     "aten/src/ATen/native/verbose_wrapper.cpp",

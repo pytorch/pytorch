@@ -919,7 +919,7 @@ class OrderedDictVariable(ConstDictVariable):
         # popitem(last=) handler.
         method = self.lookup_tp_method(name)
         if method is not None:
-            result = method.invoke(self, tx, name, args, kwargs)
+            result = method(self, tx, name, args, kwargs)
             if result is not None:
                 return result
         return super().call_method(tx, name, args, kwargs)
