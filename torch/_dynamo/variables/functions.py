@@ -1326,9 +1326,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
@@ -3058,7 +3056,6 @@ class FunctoolsPartialVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        # functools.partial uses slots, so attributes are constant
         return VariableTracker.build(tx, hasattr(functools.partial(identity), name))
 
     def getattro_impl(
@@ -3951,6 +3948,37 @@ class TritonSetAllocatorVariable(VariableTracker):
 # ---------------------------------------------------------------------------
 
 
+def _check_descriptor_obj_type(
+    tx: "InstructionTranslatorBase",
+    descriptor: types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.GetSetDescriptorType,
+    obj: "VariableTracker",
+) -> None:
+    """Check that obj's type is compatible with descriptor.__objclass__.
+
+    Mirrors CPython's descr_check which raises TypeError when a C descriptor
+    is bound to an object whose type is not a subtype of the descriptor's
+    __objclass__.
+
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L96
+    """
+    if obj is None:
+        return
+    try:
+        obj_type = obj.python_type()
+    except NotImplementedError:
+        return
+    if not issubclass(obj_type, descriptor.__objclass__):
+        raise_type_error(
+            tx,
+            f"descriptor '{descriptor.__name__}' for "
+            f"'{descriptor.__objclass__.__name__}' objects "
+            f"doesn't apply to a '{obj_type.__name__}' object",
+        )
+
+
 class WrapperDescriptorVariable(VariableTracker):
     """Unbound C slot wrapper (wrapper_descriptor on a type).
 
@@ -4021,6 +4049,7 @@ class WrapperDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
@@ -4039,6 +4068,7 @@ class WrapperDescriptorVariable(VariableTracker):
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4205,17 +4235,7 @@ class MethodDescriptorVariable(VariableTracker):
             )
         obj, *rest = args
         name = self.descriptor.__name__
-        try:
-            obj_type = obj.python_type()
-            if not issubclass(obj_type, self.descriptor.__objclass__):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for "
-                    f"'{self.descriptor.__objclass__.__name__}' objects "
-                    f"doesn't apply to a '{obj_type.__name__}' object",
-                )
-        except NotImplementedError:
-            pass
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses.
@@ -4231,6 +4251,7 @@ class MethodDescriptorVariable(VariableTracker):
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4532,6 +4553,7 @@ class MemberDescriptorVariable(VariableTracker):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
         attr_name = self.descriptor.__name__
@@ -4622,6 +4644,7 @@ class GetSetDescriptorVariable(VariableTracker):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to getattro_impl for
         # proxy-based VTs like TensorVariable.
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             from .object_protocol import _UnhandledDescriptorError
@@ -4629,6 +4652,18 @@ class GetSetDescriptorVariable(VariableTracker):
             raise _UnhandledDescriptorError(
                 f"Cannot resolve getset_descriptor '{attr_name}' "
                 f"on {type(obj).__name__}"
+            )
+        # _saved_* descriptors on autograd Nodes trigger checkpoint
+        # recomputation hooks when __get__ is called.  Graph-break
+        # instead of executing the side-effecting getter during tracing.
+        if attr_name.startswith("_saved_") and isinstance(
+            obj_value, torch.autograd.graph.Node
+        ):
+            from .object_protocol import _UnhandledDescriptorError
+
+            raise _UnhandledDescriptorError(
+                f"Cannot resolve _saved_* descriptor '{attr_name}' "
+                f"on autograd Node during tracing"
             )
         try:
             resolved = self.descriptor.__get__(obj_value, type(obj_value))
