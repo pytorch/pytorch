@@ -58,17 +58,17 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_tensorssa_group_size,
 )
 from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-    FlexGemmNormalizedGetItem,
-    FlexGemmNormalizedNode,
-    FlexGemmNormalizedNVFP4Pack,
-    FlexGemmNormalizedPrepareSoftmax,
-    FlexGemmNormalizedReduction,
-    FlexGemmNormalizedSelect,
-    FlexGemmNormalizedSplit,
-    FlexGemmNormalizedSqueeze,
-    FlexGemmNormalizedUnsupportedReduction,
-    FlexGemmNormalizedView,
     normalize_flex_gemm_epilogue_fx_node,
+    NormalizedGetItem,
+    NormalizedNode,
+    NormalizedNVFP4Pack,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSelect,
+    NormalizedSplit,
+    NormalizedSqueeze,
+    NormalizedUnsupportedReduction,
+    NormalizedView,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
@@ -345,7 +345,7 @@ class FlexGemmEpilogueGraph:
     """
 
     dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]]
-    normalized_nodes: dict[torch.fx.Node, FlexGemmNormalizedNode]
+    normalized_nodes: dict[torch.fx.Node, NormalizedNode]
 
     @classmethod
     def from_graph_module(
@@ -353,7 +353,7 @@ class FlexGemmEpilogueGraph:
     ) -> "FlexGemmEpilogueGraph":
         """Build transitive dependencies in the graph's topological order."""
         dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]] = {}
-        normalized_nodes: dict[torch.fx.Node, FlexGemmNormalizedNode] = {}
+        normalized_nodes: dict[torch.fx.Node, NormalizedNode] = {}
         for node in graph_module.graph.nodes:
             node_dependencies: OrderedSet[torch.fx.Node] = OrderedSet()
             for input_node in iter_fx_node_inputs((node.args, node.kwargs)):
@@ -412,34 +412,32 @@ class FlexGemmLocalReduceAnalysis:
         if node.op != "call_function":
             return
         normalized = self.graph.normalized_nodes.get(node)
-        if isinstance(normalized, FlexGemmNormalizedView):
+        if isinstance(normalized, NormalizedView):
             if self.propagate_local_reduce_match(node, normalized.source):
                 return
             if self.bind_grouped_layout(node, normalized):
                 return
-        elif isinstance(normalized, FlexGemmNormalizedReduction):
+        elif isinstance(normalized, NormalizedReduction):
             if self.bind_grouped_reduction(
                 node, normalized.source, normalized.dim, normalized.dtype
             ):
                 return
-        elif isinstance(normalized, FlexGemmNormalizedPrepareSoftmax):
+        elif isinstance(normalized, NormalizedPrepareSoftmax):
             if self.bind_grouped_reduction(
                 node, normalized.source, normalized.dim, raise_invalid_dims=False
             ):
                 return
-        elif isinstance(normalized, FlexGemmNormalizedUnsupportedReduction):
+        elif isinstance(normalized, NormalizedUnsupportedReduction):
             if normalized.source in self.grouped_layouts:
                 raise local_reduce_unsupported_tensorssa_error(normalized.target)
-        elif isinstance(
-            normalized, (FlexGemmNormalizedSqueeze, FlexGemmNormalizedGetItem)
-        ):
+        elif isinstance(normalized, (NormalizedSqueeze, NormalizedGetItem)):
             if self.propagate_local_reduce_match(node, normalized.source):
                 return
         if is_shape_preserving_pointwise_node(node):
             self.propagate_pointwise_match(node, LOCAL_REDUCE_MIXED_MATCH_ERROR)
 
     def bind_grouped_layout(
-        self, node: torch.fx.Node, normalized: FlexGemmNormalizedView
+        self, node: torch.fx.Node, normalized: NormalizedView
     ) -> bool:
         """Record the TensorSSA layout when a view exposes grouped GEMM values."""
         grouped_layout = grouped_tensor_layout(
@@ -543,7 +541,7 @@ class FlexGemmLocalReduceAnalysis:
         if not isinstance(value, torch.fx.Node):
             return None
         normalized = self.graph.normalized_nodes.get(value)
-        if isinstance(normalized, FlexGemmNormalizedReduction):
+        if isinstance(normalized, NormalizedReduction):
             if normalized.source is not grouped_source:
                 input_node = normalized.source
                 if self.graph.depends_on(input_node, grouped_source):
@@ -608,7 +606,7 @@ class FlexGemmLocalReduceAnalysis:
             return
         seen.add(value)
         normalized = self.graph.normalized_nodes.get(value)
-        if isinstance(normalized, FlexGemmNormalizedReduction):
+        if isinstance(normalized, NormalizedReduction):
             self.validate_hidden_feed_main_reduction_input(
                 normalized.source, grouped_source
             )
@@ -626,7 +624,7 @@ class FlexGemmLocalReduceAnalysis:
         if match is None:
             return None
         normalized = self.graph.normalized_nodes.get(match.value_node)
-        if isinstance(normalized, FlexGemmNormalizedReduction):
+        if isinstance(normalized, NormalizedReduction):
             self.validate_feed_main_source_reductions(
                 source, normalized.source, match.value_node
             )
@@ -656,7 +654,7 @@ class FlexGemmLocalReduceAnalysis:
         if not isinstance(value, torch.fx.Node):
             return False
         normalized = self.graph.normalized_nodes.get(value)
-        if isinstance(normalized, FlexGemmNormalizedReduction):
+        if isinstance(normalized, NormalizedReduction):
             return (
                 normalized.dtype is None
                 and bool(normalized.keepdim)
@@ -685,7 +683,7 @@ class FlexGemmLocalReduceAnalysis:
         ):
             return None
         normalized = self.graph.normalized_nodes.get(grouped_source)
-        if not isinstance(normalized, FlexGemmNormalizedView):
+        if not isinstance(normalized, NormalizedView):
             return None
         source_node = normalized.source
         grouped_layout = self.grouped_layouts.get(grouped_source)
@@ -754,7 +752,7 @@ class FlexGemmLocalReduceAnalysis:
     ) -> FlexGemmLocalReduceMatch | None:
         """Match feed-main reductions through trailing pointwise nodes."""
         normalized = self.graph.normalized_nodes.get(output)
-        if isinstance(normalized, FlexGemmNormalizedView):
+        if isinstance(normalized, NormalizedView):
             return self.match_feed_main_source(
                 normalized.source, output.meta.get("val")
             )
@@ -967,10 +965,10 @@ def match_grouped_main_lane(
         return None
     normalized = local_reduce.graph.normalized_nodes.get(node)
 
-    if isinstance(normalized, FlexGemmNormalizedGetItem):
+    if isinstance(normalized, NormalizedGetItem):
         split = normalized.source
         split_normalized = local_reduce.graph.normalized_nodes.get(split)
-        if not isinstance(split_normalized, FlexGemmNormalizedSplit):
+        if not isinstance(split_normalized, NormalizedSplit):
             return None
         shape = tensor_meta_shape(split_normalized.source)
         if (
@@ -1001,13 +999,13 @@ def match_grouped_main_lane(
             structural_values=(split_size,),
         )
 
-    if isinstance(normalized, FlexGemmNormalizedNVFP4Pack):
+    if isinstance(normalized, NormalizedNVFP4Pack):
         grouped = normalized.source
         view_normalized = local_reduce.graph.normalized_nodes.get(grouped)
         shape = tensor_meta_shape(grouped)
         group = 2
         if (
-            not isinstance(view_normalized, FlexGemmNormalizedView)
+            not isinstance(view_normalized, NormalizedView)
             or shape is None
             or len(shape) != 3
             or not statically_known_equal(shape[-1], group)
@@ -1025,13 +1023,13 @@ def match_grouped_main_lane(
             layout_node=grouped,
         )
 
-    if not isinstance(normalized, FlexGemmNormalizedSelect):
+    if not isinstance(normalized, NormalizedSelect):
         return None
     view = normalized.source
     view_normalized = local_reduce.graph.normalized_nodes.get(view)
     shape = tensor_meta_shape(view)
     if (
-        not isinstance(view_normalized, FlexGemmNormalizedView)
+        not isinstance(view_normalized, NormalizedView)
         or not local_reduce.graph.depends_on(view_normalized.source, gemm)
         or shape is None
         or len(shape) != 3
@@ -1131,9 +1129,7 @@ def grouped_main_output_match(
             if not -first.group <= index < first.group:
                 return None
             indices.add(index % first.group)
-        if isinstance(
-            local_reduce.graph.normalized_nodes.get(node), FlexGemmNormalizedSelect
-        ):
+        if isinstance(local_reduce.graph.normalized_nodes.get(node), NormalizedSelect):
             select_indices[node] = match.indices[0] % first.group
         if match.layout_node is not None:
             grouped_layouts[match.layout_node] = FlexGemmGroupedLayoutMatch(
@@ -1195,7 +1191,7 @@ class FlexGemmEpilogueAnalysis:
             )
         else:
             if any(
-                isinstance(normalized, FlexGemmNormalizedSelect)
+                isinstance(normalized, NormalizedSelect)
                 and normalized.source in local_reduce.grouped_layouts
                 and local_reduce.grouped_layouts[normalized.source].layout.axis == 1
                 for normalized in local_reduce.graph.normalized_nodes.values()
@@ -1348,7 +1344,7 @@ class FlexGemmEpilogueEmitter:
             ):
                 self.feed_main = local_reduce_match.value_node
                 normalized = self.normalized_nodes.get(local_reduce_match.value_node)
-                if not isinstance(normalized, FlexGemmNormalizedReduction):
+                if not isinstance(normalized, NormalizedReduction):
                     raise AssertionError("feed-main plans require a matched reduction")
                 self.feed_main_input = normalized.source
                 self.aux = None if store is None else store.node
@@ -1406,7 +1402,7 @@ class FlexGemmEpilogueEmitter:
             return False
         source = node.all_input_nodes[0]
         normalized = self.normalized_nodes.get(source)
-        if not isinstance(normalized, FlexGemmNormalizedReduction):
+        if not isinstance(normalized, NormalizedReduction):
             return False
         reduction_input = normalized.source
         layout = self.grouped_tensors.get(reduction_input)
@@ -1495,75 +1491,76 @@ class FlexGemmEpilogueEmitter:
         if lowered is not None:
             self.env[node] = lowered
             return
-        if isinstance(normalized, FlexGemmNormalizedSqueeze):
-            lowered = lower_squeeze(node, normalized, self.env, self.store_sources)
-            if lowered is not None:
-                self.env[node] = lowered
-                self.propagate_physical_reduction(node, normalized.source)
-                return
-        if isinstance(normalized, FlexGemmNormalizedSplit):
-            lowered = lower_grouped_n_split(
-                node, normalized, self.env, self.kernel, self.grouped_tensors
-            )
-            if lowered is not None:
-                self.env[node] = lowered
-                return
-        elif isinstance(normalized, FlexGemmNormalizedSelect):
-            index = self.grouped_select_indices.get(node)
-            if index is not None:
-                self.env[node] = lower_grouped_n_select(
-                    normalized, index, self.env, self.kernel
+        match normalized:
+            case NormalizedSqueeze():
+                lowered = lower_squeeze(node, normalized, self.env, self.store_sources)
+                if lowered is not None:
+                    self.env[node] = lowered
+                    self.propagate_physical_reduction(node, normalized.source)
+                    return
+            case NormalizedSplit():
+                lowered = lower_grouped_n_split(
+                    node, normalized, self.env, self.kernel, self.grouped_tensors
                 )
-                return
-        if isinstance(normalized, FlexGemmNormalizedGetItem):
-            lowered = lower_getitem(node, normalized, self.env, self.store_sources)
-            if lowered is not None:
-                self.env[node] = lowered
-                self.propagate_physical_reduction(node, normalized.source)
-                return
-        elif isinstance(normalized, FlexGemmNormalizedPrepareSoftmax):
-            self.env[node] = lower_prepare_softmax_online(
-                node,
-                normalized,
-                self.env,
-                self.kernel,
-                self.grouped_tensors,
-                self.store_sources,
-            )
-            return
-        elif isinstance(normalized, FlexGemmNormalizedView):
-            lowered = lower_view_or_reshape(
-                node,
-                normalized,
-                self.env,
-                self.kernel,
-                self.grouped_tensors,
-                self.active_grouped_layouts,
-                self.store_sources,
-                node is self.feed_main_input,
-            )
-            if lowered is not None:
-                self.env[node] = lowered
-                self.propagate_physical_reduction(node, normalized.source)
-                return
-        elif isinstance(normalized, FlexGemmNormalizedReduction):
-            self.bind_reduction(
-                node,
-                lower_tensorssa_reduce(
+                if lowered is not None:
+                    self.env[node] = lowered
+                    return
+            case NormalizedSelect():
+                index = self.grouped_select_indices.get(node)
+                if index is not None:
+                    self.env[node] = lower_grouped_n_select(
+                        normalized, index, self.env, self.kernel
+                    )
+                    return
+            case NormalizedGetItem():
+                lowered = lower_getitem(node, normalized, self.env, self.store_sources)
+                if lowered is not None:
+                    self.env[node] = lowered
+                    self.propagate_physical_reduction(node, normalized.source)
+                    return
+            case NormalizedPrepareSoftmax():
+                self.env[node] = lower_prepare_softmax_online(
                     node,
                     normalized,
                     self.env,
                     self.kernel,
                     self.grouped_tensors,
                     self.store_sources,
-                    self.physical_reductions,
-                ),
-            )
-            return
-        elif isinstance(normalized, FlexGemmNormalizedUnsupportedReduction):
-            raise local_reduce_unsupported_tensorssa_error(
-                normalized.target, value_only=True
-            )
+                )
+                return
+            case NormalizedView():
+                lowered = lower_view_or_reshape(
+                    node,
+                    normalized,
+                    self.env,
+                    self.kernel,
+                    self.grouped_tensors,
+                    self.active_grouped_layouts,
+                    self.store_sources,
+                    node is self.feed_main_input,
+                )
+                if lowered is not None:
+                    self.env[node] = lowered
+                    self.propagate_physical_reduction(node, normalized.source)
+                    return
+            case NormalizedReduction():
+                self.bind_reduction(
+                    node,
+                    lower_tensorssa_reduce(
+                        node,
+                        normalized,
+                        self.env,
+                        self.kernel,
+                        self.grouped_tensors,
+                        self.store_sources,
+                        self.physical_reductions,
+                    ),
+                )
+                return
+            case NormalizedUnsupportedReduction():
+                raise local_reduce_unsupported_tensorssa_error(
+                    normalized.target, value_only=True
+                )
         is_shape_preserving = is_shape_preserving_pointwise_node(node)
         if is_shape_preserving and self.feed_main is None:
             if self.aux is None and any(
