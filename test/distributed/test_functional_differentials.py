@@ -295,6 +295,31 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
+    def test_all_reduce_avg_backward(self, device):
+        """Test all_reduce backward with the 'avg' reduction.
+
+        Both tensor AND gradients are VARYING (different across ranks).
+        Backward aggregates gradients via all_reduce(avg).
+        """
+        group_name = dist.group.WORLD.group_name
+
+        input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
+        output = fcols.all_reduce(input_tensor, "avg", group=group_name)
+
+        # Backward with ones: avg of ones across ranks is ones.
+        output.sum().backward()
+        expected_grad = torch.ones(3, 3, device=device)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+        # Backward is all_reduce (avg) of the incoming gradients.
+        grad_outputs = torch.rand_like(output, device=device)
+        (grad_input,) = torch.autograd.grad(
+            output, input_tensor, grad_outputs=grad_outputs
+        )
+        expected_grad_input = fcols.all_reduce(grad_outputs, "avg", group=group_name)
+        self.assertEqual(grad_input, expected_grad_input)
+
+    @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
     def test_all_gather_tensor_backward(self, device, gather_dim):
         """Test all_gather_tensor backward does reduce_scatter.

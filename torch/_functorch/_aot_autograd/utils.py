@@ -19,7 +19,7 @@ import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
@@ -703,7 +703,7 @@ def register_buffer_assignment_hook(
             if isinstance(buffer, FunctionalTensor):
                 buffer = buffer.from_functional()
             # or buffer is a fake tensor
-            if not isinstance(buffer, FakeTensor):
+            if not is_fake_tensor(buffer):
                 raise AssertionError(f"expected FakeTensor, got {type(buffer)}")
             # The fake tensor in turn is associated with a proxy node.
             proxy_mode = torch.fx.experimental.proxy_tensor.get_proxy_mode()

@@ -90,6 +90,20 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
   would be sufficient to make change visible in `torch` package.
 
+  Alternatively, scikit-build-core's editable install can rebuild the project
+  automatically on the first `import torch` in a process. This is off by default
+  (a plain editable install does not rebuild on import); opt in at install time
+  by setting the `SKBUILD_EDITABLE_REBUILD` environment variable:
+  ```bash
+  SKBUILD_EDITABLE_REBUILD=true spin develop
+  ```
+  (equivalently, via config-settings with a raw pip install:
+  `python -m pip install -e . -v --no-build-isolation -C editable.rebuild=true`).
+  With this enabled, editing a source file and re-importing `torch` runs
+  `cmake --build & --install` before the import proceeds, so changes are picked
+  up without an explicit reinstall. Set `SKBUILD_EDITABLE_VERBOSE=1` to see the
+  build output, or `=0` to silence it.
+
 
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
   uninstall torch` multiple times. You'll know `torch` is fully
@@ -102,12 +116,12 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   pip uninstall torch
   ```
 
-  Next run `python setup.py clean`. After that, you can install in editable mode again.
+  Next run `spin clean`. After that, you can install in editable mode again.
 
 * If you run into errors when running `python -m pip install -e . -v --no-build-isolation`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
-  2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
+  2. Nuke your `build` directory. The build compiles binaries into the `build` folder and caches many
   details along the way, which saves time the next time you build. If you're running into issues, you can always
   `rm -rf build` from the toplevel `pytorch` directory and start over.
   3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
@@ -115,7 +129,7 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
       ```bash
       git submodule deinit -f .
       git clean -xdf
-      python setup.py clean
+      spin clean
       git submodule update --init --recursive
       python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
@@ -243,10 +257,9 @@ dependencies as well as the nightly binaries into the repo directory.
   in [csrc](torch/csrc) is a Python module, following the PyTorch Python
   frontend module structure.
   * [csrc](torch/csrc) - C++ files composing the PyTorch library. Files
-    in this directory tree are a mix of Python binding code, and C++
-    heavy lifting. Consult `setup.py` for the canonical list of Python
-    binding files; conventionally, they are often prefixed with
-    `python_`. [README](torch/csrc/README.md)
+    in this directory tree are a mix of Python binding code
+    (conventionally prefixed with `python_`) and C++ heavy lifting.
+    [README](torch/csrc/README.md)
     * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
       frontend. [README](torch/csrc/jit/README.md)
     * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic differentiation. [README](torch/csrc/autograd/README.md)
@@ -280,11 +293,7 @@ dependencies as well as the nightly binaries into the repo directory.
 
 ## AI-Assisted Development
 
-PyTorch is a project developed and reviewed by humans.
-PyTorch encourages the use of AI in its development, however, PyTorch is a large and technically complex project and it is easy for current LLMs,
-if not properly guided, to produce seemingly correct PRs or issues with major flaws. Because of this, to ensure the health
-of the project, we must limit how contributors, especially those new to the project,
-submit PRs and open issues.
+Please see PyTorch's detailed [AI Policy here](AI_POLICY.md).
 
 All the details on how to contribute (with or without AI assistance) are in the [Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions).
 A couple reminders here though:
@@ -765,7 +774,7 @@ will want to keep in mind:
 
 ### Build only what you need
 
-`python setup.py build` will build everything by default, but sometimes you are
+`spin develop` will build everything by default, but sometimes you are
 only interested in a specific component.
 
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
@@ -828,7 +837,7 @@ information for the code in `torch/csrc`. More information at:
 By default, cmake will use its Makefile generator to generate your build
 system.  You can get faster builds if you install the ninja build system
 with `pip install ninja`.  If PyTorch was already built, you will need
-to run `python setup.py clean` once after installing ninja for builds to
+to run `spin clean` once after installing ninja for builds to
 succeed.
 
 Note: Make sure to use a machine with a larger number of CPU cores;this will significantly reduce your build times.
@@ -869,7 +878,7 @@ Each of these 3 variables should contain ccache, e.g.
 CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
 ```
 
-If not, you can define these variables on the command line before invoking `setup.py`.
+If not, you can define these variables on the command line before building.
 
 ```bash
 export CMAKE_C_COMPILER_LAUNCHER=ccache
@@ -1349,7 +1358,7 @@ are Caffe2/PyTorch specific. Here they are:
   `scripts` are Caffe2-specific. Don't put PyTorch code in them without
   extra coordination.
 
-- `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
+- `mypy*`, `requirements.txt`, `pyproject.toml`, `test`, `tools` are
   PyTorch-specific. Don't put Caffe2 code in them without extra
   coordination.
 

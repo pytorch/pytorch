@@ -1,0 +1,47 @@
+diff --git a/test/cpython/v3_13/test_super.py b/test/cpython/v3_13/test_super.py
+index 1222ec6a3c4..ec1eb7cec41 100644
+--- a/test/cpython/v3_13/test_super.py
++++ b/test/cpython/v3_13/test_super.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_super.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for zero-argument super() & related machinery."""
+ 
+ import textwrap
+@@ -47,12 +65,13 @@ class G(A):
+     pass
+ 
+ 
+-class TestSuper(unittest.TestCase):
++class TestSuper(CPythonTestCase):
+ 
+     def tearDown(self):
+         # This fixes the damage that test_various___class___pathologies does.
+         nonlocal __class__
+         __class__ = TestSuper
++        super().tearDown()
+ 
+     def test_basics_working(self):
+         self.assertEqual(D().f(), 'ABCD')
+@@ -541,4 +560,4 @@ class TestSuper(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
