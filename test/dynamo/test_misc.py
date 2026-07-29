@@ -14340,6 +14340,21 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
 
+    def test_dynamo_reset_clears_fake_tensor_cache(self):
+        # The fake tensor dispatch cache survives reset() otherwise, so a
+        # compile retried after reset() could behave differently than a fresh
+        # process (see #191283 for a bug this masked as test flakiness).
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def fn(x):
+            return torch.sin(x)
+
+        torch.compile(fn, backend="eager")(torch.randn(3, 3))
+        self.assertGreater(len(FakeTensorMode.cache), 0)
+
+        torch._dynamo.reset()
+        self.assertEqual(len(FakeTensorMode.cache), 0)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_check_simplification(self):
         @torch.compile(backend="eager", fullgraph=True)
