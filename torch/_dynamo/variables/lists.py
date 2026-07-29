@@ -38,7 +38,6 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     get_fake_value,
@@ -1209,18 +1208,6 @@ class ListVariable(CommonListMethodsVariable):
             self.call_method(tx, "extend", args, {})
         return ConstantVariable.create(None)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "__class__":
-            source = AttrSource(self.source, name) if self.source else None
-            class_type = self.python_type()
-            if class_type is list:
-                return VariableTracker.build(tx, class_type, source=source)
-            else:
-                return VariableTracker.build(tx, class_type, source)
-        return super().getattro_impl(tx, name)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -1791,15 +1778,6 @@ class TupleVariable(BaseListVariable):
             return "()"
         else:
             return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
-
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "__class__":
-            source = AttrSource(self.source, name) if self.source else None
-            class_type = self.python_type()
-            return VariableTracker.build(tx, class_type, source=source)
-        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
