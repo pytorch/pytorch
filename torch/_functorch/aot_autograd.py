@@ -454,7 +454,7 @@ AOT_COUNTER = itertools.count()
 # However, Inductor does not want the concept of tokens in the final generated
 # code's input and output. Since changing the graph signature inside of inductor
 # is difficult, after generating the forward graph, we will run a pass to
-# remove the tokens from the inputgenerate the following graph for Inductor, where
+# remove the tokens from the input and generate the following graph for Inductor, where
 # the tokens are created and sunk within the graph, rather than as inputs and
 # outputs:
 #
