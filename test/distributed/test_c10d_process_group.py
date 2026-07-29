@@ -22,6 +22,8 @@ from torch.testing._internal.common_utils import run_tests
 
 class AbstractProcessGroupTest(C10dBackendTest):
     def test_sequence_numbers(self):
+        if not self.supports_sequence_numbers:
+            self.skipTest(f"{self.backend_name} does not support sequence numbers")
         self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertEqual(default_pg._get_sequence_number_for_group(), 0)
