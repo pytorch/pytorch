@@ -331,18 +331,55 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
+# CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
+# deliberately mirrors the low four so the mapping is near-identity.
+_METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
+
+
+@functools.cache
+def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
+    """Arity convention for `python_type.name`, read from its CPython
+    PyMethodDef.ml_flags. Falls back to VARARGS|KEYWORDS when python_type has no
+    such attribute or it carries no ml_flags (slot wrappers, pure-Python
+    functions)."""
+    import torch
+
+    default = MethodFlags.VARARGS | MethodFlags.KEYWORDS
+    fn = getattr(python_type, name, None)
+    ml = None if fn is None else torch._C._dynamo.eval_frame.get_method_ml_flags(fn)
+    if ml is None:
+        return default
+    flags = MethodFlags(0)
+    if ml & _METH_NOARGS:
+        flags |= MethodFlags.NOARGS
+    if ml & _METH_O:
+        flags |= MethodFlags.O
+    if ml & (_METH_VARARGS | _METH_FASTCALL):
+        flags |= MethodFlags.VARARGS
+    if ml & _METH_KEYWORDS:
+        flags |= MethodFlags.KEYWORDS
+    return flags or default
+
+
+def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
+    """Resolve the arity flags for method `name` from the VT's runtime
+    python_type()."""
+    return _flags_from_ml_flags(maybe_get_python_type(vt), name)
+
+
 @dataclasses.dataclass(slots=True)
 class Method:
     """Declarative entry in a VariableTracker's `tp_methods` table, analogous
-    to CPython's PyMethodDef. `flags` drives centralized arity checking.
+    to CPython's PyMethodDef.
 
     Handlers have signature `(self, tx, args, kwargs)` and return the result
     VariableTracker, or None to decline the call (the equivalent of the old
     `super().call_method` fall-through) so `call_method` continues to the
-    object-protocol dispatch below."""
+    object-protocol dispatch below. The method name is the tp_methods key this
+    entry is stored under (passed to `invoke`); its arity convention is derived
+    on demand from that method's ml_flags (see _derive_method_flags)."""
 
     handler: Callable[..., VariableTracker | None]
-    flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
 
     def invoke(
         self,
@@ -352,7 +389,8 @@ class Method:
         args: Any,
         kwargs: Any,
     ) -> VariableTracker | None:
-        _check_method_arity(vt, tx, name, self.flags, args, kwargs)
+        flags = _derive_method_flags(vt, name)
+        _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
 
@@ -988,102 +1026,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Returns a VT if the type defines __getattr__ and it succeeds,
         None otherwise.  The base returns None (most types have no
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
-        """
-        return None
-
-    def lookup_type_attr(self, tx: InstructionTranslatorBase, name: str) -> object:
-        """Step 1 of GenericGetAttr: MRO walk on the Python type.
-
-        Base uses mro_lookup(python_type(), name).  UDOV overrides with a
-        cached version that also unpatches nn.Module.__init__.
-        """
-        from .object_protocol import mro_lookup, NO_SUCH_SUBOBJ
-
-        try:
-            py_type = self.python_type()
-        except NotImplementedError:
-            return NO_SUCH_SUBOBJ
-        return mro_lookup(py_type, name)
-
-    def resolve_data_descriptor(
-        self,
-        tx: InstructionTranslatorBase,
-        name: str,
-        type_attr: object,
-        source: Source | None,
-    ) -> VariableTracker:
-        """Step 2 of GenericGetAttr: invoke a data descriptor.
-
-        Base wraps _resolve_descriptor_get.  UDOV overrides with
-        source management via get_source_by_walking_mro and side-effects
-        checks for member/getset descriptors.
-        """
-        from .object_protocol import _resolve_descriptor_get, _UnhandledDescriptorError
-
-        py_type = self.python_type()
-        class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, self, class_vt, source)
-        if result is not None:
-            return result
-        raise _UnhandledDescriptorError(
-            f"resolve_data_descriptor: unhandled data descriptor "
-            f"{type(type_attr)} for {name}"
-        )
-
-    def resolve_type_attr(
-        self,
-        tx: InstructionTranslatorBase,
-        name: str,
-        type_attr: object,
-        source: Source | None,
-    ) -> VariableTracker:
-        """Steps 4-5 of GenericGetAttr: non-data descriptor or plain class var.
-
-        Base handles the CallMethodVariable shortcut for VTs with custom
-        call_method, then wraps _resolve_descriptor_get, then falls through
-        to VariableTracker.build for plain class variables.
-
-        UDOV overrides with source management via get_source_by_walking_mro,
-        _torchdynamo_inline unwrapping, lru_cache, cython, and user-defined
-        descriptor handling.
-        """
-        from .object_protocol import (
-            _has_custom_call_method,
-            _is_method_type,
-            _resolve_descriptor_get,
-            _UnhandledDescriptorError,
-        )
-
-        if hasattr(type(type_attr), "__get__"):
-            # Dispatch through call_method (a hand-written override or a
-            # tp_methods entry) via CallMethodVariable instead of inlining the
-            # MRO-resolved method, preserving custom tracing logic.
-            if _is_method_type(type_attr) and (
-                self._lookup_tp_table(name, "tp_methods") is not None
-                or _has_custom_call_method(self)
-            ):
-                return variables.CallMethodVariable(self, name, source=source)
-
-            py_type = self.python_type()
-            class_vt = VariableTracker.build(tx, py_type)
-            result = _resolve_descriptor_get(tx, type_attr, self, class_vt, source)
-            if result is not None:
-                return result
-            raise _UnhandledDescriptorError(
-                f"resolve_type_attr: unhandled non-data descriptor "
-                f"{type(type_attr)} for {name}"
-            )
-
-        return VariableTracker.build(tx, type_attr, source)
-
-    def dynamic_getattr_fallback(
-        self, tx: InstructionTranslatorBase, name: str
-    ) -> VariableTracker | None:
-        """Step 5b of GenericGetAttr: fallback for attrs not on MRO or
-        instance dict (e.g. threading.local per-thread storage).
-
-        Base returns None.  UDOV overrides to try
-        type(self.value).__getattribute__(self.value, name).
         """
         return None
 
