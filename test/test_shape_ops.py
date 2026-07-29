@@ -120,20 +120,6 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    @onlyCPU
-    @unittest.expectedFailure
-    @dtypes(torch.quint4x2, torch.quint2x4)
-    def test_flip_unsupported_dtype(self, device):
-        scale, zero_point = 0.1, 5
-        for dtype in (torch.quint4x2, torch.quint2x4):
-            qt = torch.quantize_per_tensor(
-                torch.randn(16, 16, device=device),
-                scale=scale,
-                zero_point=zero_point,
-                dtype=dtype,
-            )
-            torch.flip(qt, dims=(0,))
-
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_movedim_invalid(self, device, dtype):
         shape = self._rand_shape(4, min_size=5, max_size=10)
@@ -598,6 +584,19 @@ class TestShapeOps(TestCase):
         np_fn = partial(np.flip, axis=0)
         self.compare_with_numpy(torch_fn, np_fn, t_in)
         del t_in
+
+    @onlyCPU
+    @unittest.expectedFailure
+    @dtypes(torch.quint4x2, torch.quint2x4)
+    def test_flip_unsupported_dtype(self, device, dtype):
+        scale, zero_point = 0.1, 5
+        qt = torch.quantize_per_tensor(
+            torch.randn(16, 16, device=device),
+            scale=scale,
+            zero_point=zero_point,
+            dtype=dtype,
+        )
+        torch.flip(qt, dims=(0,))
 
     def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
         for dim in range(min_dim, max_dim + 1):
