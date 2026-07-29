@@ -87,7 +87,7 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
-    OrderedDictVariable,
+    OrderedItemsDictVariable,
 )
 from .hashable import is_hashable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
@@ -3111,7 +3111,24 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             items: dict[VariableTracker, VariableTracker],
         ) -> VariableTracker:
             if user_cls is OrderedDict:
-                return OrderedDictVariable(items, mutation_type=ValueMutationNew())
+                from .builder import SourcelessBuilder
+                from .user_defined import OrderedDictVariable
+
+                result = tx.output.side_effects.track_new_user_defined_object(
+                    SourcelessBuilder.create(tx, dict),
+                    SourcelessBuilder.create(tx, OrderedDict),
+                    [],
+                    tx=tx,
+                )
+                if not isinstance(result, OrderedDictVariable):
+                    raise AssertionError(
+                        f"Expected OrderedDictVariable, got {type(result)}"
+                    )
+                result._base_vt = OrderedItemsDictVariable(
+                    items,
+                    mutation_type=ValueMutationNew(),
+                )
+                return result
             elif user_cls is defaultdict:
                 from .builder import SourcelessBuilder
                 from .user_defined import DefaultDictVariable
