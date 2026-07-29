@@ -5937,9 +5937,8 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             self.assertTrue(
                 all(config.num_stages == 2 for config in heuristic.mm_configs)
             )
-            stages = {config.num_stages for config in heuristic.exhaustive_configs}
-            self.assertIn(1, stages)
-            self.assertIn(2, stages)
+            filtered_configs = heuristic._filter_configs(heuristic.exhaustive_configs)
+            self.assertTrue(all(config.num_stages == 2 for config in filtered_configs))
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
 
