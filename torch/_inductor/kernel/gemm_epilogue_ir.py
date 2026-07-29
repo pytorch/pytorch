@@ -1,17 +1,172 @@
 # mypy: allow-untyped-defs
-"""Semantic analysis helpers for lowered GEMM epilogue loop bodies."""
+"""Typed GEMM epilogue IR contracts and lowered-loop semantic analysis."""
 
 import dataclasses
 import math
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 import sympy
 
 import torch
 from torch._inductor.ir import ComputedBuffer
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch._inductor.ops_handler import DefaultHandler
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.utils._ordered_set import OrderedSet
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmReductionGeometry:
+    """Grouped M/N reduction geometry shared by frontend and backend plans."""
+
+    group: int
+    axis: int
+
+    def __post_init__(self) -> None:
+        if self.group <= 0:
+            raise RuntimeError("local_reduce_group must be positive")
+        if self.axis not in (0, 1):
+            raise RuntimeError("local_reduce_axis must be 0 or 1")
+
+    @property
+    def needs_physical_callbacks(self) -> bool:
+        return self.axis == 0 or self.group > 32
+
+    @property
+    def group_size(self) -> int:
+        return self.group
+
+    @classmethod
+    def from_output_shape(
+        cls, output_shape: Sequence[Any], gemm_shape: Sequence[Any]
+    ) -> "GemmReductionGeometry | None":
+        if len(output_shape) != 3 or len(gemm_shape) != 2:
+            return None
+        for axis, group_dim in ((0, 1), (1, 2)):
+            try:
+                group = V.graph.sizevars.optimization_hint(output_shape[group_dim])
+            except (GuardOnDataDependentSymNode, TypeError, ValueError):
+                continue
+            geometry = cls(group=group, axis=axis)
+            if geometry.matches_output_shape(output_shape, gemm_shape):
+                return geometry
+        return None
+
+    @property
+    def reduce_dims(self) -> tuple[int, ...]:
+        return (-1, 2) if self.axis == 1 else (-2, 1)
+
+    def matches_reduction_dim(self, dim: Any) -> bool:
+        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
+        return len(dims) == 1 and dims[0] in self.reduce_dims
+
+    def matches_output_shape(
+        self, output_shape: Sequence[Any], gemm_shape: Sequence[Any]
+    ) -> bool:
+        if len(gemm_shape) != 2:
+            return False
+        m, n = gemm_shape
+        grouped = (
+            (m, n // self.group, self.group)
+            if self.axis == 1
+            else (m // self.group, self.group, n)
+        )
+        return statically_known_shape_equal(
+            output_shape, (m, n)
+        ) or statically_known_shape_equal(output_shape, grouped)
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmReductionDescriptor:
+    """Backend lowering descriptor for a recognized reduction expression."""
+
+    kind: str
+    parameters: tuple[float, ...] = ()
+
+    _PARAMETER_COUNTS: ClassVar[dict[str, int]] = {
+        "mean_linear": 3,
+        "normalize_sum_affine": 4,
+        "normalize_sum_reverse_affine": 4,
+        "sum_mul_affine": 2,
+        "variance_affine": 2,
+    }
+
+    def __post_init__(self) -> None:
+        expected = self._PARAMETER_COUNTS.get(self.kind, 0)
+        if len(self.parameters) != expected:
+            raise ValueError(
+                f"{self.kind} expects {expected} reduction parameters, "
+                f"got {len(self.parameters)}"
+            )
+
+    @classmethod
+    def parse(cls, value: str) -> "GemmReductionDescriptor":
+        kind, *parameters = value.split(":")
+        return cls(kind, tuple(float(parameter) for parameter in parameters))
+
+    def serialize(self) -> str:
+        if not self.parameters:
+            return self.kind
+        return (
+            self.kind
+            + ":"
+            + ":".join(format(parameter, ".17g") for parameter in self.parameters)
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmReductionConfig:
+    """Reduction recognized from frontend graph or scheduler loop IR."""
+
+    output_name: str
+    group: int
+    axis: int
+    reduction_type: str
+    source_type: str
+
+    @property
+    def geometry(self) -> GemmReductionGeometry:
+        return GemmReductionGeometry(self.group, self.axis)
+
+    @property
+    def contract(self) -> tuple[int, int, str, str]:
+        return self.group, self.axis, self.reduction_type, self.source_type
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmReductionPlan:
+    """Backend-neutral reduction outputs passed from analysis to codegen."""
+
+    reduction_output: str | None
+    group: int
+    axis: int
+    reduction_type: str
+    source_type: str
+    primary_output: str
+    feeds_main: bool = False
+    feed_output: str | None = None
+    secondary_feed_output: str | None = None
+    secondary_feed_type: str | None = None
+
+    @property
+    def geometry(self) -> GemmReductionGeometry:
+        return GemmReductionGeometry(self.group, self.axis)
+
+    @property
+    def auxiliary_outputs(self) -> tuple[str, ...]:
+        return tuple(
+            OrderedSet(
+                output
+                for output in (
+                    self.reduction_output,
+                    self.feed_output,
+                    self.secondary_feed_output,
+                )
+                if output is not None and output != self.primary_output
+            )
+        )
 
 
 @dataclasses.dataclass(frozen=True)
