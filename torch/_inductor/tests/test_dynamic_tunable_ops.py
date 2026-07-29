@@ -1016,6 +1016,30 @@ class AllTunableOpsWildcardFallbackTest(TestCase):
             "tunable-disabled reference",
         )
 
+    def test_swapped_mask_guard_restores_outer_mask(self) -> None:
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        torch.cuda.tunable.set_max_tuning_duration(1)
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        dynamic_shapes = [(31, 263, 251), (37, 269, 257)]
+        with torch.cuda.tunable.dynamic_dims_mask(M=True):
+            for seed, (m, n, k) in enumerate(dynamic_shapes, start=30):
+                mat1, mat2 = _mm(m, n, k, seed=seed)
+                torch.mm(mat1, mat2)
+                self.assertTrue(
+                    _has_wildcard_with_dims("GemmTunableOp", n, k),
+                    f"expected wildcard entry for ({m}, {n}, {k})",
+                )
+
+        m, n, k = 41, 271, 277
+        mat1, mat2 = _mm(m, n, k, seed=32)
+        torch.mm(mat1, mat2)
+        self.assertFalse(
+            _has_wildcard_with_dims("GemmTunableOp", n, k),
+            "swapped inner guard leaked outside the dynamic mask scope",
+        )
+
     def test_gemm_strided_batched_tunable_op_bmm_wildcard_round_trip(
         self,
     ) -> None:

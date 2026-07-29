@@ -869,6 +869,11 @@ inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
         return false;
       }
     }
+    if (!tuning_ctx->IsTuningEnabled() &&
+        (result == at::cuda::tunable::ResultEntry::Default() ||
+         !bgemm_op.CanDispatchResult(result, &params))) {
+      return false;
+    }
     bgemm_op(&params);
     return true;
   };
@@ -1439,6 +1444,11 @@ inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
       if (result == at::cuda::tunable::ResultEntry::Null()) {
         return false;
       }
+    }
+    if (!tuning_ctx->IsTuningEnabled() &&
+        (result == at::cuda::tunable::ResultEntry::Default() ||
+         !gemm_op.CanDispatchResult(result, &params))) {
+      return false;
     }
     gemm_op(&params);
     return true;

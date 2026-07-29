@@ -117,6 +117,19 @@ class TunableOp {
   public:
     virtual ~TunableOp() = default;
 
+    bool CanDispatchResult(
+        const ResultEntry& result,
+        const ParamsT* params) {
+      if (HasOp(result.GetKey())) {
+        return true;
+      }
+#ifndef USE_ROCM
+      return RegisterOpForResult(result, params) && HasOp(result.GetKey());
+#else
+      return false;
+#endif
+    }
+
     TuningStatus operator()(const ParamsT* params) {
       // Dynamic TunableOp dispatch matrix:
       //
@@ -230,11 +243,9 @@ class TunableOp {
         result = ResultEntry::Default();
       }
       auto* op = GetOp(result.GetKey());
-#ifndef USE_ROCM
-      if (op == nullptr && RegisterOpForResult(result, params)) {
+      if (op == nullptr && CanDispatchResult(result, params)) {
         op = GetOp(result.GetKey());
       }
-#endif
       if (op == nullptr) {
         TUNABLE_LOG2("missing candidate ", result, ", using default");
         result = ResultEntry::Default();
