@@ -2252,6 +2252,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # attributes used by the origami branch in _get_template_configs_impl.
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
+    uses_tdm_configs: bool
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
@@ -2382,6 +2383,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 configs=exhaustive,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                **kwargs,
             )
             selector = origami.OrigamiMatmulSelector(
                 allcfgs,
@@ -2476,6 +2478,16 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 origami_triton_configs[config_key] = (
                     cfg.occupancy,
                     wgm_result.wgm,
+                )
+
+            # Revalidate the reconstructed Origami tiles. The candidate pool was
+            # filtered above, but selected results are rebuilt as GemmConfig objects.
+            if self.uses_tdm_configs:
+                origami_configs = _filter_tdm_descriptor_block_configs(
+                    origami_configs,
+                    dtype.itemsize,
+                    a_row_major=kwargs.get("tdm_a_row_major", True),
+                    b_row_major=kwargs.get("tdm_b_row_major", True),
                 )
 
             # Apply backend filters (max block size, memory constraints, etc.).
