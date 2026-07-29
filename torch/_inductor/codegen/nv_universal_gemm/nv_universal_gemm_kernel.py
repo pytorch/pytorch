@@ -586,11 +586,25 @@ def _tensor_sig(t):
 def _local_reduce_specialization(variant_kwargs: dict | None) -> tuple:
     if variant_kwargs is None:
         return ()
-    return tuple(
+    specialization = tuple(
         (key, variant_kwargs[key])
         for key in GemmReductionArguments.SPECIALIZATION_KEYS
         if key in variant_kwargs
     )
+    tensor_specialization = tuple(
+        (
+            key,
+            None
+            if (tensor := variant_kwargs.get(key)) is None
+            else _tensor_sig(tensor),
+        )
+        for key in (
+            "local_reduce_out",
+            "local_reduce_feed_out",
+            "local_reduce_secondary_feed_out",
+        )
+    )
+    return specialization + tensor_specialization
 
 
 def _create_gemm_cache_key(
