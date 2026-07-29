@@ -801,6 +801,151 @@ class TestIsAvailable(TestCase):
         self.assertEqual(is_available(), expected)
 
 
+# Host-side test of the graph-instantiate hook registry: consumers register hooks that a
+# CUDAGraph fans out to via run_graph_instantiate_hooks at the end of instantiate(). The
+# registry just passes the graph through, so a sentinel stands in for it. No CUDA needed.
+class TestGraphInstantiateHooks(TestCase):
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        cg._global_instantiate_hooks.clear()
+        super().tearDown()
+
+    def test_register_run_unregister(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+        graph = object()
+        handle = cg.register_graph_instantiate_hook(lambda g: seen.append(g))
+        cg.run_graph_instantiate_hooks(graph)
+        self.assertEqual(seen, [graph])
+        handle.remove()
+        cg.run_graph_instantiate_hooks(graph)  # unregistered: not called again
+        self.assertEqual(seen, [graph])
+
+    def test_multiple_hooks_all_run(self):
+        import torch.cuda.graphs as cg
+
+        seen_a, seen_b = [], []
+        cg.register_graph_instantiate_hook(lambda g: seen_a.append(g))
+        cg.register_graph_instantiate_hook(lambda g: seen_b.append(g))
+        graph = object()
+        cg.run_graph_instantiate_hooks(graph)
+        self.assertEqual((seen_a, seen_b), ([graph], [graph]))
+
+    def test_run_swallows_hook_errors(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+
+        def boom(g):
+            raise RuntimeError("boom")
+
+        cg.register_graph_instantiate_hook(boom)
+        cg.register_graph_instantiate_hook(lambda g: seen.append(g))
+        graph = object()
+        cg.run_graph_instantiate_hooks(graph)  # first raises, second still runs
+        self.assertEqual(seen, [graph])
+
+    @requires_cuda
+    def test_fires_once_on_real_graph_instantiate(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+        handle = cg.register_graph_instantiate_hook(lambda gr: seen.append(gr))
+        self.addCleanup(handle.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+
+        # instantiate() ran once at capture_end and fired the hook with this graph.
+        self.assertEqual(seen, [g])
+        for _ in range(3):
+            g.replay()
+        torch.cuda.synchronize()
+        # replay does not re-instantiate, so the hook is not called again.
+        self.assertEqual(seen, [g])
+        g.reset()
+
+
+# Host-side test of the graph-destroy hook registry: consumers register per-resolver
+# cleanup hooks that a CUDAGraph invokes (gated on graph_destroy_hooks_active) via
+# run_graph_destroy_hooks when a CUDA graph is destroyed. No CUDA needed.
+class TestGraphDestroyHooks(TestCase):
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        cg._global_destroy_hooks.clear()
+        super().tearDown()
+
+    def test_register_run_unregister(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+        self.assertFalse(cg.graph_destroy_hooks_active())
+        handle = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
+        self.assertTrue(cg.graph_destroy_hooks_active())
+        cg.run_graph_destroy_hooks({7})
+        self.assertEqual(seen, [{7}])
+        handle.remove()
+        self.assertFalse(cg.graph_destroy_hooks_active())
+        cg.run_graph_destroy_hooks({8})  # unregistered: not called again
+        self.assertEqual(seen, [{7}])
+
+    def test_multiple_hooks_all_run(self):
+        import torch.cuda.graphs as cg
+
+        seen_a, seen_b = [], []
+        cg.register_graph_destroy_hook(lambda ids: seen_a.append(set(ids)))
+        cg.register_graph_destroy_hook(lambda ids: seen_b.append(set(ids)))
+        cg.run_graph_destroy_hooks({5})
+        self.assertEqual((seen_a, seen_b), ([{5}], [{5}]))
+
+    def test_run_swallows_hook_errors(self):
+        import torch.cuda.graphs as cg
+
+        seen = []
+
+        def boom(ids):
+            raise RuntimeError("boom")
+
+        cg.register_graph_destroy_hook(boom)
+        cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
+        cg.run_graph_destroy_hooks({1})  # first raises, second still runs
+        self.assertEqual(seen, [{1}])
+
+    @requires_cuda
+    def test_fires_with_recorded_exec_ids_on_teardown(self):
+        import torch.cuda.graphs as cg
+
+        exec_id = 0xABCD
+        seen = []
+        # Stand in for a consumer that records per-graph state at instantiate: stamp a
+        # known exec id onto the graph so teardown has something to hand the destroy hook.
+        inst = cg.register_graph_instantiate_hook(
+            lambda gr: gr._recorded_exec_ids.add(exec_id)
+        )
+        dh = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
+        self.addCleanup(inst.remove)
+        self.addCleanup(dh.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+        for _ in range(3):
+            g.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(seen, [])  # not torn down yet
+        # reset() tears down this capture cycle and fires the armed destroy callback,
+        # handing the destroy hook the exec ids recorded on the graph.
+        g.reset()
+        self.assertEqual(seen, [{exec_id}])
+
+
 # Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
 # ("name") and reader tolerance for the two legacy pickle spellings: dicts
 # keyed "str" and bare unwrapped strings.
