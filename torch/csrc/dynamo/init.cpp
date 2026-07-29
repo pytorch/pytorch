@@ -232,17 +232,6 @@ enum class PyTypeSlotBit : int64_t {
   TP_INIT = 11,
 };
 
-// Type flag masks, equal to the real CPython Py_TPFLAGS_* values so that
-// get_tp_flags (which returns the raw tp_flags word) and has_tp_flag work
-// directly against them. Macros absent on older interpreters map to 0.
-enum class PyTypeFlagBit : int64_t {
-#ifdef Py_TPFLAGS_MANAGED_DICT
-  MANAGED_DICT = Py_TPFLAGS_MANAGED_DICT,
-#else
-  MANAGED_DICT = 0,
-#endif
-};
-
 int64_t get_pysequence_slots(PyTypeObject* type) {
   int64_t slots = 0;
   if (PyType_GetSlot(type, Py_sq_length) != nullptr)
@@ -423,23 +412,6 @@ PyObject* _get_type_slots(
   return tuple;
 }
 
-int64_t get_tp_flags(PyTypeObject* type) {
-  // Raw tp_flags word; test bits against the PyTypeFlags masks via has_tp_flag.
-  return static_cast<int64_t>(PyType_GetFlags(type));
-}
-
-PyObject* _get_tp_flags(
-    PyObject* self,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
-  if (!_checkParamCount(nargs, 1)) {
-    return nullptr;
-  }
-  PyObject* arg = args[0];
-  PyTypeObject* type = PyType_Check(arg) ? (PyTypeObject*)arg : Py_TYPE(arg);
-  return PyLong_FromLongLong(get_tp_flags(type));
-}
-
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
@@ -456,8 +428,6 @@ void _register_functions(PyObject* mod) {
           nullptr},
       PyMethodDef{
           "get_type_slots", PYC_FN(_get_type_slots), METH_FASTCALL, nullptr},
-      PyMethodDef{
-          "get_tp_flags", PYC_FN(_get_tp_flags), METH_FASTCALL, nullptr},
       PyMethodDef{nullptr, nullptr, 0, nullptr},
   });
   PyModule_AddFunctions(mod, fns.data());
@@ -571,14 +541,6 @@ void initDynamoBindings(PyObject* torch) {
         int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
         return (slots & (1LL << slot_bit)) != 0;
       });
-  dynamo_module.def(
-      "has_tp_flag", [](int64_t flags, const py::object& flag_obj) {
-        // flag is a real Py_TPFLAGS_* mask (see PyTypeFlags), not a bit index.
-        int64_t flag = py::cast<int64_t>(flag_obj.attr("__index__")());
-        return (flags & flag) != 0;
-      });
-  py::enum_<PyTypeFlagBit>(dynamo_module, "PyTypeFlags")
-      .value("MANAGED_DICT", PyTypeFlagBit::MANAGED_DICT);
   py::enum_<PySequenceSlotBit>(dynamo_module, "PySequenceSlots")
       .value("SQ_LENGTH", PySequenceSlotBit::SQ_LENGTH)
       .value("SQ_CONCAT", PySequenceSlotBit::SQ_CONCAT)
