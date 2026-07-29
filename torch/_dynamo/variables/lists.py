@@ -1635,6 +1635,21 @@ class DequeVariable(CommonListMethodsVariable):
         if name == "__init__":
             return self.tp_init_impl(tx, args, kwargs)
 
+        if name == "__setattr__":
+            # deque has no __dict__, so every attribute write raises. maxlen is a
+            # read-only getset descriptor; anything else is simply absent.
+            attr_name = args[0].as_python_constant()
+            if attr_name == "maxlen":
+                msg = (
+                    "attribute 'maxlen' of 'collections.deque' objects is not writable"
+                )
+            else:
+                msg = (
+                    f"'collections.deque' object has no attribute '{attr_name}' "
+                    "and no __dict__ for setting new attributes"
+                )
+            raise_observed_exception(AttributeError, tx, args=[msg])
+
         if name == "__reversed__":
             # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
             # the current state and detects mutation during iteration.
