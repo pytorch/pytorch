@@ -62,7 +62,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, TypeSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -622,6 +622,16 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
+            # Constant-folding grad_fn to None is only valid while the tensor
+            # stays a leaf. requires_grad alone does not distinguish a leaf
+            # (grad_fn is None) from a non-leaf with the same metadata, so
+            # guard on grad_fn being None to force a recompile otherwise.
+            if self.source is not None:
+                install_guard(
+                    AttrSource(self.source, "grad_fn").make_guard(
+                        GuardBuilder.NONE_MATCH
+                    )
+                )
             return variables.ConstantVariable.create(None)
 
     def method_attr__version(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -689,7 +699,13 @@ class TensorVariable(VariableTracker):
                 )
 
         if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
+            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
+            # A sourced class self-guards when observed downstream (e.g.
+            # `w.__class__ is SomeType`), which keeps type observation sound even
+            # when the input's own class guard is relaxed (see
+            # VariableBuilder.wrap_tensor and ACT input polymorphism).
+            source = self.source and TypeSource(self.source)
+            return VariableTracker.build(tx, self.python_type(), source)
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
