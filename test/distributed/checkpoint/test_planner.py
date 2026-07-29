@@ -4,6 +4,7 @@ import sys
 from unittest.mock import patch
 
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import (
@@ -15,6 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharded_tensor.metadata import (
     TensorProperties as TensorProperties_Shard,
 )
+from torch.distributed.checkpoint import CheckpointableTensor
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.default_planner import (
@@ -50,6 +52,10 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
+)
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.distributed_utils import (
@@ -94,6 +100,69 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards=local_shards, sharded_tensor_metadata=sharded_tensor_md
     )
+
+
+class TestCheckpointableTensorDistributed(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @property
+    def device_type(self) -> str:
+        return "cpu"
+
+    @with_comms
+    @with_temp_dir
+    def test_checkpointable_tensor_shard_save_load(self):
+        shard_size = 4
+        rank = dist.get_rank()
+        start = rank * shard_size
+        expected = torch.arange(start, start + shard_size, dtype=torch.float32)
+
+        tensor = expected.clone()
+        tensor.global_shape = (self.world_size * shard_size,)
+        tensor.global_offsets = ((start,),)
+        tensor.local_offsets = ((0,),)
+        tensor.local_sizes = ((shard_size,),)
+        self.assertIsInstance(tensor, CheckpointableTensor)
+
+        dcp.save({"proto": tensor}, checkpoint_id=self.temp_dir)
+        dist.barrier()
+
+        metadata = dcp.FileSystemReader(self.temp_dir).read_metadata()
+        tensor_metadata = metadata.state_dict_metadata["proto"]
+        self.assertIsInstance(tensor_metadata, TensorStorageMetadata)
+        self.assertEqual(
+            torch.Size([self.world_size * shard_size]), tensor_metadata.size
+        )
+        self.assertEqual(
+            [
+                ChunkStorageMetadata(
+                    offsets=torch.Size([rank * shard_size]),
+                    sizes=torch.Size([shard_size]),
+                )
+                for rank in range(self.world_size)
+            ],
+            sorted(tensor_metadata.chunks, key=lambda chunk: tuple(chunk.offsets)),
+        )
+
+        target = torch.empty(shard_size, device="meta")
+        target.global_shape = (self.world_size * shard_size,)
+        target.global_offsets = ((start,),)
+        target.local_offsets = ((0,),)
+        target.local_sizes = ((shard_size,),)
+        state_dict = {"proto": target}
+
+        dcp.load(state_dict, checkpoint_id=self.temp_dir)
+
+        loaded = state_dict["proto"]
+        self.assertFalse(loaded.is_meta)
+        self.assertEqual(torch.device("cpu"), loaded.device)
+        self.assertIsInstance(loaded, CheckpointableTensor)
+        self.assertEqual(torch.Size([shard_size]), loaded.size())
+        self.assertEqual((self.world_size * shard_size,), loaded.global_shape)
+        self.assertEqual(((start,),), loaded.global_offsets)
+        self.assertEqual(expected, loaded)
 
 
 class TestSavePlan(TestCase):

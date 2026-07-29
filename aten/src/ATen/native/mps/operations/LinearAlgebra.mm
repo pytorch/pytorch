@@ -12,6 +12,7 @@
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <ATen/native/mps/operations/GemmHeuristics.h>
 
 #include <fmt/format.h>
 
@@ -40,7 +41,6 @@
 #include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_lu_solve.h>
 #include <ATen/ops/linalg_qr.h>
-#include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -92,6 +92,170 @@ AlphaBeta make_alpha_beta(const Scalar& alpha, const Scalar& beta, ScalarType sc
     alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
   }
   return alpha_beta;
+}
+
+// Describes how a kernel reads one logical matrix.
+struct ResolvedMatrix {
+  Tensor tensor;
+  int64_t ld; // leading stride in the selected orientation
+  int64_t stride; // stride along the reduction/output dimension
+  bool transposed; // true when stored column-major
+};
+
+ResolvedMatrix resolve_matrix(const Tensor& matrix) {
+  const auto rows = matrix.size(0);
+  const auto cols = matrix.size(1);
+  const auto row_stride = matrix.stride(0);
+  const auto col_stride = matrix.stride(1);
+  if (col_stride == 1 && row_stride >= cols) {
+    return {matrix, row_stride, col_stride, false};
+  }
+  if (row_stride == 1 && col_stride >= rows) {
+    return {matrix, col_stride, row_stride, true};
+  }
+  return {matrix, row_stride, col_stride, false};
+}
+
+// Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
+// GemvDims packing handles all four mat/vec layouts.
+void dispatch_gemv(const Tensor& A,
+                   const Tensor& B,
+                   const Tensor& out,
+                   const std::optional<Tensor>& bias,
+                   const ResolvedMatrix& matrix,
+                   const Scalar& alpha,
+                   const Scalar& beta,
+                   GemmEpilogue epi,
+                   const GemvPolicy& policy,
+                   bool m_is_one,
+                   int64_t outlen,
+                   bool idx64) {
+  const auto dt = out.scalar_type();
+  const std::string dt_str = scalarToMetalTypeString(out);
+  constexpr int64_t r = 0, c = 1;
+  const auto K = A.size(1);
+
+  // gemv_t when the output runs along the matrix's columns; else gemv_nt.
+  const bool gemv_use_t = m_is_one ? !matrix.transposed : matrix.transposed;
+  const bool matrix_contiguous = matrix.stride == 1;
+  const int64_t align = matrix_contiguous ? matrix.ld | matrix.tensor.storage_offset() : 0;
+  GemvConfig cfg;
+  if (idx64) {
+    // Offsets overflow int32: such operands are DRAM-bound, so skip the
+    // policy and use the fixed configs the _i64 variants are built at.
+    cfg = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
+    cfg = GemvPolicy::clamp_vec(cfg, align);
+  } else {
+    cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
+  }
+  // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
+  // scalar-column standard kernel.
+  const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
+  if (cfg.kernel == GemvKernel::T2D && (!matrix_contiguous || (align & (t2d_vec - 1)))) {
+    cfg.kernel = GemvKernel::Standard;
+    cfg.vec = matrix_contiguous ? 1 : 2;
+  }
+  const GemvConfig launch_cfg = cfg;
+  const bool gemv_t2d = gemv_use_t && launch_cfg.kernel == GemvKernel::T2D;
+
+  const auto vvec = m_is_one ? A : B;
+  const auto vec_xs = m_is_one ? A.stride(c) : B.stride(r);
+  // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
+  const bool xc = !gemv_use_t && launch_cfg.vec > 1 && vec_xs == 1 && (vvec.storage_offset() % launch_cfg.vec) == 0;
+
+  Tensor expanded_bias;
+  int64_t out_stride = 0;
+  if (epi == GemmEpilogue::Bias) {
+    TORCH_INTERNAL_ASSERT(bias.has_value());
+    expanded_bias = bias->expand_as(out);
+    out_stride = m_is_one ? expanded_bias.stride(c) : expanded_bias.stride(r);
+  } else {
+    expanded_bias = matrix.tensor; // dummy binding for buffer(4); never dereferenced
+  }
+
+  // gemv_t indexes bias at (0,n); gemv_nt indexes it at (row,0).
+  GemvDims dims;
+  dims.n = outlen;
+  dims.K = K;
+  dims.ld = matrix.ld;
+  dims.ms = matrix.stride;
+  dims.xs = vec_xs;
+  dims.bias_r = gemv_use_t ? 0 : out_stride;
+  dims.bias_c = gemv_use_t ? out_stride : 0;
+
+  const auto epi_str = epi == GemmEpilogue::Bias ? "ab" : "none";
+  const auto matrix_str = matrix_contiguous ? "" : "_strided";
+  const auto idx_str = idx64 ? "_i64" : "";
+  std::string fname;
+  if (gemv_t2d) {
+    fname = fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.kq, epi_str);
+  } else if (gemv_use_t) {
+    fname =
+        fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, matrix_str, idx_str);
+  } else {
+    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}{}",
+                        dt_str,
+                        launch_cfg.nsimd,
+                        launch_cfg.vec,
+                        epi_str,
+                        xc ? "xc" : "xs",
+                        matrix_str,
+                        idx_str);
+  }
+  auto pso = lib.getPipelineStateForFunc(fname);
+  const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * c10::metal::simdgroup_size);
+  const int64_t rows_per_tg = gemv_t2d ? (c10::metal::simdgroup_size / launch_cfg.kq) * t2d_vec
+      : gemv_use_t                     ? c10::metal::simdgroup_size * launch_cfg.vec
+                                       : launch_cfg.nsimd;
+  const int64_t num_groups = (outlen + rows_per_tg - 1) / rows_per_tg;
+  const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "gemm_gemv", {matrix.tensor, vvec});
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, matrix.tensor, vvec, out, dims, expanded_bias, ab);
+      [enc dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_tg, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+}
+
+// Rank-1 GEMV gate for mm/addmm: dispatch when out is rank-1 (M==1 xor N==1)
+// and unit-stride along its length, otherwise return false to fall back to MPSGraph
+// A=(M,K), B=(K,N).
+bool try_mps_gemv(const Tensor& A,
+                  const Tensor& B,
+                  const Tensor& out,
+                  const std::optional<Tensor>& bias,
+                  const Scalar& alpha,
+                  const Scalar& beta,
+                  GemmEpilogue epi) {
+  const auto dtype = out.scalar_type();
+  if (dtype != at::kFloat && dtype != at::kHalf && dtype != at::kBFloat16) {
+    return false;
+  }
+  const auto M = A.size(0);
+  const auto N = B.size(1);
+  const auto K = A.size(1);
+  if (M != 1 && N != 1) {
+    return false;
+  }
+  const auto m_is_one = (M == 1);
+  const auto outlen = m_is_one ? N : M;
+  // Output must be unit-stride along its length for the flat store.
+  const auto out_unit = m_is_one ? (out.stride(1) == 1) : (out.stride(0) == 1);
+  if (!out_unit) {
+    return false;
+  }
+  const auto matrix = resolve_matrix(m_is_one ? B : A);
+  // Dispatch 64-bit-index variants when numel or storage offsets exceed int32.
+  const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) || (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
+  const GemvPolicy policy = GemvPolicy::current();
+  dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64);
+  return true;
 }
 
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -790,6 +954,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     return output.zero_();
   }
 
+  // Rank-1 (M==1 xor N==1): route mm/mv to the metal GEMV kernels.
+  if (try_mps_gemv(self, other, output, std::nullopt, 1, 0, GemmEpilogue::None)) {
+    return output;
+  }
+
   // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
   // And crashes if its a view of matrix with dimensions larger than 2**15
   // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
@@ -1002,6 +1171,11 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
       output.copy_(*bias_);
       output.mul_(beta);
     }
+    return output;
+  }
+
+  // Rank-1 (M==1 xor N==1): route addmm/addmv to the metal GEMV kernels.
+  if (try_mps_gemv(self, other, output, *bias_, alpha, beta, GemmEpilogue::Bias)) {
     return output;
   }
 
@@ -1893,105 +2067,51 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
   return result;
 }
 
-static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor& R, bool reduced_mode) {
+static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
   using namespace mps;
 
-  auto m = A.size(-2);
-  auto n = A.size(-1);
-
-  int64_t batch_size = 1;
-  for (int64_t i = 0; i < A.dim() - 2; i++) {
-    batch_size *= A.size(i);
-  }
-
-  auto A_work = A.reshape({batch_size, m, n}).contiguous();
-
-  QrParams params;
-  params.m = m;
-  params.n = n;
-
-  auto info = at::zeros({1}, A.options().dtype(kInt));
-  MPSStream* stream = getCurrentMPSStream();
-
-  Tensor Q_work = at::empty({batch_size, m, m}, A.options());
-  Tensor R_work = at::empty({batch_size, m, n}, A.options());
-  Tensor v_work = at::empty({batch_size, m}, A.options());
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto compute_encoder = stream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(fmt::format("linalg_qr_householder_{}", scalarToMetalTypeString(A)));
-
-      getMPSProfiler().beginProfileKernel(pso, "linalg_qr", {A});
-      [compute_encoder setComputePipelineState:pso];
-
-      MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
-      // one threadgroup per matrix in batch
-      MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
-
-      mtl_setArgs(compute_encoder, A_work, Q_work, R_work, info, params, v_work);
-      [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
-
-      getMPSProfiler().endProfileKernel(pso);
-    }
-  });
-
-  bool is_batched = A.dim() > 2;
-
-  if (reduced_mode) {
-    auto k = std::min(m, n);
-    auto Q_reduced = Q_work.narrow(-1, 0, k); // [batch, m, k]
-    auto R_reduced = R_work.narrow(-2, 0, k); // [batch, k, n]
-
-    if (is_batched) {
-      Q.copy_(Q_reduced.reshape(Q.sizes()));
-      R.copy_(R_reduced.reshape(R.sizes()));
-    } else {
-      Q.copy_(Q_reduced.squeeze(0));
-      R.copy_(R_reduced.squeeze(0));
-    }
-  } else {
-    // Q=mxm, R=mxn
-    if (is_batched) {
-      Q.copy_(Q_work.reshape(Q.sizes()));
-      R.copy_(R_work.reshape(R.sizes()));
-    } else {
-      Q.copy_(Q_work.squeeze(0));
-      R.copy_(R_work.squeeze(0));
-    }
-  }
-
-  if (info.item<int>() != 0) {
-    TORCH_CHECK(false, "linalg_qr: MPS kernel failed with error code ", info.item<int>());
-  }
-}
-
-static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tensor& R, const c10::string_view mode) {
-  using namespace mps;
-
-  TORCH_CHECK(A.scalar_type() == kFloat, "linalg_qr: MPS currently supports float32 only");
+  TORCH_CHECK(A.scalar_type() == kFloat, "geqrf: MPS currently supports float32 only");
 
   if (A.numel() == 0) {
     return;
   }
 
   auto m = A.size(-2);
-  auto n = A.size(-1);
+  auto batch_size = c10::multiply_integers(A.sizes().slice(0, A.dim() - 2));
+  auto v_work = at::empty({batch_size, m}, A.options());
 
-  if (std::min(m, n) > 512) {
-    TORCH_WARN_ONCE(
-        "linalg_qr: MPS implementation is currently limited to min(m,n) <= 512, "
-        "falling back to CPU.");
-    auto A_cpu = A.to(at::kCPU);
-    auto [Q_cpu, R_cpu] = at::linalg_qr(A_cpu, mode);
-    const_cast<Tensor&>(Q).copy_(Q_cpu.to(at::kMPS));
-    const_cast<Tensor&>(R).copy_(R_cpu.to(at::kMPS));
-    return;
+  GeqrfParams params;
+
+  for (const auto dim : c10::irange(A.dim())) {
+    params.A_sizes[dim] = A.size(dim);
+    params.A_strides[dim] = A.stride(dim);
+
+    if (dim < tau.dim()) {
+      params.tau_strides[dim] = tau.stride(dim);
+    }
   }
 
-  bool reduced_mode = (mode != "complete");
+  params.num_batch_dims = A.dim() - 2;
 
-  metal_qr_kernel_impl(A, Q, R, reduced_mode);
+  MPSStream* stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto compute_encoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("geqrf_{}", scalarToMetalTypeString(A)));
+
+      getMPSProfiler().beginProfileKernel(pso, "geqrf", {A});
+      [compute_encoder setComputePipelineState:pso];
+
+      MTLSize threadGroupSize = MTLSizeMake([pso maxTotalThreadsPerThreadgroup], 1, 1);
+      MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
+
+      mtl_setArgs(compute_encoder, A, tau, params, v_work);
+      [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
 }
 
 static void lstsq_kernel_mps(const Tensor& a,
@@ -2290,10 +2410,6 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
   mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
 }
 
-TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const Tensor& Q, const Tensor& R) {
-  mps::linalg_qr_out_impl_mps(A, Q, R, mode);
-}
-
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
@@ -2301,5 +2417,6 @@ REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
 REGISTER_DISPATCH(svd_stub, mps::svd_kernel_mps);
 REGISTER_DISPATCH(linalg_eigh_stub, mps::eigh_kernel_mps);
 REGISTER_DISPATCH(lstsq_stub, mps::lstsq_kernel_mps);
+REGISTER_DISPATCH(geqrf_stub, mps::geqrf_kernel_mps)
 
 } // namespace at::native

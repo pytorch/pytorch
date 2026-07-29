@@ -1,0 +1,38 @@
+diff --git a/test/cpython/v3_13/test_subclassinit.py b/test/cpython/v3_13/test_subclassinit.py
+index 0d32aa509bd..15d58500db5 100644
+--- a/test/cpython/v3_13/test_subclassinit.py
++++ b/test/cpython/v3_13/test_subclassinit.py
+@@ -1,8 +1,26 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_subclassinit.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import types
+ import unittest
+ 
+ 
+-class Test(unittest.TestCase):
++class Test(CPythonTestCase):
+     def test_init_subclass(self):
+         class A:
+             initialized = False
+@@ -278,4 +296,4 @@ class Test(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

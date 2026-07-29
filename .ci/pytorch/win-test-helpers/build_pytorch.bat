@@ -110,7 +110,8 @@ sccache --zero-stats
 set CMAKE_C_COMPILER_LAUNCHER=sccache
 set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 
-set CMAKE_GENERATOR=Ninja
+:: CMAKE_GENERATOR=Ninja is now forced via cmake.define.CMAKE_GENERATOR in
+:: pyproject.toml (single source of truth), so it is not set here.
 
 if "%USE_CUDA%"=="1" (
   :: randomtemp is used to resolve the intermittent build error related to CUDA.

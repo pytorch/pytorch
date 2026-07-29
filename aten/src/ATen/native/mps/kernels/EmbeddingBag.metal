@@ -171,9 +171,24 @@ void embedding_bag_impl(
 
   uint32_t offsets_end = min(bag_idx + 1, num_bags - 1);
   const bool is_last_bag = bag_idx + 1 == num_bags;
-  uint32_t indices_start = static_cast<uint32_t>(offsets[bag_idx]);
+  uint32_t indices_start =
+      (bag_idx == 0) ? 0u : static_cast<uint32_t>(offsets[bag_idx]);
   uint32_t indices_end =
       is_last_bag ? num_indices : static_cast<uint32_t>(offsets[offsets_end]);
+
+  if (indices_end > num_indices || indices_end < indices_start) {
+    TORCH_REPORT_ERROR(
+        error_buf,
+        "Invalid offsets in embedding_bag: bag ",
+        bag_idx,
+        " spans [",
+        indices_start,
+        ", ",
+        indices_end,
+        ") but num_indices is ",
+        num_indices);
+    return;
+  }
 
   auto out_val = ReductionOpInit<M, T>()();
 
