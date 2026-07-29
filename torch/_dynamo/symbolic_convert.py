@@ -52,6 +52,7 @@ import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import (
+    FakeTensorObservedException,
     get_dynamo_observed_exception,
     ObservedException,
     TensorifyScalarRestartAnalysis,
@@ -194,11 +195,13 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
-    generic_bool,
-    generic_contains,
+    generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_is_true,
+    generic_setitem,
     pyiter_send,
+    pysequence_contains,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -956,7 +959,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():
                 if truth_fn(result.as_python_constant()):
                     if push:
@@ -995,7 +998,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif not value.is_tensor():
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if truth_fn(result):
                 if push:
                     self.push(value)
@@ -2868,6 +2871,20 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
+            if isinstance(raised_exception, FakeTensorObservedException):
+                from .exc import format_graph_break_message
+
+                msg = format_graph_break_message(
+                    "RuntimeError when making fake tensor call",
+                    "",
+                    str(raised_exception),
+                    [*graph_break_hints.USER_ERROR],
+                )
+                e = exc.TorchRuntimeError(
+                    msg, getattr(raised_exception, "real_stack", None)
+                )
+                raise e.with_traceback(raised_exception.__traceback__) from None
+
             curr_exc = self.exn_vt_stack.get_raised_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
@@ -3312,10 +3329,10 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            # pyrefly: ignore [unsupported-operation]
-            if inst.arg % 2:
-                self.LOAD_METHOD(inst)
-                return
+            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
+                "LOAD_ATTR method variant should have been normalized by "
+                "remove_load_attr_method_variant in cleaned_instructions"
+            )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
@@ -3961,7 +3978,7 @@ class InstructionTranslatorBase(
     )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
-        obj.call_method(self, "__setitem__", [key, val], {})
+        generic_setitem(self, obj, key, val)
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
@@ -3969,7 +3986,7 @@ class InstructionTranslatorBase(
         # only. We avoid call_method("__getitem__") because it can execute
         # user code and add unwanted graph nodes.
         self._maybe_sync_dealloc_subscr(obj, key)
-        obj.call_method(self, "__delitem__", [key], {})
+        generic_delitem(self, obj, key)
 
     def _maybe_sync_dealloc_subscr(
         self, obj: VariableTracker, key: VariableTracker
@@ -4109,7 +4126,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected isinstance(obj, ConstDictVariable) to be true"
             )
-        obj.call_method(self, "__setitem__", (k, v), {})  # type: ignore[arg-type]
+        generic_setitem(self, obj, k, v)
 
     def SET_ADD(self, inst: Instruction) -> None:
         v = self.pop()
@@ -4329,7 +4346,7 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec), source=value.source, tx=self
+                LazySymNodeFormatString(value, fmt_spec), source=None
             )
             self.push(value)
             return
@@ -4429,7 +4446,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
+        self.push(pysequence_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 
@@ -4818,7 +4835,7 @@ class InstructionTranslatorBase(
 
     def MAKE_CELL(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12) and not self.accept_prefix_inst:
-            # In 3.12+, MAKE_CELL is not longer necessarily a prefix instruction.
+            # In 3.12+, MAKE_CELL is no longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
             if not isinstance(self.symbolic_locals[inst.argval], NullVariable):
                 raise AssertionError(
@@ -5596,9 +5613,28 @@ class InstructionTranslator(InstructionTranslatorBase):
             if f_code.co_flags & CO_VARKEYWORDS:
                 varkw_name = f_code.co_varnames[_vararg_idx]
 
+            # Skip inputs never read anywhere in the function: they cannot
+            # affect the graph or any resume suffix, so guards on them are
+            # wasteful. Export mode must keep all locals because realize_all()
+            # below needs them. locals()/vars() are handled in _call_frame_locals_snapshot
+            # which adds pruned entries back from tx.f_locals on demand.
+            if export:
+                function_live_names: set[str] | None = None
+            else:
+                function_live_names = livevars_analysis(
+                    self.instructions, self.instructions[0]
+                )
+
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    if (
+                        function_live_names is not None
+                        and name not in function_live_names
+                        and name != varargs_name
+                        and name != varkw_name
+                    ):
+                        continue
                     local_dynamism = None
                     if dynamism:
                         local_dynamism = frozenset(dynamism.get(name, {}).items())

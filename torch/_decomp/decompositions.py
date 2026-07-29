@@ -1744,8 +1744,8 @@ def native_group_norm_backward(
     )
 
     # Compute Internal gradients
-    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
-    db = grad_output.view(N, C, HxW).sum(dim=[2])
+    ds = torch.mul(grad_output, input).reshape(N, C, HxW).sum(dim=[2])
+    db = grad_output.reshape(N, C, HxW).sum(dim=[2])
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
@@ -1766,7 +1766,7 @@ def native_group_norm_backward(
                 rstd.unsqueeze(-1),
                 torch.ones((1, group, cpg), device=rstd.device),
             )
-        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c2 = torch.addcmul(-ds_val, db_val, mean) * rstd * rstd * rstd * s
         c3 = -c2 * mean - db_val * rstd * s
 
         c1 = c1.unsqueeze(-1)
@@ -2125,7 +2125,7 @@ def native_batch_norm_helper(
         running_var = running_var.to(dtype=computation_dtype, copy=True)
         new_running_var = running_var
         mean = running_mean
-        invstd = 1 / (torch.sqrt(running_var + eps))
+        invstd = torch.rsqrt(running_var + eps)
         # Very annoying inconsistency where CPU and CUDA give different shapes
         if input.device.type != "cpu":
             save_mean = running_mean

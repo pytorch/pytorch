@@ -793,7 +793,11 @@ class OpInfo:
     # backward dtypes this function is expected to work with on MPS
     backward_dtypesIfMPS: _dispatch_dtypes = None
 
+    # backward dtypes this function is expected to work with on HPU
     backward_dtypesIfHpu: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on XPU
+    backward_dtypesIfXPU: _dispatch_dtypes = None
 
     # the following metadata describes the operators out= support
 
@@ -1044,7 +1048,17 @@ class OpInfo:
                 else self.dtypes
             )
         )
-
+        self.backward_dtypesIfXPU = (
+            set(self.backward_dtypesIfXPU)
+            if self.backward_dtypesIfXPU is not None
+            else (
+                self.backward_dtypesIfCUDA
+                if self.backward_dtypesIfCUDA is not None
+                else self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypes
+            )
+        )
         self.backward_dtypes = (
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
@@ -1135,7 +1149,7 @@ class OpInfo:
         if self.supports_njt is None:
             self.supports_njt = False
 
-        # We run the sampling functions without tracking the gradiends of the creation of inputs
+        # We run the sampling functions without tracking the gradients of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
         self.sample_inputs_sparse_coo_func = torch.no_grad()(
             self.sample_inputs_sparse_coo_func
@@ -1616,6 +1630,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "xpu":
+            backward_dtypes = self.backward_dtypesIfXPU
         elif device_type == "mps":
             backward_dtypes = self.backward_dtypesIfMPS
         else:
