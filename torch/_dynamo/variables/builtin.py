@@ -1471,11 +1471,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
         cell_and_freevars = set(tx.cell_and_freevars())
         frame_locals = {}
-        # symbolic_cellvars registers all of the frame's cells; listing it
-        # second makes cell contents take precedence over a (shadowing)
-        # colliding fast local of the same name.
+        # symbolic_cellvars registers all of the frame's cells. Cells are
+        # listed first so that a colliding fast local of the same name
+        # shadows the cell, matching CPython: the two share a name but not a
+        # localsplus slot, and the fast slot wins while it holds a value (an
+        # empty one is skipped below, leaving the cell contents visible).
         for name, value in itertools.chain(
-            tx.symbolic_locals.items(), tx.symbolic_cellvars.items()
+            tx.symbolic_cellvars.items(), tx.symbolic_locals.items()
         ):
             if name not in frame_local_names:
                 continue
