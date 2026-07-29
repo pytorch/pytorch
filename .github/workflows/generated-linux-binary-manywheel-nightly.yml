@@ -522,7 +522,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_10-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.10"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -549,7 +549,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_11-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.11"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -576,7 +576,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_12-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.12"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -603,7 +603,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_13-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.13"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -630,7 +630,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_14-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.14"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -657,7 +657,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_14t-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.14t"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -684,7 +684,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_15-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.15"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -711,7 +711,7 @@ jobs:
             docker_image_tag_prefix: "rocm7.14"
             build_name: "manywheel-py3_15t-rocm7_14"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries]==7.14"
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14"
           - desired_python: "3.15t"
             desired_cuda: "xpu"
             gpu_arch_version: ""
