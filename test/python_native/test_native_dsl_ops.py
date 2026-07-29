@@ -165,7 +165,7 @@ class TestNativeDSLOps(TestCase):
         script = textwrap.dedent("""\
             import sys
             import torch
-            dsl_modules = ["triton", "cutlass", "tvm_ffi", "helion"]
+            dsl_modules = ["triton", "cutlass", "tvm_ffi", "helion", "flydsl"]
             leaked = [m for m in dsl_modules if m in sys.modules]
             print(repr(leaked))
         """)
