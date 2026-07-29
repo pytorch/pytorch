@@ -850,6 +850,65 @@ class TestTorchFunctionOverride(TestCase):
         self.assertTrue(obj_last.torch_function_called,
                         "torch_function should be called when object is last in list")
 
+    def test_torch_function_leading_in_varargs_intlist(self):
+        """Test dispatch when a torch_function object leads a var-args int list"""
+        # https://github.com/pytorch/pytorch/issues/191275
+
+        class SizeLike:
+            def __init__(self):
+                self.dispatched_args = None
+                self.dispatched_kwargs = None
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                self.dispatched_args = args
+                self.dispatched_kwargs = kwargs
+                return torch.tensor(42.0)
+
+        t = torch.zeros(1, 4)
+
+        # Leading position in the var-args spelling used to raise
+        # "takes 1 positional argument but 2 were given" for signatures
+        # with keyword-only parameters after the int list; view has a bare
+        # signature and is included to lock in its dispatch behavior.
+        for call, expected_args in [
+            (lambda o: t.expand(o, 4), lambda o: (t, o, 4)),
+            (lambda o: t.new_zeros(o, 4), lambda o: (t, o, 4)),
+            (lambda o: torch.zeros(o, 4), lambda o: (o, 4)),
+            (lambda o: torch.rand(o, 4), lambda o: (o, 4)),
+            (lambda o: t.view(o, 4), lambda o: (t, o, 4)),
+        ]:
+            obj = SizeLike()
+            call(obj)
+            self.assertEqual(obj.dispatched_args, expected_args(obj))
+
+        # Controls: non-leading and packed spellings keep dispatching.
+        obj = SizeLike()
+        t.expand(4, obj)
+        self.assertEqual(obj.dispatched_args, (t, 4, obj))
+        obj = SizeLike()
+        t.expand((obj, 4))
+        self.assertEqual(obj.dispatched_args, (t, (obj, 4)))
+
+        # Keyword arguments after a leading object are forwarded intact.
+        obj = SizeLike()
+        torch.zeros(obj, 4, dtype=torch.float64)
+        self.assertEqual(obj.dispatched_args, (obj, 4))
+        self.assertEqual(obj.dispatched_kwargs, {"dtype": torch.float64})
+
+    def test_fx_trace_expand_leading_symbolic_dim(self):
+        """Test fx.symbolic_trace of expand with the traced dim leading"""
+        # https://github.com/pytorch/pytorch/issues/191275
+        import torch.fx as fx
+
+        const = torch.zeros(1, 4)
+
+        def f(x):
+            return const.expand(x.shape[0], *const.shape[1:])
+
+        gm = fx.symbolic_trace(f)
+        x = torch.randn(3, 2)
+        self.assertEqual(gm(x), f(x))
+
     def test_torch_function_nested_tuple_getitem(self):
         """Test that torch_function is called with getitem for TF objects inside nested tuples"""
 
