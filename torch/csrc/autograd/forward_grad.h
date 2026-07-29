@@ -100,6 +100,7 @@ struct ForwardGrad;
 #define EXPECTED_MAX_LEVEL 2
 
 struct TORCH_API ForwardADLevel {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ForwardADLevel(uint64_t idx) : idx_(idx) {}
   ~ForwardADLevel();
 
@@ -107,6 +108,7 @@ struct TORCH_API ForwardADLevel {
   static void release_idx(uint64_t idx);
   static std::shared_ptr<ForwardADLevel> get_by_idx(uint64_t idx);
   static std::shared_ptr<ForwardADLevel> try_get_by_idx(uint64_t idx);
+  static bool has_any_level();
 
   void erase(const std::shared_ptr<ForwardGrad>& grad) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -124,6 +126,7 @@ struct TORCH_API ForwardADLevel {
   uint64_t idx_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
   ForwardGrad() = default;
 
