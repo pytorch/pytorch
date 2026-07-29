@@ -301,6 +301,7 @@ with torch.xpu._DeviceGuard(0):
         self.assertTrue(make_line(0).setup_stream_cache)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @xfailIfNoAcceleratorTriton
     def test_generated_code_uses_get_stream_by_index(self):
         """Generated inductor code should use _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
@@ -1390,6 +1391,53 @@ class TestUserStreamCompile(InductorTestCase):
             wait_0_1_pos,
             add_kernel_pos,
             "wait_stream(0, 1) must come after add kernel (stream 1)",
+        )
+
+    def test_pattern_replacement_preserves_stream(self):
+        """A post-grad pattern replacement (online softmax) must preserve the
+        stream annotation of the intermediate nodes it introduces. Regression
+        test: the pattern matcher's percolate_tags dropped the "custom" (stream)
+        meta, so prepare_softmax_online landed on the default stream instead of
+        the side stream it was computed on. The softmax must feed a downstream
+        op (here the second matmul) so prepare_softmax_online is a non-output
+        intermediate -- output nodes get correct meta via _transfer_meta and
+        would not exercise the percolate_tags path."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(q, k, v):
+            s = torch.cuda.Stream()
+            e = torch.cuda.Event()
+            with torch.cuda.stream(s):
+                e.wait()
+                attn = (q @ k.transpose(-2, -1)).softmax(dim=-1) @ v
+            s.synchronize()
+            return attn.sum()
+
+        q = torch.randn(8, 64, 32, device="cuda")
+        k = torch.randn(8, 64, 32, device="cuda")
+        v = torch.randn(8, 64, 32, device="cuda")
+        expected = fn(q, k, v)
+        result, (code,) = run_and_get_code(torch.compile(fn), q, k, v)
+        self.assertEqual(result, expected)
+
+        # Find the stream context the prepare_softmax_online kernel call is
+        # emitted under. Without the fix it lands under default_stream; with it,
+        # under the side stream. A plain FileCheck ordering is too loose here --
+        # a later default_stream block would satisfy it -- so track the enclosing
+        # context explicitly.
+        call_body = code[code.find("def call(") :]
+        ctx = None
+        softmax_ctx = None
+        for line in call_body.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith(("with stream", "with default_stream")):
+                ctx = stripped
+            if "prepare_softmax_online" in line and ".run(" in line:
+                softmax_ctx = ctx
+        self.assertIsNotNone(softmax_ctx, "prepare_softmax_online kernel not found")
+        self.assertTrue(
+            softmax_ctx.startswith("with stream"),
+            f"prepare_softmax_online must run on the side stream, got: {softmax_ctx}",
         )
 
     def test_codegen_structure_single_stream(self):
@@ -2734,6 +2782,7 @@ instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 class TestStreamExternalObjectRestore(InductorTestCase):
+    @xfailIfNoAcceleratorTriton
     def test_restore_external_objects_before_backward(self):
         """Forward snapshots external object registry, backward restores it."""
         from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs

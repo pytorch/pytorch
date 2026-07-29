@@ -17,7 +17,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -49,7 +48,6 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181336")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
