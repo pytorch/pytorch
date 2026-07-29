@@ -62,9 +62,11 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         self._init_pg()
         # The handle is deliberately dropped: the group owns the hook.
         NanCheckHook.attach(dist.group.WORLD)
+        # Initialize lazy GPU backends before the device assert poisons the stream.
+        t = torch.ones(1024, device=self.device)
+        dist.all_reduce(t)
         # All ranks poison their input so no rank is left waiting on a peer
         # that died in the check.
-        t = torch.ones(1024, device=self.device)
         t[42] = float("nan")
         self._assert_nan_detected(t)
 
