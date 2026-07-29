@@ -20,9 +20,9 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
     _LoopMutationTracker,
-    _LoopStateSnapshot,
-    _ReindexingMemoryBaseline,
-    _ReindexingPlan,
+    ForeachKernelSchedulerNode,
+    FusedSchedulerNode,
+    refresh_group_node_dependencies,
     Scheduler,
     SchedulerNode,
     TilingAndMemoryMetrics,
@@ -291,6 +291,65 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
 
+    def test_nested_loop_mutation_trackers(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        original_body = snode._body
+        outer = _LoopMutationTracker.create((snode,))
+        inner = _LoopMutationTracker.create((snode,))
+        inner.watch(snode)
+
+        try:
+            snode.apply_indexing_exprs({})
+            mutated_body = snode._body
+            with inner.restore_original_state():
+                self.assertIs(snode._body, original_body)
+            self.assertIs(snode._body, mutated_body)
+            inner.finish(rollback=False)
+        finally:
+            outer.finish(rollback=True)
+
+        self.assertIs(snode._body, original_body)
+
+    def test_expand_dimension_loop_state_rollback(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        original_state = snode.snapshot_loop_state()
+        tracker = _LoopMutationTracker.create((snode,))
+
+        snode.expand_dimension_for_pointwise_node(0, 64)
+        self.assertNotEqual(snode.snapshot_loop_state(), original_state)
+        tracker.finish(rollback=True)
+
+        self.assertEqual(snode.snapshot_loop_state(), original_state)
+
+    def test_foreach_nested_fused_loop_state_rollback(self):
+        snodes = [
+            SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+            for _ in range(2)
+        ]
+        for order, snode in enumerate(snodes):
+            snode.min_order = snode.max_order = order
+            snode.min_input_distance = snode.max_input_distance = 0
+        subkernel = FusedSchedulerNode(V.graph.scheduler, snodes)
+        foreach = ForeachKernelSchedulerNode(
+            V.graph.scheduler,
+            [subkernel],
+            use_custom_partition_algo=False,
+        )
+        original_body = snodes[0]._body
+        original_group = subkernel.group
+        original_read_writes = foreach.read_writes
+        tracker = _LoopMutationTracker.create((foreach,))
+
+        snodes[0].expand_dimension_for_pointwise_node(0, 64)
+        subkernel.group = (original_group[0], (sympy.S.One, sympy.S.One))
+        refresh_group_node_dependencies(subkernel)
+        refresh_group_node_dependencies(foreach)
+        tracker.finish(rollback=True)
+
+        self.assertIs(snodes[0]._body, original_body)
+        self.assertEqual(subkernel.group, original_group)
+        self.assertEqual(foreach.read_writes, original_read_writes)
+
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
@@ -332,8 +391,7 @@ class ImplDetailTest(MockSchedulerTest):
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
         )
 
-    @staticmethod
-    def _make_reindexing_memory_test_case():
+    def _make_reindexing_memory_test_case(self):
         scheduler = Scheduler.__new__(Scheduler)
         pointwise = mock.Mock()
         reduction = mock.Mock()
@@ -343,85 +401,153 @@ class ImplDetailTest(MockSchedulerTest):
         pointwise.get_name.return_value = "pointwise"
         pointwise.get_nodes.return_value = [pointwise]
 
-        baseline = _ReindexingMemoryBaseline(
-            (
-                TilingAndMemoryMetrics({"x": 1}, {"x": 10}, 10, 0),
-                TilingAndMemoryMetrics({"r0_": 1}, {"r0_": 10}, 10, 0),
-            ),
-            0,
+        individual_metrics = (
+            TilingAndMemoryMetrics({"x": 1}, {"x": 10}, 10, 0),
+            TilingAndMemoryMetrics({"r0_": 1}, {"r0_": 10}, 10, 0),
         )
         backend = mock.Mock()
         scheduler.get_backend = mock.Mock(return_value=backend)
-        return scheduler, pointwise, reduction, baseline, backend
+        state = {"name": "candidate"}
+
+        @contextlib.contextmanager
+        def restore_original_state():
+            self.assertEqual(state["name"], "candidate")
+            state["name"] = "original"
+            yield
+            state["name"] = "candidate"
+
+        mutation_tracker = mock.Mock()
+        mutation_tracker.restore_original_state.side_effect = restore_original_state
+        return (
+            scheduler,
+            pointwise,
+            reduction,
+            mutation_tracker,
+            backend,
+            individual_metrics,
+            state,
+        )
 
     @parametrize(
         "coalesced,uncoalesced,expected",
         ((20, 0, False), (4, 1, False), (5, 1, True)),
     )
     def test_reindexing_memory_cost_comparison(self, coalesced, uncoalesced, expected):
-        scheduler, pointwise, reduction, baseline, backend = (
-            self._make_reindexing_memory_test_case()
-        )
-        backend.get_tiling_and_memory_metrics.return_value = TilingAndMemoryMetrics(
+        (
+            scheduler,
+            pointwise,
+            reduction,
+            tracker,
+            backend,
+            individual_metrics,
+            state,
+        ) = self._make_reindexing_memory_test_case()
+        combined = TilingAndMemoryMetrics(
             {"x": 1, "r0_": 1},
             {"x": 10, "r0_": 10},
             coalesced,
             uncoalesced,
         )
+        calls = []
+
+        def get_metrics(nodes):
+            calls.append((state["name"], tuple(nodes)))
+            if state["name"] == "candidate":
+                return combined
+            return individual_metrics[0 if nodes == [pointwise] else 1]
+
+        backend.get_tiling_and_memory_metrics.side_effect = get_metrics
         decision = scheduler._reindexing_regresses_memory_coalescing(
-            pointwise, reduction, baseline
+            pointwise, reduction, tracker
         )
         self.assertEqual(decision, expected)
+        self.assertEqual(
+            calls,
+            [
+                ("original", (pointwise,)),
+                ("original", (reduction,)),
+                ("candidate", (pointwise, reduction)),
+            ],
+        )
 
-    def test_reindexing_memory_cost_fallback(self):
-        scheduler, pointwise, reduction, baseline, backend = (
+    def test_reindexing_memory_metrics_unavailable(self):
+        scheduler, pointwise, reduction, tracker, backend, _, state = (
             self._make_reindexing_memory_test_case()
         )
-        scheduler.score_fusion_memory = mock.Mock(return_value=5)
-        with mock.patch(
-            "torch._inductor.scheduler._uncoalesced_memory_cost", return_value=10
-        ):
-            decision = scheduler._reindexing_regresses_memory_coalescing(
-                pointwise, reduction, _ReindexingMemoryBaseline(None, 0)
-            )
-            self.assertTrue(decision)
+        calls = []
 
-            backend.get_tiling_and_memory_metrics.return_value = None
-            decision = scheduler._reindexing_regresses_memory_coalescing(
-                pointwise, reduction, baseline
-            )
-            self.assertTrue(decision)
+        def get_metrics(nodes):
+            calls.append((state["name"], tuple(nodes)))
+            return None
 
-    def test_reindexing_baseline_restores_candidate(self):
+        backend.get_tiling_and_memory_metrics.side_effect = get_metrics
+        self.assertFalse(
+            scheduler._reindexing_regresses_memory_coalescing(
+                pointwise, reduction, tracker
+            )
+        )
+        self.assertEqual(
+            calls,
+            [
+                ("original", (pointwise,)),
+                ("original", (reduction,)),
+            ],
+        )
+
+    @parametrize("reject,expected", ((False, True), (True, False)))
+    def test_direct_reindexing_memory_guard(self, reject, expected):
         scheduler = Scheduler.__new__(Scheduler)
-        pointwise = mock.Mock()
-        reduction = mock.Mock()
-        original_snapshot = mock.Mock()
-        current_snapshot = mock.Mock()
-        plan = _ReindexingPlan(
-            pointwise,
-            (),
-            sympy.S.One,
-            sympy.S.One,
-            original_snapshot,
+        scheduler.mutation_renames = {}
+        scheduler._has_multi_stream_nodes = mock.Mock(return_value=False)
+        scheduler._has_mempool_nodes = mock.Mock(return_value=False)
+        scheduler._nested_index_equivalent_dep_names = mock.Mock(return_value=None)
+        scheduler._score_fusion_memory_for_can_fuse = mock.Mock(return_value=0)
+        scheduler.can_fuse_vertical = mock.Mock(side_effect=(False, True))
+
+        node1, node2 = mock.Mock(), mock.Mock()
+        node1.get_name.return_value = "producer"
+        node2.get_name.return_value = "consumer"
+        node1.is_template.return_value = node2.is_template.return_value = False
+        node1.get_operation_names.return_value = OrderedSet(("producer",))
+        node2.get_operation_names.return_value = OrderedSet(("consumer",))
+        node1.ancestors = OrderedSet()
+        node2.ancestors = OrderedSet(("producer",))
+        node1.get_buffer_names.return_value = OrderedSet()
+        node2.get_buffer_names.return_value = OrderedSet()
+        node1.get_device.return_value = node2.get_device.return_value = torch.device(
+            GPU_TYPE
+        )
+
+        scheduler._try_reindex_pointwise_for_reduction = mock.Mock(
+            return_value=(True, True)
+        )
+        scheduler._reindexing_regresses_memory_coalescing = mock.Mock(
+            return_value=reject
         )
         backend = mock.Mock()
-        backend.get_tiling_and_memory_metrics.return_value = None
+        backend.can_fuse_vertical.return_value = True
         scheduler.get_backend = mock.Mock(return_value=backend)
-        pointwise.get_nodes.return_value = []
+        mutation_tracker = mock.Mock()
 
-        with mock.patch.object(
-            _LoopStateSnapshot, "create", return_value=current_snapshot
-        ) as create_snapshot:
-            baseline = scheduler._capture_reindexing_memory_baseline(
-                pointwise, reduction, plan
+        with (
+            inductor_config.patch(
+                {
+                    "expand_dimension_for_pointwise_nodes": False,
+                    "loop_index_inversion_in_fusion": False,
+                    "loop_reindexing_after_fusion": True,
+                }
+            ),
+            mock.patch.object(V.choices, "can_fuse", return_value=True),
+            mock.patch.object(V.choices, "can_fuse_vertical", return_value=True),
+        ):
+            self.assertEqual(
+                scheduler._can_fuse(node1, node2, mutation_tracker=mutation_tracker),
+                expected,
             )
 
-        create_snapshot.assert_called_once_with((pointwise,))
-        original_snapshot.restore.assert_called_once_with()
-        current_snapshot.restore.assert_called_once_with()
-        self.assertIsNone(baseline.individual_metrics)
-        self.assertEqual(baseline.uncoalesced_cost, 0)
+        scheduler._reindexing_regresses_memory_coalescing.assert_called_once_with(
+            node1, node2, mutation_tracker
+        )
 
 
 @inductor_config.patch(
@@ -459,6 +585,15 @@ class LoopOrderingTest(TestCase):
         super().setUp()
         metrics.reset()
 
+    @staticmethod
+    def _get_node_origins(node):
+        return {
+            origin.target
+            for snode in node.get_nodes()
+            if isinstance(snode, SchedulerNode) and snode.node is not None
+            for origin in snode.node.get_origins()
+        }
+
     @contextlib.contextmanager
     def _record_reindexing_memory_decisions(self):
         decisions = []
@@ -468,25 +603,14 @@ class LoopOrderingTest(TestCase):
             scheduler,
             node1,
             node2,
-            baseline,
+            mutation_tracker,
         ):
+            reject = original(scheduler, node1, node2, mutation_tracker)
             backend = scheduler.get_backend(node1.get_device())
-            original_get_metrics = backend.get_tiling_and_memory_metrics
-            combined_metrics = []
-
-            def get_metrics(nodes):
-                metrics = original_get_metrics(nodes)
-                if len(nodes) == 2:
-                    combined_metrics.append(metrics)
-                return metrics
-
-            with mock.patch.object(
-                backend, "get_tiling_and_memory_metrics", get_metrics
-            ):
-                reject = original(scheduler, node1, node2, baseline)
-            metrics = combined_metrics[-1] if combined_metrics else None
-            reduction = node1 if node1.is_reduction() else node2
-            decisions.append((tuple(reduction.group[1]), reject, metrics))
+            memory_metrics = backend.get_tiling_and_memory_metrics([node1, node2])
+            origins = self._get_node_origins(node1) | self._get_node_origins(node2)
+            is_vertical = bool(node1.get_operation_names() & node2.ancestors)
+            decisions.append((origins, is_vertical, reject, memory_metrics))
             return reject
 
         with mock.patch.object(
@@ -732,11 +856,10 @@ class LoopOrderingTest(TestCase):
             actual = torch.compile(f)(x)
         torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
         self.assertEqual(1, metrics.generated_kernel_count)
-        target_group = (M * (N // 128), 128)
         target_decisions = [
             (reject, memory_metrics)
-            for group, reject, memory_metrics in decisions
-            if group == target_group
+            for origins, is_vertical, reject, memory_metrics in decisions
+            if is_vertical and torch.ops.aten.mean.dim in origins
         ]
         self.assertTrue(
             any(
@@ -916,8 +1039,9 @@ class LoopOrderingTest(TestCase):
         # variance reduction + block reduction = 2 kernels
         self.assertEqual(2, metrics.generated_kernel_count)
 
-    @parametrize("coalesce_analysis", (False, True))
-    def test_upsample_into_reduction_keeps_coalesced_loops(self, coalesce_analysis):
+    @inductor_config.patch(force_disable_caches=True)
+    @inductor_config.patch("triton.coalesce_tiling_analysis", True)
+    def test_upsample_into_reduction_keeps_coalesced_loops(self):
         """Reindexing upsample onto GroupNorm's split loses coalescing (#189488)."""
 
         class Mod(nn.Module):
@@ -938,36 +1062,54 @@ class LoopOrderingTest(TestCase):
         mod = Mod(channels, groups).eval()
         x = torch.randn(batch, channels, spatial // 2, spatial // 2)
         residual = torch.randn_like(x)
+        target_origins = {
+            torch.ops.aten._unsafe_index.Tensor,
+            torch.ops.aten.var_mean.correction,
+        }
 
         with (
             torch.no_grad(),
-            inductor_config.patch("triton.coalesce_tiling_analysis", coalesce_analysis),
             self._record_reindexing_memory_decisions() as decisions,
         ):
             self.do_acc_test(mod, x, residual)
-        self.assertEqual(6, metrics.generated_kernel_count)
-        target_group = (batch * groups, (channels // groups) * spatial * spatial)
-        target_decisions = [
-            (reject, memory_metrics)
-            for group, reject, memory_metrics in decisions
-            if group == target_group
-        ]
-        if coalesce_analysis:
-            self.assertTrue(
-                any(
-                    reject
-                    and memory_metrics is not None
-                    and memory_metrics.uncoalesced_memory_cost > 0
-                    for reject, memory_metrics in target_decisions
-                )
+        self.assertEqual(7, metrics.generated_kernel_count)
+
+        self.assertTrue(
+            any(
+                target_origins <= origins
+                and is_vertical
+                and reject
+                and memory_metrics is not None
+                and memory_metrics.uncoalesced_memory_cost > 0
+                for origins, is_vertical, reject, memory_metrics in decisions
             )
-        else:
-            self.assertTrue(
-                any(
-                    reject and memory_metrics is None
-                    for reject, memory_metrics in target_decisions
-                )
-            )
+        )
+
+    @inductor_config.patch("triton.coalesce_tiling_analysis", True)
+    def test_horizontal_reindexing_memory_guard(self):
+        def f(x):
+            return x + 1, x.reshape(-1, 128).sum(dim=-1)
+
+        target_origins = {torch.ops.aten.add.Tensor, torch.ops.aten.sum.dim_IntList}
+        target_decisions = []
+        original = Scheduler._reindexing_regresses_memory_coalescing
+
+        def reject_target(scheduler, node1, node2, mutation_tracker):
+            reject = original(scheduler, node1, node2, mutation_tracker)
+            origins = self._get_node_origins(node1) | self._get_node_origins(node2)
+            is_vertical = bool(node1.get_operation_names() & node2.ancestors)
+            if target_origins <= origins and not is_vertical:
+                target_decisions.append(reject)
+                return True
+            return reject
+
+        x = torch.randn(16, 8192)
+        with mock.patch.object(
+            Scheduler, "_reindexing_regresses_memory_coalescing", reject_target
+        ):
+            self.assertEqual(torch.compile(f)(x), f(x))
+        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertIn(False, target_decisions)
 
     @inductor_config.patch(
         {
@@ -1517,13 +1659,15 @@ class MemoryCoalescingTest(MockSchedulerTest):
         self.assertEqual(list(memory_metrics.selected_tiling), expected_tiling)
         self.assertEqual(list(memory_metrics.tiling_scores), expected_tiling)
 
-        selected_cost = sum(memory_metrics.tiling_scores.values())
+        selected_score = sum(memory_metrics.tiling_scores.values())
         total_cost = sum(analysis.coalesced_by_var.values()) + sum(
             analysis.uncoalesced_addrs.values()
         )
-        self.assertEqual(memory_metrics.coalesced_memory_cost, selected_cost)
+        self.assertGreaterEqual(memory_metrics.coalesced_memory_cost, selected_score)
         self.assertEqual(
-            memory_metrics.uncoalesced_memory_cost, total_cost - selected_cost
+            memory_metrics.coalesced_memory_cost
+            + memory_metrics.uncoalesced_memory_cost,
+            total_cost,
         )
         return analysis, memory_metrics
 
@@ -1871,6 +2015,15 @@ class MemoryCoalescingTest(MockSchedulerTest):
             self.assertLess(
                 memory_metrics.tiling_scores["x"],
                 analysis.coalesced_by_var[index_vars[-1]],
+            )
+            expected_coalesced = (
+                analysis.coalesced_by_var[index_vars[-1]]
+                + analysis.coalesced_by_var[reduction_vars[-1]]
+            )
+            self.assertEqual(memory_metrics.coalesced_memory_cost, expected_coalesced)
+            self.assertEqual(
+                memory_metrics.uncoalesced_memory_cost,
+                analysis.coalesced_by_var[reduction_vars[0]],
             )
             return nodes
 
