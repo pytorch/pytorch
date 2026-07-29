@@ -319,7 +319,7 @@ def _check_method_arity(
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
-    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
+    # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
     qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
@@ -376,12 +376,12 @@ class Method:
     VariableTracker, or None to decline the call (the equivalent of the old
     `super().call_method` fall-through) so `call_method` continues to the
     object-protocol dispatch below. The method name is the tp_methods key this
-    entry is stored under (passed to `invoke`); its arity convention is derived
+    entry is stored under; its arity convention is derived
     on demand from that method's ml_flags (see _derive_method_flags)."""
 
     handler: Callable[..., VariableTracker | None]
 
-    def invoke(
+    def __call__(
         self,
         vt: VariableTracker,
         tx: InstructionTranslatorBase,
@@ -1358,7 +1358,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # (tp_slot) dispatch below, mirroring the old super().call_method path.
         method = self.lookup_tp_method(name)
         if method is not None:
-            result = method.invoke(self, tx, name, args, kwargs)
+            result = method(self, tx, name, args, kwargs)
             if result is not None:
                 return result
 
