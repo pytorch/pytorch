@@ -3286,7 +3286,10 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             except Exception as exc:
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
                 raise
-            return VariableTracker.build(tx, result)
+            obj, name_var = args[0], args[1]
+            name = name_var.as_python_constant()
+            source = AttrSource(obj.source, name) if obj.source else None
+            return VariableTracker.build(tx, result, source=source)
 
     def _call_getattr(
         self,
