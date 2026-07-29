@@ -1235,18 +1235,15 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    if num_leaves == 0:
-        results = []
-    else:
-        results = []
-        for leaf_idx, leaf in enumerate(dummy_out_leaves):
-            if isinstance(leaf, torch.Tensor):
-                stacked = torch.stack([e[leaf_idx] for e in op(result_flat)])
-                results.append(
-                    torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
-                )
-            else:
-                results.append(leaf)
+    results = []
+    for leaf_idx, leaf in enumerate(dummy_out_leaves):
+        if isinstance(leaf, torch.Tensor):
+            stacked = torch.stack([e[leaf_idx] for e in op(result_flat)])
+            results.append(
+                torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
+            )
+        else:
+            results.append(leaf)
     return (
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(results, dummy_out_spec),
