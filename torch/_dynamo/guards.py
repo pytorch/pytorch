@@ -4101,7 +4101,12 @@ class GuardsStatePickler(pickle.Pickler):
         inner_tensors = dict(inner_data)
 
         outer_size, outer_stride = meta_tensor.shape, meta_tensor.stride()
-        out = type(meta_tensor).__tensor_unflatten__(  # type: ignore[attr-defined]
+        # Use the recorded pytype, not type(meta_tensor): a transparent wrapper
+        # subclass (e.g. AsyncCollectiveTensor) whose __torch_dispatch__ desugars
+        # ops to its inner tensor makes torch.empty_like() return a plain Tensor,
+        # so meta_tensor loses the subclass type and Tensor.__tensor_unflatten__
+        # does not exist.
+        out = pytype.__tensor_unflatten__(  # type: ignore[attr-defined]
             inner_tensors, ctx, outer_size, outer_stride
         )
         out.pytype = pytype
