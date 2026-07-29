@@ -2303,7 +2303,7 @@ class TestPoolingNNCUDA(NNTestCase):
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
-instantiate_device_type_tests(TestPoolingNNCUDA, globals(), only_for=["cuda"])
+instantiate_device_type_tests(TestPoolingNNCUDA, globals(), only_for="cuda")
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":
