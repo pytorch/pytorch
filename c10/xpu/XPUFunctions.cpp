@@ -192,6 +192,17 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
 
+#if SYCL_COMPILER_VERSION >= 20260100
+  // TODO: Remove once driver supports querying Xe topology properties.
+#define OVERRIDE_DEVICE_PROP_XE(name, property, default) \
+  device_prop->name = default;
+
+  namespace syclex = sycl::ext::oneapi::experimental;
+  if (device_prop->architecture == syclex::architecture::intel_gpu_pvc ||
+      device_prop->architecture == syclex::architecture::intel_gpu_pvc_vg) {
+    AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(OVERRIDE_DEVICE_PROP_XE)
+  }
+#endif
   return;
 }
 
