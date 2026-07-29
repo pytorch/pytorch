@@ -1240,6 +1240,10 @@ def run_doctests(test_module, test_directory, options):
                 "from torch import nn",
                 "import torch.nn.functional as F",
                 "import torch",
+                # So doctests can suppress a warning from an intentionally
+                # deprecated/prototype example via a `# docs: hide`-marked
+                # `warnings.filterwarnings(...)` line without a visible import.
+                "import warnings",
             ]
         ),
         "analysis": "static",  # set to "auto" to test doctests in compiled modules
