@@ -7,7 +7,7 @@ Key classes include:
 - SuperVariable: Handles super() calls and method resolution
 - ExceptionVariable: Tracks exception objects
 - RandomVariable: Manages random number generators
-- CallMethodVariable: Bridges getattro_impl to call_method dispatch
+- GetAttrVariable: Tracks attribute access
 - MethodWrapperVariable: Handles method wrappers
 - PythonModuleVariable: Tracks Python modules
 - NumpyVariable: Handles numpy functions and types
@@ -195,8 +195,8 @@ class SuperVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Check if getattr is a constant. If not, delay the actual work by
-        # wrapping the result in CallMethodVariable. Mostly super is
-        # called with a method, so the work is delayed to call_function.
+        # wrapping the result in GetAttrVariable. Mostly super is called with a
+        # method, so most of the work is delayed to call_function.
         #
         # We could have just implemented a const_getattr. However, super is
         # special when it comes to finding sources. Compared to other VTs, super
@@ -204,7 +204,7 @@ class SuperVariable(VariableTracker):
         # not just AttrSource).
         value, source = self._resolved_getattr_and_source(tx, name)
         if not variables.ConstantVariable.is_literal(value):
-            return CallMethodVariable(self, name)
+            return GetAttrVariable(self, name, py_type=type(value))
         if source:
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
@@ -994,14 +994,6 @@ class AutogradFunctionVariable(VariableTracker):
     def python_type(self) -> type:
         return type
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if name in ("apply", "backward"):
-            source = self.source and AttrSource(self.source, name)
-            return CallMethodVariable(self, name, source=source)
-        return super().getattro_impl(tx, name)
-
     def _resolve_kwargs(
         self,
         args: list[VariableTracker],
@@ -1514,6 +1506,138 @@ class LambdaVariable(VariableTracker):
         return self.fn(*args, **kwargs)
 
 
+class GetAttrVariable(VariableTracker):
+    _nonvar_fields = {
+        "name",
+        "py_type",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        obj: VariableTracker,
+        name: str,
+        py_type: type | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        if not isinstance(obj, VariableTracker):
+            raise AssertionError(f"obj must be a VariableTracker, got {type(obj)}")
+        if not isinstance(name, str):
+            raise AssertionError(f"name must be a str, got {type(name)}")
+        self.obj = obj
+        self.name = name
+        self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
+
+    def python_type(self) -> type:
+        if self.py_type is not None:
+            return self.py_type
+        else:
+            return super().python_type()
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.obj}, {self.name})"
+
+    @staticmethod
+    def create_getattr_proxy(base_proxy: torch.fx.Proxy, attr: str) -> Any:
+        return getattr(base_proxy, attr)
+
+    def as_proxy(self) -> Any:
+        return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
+
+    def as_python_constant(self) -> Any:
+        constant = self.obj.as_python_constant()
+        try:
+            return getattr(constant, self.name)
+        except AttributeError:
+            raise NotImplementedError(f"{self} is not a constant") from None
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # GetAttrVariable can wrap various types (bound methods, descriptors,
+        # etc.) with different C tp_hash.  Resolve to the actual value and hash.
+        try:
+            val = self.as_python_constant()
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            from ..exc import unimplemented
+
+            unimplemented(
+                gb_type="Non-constant GetAttrVariable hash",
+                context=f"hash_impl {self}",
+                explanation=f"Cannot hash {self} because Dynamo doesn't know how to represent "
+                "the type of the getattr() result, which is not a constant.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return hash(val), False
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        if (
+            isinstance(self.obj, AutogradFunctionVariable)
+            and self.name == "apply"
+            and getattr(self.obj.fn_cls, "generate_vmap_rule", False)
+        ):
+            return variables.ConstantVariable.create(
+                hasattr(self.obj.fn_cls.apply, name)
+            )
+        return super().call_obj_hasattr(tx, name)
+
+    def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
+        if not isinstance(self.obj, variables.NNModuleVariable):
+            raise NotImplementedError
+        step1 = tx.output.get_submodule(self.obj.module_key)
+        if self.name not in step1.__dict__:
+            raise NotImplementedError
+        step2 = inspect.getattr_static(step1, self.name)
+        if name not in step2.__dict__:
+            raise NotImplementedError
+        return inspect.getattr_static(step2, name)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.obj)
+        codegen.extend_output(codegen.create_load_attrs(self.name))
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import generic_richcompare
+
+        try:
+            resolved = self.obj.getattro_impl(tx, self.name)
+        except NotImplementedError:
+            resolved = None
+        if resolved is None or isinstance(resolved, GetAttrVariable):
+            if self.obj.is_python_constant():
+                val = getattr(self.obj.as_python_constant(), self.name)
+                resolved = VariableTracker.build(tx, val)
+            else:
+                unimplemented(
+                    gb_type="Unresolved GetAttrVariable comparison",
+                    context=f"richcompare_impl {self} {op}",
+                    explanation=f"Cannot compare {self} because the attribute "
+                    f"could not be resolved to a concrete value.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        return generic_richcompare(tx, resolved, other, op)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.obj.call_method(tx, self.name, args, kwargs)
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        if self.name == "__dict__" and hasattr(self.obj, "get_dict_vt"):
+            return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
+        return super().mp_subscript_impl(tx, key)
+
+
 class CallMethodVariable(VariableTracker):
     """A method bound to a VT instance.
 
@@ -1548,23 +1672,6 @@ class CallMethodVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return getattr(self.obj.as_python_constant(), self.method_name)
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        try:
-            return VariableTracker.build(tx, repr(self.as_python_constant()))
-        except (AsPythonConstantNotImplementedError, AttributeError):
-            pass
-        # The receiver is not a compile-time constant, so we cannot reconstruct
-        # the bound method (whose repr would also embed a non-reproducible
-        # memory address). Fall back to a best-effort address-free repr rather
-        # than hard-erroring under fullgraph.
-        try:
-            obj_type_name = self.obj.python_type_name()
-        except NotImplementedError:
-            obj_type_name = "object"
-        return VariableTracker.build(
-            tx, f"<method '{self.method_name}' of '{obj_type_name}' object>"
-        )
-
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             return hash(self.as_python_constant()), False
@@ -1580,21 +1687,6 @@ class CallMethodVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        try:
-            val = self.as_python_constant()
-            return VariableTracker.build(tx, hasattr(val, name))
-        except (AsPythonConstantNotImplementedError, AttributeError):
-            pass
-        try:
-            if hasattr(self.python_type(), name):
-                return VariableTracker.build(tx, True)
-        except NotImplementedError:
-            pass
-        return super().call_obj_hasattr(tx, name)
 
     def call_function(
         self,
@@ -1735,7 +1827,9 @@ class TypingVariable(VariableTracker):
         from .builder import SourcelessBuilder, VariableBuilder
 
         if name in cmp_name_to_op_mapping:
-            return CallMethodVariable(self, name)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(getattr(self.value, name))
+            )
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
@@ -2175,8 +2269,9 @@ class DebuggingVariable(VariableTracker):
             unimplemented(
                 gb_type="attempted to reorder a debugging function that can't actually be reordered",
                 context=f"fn: {self.value}, args: {args}, kwargs: {kwargs}",
-                explanation="`torch.compile` can only reorder functions where the arguments "
-                "are Tensors, constants, or string formatters.",
+                explanation="`torch.compile` can only reorder functions that are called "
+                "without keyword arguments and whose arguments are Tensors, constants, "
+                "or string formatters.",
                 hints=[
                     f"Avoid calling the logging function {self.value} with args that are not supported.",
                 ],
@@ -2199,13 +2294,17 @@ class DebuggingVariable(VariableTracker):
         actually reorder.
         """
 
+        # kwargs are dropped by the replay codegen, so refuse rather than lose them
+        if kwargs:
+            return False
+
         allowed_input_types = (
             variables.TensorVariable,
             variables.ConstantVariable,
             StringFormatVariable,
         )
 
-        flat_args = pytree.tree_leaves([args, kwargs])
+        flat_args = pytree.tree_leaves(args)
         for arg in flat_args:
             if not isinstance(arg, allowed_input_types):
                 return False
@@ -2272,17 +2371,23 @@ class LoggingLoggerVariable(VariableTracker):
         if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
 
+        reorderable = torch._dynamo.config.reorderable_logging_functions
+        if self.source and (method in reorderable or function in reorderable):
+            fn_var = DebuggingVariable(method, source=AttrSource(self.source, name))
+            return fn_var.call_function(tx, args, kwargs)
+
         logger_cls = type(self.value)
         logger_cls_name = f"{logger_cls.__module__}.{logger_cls.__qualname__}"
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
             context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
-            explanation="logging.Logger methods are not supported for non-export cases.",
+            explanation="For non-export cases, logging.Logger methods are only supported if the logger "
+            "has a source and the method is registered as reorderable.",
             hints=[
                 "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.",
                 f"For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
                 f"Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`{name}`) is checked against the ignore set. Ignoring a method that `{name}` calls internally has no effect.",
-                "If you need the log side effect to run, then you can try one of (1) `torch._higher_order_ops.print(...)`, (2) wrap the logging call in a custom op (marked as mutable), or (3) preserve the logging contents and move the logging call outside the compiled region.",
+                f"If you need the log side effect to run, then you can try one of (1) create the logger outside the compiled region and add the method to `torch._dynamo.config.reorderable_logging_functions` (e.g. `torch._dynamo.config.reorderable_logging_functions.add(logger.{name})`) so that it runs after the compiled region, as long as it is called without kwargs and its arguments are tensors, constants, or string formatters, (2) `torch._higher_order_ops.print(...)`, (3) wrap the logging call in a custom op (marked as mutable), or (4) preserve the logging contents and move the logging call outside the compiled region.",
             ],
         )
 
@@ -2382,9 +2487,7 @@ class ConstantLikeVariable(VariableTracker):
             return NumpyVariable(result)
         if variables.ConstantVariable.is_literal(result):
             return VariableTracker.build(tx, result)
-        if callable(result):
-            return CallMethodVariable(self, name)
-        return VariableTracker.build(tx, result)
+        return GetAttrVariable(self, name, py_type=type(result))
 
 
 class NumpyDTypeVariable(ConstantLikeVariable):

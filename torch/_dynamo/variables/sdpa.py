@@ -74,6 +74,7 @@ class SDPAParamsVariable(VariableTracker):
         import torch._C
 
         from .builder import wrap_fx_proxy
+        from .misc import GetAttrVariable
 
         try:
             getattr_static(torch._C._SDPAParams, name)
@@ -89,7 +90,7 @@ class SDPAParamsVariable(VariableTracker):
                 ],
             )
 
-        proxy = getattr(self.as_proxy(), name)
+        proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
         if self.source is not None:
             return wrap_fx_proxy(
                 tx=tx, proxy=proxy, source=AttrSource(self.source, name)
