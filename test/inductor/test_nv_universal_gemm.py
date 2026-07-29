@@ -963,8 +963,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
 
     def test_local_reduce_plan_deduplicates_outputs(self):
-        from torch._inductor.kernel.gemm_epilogue import (
-            GemmReductionExpression,
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmReductionDescriptor,
             GemmReductionPlan,
         )
 
@@ -979,10 +979,10 @@ class TestNVUniversalGemmHeuristics(TestCase):
             secondary_feed_output="output",
         )
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
-        expression = GemmReductionExpression.parse("mean_linear:1:2:3")
+        expression = GemmReductionDescriptor.parse("mean_linear:1:2:3")
         self.assertEqual(expression.serialize(), "mean_linear:1:2:3")
         with self.assertRaisesRegex(ValueError, "expects 3"):
-            GemmReductionExpression.parse("mean_linear:1:2")
+            GemmReductionDescriptor.parse("mean_linear:1:2")
 
     def test_reduction_pattern_near_misses(self):
         from torch._inductor.kernel.gemm_epilogue_ir import (

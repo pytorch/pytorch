@@ -23,7 +23,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
     local_reduce_unsupported_tensorssa_error,
-    statically_known_shape_equal,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
@@ -37,11 +36,9 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     unsupported_reduction_from_node,
     view_or_reshape_args,
 )
-from torch._inductor.kernel.gemm_epilogue import (
-    GemmEpilogueGraph,
-    GemmReductionGeometry,
-    iter_fx_node_inputs,
-)
+from torch._inductor.kernel.gemm_epilogue import GemmEpilogueGraph, iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch.utils._ordered_set import OrderedSet
 
 
