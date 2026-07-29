@@ -3741,11 +3741,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source=descriptor_get_source,
         ).call_function(tx, [self, owner_var], {})
 
-    def _wrap_instance_dict_source(
-        self, tx: "InstructionTranslatorBase", name: str, source: Source | None
-    ) -> Source | None:
-        return self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
-
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:

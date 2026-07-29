@@ -1008,20 +1008,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if value is not NO_SUCH_SUBOBJ:
             instance_dict = object.__getattribute__(value, "__dict__")
             if name in instance_dict:
-                source = self._wrap_instance_dict_source(tx, name, source)
+                if isinstance(self, variables.UnspecializedNNModuleVariable):
+                    source = self.maybe_wrap_nn_module_source_for_instance(
+                        tx, name, source
+                    )
                 return VariableTracker.build(tx, instance_dict[name], source)
 
         return None
-
-    def _wrap_instance_dict_source(
-        self, tx: InstructionTranslatorBase, name: str, source: Source | None
-    ) -> Source | None:
-        """Adjust the source of an instance-dict attribute (step 3 hook).
-
-        Default is identity; UserDefinedObjectVariable overrides to wrap the
-        source for nn.Module parameter/buffer access.
-        """
-        return source
 
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str
