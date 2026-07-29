@@ -264,37 +264,6 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
-_COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
-    [
-        operator.add,
-        operator.sub,
-        operator.mul,
-    ]
-)
-
-
-def _try_computed_lazy_constant(
-    fn: Callable[..., Any], args: list[VariableTracker]
-) -> VariableTracker | None:
-    """Build a ComputedLazyConstantVariable for fn(*args), or None to fall back."""
-    from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
-
-    fn = IN_PLACE_DESUGARING_MAP.get(fn, fn)
-    if fn not in _COMPUTED_LAZY_CONSTANT_OPS or len(args) != 2:
-        return None
-    any_unrealized = False
-    for arg in args:
-        if (
-            isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable))
-            and not arg.is_realized()
-        ):
-            any_unrealized = True
-        elif not isinstance(arg, ConstantVariable):
-            return None
-    if not any_unrealized:
-        return None
-    return ComputedLazyConstantVariable.create(fn, args)
-
 
 def populate_builtin_to_tensor_fn_map() -> None:
     global BUILTIN_TO_TENSOR_FN_MAP
@@ -1107,35 +1076,30 @@ class BuiltinVariable(BaseBuiltinVariable):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import (
-            ComputedLazyConstantVariable,
-            LazyConstantVariable,
-            LazyVariableTracker,
-        )
+        from .lazy import LazyConstantVariable, LazyVariableTracker
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
-        lazy_constant_types = (LazyConstantVariable, ComputedLazyConstantVariable)
         lazy_types = [t for t in arg_types if issubclass(t, LazyVariableTracker)]
         if lazy_types:
-            if not all(issubclass(t, lazy_constant_types) for t in lazy_types):
+            if not all(issubclass(t, LazyConstantVariable) for t in lazy_types):
                 # Realize non-constant lazy args and re-dispatch.  Any
-                # lazy constant args are kept and handled on the
+                # LazyConstantVariable args are kept and handled on the
                 # second dispatch through the branch below.
                 return lambda tx, args, kwargs: obj.call_function(
                     tx,
                     [
                         a.realize()
                         if isinstance(a, LazyVariableTracker)
-                        and not isinstance(a, lazy_constant_types)
+                        and not isinstance(a, LazyConstantVariable)
                         else a
                         for a in args
                     ],
                     kwargs,
                 )
 
-            # Only lazy constant types.  Install type guards
+            # Only LazyConstantVariable lazy types.  Install type guards
             # and resolve the dispatch type.  If the resolved type is
             # ConstantVariable (the common case), delegate to a handler
             # built for ConstantVariable.  Otherwise (e.g. specialize_int=
@@ -1144,7 +1108,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             inner_handler = BuiltinVariable._make_handler(
                 fn,
                 [
-                    ConstantVariable if issubclass(t, lazy_constant_types) else t
+                    ConstantVariable if issubclass(t, LazyConstantVariable) else t
                     for t in arg_types
                 ],
                 has_kwargs,
@@ -1155,18 +1119,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker | None:
-                if not kwargs:
-                    result = _try_computed_lazy_constant(fn, args)
-                    if result is not None:
-                        return result
                 for a in args:
-                    if isinstance(a, lazy_constant_types):
+                    if isinstance(a, LazyConstantVariable):
                         if a.get_handler_type_for_dispatch() is not ConstantVariable:
                             return obj.call_function(
                                 tx,
                                 [
                                     v.realize()
-                                    if isinstance(v, lazy_constant_types)
+                                    if isinstance(v, LazyConstantVariable)
                                     else v
                                     for v in args
                                 ],
@@ -2398,6 +2358,32 @@ class BuiltinVariable(BaseBuiltinVariable):
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
         isinstance_type = isinstance_type_var.as_python_constant()
+        # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
+        # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
+        # ACT from the resolved plain Tensor. isinstance() observes the class and
+        # is constant-folded below, so reinstall the class guard -- but only when
+        # the result would actually differ between the ACT and the resolved
+        # Tensor. isinstance(w, ACT) discriminates and must recompile;
+        # isinstance(w, torch.Tensor) is True for both and must stay reusable.
+        if isinstance(arg, variables.TensorVariable) and arg.source is not None:
+            from torch._functorch._aot_autograd.utils import (
+                is_async_collective_tensor_type,
+            )
+
+            if is_async_collective_tensor_type(arg_type):
+                check_types = (
+                    isinstance_type
+                    if isinstance(isinstance_type, tuple)
+                    else (isinstance_type,)
+                )
+                # Guard if any checked type distinguishes ACT from torch.Tensor,
+                # or conservatively if a checked entry is not a plain class.
+                if any(
+                    not isinstance(ty, type)
+                    or issubclass(arg_type, ty) != issubclass(torch.Tensor, ty)
+                    for ty in check_types
+                ):
+                    install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
             if _uses_custom_classinfo_check(isinstance_type):
                 unimplemented(
