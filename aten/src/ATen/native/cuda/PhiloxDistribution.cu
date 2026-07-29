@@ -2,13 +2,21 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/StatelessPhilox4x32.cuh>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/PhiloxDistribution.h>
+#include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/core/TransformationHelper.h>
+#include <curand_kernel.h>
+#include <curand_philox4x32_x.h>
+#include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
+#include <array>
 #include <type_traits>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -20,6 +28,43 @@
 namespace at::native {
 
 namespace {
+
+void run_normal_distribution_shards(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    double mean,
+    double stddev,
+    std::optional<Generator> generator);
+
+void philox_distribution_shards_cuda(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    PhiloxDistributionKind distribution,
+    ArrayRef<Scalar> params,
+    std::optional<Generator> generator) {
+  switch (distribution) {
+    case PhiloxDistributionKind::Normal:
+      run_normal_distribution_shards(
+          self,
+          global_shape,
+          global_offsets,
+          local_offsets,
+          local_sizes,
+          chunk_count,
+          params[0].toDouble(),
+          params[1].toDouble(),
+          generator);
+      break;
+  }
+}
 
 using at::cuda::philox_4x32;
 
@@ -61,6 +106,343 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   double s, c;
   ::sincos(TWO_PI * u2, &s, &c);
   return {radius * c, radius * s};
+}
+
+// A non-empty logical tensor with at most INT_MAX elements has at most 30
+// dimensions whose size is greater than one. Size-one dimensions are folded
+// into each chunk's base offsets before constructing this calculator.
+constexpr int kMaxDistributionShardDims = 30;
+
+struct DistributionShardOffsetCalculator {
+  C10_HOST_DEVICE std::array<int64_t, 2> get(uint32_t linear_idx) const {
+    std::array<int64_t, 2> offsets{0, 0};
+    for (int dim = 0; dim < dims; ++dim) {
+      const auto divmod = sizes[dim].divmod(linear_idx);
+      linear_idx = divmod.div;
+      offsets[0] += static_cast<int64_t>(divmod.mod) * global_strides[dim];
+      offsets[1] += static_cast<int64_t>(divmod.mod) * local_strides[dim];
+    }
+    return offsets;
+  }
+
+  int dims{0};
+  at::cuda::detail::IntDivider<uint32_t> sizes[kMaxDistributionShardDims];
+  int64_t global_strides[kMaxDistributionShardDims];
+  int64_t local_strides[kMaxDistributionShardDims];
+};
+
+struct DistributionShardLaunch {
+  int64_t numel;
+  int64_t global_base;
+  int64_t local_base;
+  bool is_contiguous;
+  DistributionShardOffsetCalculator offset_calculator;
+};
+
+void append_shard_dimension(
+    DistributionShardOffsetCalculator& calculator,
+    int64_t size,
+    int64_t global_stride,
+    int64_t local_stride) {
+  if (size <= 1) {
+    return;
+  }
+
+  if (calculator.dims > 0) {
+    const int previous = calculator.dims - 1;
+    const int64_t inner_size = calculator.sizes[previous].divisor;
+    int64_t expected_global_stride;
+    int64_t expected_local_stride;
+    const bool global_stride_overflow = c10::mul_overflows(
+        inner_size,
+        calculator.global_strides[previous],
+        &expected_global_stride);
+    const bool local_stride_overflow = c10::mul_overflows(
+        inner_size, calculator.local_strides[previous], &expected_local_stride);
+    if (!global_stride_overflow && !local_stride_overflow &&
+        global_stride == expected_global_stride &&
+        local_stride == expected_local_stride) {
+      const auto combined_size = static_cast<uint32_t>(inner_size * size);
+      calculator.sizes[previous] =
+          at::cuda::detail::IntDivider<uint32_t>(combined_size);
+      return;
+    }
+  }
+
+  TORCH_CHECK(
+      calculator.dims < kMaxDistributionShardDims,
+      "_philox_distribution_shards_: too many non-trivial shard dimensions");
+  const int index = calculator.dims++;
+  calculator.sizes[index] =
+      at::cuda::detail::IntDivider<uint32_t>(static_cast<uint32_t>(size));
+  calculator.global_strides[index] = global_stride;
+  calculator.local_strides[index] = local_stride;
+}
+
+std::vector<DistributionShardLaunch> build_shard_launches(
+    const Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    const detail::ValidatedPhiloxShardMetadata& metadata) {
+  constexpr const char* op_name = "_philox_distribution_shards_";
+  const size_t ndim = global_shape.size();
+  if (metadata.global_numel == 0) {
+    return {};
+  }
+
+  std::vector<int64_t> global_strides(ndim);
+  int64_t stride = 1;
+  for (size_t dim = ndim; dim > 0; --dim) {
+    global_strides[dim - 1] = stride;
+    stride *= global_shape[dim - 1];
+  }
+
+  std::vector<DistributionShardLaunch> launches;
+  launches.reserve(static_cast<size_t>(chunk_count));
+  for (const auto chunk : c10::irange(static_cast<size_t>(chunk_count))) {
+    if (metadata.chunk_numels[chunk] == 0) {
+      continue;
+    }
+    DistributionShardLaunch launch{};
+    launch.numel = metadata.chunk_numels[chunk];
+    for (const auto dim : c10::irange(ndim)) {
+      const size_t index = chunk * ndim + dim;
+      int64_t global_term;
+      int64_t local_term;
+      TORCH_CHECK(
+          !c10::mul_overflows(
+              global_offsets[index], global_strides[dim], &global_term) &&
+              !c10::add_overflows(
+                  launch.global_base, global_term, &launch.global_base),
+          op_name,
+          ": global shard offset overflow");
+      TORCH_CHECK(
+          !c10::mul_overflows(
+              local_offsets[index],
+              self.stride(static_cast<int64_t>(dim)),
+              &local_term) &&
+              !c10::add_overflows(
+                  launch.local_base, local_term, &launch.local_base),
+          op_name,
+          ": local shard offset overflow");
+    }
+    for (size_t dim = ndim; dim > 0; --dim) {
+      const size_t logical_dim = dim - 1;
+      append_shard_dimension(
+          launch.offset_calculator,
+          local_sizes[chunk * ndim + logical_dim],
+          global_strides[logical_dim],
+          self.stride(static_cast<int64_t>(logical_dim)));
+    }
+    launch.is_contiguous = launch.offset_calculator.dims <= 1 &&
+        (launch.offset_calculator.dims == 0 ||
+         (launch.offset_calculator.global_strides[0] == 1 &&
+          launch.offset_calculator.local_strides[0] == 1));
+    launches.push_back(launch);
+  }
+  return launches;
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+__global__ void distribution_contiguous_shard_kernel(
+    scalar_t* __restrict__ output,
+    PhiloxCudaState philox_args,
+    int64_t local_numel,
+    int64_t global_base,
+    int64_t local_base,
+    int64_t total_grid,
+    sample_t sample_func,
+    param_t param_func) {
+  constexpr int unroll_factor = elems_per_call<scalar_t>;
+  const int64_t thread_index =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t total_stride = blockDim.x * total_grid;
+  const int64_t global_end = global_base + local_numel;
+  if (thread_index >= global_end) {
+    return;
+  }
+
+  const int64_t first_q = global_base <= thread_index
+      ? 0
+      : (global_base - thread_index + total_stride - 1) / total_stride;
+  const int64_t last_q = (global_end - 1 - thread_index) / total_stride;
+  if (first_q > last_q) {
+    return;
+  }
+  const int64_t first_call = first_q / unroll_factor;
+  const int64_t last_call = last_q / unroll_factor;
+
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  curandStatePhilox4_32_10_t state;
+  curand_init(
+      seed,
+      static_cast<uint64_t>(thread_index),
+      offset + static_cast<uint64_t>(first_call) *
+          max_generator_offsets_per_curand_call,
+      &state);
+  for (int64_t call = first_call; call <= last_call; ++call) {
+    auto sample = sample_func(&state);
+#pragma unroll
+    for (int lane = 0; lane < unroll_factor; ++lane) {
+      const int64_t logical_index =
+          thread_index +
+          total_stride * (call * unroll_factor + static_cast<int64_t>(lane));
+      if (logical_index >= global_base && logical_index < global_end) {
+        output[local_base + logical_index - global_base] =
+            param_func((&sample.x)[lane]);
+      }
+    }
+  }
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+__global__ void distribution_shard_kernel(
+    scalar_t* __restrict__ output,
+    PhiloxCudaState philox_args,
+    int64_t local_numel,
+    int64_t global_base,
+    int64_t local_base,
+    DistributionShardOffsetCalculator offset_calculator,
+    int64_t total_grid,
+    sample_t sample_func,
+    param_t param_func) {
+  constexpr int unroll_factor = elems_per_call<scalar_t>;
+  const int64_t local_idx =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (local_idx >= local_numel) {
+    return;
+  }
+
+  const auto offsets = offset_calculator.get(static_cast<uint32_t>(local_idx));
+  const int64_t logical_index = global_base + offsets[0];
+  const int64_t total_stride = blockDim.x * total_grid;
+  const int64_t thread_index = logical_index % total_stride;
+  const int64_t thread_iteration_and_lane = logical_index / total_stride;
+  const int64_t lane = thread_iteration_and_lane % unroll_factor;
+  const uint64_t thread_iteration =
+      static_cast<uint64_t>(thread_iteration_and_lane / unroll_factor);
+
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  curandStatePhilox4_32_10_t state;
+  curand_init(
+      seed,
+      static_cast<uint64_t>(thread_index),
+      offset + thread_iteration * max_generator_offsets_per_curand_call,
+      &state);
+  auto sample = sample_func(&state);
+  output[local_base + offsets[1]] = param_func((&sample.x)[lane]);
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+void distribution_shards(
+    Tensor& self,
+    const detail::ValidatedPhiloxShardMetadata& metadata,
+    const std::vector<DistributionShardLaunch>& launches,
+    std::optional<Generator> generator,
+    const sample_t& sample_func,
+    const param_t& param_func) {
+  constexpr int unroll_factor = elems_per_call<scalar_t>;
+  auto [counter_offset, total_grid, block] =
+      calc_execution_policy(metadata.global_numel, unroll_factor);
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(
+      generator, cuda::detail::getDefaultCUDAGenerator());
+  PhiloxCudaState rng_engine_inputs;
+  {
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+  }
+  if (self.numel() == 0) {
+    return;
+  }
+
+  auto* output = self.mutable_data_ptr<scalar_t>();
+  for (const auto& launch : launches) {
+    const int64_t total_stride = block.x * total_grid.x;
+    if (launch.is_contiguous && launch.numel >= total_stride) {
+      distribution_contiguous_shard_kernel<scalar_t>
+          <<<total_grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+              output,
+              rng_engine_inputs,
+              launch.numel,
+              launch.global_base,
+              launch.local_base,
+              total_grid.x,
+              sample_func,
+              param_func);
+      continue;
+    }
+    const uint32_t local_grid =
+        static_cast<uint32_t>((launch.numel + block.x - 1) / block.x);
+    distribution_shard_kernel<scalar_t>
+        <<<local_grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            output,
+            rng_engine_inputs,
+            launch.numel,
+            launch.global_base,
+            launch.local_base,
+            launch.offset_calculator,
+            total_grid.x,
+            sample_func,
+            param_func);
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void run_normal_distribution_shards(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    double mean,
+    double stddev,
+    std::optional<Generator> generator) {
+  auto metadata = detail::validate_philox_shard_metadata(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count);
+  auto launches = build_shard_launches(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count,
+      metadata);
+  if (metadata.global_numel == 0) {
+    return;
+  }
+  if (launches.size() == 1 &&
+      launches[0].numel == metadata.global_numel &&
+      launches[0].global_base == 0 && launches[0].local_base == 0 &&
+      self.numel() == metadata.global_numel && self.is_contiguous()) {
+    auto gen = get_generator_or_default<CUDAGeneratorImpl>(
+        generator, cuda::detail::getDefaultCUDAGenerator());
+    templates::cuda::normal_kernel(self, mean, stddev, gen);
+    return;
+  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_philox_distribution_shards_",
+      [&] {
+        distribution_shards<scalar_t>(
+            self,
+            metadata,
+            launches,
+            generator,
+            templates::cuda::NormalDistributionSampler<scalar_t>{},
+            templates::cuda::NormalDistributionTransform<scalar_t>(
+                mean, stddev));
+      });
 }
 
 // Single-key kernel: one thread per chunk of elements, where each chunk
@@ -318,5 +700,9 @@ Tensor& _philox_normal_cuda_(
   });
   return self;
 }
+
+REGISTER_DISPATCH(
+    philox_distribution_shards_stub,
+    &philox_distribution_shards_cuda)
 
 } // namespace at::native
