@@ -67,6 +67,7 @@ from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
+from .singleton_reduction import eliminate_singleton_reductions
 from .split_cat import POST_GRAD_PATTERNS
 
 
@@ -223,6 +224,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reject_current_device").apply_graph_pass(
         reject_current_device_nodes
     )
+
+    if config.singleton_reduction_elimination:
+        singleton_reductions = GraphTransformObserver(
+            gm, "eliminate_singleton_reductions"
+        ).apply_graph_pass(eliminate_singleton_reductions)
+        if singleton_reductions:
+            fake_tensor_updater.incremental_update()
 
     if config.pattern_matcher:
         lazy_init()
