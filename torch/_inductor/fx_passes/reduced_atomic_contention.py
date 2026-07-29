@@ -356,8 +356,8 @@ def _check_memory(
     )
 
     if _artifact_log.isEnabledFor(logging.DEBUG):
-        overhead = candidate.output_size * candidate.element_bytes * max(
-            0, num_partitions - 1
+        overhead = (
+            candidate.output_size * candidate.element_bytes * max(0, num_partitions - 1)
         )
         _artifact_log.debug(
             "partitioned_scatter: memory check node=%s "
