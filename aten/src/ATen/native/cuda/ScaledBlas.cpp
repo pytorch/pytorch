@@ -1416,10 +1416,13 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
   }
   {
     auto bias_ = bias.has_value() ? *bias : Tensor();
+    auto global_scale_a = scale_a.size() > 1 ? scale_a[1] : Tensor();
+    auto global_scale_b = scale_b.size() > 1 ? scale_b[1] : Tensor();
 
     // NOLINTNEXTLINE(*c-array*)
     TensorArg targs[]{{out, "out", 0}, {mat_a, "mat_a", 1}, {mat_b, "mat_b", 2},
-                      {bias_, "bias", 3}, {scale_a[0], "scale_a", 4}, {scale_b[0], "scale_b", 5}};
+                      {bias_, "bias", 3}, {scale_a[0], "scale_a", 4}, {scale_b[0], "scale_b", 5},
+                      {global_scale_a, "global_scale_a", 6}, {global_scale_b, "global_scale_b", 7}};
     checkAllSameGPU(__func__, targs);
   }
 
