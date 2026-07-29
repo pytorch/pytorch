@@ -115,6 +115,9 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
     fi
   done
 
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
 fi
 
 # Use special scripts for Android builds
@@ -180,19 +183,12 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
-# memory to build and will OOM
-
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  J=2  # default to 2 jobs
-  case "$RUNNER" in
-    linux.12xlarge.memory|linux.24xlarge.memory)
-      J=24
-      ;;
-  esac
-  echo "Building FlashAttention with job limit $J"
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
-fi
+# FlashAttention CUDA kernels (built for CUDA 8.0+) need large amounts of memory
+# to compile and can OOM at full build parallelism. The previous mitigation set
+# BUILD_CUSTOM_STEP to pre-build the flash_attention target at a reduced job
+# count; it was consumed by the setuptools build path removed in this stack, so
+# it is dropped here. Re-homing the throttle as a CMake JOB_POOLS constraint is
+# tracked in https://github.com/pytorch/pytorch/issues/190663.
 
 # TODO: Removeme once all the wrappers are gone
 if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -253,6 +249,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
   # Release xpu build stress with WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
@@ -279,7 +276,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
   # on a from-source build that test jobs don't have. --dry-run reads the tree
   # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
-  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && [[ "${USE_NINJA}" != "0" ]] && grep -q "csrc/Module.cpp" build/compile_commands.json; then
     debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
     echo "${debinfo_plan}"
     grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
