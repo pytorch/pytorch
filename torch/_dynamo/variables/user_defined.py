@@ -4402,9 +4402,26 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         return self._base_vt.call_method(tx, "with_traceback", args, kwargs)  # type: ignore[missing-attribute]
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # __setattr__ is the tp_setattro slot, not dispatched through tp_methods,
+        # so handle it here (mirroring ExceptionVariable.call_method) to route
+        # writes of __cause__/__context__/__suppress_context__/__traceback__ to
+        # the wrapped base exception VT. Without this, `raise X from Y` never
+        # records X.__cause__ (issue: contextlib exception-chaining repro).
+        if name == "__setattr__":
+            result = self._setattr(tx, args, kwargs)
+            if result is not None:
+                return result
+        return super().call_method(tx, name, args, kwargs)
+
     tp_methods = {
         "__init__": Method(_init),
-        "__setattr__": Method(_setattr),
         "with_traceback": Method(_with_traceback),
     }
 
