@@ -629,6 +629,10 @@ void CUDAGraph::end_capture_to_conditional_node() {
   CUDAStream stream = conditional_node_streams_.top().current_stream();
   AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
   c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
+
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
   conditional_node_handles_.pop();
@@ -636,8 +640,6 @@ void CUDAGraph::end_capture_to_conditional_node() {
   TORCH_INTERNAL_ASSERT(!conditional_node_raw_streams_.empty());
   conditional_node_raw_streams_.pop();
 
-  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
-  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
   if (conditional_graph_capture_ids_.empty()) {
     c10::cuda::CUDACachingAllocator::beginAllocateToPool(
         capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
