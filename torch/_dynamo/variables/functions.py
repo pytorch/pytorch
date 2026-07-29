@@ -3943,6 +3943,37 @@ class TritonSetAllocatorVariable(VariableTracker):
 # ---------------------------------------------------------------------------
 
 
+def _check_descriptor_obj_type(
+    tx: "InstructionTranslatorBase",
+    descriptor: types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.GetSetDescriptorType,
+    obj: "VariableTracker",
+) -> None:
+    """Check that obj's type is compatible with descriptor.__objclass__.
+
+    Mirrors CPython's descr_check which raises TypeError when a C descriptor
+    is bound to an object whose type is not a subtype of the descriptor's
+    __objclass__.
+
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L96
+    """
+    if obj is None:
+        return
+    try:
+        obj_type = obj.python_type()
+    except NotImplementedError:
+        return
+    if not issubclass(obj_type, descriptor.__objclass__):
+        raise_type_error(
+            tx,
+            f"descriptor '{descriptor.__name__}' for "
+            f"'{descriptor.__objclass__.__name__}' objects "
+            f"doesn't apply to a '{obj_type.__name__}' object",
+        )
+
+
 class WrapperDescriptorVariable(VariableTracker):
     """Unbound C slot wrapper (wrapper_descriptor on a type).
 
@@ -4013,6 +4044,7 @@ class WrapperDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
@@ -4031,6 +4063,7 @@ class WrapperDescriptorVariable(VariableTracker):
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4197,17 +4230,7 @@ class MethodDescriptorVariable(VariableTracker):
             )
         obj, *rest = args
         name = self.descriptor.__name__
-        try:
-            obj_type = obj.python_type()
-            if not issubclass(obj_type, self.descriptor.__objclass__):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for "
-                    f"'{self.descriptor.__objclass__.__name__}' objects "
-                    f"doesn't apply to a '{obj_type.__name__}' object",
-                )
-        except NotImplementedError:
-            pass
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses.
@@ -4223,6 +4246,7 @@ class MethodDescriptorVariable(VariableTracker):
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4517,6 +4541,7 @@ class MemberDescriptorVariable(VariableTracker):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
         attr_name = self.descriptor.__name__
@@ -4538,6 +4563,21 @@ class MemberDescriptorVariable(VariableTracker):
             )
         result_source = obj.source and AttrSource(obj.source, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
+        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
+        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
+        # value is None for __delete__.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
+        stored = variables.DeletedVariable() if value is None else value
+        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
+        return variables.ConstantVariable.create(None)
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -4607,6 +4647,7 @@ class GetSetDescriptorVariable(VariableTracker):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to getattro_impl for
         # proxy-based VTs like TensorVariable.
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             from .object_protocol import _UnhandledDescriptorError
@@ -4744,3 +4785,15 @@ class TupleGetterVariable(VariableTracker):
         return obj.call_method(
             tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
         )
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # _tuplegetter fields are read-only; tuplegetter_descr_set always
+        # raises AttributeError for both set and delete.
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
+        msg = "can't delete attribute" if value is None else "can't set attribute"
+        raise_observed_exception(AttributeError, tx, args=[msg])
