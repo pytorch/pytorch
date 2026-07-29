@@ -113,6 +113,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pylong_from_base,
     pynumber_absolute,
     pynumber_add,
     pynumber_float,
@@ -1848,9 +1849,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        arg: VariableTracker,
+        base: VariableTracker | None = None,
     ) -> VariableTracker | None:
-        return pynumber_int(tx, arg)
+        if base is None:
+            return pynumber_int(tx, arg)
+        return pylong_from_base(tx, arg, base)
 
     def call_float(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker

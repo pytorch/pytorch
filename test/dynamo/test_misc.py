@@ -2068,6 +2068,54 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(ValueError):
             opt([])
 
+    def test_int_base_indexable(self):
+        # int(x, base) resolves base via __index__ (PyNumber_AsSsize_t), so a
+        # non-constant __index__-able base must be accepted. Previously this
+        # raised an "invalid call to builtin op handler" graph break because
+        # call_int ignored the base argument entirely.
+        class MyIndexable:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn(x):
+            a = int("101", base=MyIndexable(2))
+            b = int("101", MyIndexable(36))
+            c = int(b"ff", base=MyIndexable(16))
+            return x + a + b + c
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_int_base_out_of_range_value_error(self):
+        class MyIndexable:
+            def __index__(self):
+                return 37
+
+        def fn(xs):
+            return int("43", base=MyIndexable())
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_non_string_type_error(self):
+        def fn(n):
+            return int(n, base=16)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(5)
+        with self.assertRaises(TypeError):
+            opt(5)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
