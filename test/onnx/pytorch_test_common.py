@@ -50,6 +50,10 @@ def _skipper(condition, reason):
 
 skipIfNoCuda = _skipper(lambda: not torch.cuda.is_available(), "CUDA is not available")
 
+skipIfNoAccelerator = _skipper(
+    lambda: not torch.accelerator.is_available(), "Accelerator is not available"
+)
+
 skipIfTravis = _skipper(lambda: os.getenv("TRAVIS"), "Skip In Travis")
 
 skipIfNoBFloat16Cuda = _skipper(
