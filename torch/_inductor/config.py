@@ -1255,7 +1255,10 @@ partitioned_scatter_min_index_size: int = 4096
 
 # Skip ops where index_numel / scatter_dim_size is below this ratio.
 # Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
-partitioned_scatter_min_contention_ratio: float = 1.0
+# The partitioned form adds ~2P * output_numel of streaming traffic (zero-fill the
+# expanded buffer, then read it back to reduce) to relieve ratio * output_numel of
+# atomic traffic, so the trade only pays off once several writes land per slot.
+partitioned_scatter_min_contention_ratio: float = 4.0
 
 # GPU memory reserved for state invisible to the FX profile: CUDA driver context,
 # PyTorch caching allocator pool, and kernel scratch (cuBLAS/Triton). Subtracted from

@@ -394,7 +394,7 @@ class TestPartitionedScatterOpt(TestCase):
         idx_a = torch.randint(0, 5, (100,), dtype=torch.int64)
         vals_a = torch.randn(100, dtype=torch.float32)
 
-        # Op B: contention_ratio=0.25 < 1.0 → normally skipped by gate 7
+        # Op B: contention_ratio=0.25 < min_contention_ratio → normally skipped by gate 7
         out_b = torch.zeros(16384, dtype=torch.float32)
         idx_b = torch.randint(0, 16384, (4096,), dtype=torch.int64)
         vals_b = torch.randn(4096, dtype=torch.float32)
@@ -431,6 +431,33 @@ class TestPartitionedScatterOpt(TestCase):
                 torch.allclose(e, a, atol=1e-1, rtol=1e-2),
                 f"force mode output mismatch: expected={e[:5]} actual={a[:5]}",
             )
+
+    def test_skip_cpu_device(self):
+        """CPU scatters are never rewritten, even with force enabled."""
+        torch.manual_seed(21)
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(n, dtype=torch.float32, device="cpu")
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64, device="cpu")
+        vals = torch.randn(N, dtype=torch.float32, device="cpu")
+
+        config.partitioned_scatter_force = True
+        with torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_cpu_device"],
+            0,
+            "CPU scatter should be skipped by the device gate",
+        )
+        self.assertTrue(torch.allclose(expected, actual, atol=1e-1, rtol=1e-2))
 
     def test_compute_num_partitions_tight_budget(self):
         """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
@@ -483,11 +510,11 @@ class TestPartitionedScatterOpt(TestCase):
         """
         Contention gate uses index_size / scatter_dim_size, not index_size / output_numel.
 
-        For [vocab=4096, dim=64] with N=5000 indices:
-          wrong: 5000 / (4096*64) = 0.019 → skip
-          right: 5000 / 4096 = 1.22 → apply
+        For [vocab=4096, dim=64] with N=50000 indices:
+          wrong: 50000 / (4096*64) = 0.19 → skip
+          right: 50000 / 4096 = 12.2 → apply
         """
-        vocab, dim, N = 4096, 64, 5000
+        vocab, dim, N = 4096, 64, 50_000
 
         def f(out, idx, vals):
             return out.index_put([idx], vals, accumulate=True)
@@ -514,9 +541,13 @@ class TestPartitionedScatterOpt(TestCase):
         )
 
     @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
+    @config.patch(partitioned_scatter_min_contention_ratio=1.0)
     def test_memory_aware_partition_count(self):
         """
         Verify that live tensor memory constrains num_partitions.
+
+        The contention gate is pinned low so this exercises the memory budget
+        in isolation (this graph's ratio is 11M/10M = 1.1).
 
         Graph: out(40 MB) + idx(88 MB) + vals(44 MB) + persistent(400 MB) inputs.
         At the index_put node, baseline live memory ≈ 440 MB.
