@@ -12598,7 +12598,6 @@ class TestSDPA(TestCaseMPS):
             )
         self._compare_tensors(y.cpu(), y_ref)
 
-
     @serialTest()
     def test_sdpa_fp32_no_memory_leak(self):
         def get_mps_memory_usage():
@@ -13040,7 +13039,6 @@ class TestSDPA(TestCaseMPS):
         # Max relative error rather than the mean _run_prefill_test uses: rounding
         # the scale into Q in the input dtype moves a few rows a lot, and a mean
         # washes that out well below these tolerances.
-        torch.manual_seed(0)
         q, k, v = self._prefill_qkv(1, 2, 2, 128, 128, head_dim, "contiguous", dtype)
         ref = F.scaled_dot_product_attention(q.cpu().float(), k.cpu().float(), v.cpu().float(), scale=scale)
         got = F.scaled_dot_product_attention(q, k, v, scale=scale).cpu().float()

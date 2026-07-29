@@ -835,7 +835,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   bool supports_prefill = !prefill_attention_disabled && !supports_fast_sdpa && prefill_supported_dtype &&
       prefill_mask_compatible && prefill_head_dim_supported && prefill_q_long_enough && (k_.size(2) > 0);
 
-  bool supports_mpp =
+  bool supports_mpp = !prefill_attention_disabled &&
       can_use_mpp_prefill(q_, mask_, query_head_dim, value_head_dim, query_seq_len, k_.size(2), supports_fast_sdpa);
 
   if (!supports_fast_sdpa && !supports_prefill && !supports_mpp) {
