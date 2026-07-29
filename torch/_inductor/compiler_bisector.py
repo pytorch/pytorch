@@ -571,6 +571,7 @@ class CompilerBisector:
             added_pre_grad_graph = True
 
         bisection_enabled_orig = cls.bisection_enabled
+        in_process_cache_orig = cls.in_process_cache
         try:
             if not cli_interface:
                 cls.delete_bisect_status()
@@ -667,7 +668,7 @@ class CompilerBisector:
             if not cli_interface:
                 cls.bisection_enabled = bisection_enabled_orig
                 cls.delete_bisect_status()
-                cls.in_process_cache = None
+                cls.in_process_cache = in_process_cache_orig
             if added_pre_grad_graph and BACKENDS["inductor"]:
                 if BACKENDS["inductor"][0].name == "pre_grad_graph":
                     del BACKENDS["inductor"][0]
