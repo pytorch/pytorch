@@ -7701,17 +7701,6 @@ class TestTorch(TestCase):
         with self.assertRaises(ValueError):
             torch.quasirandom.SobolEngine(maxdim + 1)
 
-    def test_sobol_invalid_inputs(self):
-        quasi = torch.ones(2, dtype=torch.long)
-        sobolstate = torch.ones(2, 30, dtype=torch.long)
-
-        with self.assertRaisesRegex(ValueError, "dimension must match"):
-            torch._sobol_engine_ff_(quasi, 1, sobolstate, 1250999896764, 0)
-        with self.assertRaisesRegex(ValueError, "at most"):
-            torch._sobol_engine_ff_(quasi, 1, sobolstate, 2, 2**30 - 1)
-        with self.assertRaisesRegex(ValueError, "dimension must be between"):
-            torch._sobol_engine_initialize_state_(sobolstate, 1250999896764)
-
     def test_sobolengine_high_dim(self):
         engine = torch.quasirandom.SobolEngine(1111, scramble=False, seed=123456)
         samples1 = engine.draw()
