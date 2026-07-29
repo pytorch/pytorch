@@ -419,12 +419,33 @@ class DTensorTest(DTensorTestBase):
             map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
             device_mesh,
             (Shard(0),),
+            run_check=True,
             shape=global_tensor.size(),
             stride=global_tensor.stride(),
         )
 
         self.assertEqual(dtensor.size(), global_tensor.size())
         self.assertEqual(dtensor.stride(), global_tensor.stride())
+
+    @with_comms
+    def test_from_local_run_check_rejects_non_chunk_uneven(self):
+        device_mesh = self.build_device_mesh()
+        # Global size is uneven; give every rank a local width that is NOT the
+        # torch.chunk expectation so all ranks raise under run_check=True.
+        global_w = self.world_size + 1
+        expected, _ = Shard.local_shard_size_and_offset(
+            global_w, device_mesh.size(mesh_dim=0), self.rank
+        )
+        local = torch.randn(2, expected + 1, device=self.device_type)
+        with self.assertRaisesRegex(RuntimeError, "Local tensor size on shard dim"):
+            DTensor.from_local(
+                local,
+                device_mesh,
+                (Shard(1),),
+                run_check=True,
+                shape=torch.Size([2, global_w]),
+                stride=(global_w, 1),
+            )
 
     @with_comms
     def test_from_local_uneven_sharding_raise_error(self):
