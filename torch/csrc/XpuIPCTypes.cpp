@@ -427,7 +427,7 @@ class XpuIpcEvent {
 } // namespace
 
 bool IsImportedXpuStorage(const c10::StorageImpl& storage) {
-  return const_cast<c10::StorageImpl&>(storage).received_xpu();
+  return storage.received_xpu();
 }
 
 XpuSharedStorage ShareXpuStorage(const at::Storage& storage) {

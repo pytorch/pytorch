@@ -296,7 +296,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     received_xpu_ = received_xpu;
   }
 
-  bool received_xpu() {
+  bool received_xpu() const {
     return received_xpu_;
   }
 
