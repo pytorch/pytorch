@@ -1292,6 +1292,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return torch.relu(result), result + 1.0
 
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertIn("EpilogueArguments", code)
+        self.assertNotIn("CuTeDSLEpilogueArguments", code)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
@@ -2174,6 +2176,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(
             fn, a, b, scale_a, scale_b
         )
+        self.assertIn("CuTeDSLEpilogueArguments", code)
         torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
         self.assertTrue(
             epilogue_fused, f"{operation} was NOT fused into scaled epilogue"
