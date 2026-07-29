@@ -4736,6 +4736,33 @@ def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwarg
     yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
 
 
+def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs):
+    # The FlyDSL override only fires on ROCm for large N with enough rows to
+    # amortize the launch, so most of these shapes sit inside that window:
+    # N in [4096, 8192) needs >= 8192 rows, [8192, 16384) needs >= 4096, and
+    # N >= 16384 needs >= 2048.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        ((8192, 4096), (4096,), {'eps': 1e-5}),
+        ((4096, 8192), (8192,), {'eps': 1e-5}),
+        ((2048, 16384), (16384,), {'eps': 1e-5}),
+        # N is a multiple of neither vector width (8 for fp16/bf16, 4 for
+        # fp32), so this exercises the scalar tail of the vectorized path.
+        ((8192, 4098), (4098,), {'eps': 1e-5}),
+        # Below the row threshold and below the N threshold: both fall through
+        # to aten, which the override must leave numerically untouched.
+        ((64, 4096), (4096,), {'eps': 1e-5}),
+        ((8, 128), (128,), {'eps': 1e-5}),
+        # eps=None reaches the same aten fallback for the accumulator epsilon.
+        ((8, 128), (128,), {}),
+    )
+    for input_shape, normalized_shape, kw in cases:
+        weight = make_arg(normalized_shape)
+        yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
+    # weight=None is declined by the predicate and handled by aten.
+    yield SampleInput(make_arg((8192, 4096)), args=((4096,),), kwargs={'eps': 1e-5})
+
+
 def error_inputs_group_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
 
@@ -22980,6 +23007,45 @@ if "cutedsl" in dsl_ops_by_dsl:
             **_cutedsl_topk_kwargs,
         ),
     ])
+
+if "flydsl" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["flydsl"].append(
+        OpInfo(
+            "nn.functional.rms_norm",
+            variant_test_name="flydsl",
+            aten_name="rms_norm",
+            ref=reference_rms_norm,
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            sample_inputs_func=sample_inputs_rms_norm_flydsl,
+            decorators=[
+                onlyCUDA,
+                skipCUDAIf(not TEST_WITH_ROCM, "flydsl rms_norm override requires ROCm"),
+                # The predicate declines non-contiguous inputs, so this test
+                # compares the FlyDSL kernel against aten rather than one
+                # kernel against itself. Their reduction orders differ, which
+                # at N=4096 exceeds the default fp32 tolerance.
+                DecorateInfo(
+                    toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                    "TestCommon", "test_noncontiguous_samples",
+                ),
+            ],
+            skips=(
+                # test_dtypes probes every dtype and expects the listed set
+                # to exactly match what the op accepts. The override falls
+                # through to aten for fp64/complex, so those "work" from the
+                # probe's perspective -- but this variant is specifically for
+                # the override's supported dtypes only.
+                DecorateInfo(
+                    unittest.skip("override intentionally narrower than aten"),
+                    "TestCommon", "test_dtypes",
+                ),
+            ),
+        )
+    )
 
 op_db += opinfo.definitions.op_db
 
