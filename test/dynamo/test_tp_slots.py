@@ -377,6 +377,10 @@ class TestTypeFlags(TestCase):
 
         self.assertEqual(get_tp_flags(PyCls), get_tp_flags(PyCls()))
 
+    def test_managed_dict_flag_value(self):
+        # PyTypeFlags masks equal the real CPython Py_TPFLAGS_* values.
+        self.assertEqual(int(PyTypeFlags.MANAGED_DICT), 1 << 4)
+
 
 if __name__ == "__main__":
     run_tests()

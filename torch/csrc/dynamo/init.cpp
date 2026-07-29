@@ -232,10 +232,15 @@ enum class PyTypeSlotBit : int64_t {
   TP_INIT = 11,
 };
 
-// Type flag bit positions. Independent of CPython's actual tp_flags layout:
-// the scanner below maps real Py_TPFLAGS_* features onto these compact bits.
+// Type flag masks, equal to the real CPython Py_TPFLAGS_* values so that
+// get_tp_flags (which returns the raw tp_flags word) and has_tp_flag work
+// directly against them. Macros absent on older interpreters map to 0.
 enum class PyTypeFlagBit : int64_t {
+#ifdef Py_TPFLAGS_MANAGED_DICT
+  MANAGED_DICT = Py_TPFLAGS_MANAGED_DICT,
+#else
   MANAGED_DICT = 0,
+#endif
 };
 
 int64_t get_pysequence_slots(PyTypeObject* type) {
@@ -419,13 +424,8 @@ PyObject* _get_type_slots(
 }
 
 int64_t get_tp_flags(PyTypeObject* type) {
-  int64_t flags = 0;
-#ifdef Py_TPFLAGS_MANAGED_DICT
-  // Managed dict (CPython 3.11+): instances carry a __dict__ in the pre-header.
-  if (PyType_HasFeature(type, Py_TPFLAGS_MANAGED_DICT))
-    flags |= (1LL << static_cast<int>(PyTypeFlagBit::MANAGED_DICT));
-#endif
-  return flags;
+  // Raw tp_flags word; test bits against the PyTypeFlags masks via has_tp_flag.
+  return static_cast<int64_t>(PyType_GetFlags(type));
 }
 
 PyObject* _get_tp_flags(
@@ -572,9 +572,10 @@ void initDynamoBindings(PyObject* torch) {
         return (slots & (1LL << slot_bit)) != 0;
       });
   dynamo_module.def(
-      "has_tp_flag", [](int64_t flags, const py::object& flag_bit_obj) {
-        int64_t flag_bit = py::cast<int64_t>(flag_bit_obj.attr("__index__")());
-        return (flags & (1LL << flag_bit)) != 0;
+      "has_tp_flag", [](int64_t flags, const py::object& flag_obj) {
+        // flag is a real Py_TPFLAGS_* mask (see PyTypeFlags), not a bit index.
+        int64_t flag = py::cast<int64_t>(flag_obj.attr("__index__")());
+        return (flags & flag) != 0;
       });
   py::enum_<PyTypeFlagBit>(dynamo_module, "PyTypeFlags")
       .value("MANAGED_DICT", PyTypeFlagBit::MANAGED_DICT);
