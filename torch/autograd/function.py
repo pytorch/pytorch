@@ -231,6 +231,45 @@ class FunctionCtx:
         """
         self.non_differentiable = args
 
+    def set_output_grad_dtype(self, *dtypes: "torch.dtype | None") -> None:
+        r"""Declare the gradient dtype for each of this Function's outputs.
+
+        This should be called from either the :func:`setup_context` or
+        :func:`forward` methods. If called more than once, only the last call
+        takes effect; each call overwrites the declarations from the previous
+        one. Each argument corresponds positionally to the value this Function
+        returns at the same index, so the number of declarations must match the
+        number of returned values. This lets a Function define the dtype
+        contract for gradients entering its output slots independently of the
+        outputs' storage dtypes.
+
+        For each output slot the declaration means:
+
+        - a concrete :class:`torch.dtype` (only valid for a differentiable
+          Tensor output): the incoming gradient is converted to that dtype.
+        - ``None``: no conversion is performed. For a differentiable Tensor the
+          gradient passes through as-is; for a non-Tensor or non-differentiable
+          output there is no gradient, so ``None`` is the only valid choice.
+
+        If this method is not called, every output keeps the default behavior of
+        converting the incoming gradient to that output's storage dtype. To
+        request that default explicitly when calling this method, pass the
+        output's own ``dtype`` for its slot.
+
+        For example, casting the first output's gradient to ``float32``, letting
+        the second output's gradient pass through uncast (``None``), and using
+        ``None`` for the trailing non-Tensor output that has no gradient::
+
+            >>> # xdoctest: +SKIP
+            >>> @staticmethod
+            >>> def forward(ctx, x):
+            >>>     t1 = x.sin()
+            >>>     t2 = x.cos()
+            >>>     ctx.set_output_grad_dtype(torch.float32, None, None)
+            >>>     return t1, t2, "not a tensor"
+        """
+        self.output_grad_dtypes = dtypes
+
     def set_materialize_grads(self, value: bool):
         r"""Set whether to materialize grad tensors. Default is ``True``.
 
