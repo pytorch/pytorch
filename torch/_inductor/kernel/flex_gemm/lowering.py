@@ -346,7 +346,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
     # This is where we figure out what the fx-graph body is doing
-    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
+    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
     if (
         epilogue_analysis.required_geometries
         and gemm_op is not torch.ops.aten.mm.default
@@ -409,7 +409,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
-        gemm_op,
         epilogue_analysis,
         epilogue_arg_placeholders,
         fast_math=fast_math,
