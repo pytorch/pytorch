@@ -28,7 +28,7 @@ namespace torch::cuda::nccl {
 typedef void* ncclComm_t;
 
 /** redefine nccl unique ID in torch scope. this should be identical to native
- * nccl impp. */
+ * nccl impl. */
 #define NCCL_UNIQUE_ID_BYTES 128
 typedef struct {
   // NOLINTNEXTLINE(*array*)

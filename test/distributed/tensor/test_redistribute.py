@@ -675,7 +675,7 @@ class RedistributeTest(DTensorContinuousTestBase):
 
             self.assertTrue(
                 dt_back_rep._local_tensor.is_contiguous(),
-                f"Local tensor should be contiguous after Shard({shard_dim})->Replicate "
+                lambda msg: f"{msg}\nLocal tensor should be contiguous after Shard({shard_dim})->Replicate "
                 f"for shape {shape}. Got stride {dt_back_rep._local_tensor.stride()}",
             )
             self.assertTrue(dt_back_rep.is_contiguous())
@@ -1532,7 +1532,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
                         )
                         self.assertTrue(
                             src_to_dst_cost <= src_to_int_cost + int_to_dst_cost,
-                            f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
+                            lambda msg: f"{msg}\n{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
                         )
 
     def test_redistribute_cost_sort_key_uses_unbacked_hint(self):

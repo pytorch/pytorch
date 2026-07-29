@@ -1,7 +1,6 @@
 # Owner(s): ["module: tests"]
 
 import gc
-import unittest
 
 import torch
 from torch._tensor_iterator import (
@@ -14,7 +13,10 @@ from torch._tensor_iterator import (
     unary_float_op,
     unary_op,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
@@ -138,30 +140,6 @@ class TestTensorIteratorBuild(TestCase):
         b = torch.zeros(3, dtype=torch.float64)
         with self.assertRaises(RuntimeError):
             TensorIterator(outputs=[None], const_inputs=[a, b])
-
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
-    def test_cross_device_check_raises(self):
-        # Default check_all_same_device=True rejects mixed CPU+CUDA.
-        a = torch.zeros(3, device="cpu")
-        b = torch.zeros(3, device="cuda")
-        with self.assertRaises(RuntimeError):
-            binary_op(None, a, b)
-
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
-    def test_allow_cpu_scalars(self):
-        # A 0-dim CPU tensor is a "CPU scalar". With allow_cpu_scalars=True
-        # the iterator accepts it alongside a CUDA tensor without violating
-        # the same-device check (the same-device check itself allows CPU
-        # scalars when this flag is on).
-        a = torch.zeros(3, device="cuda")
-        b = torch.tensor(2.0, device="cpu")  # 0-dim CPU scalar
-        it = TensorIterator(
-            outputs=[None],
-            const_inputs=[a, b],
-            allow_cpu_scalars=True,
-            promote_inputs_to_common_dtype=True,
-        )
-        self.assertEqual(it.numel, 3)
 
 
 class TestTensorIterator(TestCase):
@@ -365,6 +343,30 @@ class TestTensorIterator(TestCase):
         r = repr(it)
         self.assertIn("ndim=", r)
         self.assertIn("ntensors=3", r)
+
+    @onlyAccelerator
+    def test_cross_device_check_raises(self, device):
+        # Default check_all_same_device=True rejects mixed CPU+accelerator.
+        a = torch.zeros(3, device="cpu")
+        b = torch.zeros(3, device=device)
+        with self.assertRaises(RuntimeError):
+            binary_op(None, a, b)
+
+    @onlyAccelerator
+    def test_allow_cpu_scalars(self, device):
+        # A 0-dim CPU tensor is a "CPU scalar". With allow_cpu_scalars=True
+        # the iterator accepts it alongside a device tensor without violating
+        # the same-device check (the same-device check itself allows CPU
+        # scalars when this flag is on).
+        a = torch.zeros(3, device=device)
+        b = torch.tensor(2.0, device="cpu")  # 0-dim CPU scalar
+        it = TensorIterator(
+            outputs=[None],
+            const_inputs=[a, b],
+            allow_cpu_scalars=True,
+            promote_inputs_to_common_dtype=True,
+        )
+        self.assertEqual(it.numel, 3)
 
 
 instantiate_device_type_tests(TestTensorIterator, globals())

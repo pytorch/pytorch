@@ -3579,6 +3579,128 @@ class TestFxGraphCacheHashing(TestCase):
         with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
             CacheabilityValidator(gm, require_shape_env=False).validate()
 
+    def _nested_region_gm(self, patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+        )
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm.meta["nested_region_config"] = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches
+        )
+        return gm
+
+    def test_nested_region_config_patches_affect_cache_key(self):
+        # A region's inductor_config_patches must be part of the cache key,
+        # otherwise two regions differing only in their patches would collide
+        # and reuse a stale compiled artifact.
+        same1 = self._nested_region_gm({"max_autotune": True})
+        same2 = self._nested_region_gm({"max_autotune": True})
+        different = self._nested_region_gm({"max_autotune": False})
+
+        self.assertEqual(
+            FxGraphHashDetails(
+                same1, [], cast(Any, {}), []
+            ).nested_inductor_config_patches,
+            (("", (("max_autotune", True),)),),
+        )
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
+
+    def test_nested_region_uncacheable_config_bypasses_cache(self):
+        # A callable patch value can't be hashed into the cache key.
+        def custom_pass(graph):
+            return graph
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                require_shape_env=False,
+            ).validate()
+
+        # A non-callable value under a custom-pass key is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
+                require_shape_env=False,
+            ).validate()
+
+        # A callable hidden inside a list value (e.g.
+        # _fuse_ddp_communication_passes) is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm(
+                    {"_fuse_ddp_communication_passes": [custom_pass]}
+                ),
+                require_shape_env=False,
+            ).validate()
+
+        # A list of non-callables stays cacheable.
+        CacheabilityValidator(
+            self._nested_region_gm(
+                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
+            ),
+            require_shape_env=False,
+        ).validate()
+
+    def _nested_region_bw_gm(self, bw_patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        fw_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches=bw_patches
+        )
+        bw_config = get_backward_nested_region_config(fw_config)
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        # Mirror run_joint_graph_passes_on_hops: the backward config is stamped on
+        # the partitioned backward invoke_subgraph node's meta["custom"] (the
+        # source of truth), not the subgraph module.
+        node = gm.graph.call_function(torch.ops.higher_order.invoke_subgraph)
+        node.meta["custom"] = {"nested_region_config": bw_config}
+        gm.graph.output(())
+        gm.recompile()
+        return gm
+
+    def test_nested_region_bw_config_patches_affect_cache_key(self):
+        # bw_inductor_config_patches (stamped on the backward invoke_subgraph
+        # node) must be part of the cache key, or two graphs differing only in
+        # backward config would collide.
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        # Backward config replaces (does not merge with) the forward config.
+        bw_config = get_backward_nested_region_config(
+            get_invoke_subgraph_compile_options(
+                bw_inductor_config_patches={"max_autotune": True}
+            )
+        )
+        self.assertEqual(
+            bw_config.inductor_config_patches,
+            {"max_autotune": True},
+        )
+
+        same1 = self._nested_region_bw_gm({"max_autotune": True})
+        same2 = self._nested_region_bw_gm({"max_autotune": True})
+        different = self._nested_region_bw_gm({"max_autotune": False})
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_check_for_hop_skips_constants(self):
         graph = torch.fx.Graph()
@@ -5140,7 +5262,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(calls, [60])
         self.assertTrue(
             any("hung after 60s" in str(w.message) for w in caught),
-            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+            msg=lambda msg: f"{msg}\nexpected timeout warning, got: {[str(w.message) for w in caught]}",
         )
 
     def test_probe_load_returns_false_on_called_process_error(self):
