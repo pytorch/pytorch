@@ -161,7 +161,12 @@ TORCH_API MPSStream* getDefaultMPSStream();
  * the lifetime of a process. The stream returned by this function is chosen
  * in round-robin order. Note: The default stream is not in the pool.
  */
-TORCH_API MPSStream* getStreamFromPool();
+TORCH_API MPSStream* getStreamFromPool(std::optional<int64_t> stream_id_opt = std::nullopt);
+
+/**
+ * Synchronize the default stream and the streams in the pool.
+ */
+TORCH_API void synchronizeAllMPSStreams(SyncType syncType);
 
 //-----------------------------------------------------------------
 //  MPSStreamImpl

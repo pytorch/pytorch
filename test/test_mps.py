@@ -908,6 +908,80 @@ class TestMPS(TestCaseMPS):
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
 
+    def test_stream(self):
+        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        with torch.mps.stream(None):
+            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        s1 = torch.mps.Stream()
+        s2 = torch.mps.Stream()
+        self.assertNotEqual(s1, torch.mps.default_stream())
+        self.assertNotEqual(s2, torch.mps.default_stream())
+        self.assertNotEqual(s1, s2)
+
+        # Check that the stream is reset correctly if an exception is raised
+        # within another stream's context.
+        # Note: Use a custom exception type so that any unexpected errors inside
+        # the `try` block pass through to fail the test
+        class MyException(Exception):
+            pass
+
+        try:
+            with torch.mps.stream(s1):
+                self.assertEqual(torch.mps.current_stream(), s1)
+                raise MyException
+
+        except MyException:
+            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        # Check that the stream is reset correctly with nested contexts
+        with torch.mps.stream(s1):
+            self.assertEqual(torch.mps.current_stream(), s1)
+            with torch.mps.stream(s2):
+                self.assertEqual(torch.mps.current_stream(), s2)
+
+            self.assertEqual(torch.mps.current_stream(), s1)
+
+        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
+            r1 = a1
+            r2 = a2
+
+            for _ in range(n):
+                with torch.mps.stream(s1):
+                    r1 = torch.sin(r1)
+                with torch.mps.stream(s2):
+                    r2 = torch.sin(r2)
+
+            return r1, r2
+
+        # Check that two separate workloads run on separate streams gives the
+        # same result as running them on one stream.
+        try:
+            a1 = torch.randn(100, device='mps')
+            a2 = torch.randn(100, device='mps')
+            torch.mps.synchronize()
+
+            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
+            s1.synchronize()
+            s2.synchronize()
+
+            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
+            torch.mps.synchronize()
+
+            self.assertEqual(r1, r1_check)
+            self.assertEqual(r2, r2_check)
+
+        finally:
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
+        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
     def test_stream_base(self):
         s1 = torch._C._MPSStreamBase()
         s2 = torch._C._MPSStreamBase()
