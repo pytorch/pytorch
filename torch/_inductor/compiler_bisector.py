@@ -565,10 +565,10 @@ class CompilerBisector:
         # bisector so far. Use a config to opt-in
         import torch._inductor.config as inductor_config
 
-        added_pre_grad_graph = False
+        pre_grad_graph_subsystem: BisectSubsystem | None = None
         if inductor_config.test_configs.bisect_pre_grad_graph:
-            BACKENDS["inductor"].insert(0, BisectSubsystem("pre_grad_graph"))
-            added_pre_grad_graph = True
+            pre_grad_graph_subsystem = BisectSubsystem("pre_grad_graph")
+            BACKENDS["inductor"].insert(0, pre_grad_graph_subsystem)
 
         bisection_enabled_orig = cls.bisection_enabled
         in_process_cache_orig = cls.in_process_cache
@@ -672,9 +672,11 @@ class CompilerBisector:
                 except Exception:
                     pass
                 cls.in_process_cache = in_process_cache_orig
-            if added_pre_grad_graph and BACKENDS["inductor"]:
-                if BACKENDS["inductor"][0].name == "pre_grad_graph":
-                    del BACKENDS["inductor"][0]
+            if pre_grad_graph_subsystem is not None:
+                try:
+                    BACKENDS["inductor"].remove(pre_grad_graph_subsystem)
+                except ValueError:
+                    pass
 
 
 HELP_TEXT = """\
