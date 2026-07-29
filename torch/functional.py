@@ -2180,6 +2180,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> warnings.filterwarnings("ignore", message=".*torch.lu is deprecated")  # docs: hide
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU
