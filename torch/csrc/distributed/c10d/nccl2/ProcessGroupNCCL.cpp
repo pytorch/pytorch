@@ -184,12 +184,12 @@ void ProcessGroupNCCL::initNcclResources() {
 }
 
 void ProcessGroupNCCL::abort() {
+  comm_state_ = CommState::ERROR;
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
     abortNcclComm();
   }
-  comm_state_ = CommState::ERROR;
 }
 
 void ProcessGroupNCCL::suspend() {
