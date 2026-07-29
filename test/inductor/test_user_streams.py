@@ -1748,6 +1748,111 @@ class GraphModule(torch.nn.Module):
             wrapper_body,
         )
 
+    def test_codegen_per_stream_alignment_copy_multi_stream(self):
+        """Regression test for per-stream alignment fixups read by many streams.
+
+        When an input is read on more than one stream, its ``x =
+        copy_if_misaligned(x)`` rewrite must be emitted once per consuming
+        stream, so every stream is ordered after its own aligned clone.  A
+        single shared copy is hard to manage due to the synchronization
+        requirements that would impose.
+
+        Here ``x`` is read on both ``s1`` and ``s2`` (``w1`` only on ``s1``,
+        ``w2`` only on ``s2``), so ``x`` must get two copies, one inside each
+        side-stream context, both cloning the same preserved original.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, w1, w2):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record(s1)
+            with torch.cuda.stream(s2):
+                b = x @ w2
+                e2.record(s2)
+            e1.wait()
+            e2.wait()
+            c = a + b
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        wrapper_body = _extract_wrapper_body(code)
+
+        # x is read on two streams: it is preserved once (`<x>_orig = <x>`)
+        # and cloned from that _orig inside each side-stream context, then
+        # freed after its last reader.
+        FileCheck().check_count("_orig = ", 1, exactly=True).run(wrapper_body)
+        FileCheck().check_count("_orig)", 2, exactly=True).run(wrapper_body)
+        # the clones live inside a side-stream context (not hoisted before the
+        # fork): a `with stream` precedes the first clone of the original.
+        FileCheck().check("with stream").check("_orig)").run(wrapper_body)
+        # the preserved original is freed on the normal codegen_free path;
+        # the multistream input's arg index is not stable across graphs, so
+        # match the free by pattern rather than a hardcoded name.
+        FileCheck().check_regex(r"del arg\d+_1_orig").run(code)
+
+    def test_codegen_per_stream_alignment_copy_one_per_stream(self):
+        """An input read multiple times on one stream gets a single copy there.
+
+        The per-stream alignment copy should be keyed on the consuming stream,
+        not on each use, so an input used several times within one
+        ``torch.cuda.stream`` block is cloned once per block.
+
+        Here ``x`` is read once on ``s1`` and twice on ``s2``, and we verify
+        that there are exactly two ``copy_if_misaligned`` clones of the
+        preserved original (one per stream), not three.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, w1, w2, w3):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record(s1)
+            with torch.cuda.stream(s2):
+                b = x @ w2
+                c = x @ w3
+                e2.record(s2)
+            e1.wait()
+            e2.wait()
+            out = a + b + c
+            s1.synchronize()
+            s2.synchronize()
+            return out
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        w3 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2, w3)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w1, w2, w3)
+        self.assertEqual(result, expected)
+
+        wrapper_body = _extract_wrapper_body(code)
+
+        # x is read 3 times (once on s1, twice on s2) but is cloned once per
+        # consuming stream, not once per use: exactly two clones (`_orig)`) of
+        # the one preserved original (`_orig = `).
+        FileCheck().check_count("_orig = ", 1, exactly=True).run(wrapper_body)
+        FileCheck().check_count("_orig)", 2, exactly=True).run(wrapper_body)
+
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton

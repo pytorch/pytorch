@@ -45,6 +45,11 @@ __all__ = [
     "make_graphed_callables",
     "export_dot",
     "export_graph_data",
+    "register_graph_instantiate_hook",
+    "run_graph_instantiate_hooks",
+    "register_graph_destroy_hook",
+    "run_graph_destroy_hooks",
+    "graph_destroy_hooks_active",
 ]
 
 
@@ -155,6 +160,69 @@ class _RetainedCallbacks:
         self.objects.clear()
 
 
+# Global CUDA-graph lifecycle hooks (the module-level counterpart of the per-graph
+# _post_instantiate_hooks). A consumer (e.g. a profiler observer) registers a hook that fires
+# for every graph, so the graph code stays free of consumer knowledge; registering a hook is
+# the opt-in. Keyed by RemovableHandle id. Instantiate hooks run at the end of instantiate()
+# with the freshly instantiated graph.
+_global_instantiate_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = OrderedDict()
+
+
+def register_graph_instantiate_hook(
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    """Register a hook run with each CUDA graph right after it is instantiated. Returns a
+    RemovableHandle; call ``.remove()`` to unregister."""
+    from torch.utils.hooks import RemovableHandle
+
+    handle = RemovableHandle(_global_instantiate_hooks)
+    _global_instantiate_hooks[handle.id] = fn
+    return handle
+
+
+def run_graph_instantiate_hooks(torch_cuda_graph: CUDAGraph) -> None:
+    """Run every registered instantiate hook with the graph. Errors are swallowed so one
+    consumer cannot break instantiate() for another."""
+    for fn in list(_global_instantiate_hooks.values()):
+        try:
+            fn(torch_cuda_graph)
+        except Exception:
+            pass
+
+
+# Graph-destroy hooks, each handed the destroyed graph's exec ids (tools_id >> 32) so a
+# consumer can purge its per-graph state. A CUDAGraph arms a single destroy callback (only
+# while a hook is registered, see graph_destroy_hooks_active) that fans out here.
+_global_destroy_hooks: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
+
+
+def register_graph_destroy_hook(fn: Callable[[set[int]], None]) -> RemovableHandle:
+    """Register ``fn(exec_ids)`` to run when a CUDA graph is destroyed. Returns a handle whose
+    ``remove()`` unregisters it."""
+    from torch.utils.hooks import RemovableHandle
+
+    handle = RemovableHandle(_global_destroy_hooks)
+    _global_destroy_hooks[handle.id] = fn
+    return handle
+
+
+def graph_destroy_hooks_active() -> bool:
+    """True when any graph-destroy hook is registered -- the gate a CUDAGraph checks before
+    arming its destroy callback."""
+    return bool(_global_destroy_hooks)
+
+
+def run_graph_destroy_hooks(exec_graph_ids: set[int]) -> None:
+    """Invoke every registered hook with the destroyed exec graph ids, swallowing per-hook
+    errors so one failure does not abort the rest (matching the destroy-callback fire
+    semantics). The single entry point a graph's destroy callback calls."""
+    for fn in list(_global_destroy_hooks.values()):
+        try:
+            fn(exec_graph_ids)
+        except Exception:
+            pass
+
+
 # Python shim helps Sphinx process docstrings more reliably.
 class CUDAGraph(_CUDAGraph):
     r"""Wrapper around a CUDA graph.
@@ -194,6 +262,10 @@ class CUDAGraph(_CUDAGraph):
     # before the first remap. Lets a re-instantiate (which produces a fresh exec
     # id) rekey annotations from the previous exec id to the new one.
     _remapped_exec_id: int | None
+    # Exec graph ids a consumer has recorded per-graph state under (one per
+    # instantiate). Handed to the graph-destroy hooks on destruction so consumers
+    # can purge that state and their maps do not grow across the run.
+    _recorded_exec_ids: set[int]
     _keep_graph: bool
     # User hooks fired by capture_end / instantiate (see register_*_hook).
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -213,6 +285,7 @@ class CUDAGraph(_CUDAGraph):
         instance._tracker = None
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
+        instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_end_hooks = OrderedDict()
@@ -231,6 +304,16 @@ class CUDAGraph(_CUDAGraph):
         # stream off it without pinning the graph.
         self._retained = _RetainedCallbacks()
         self._retained_finalizer = weakref.finalize(self, self._retained.fire)
+        # When a consumer (e.g. the CUPTI monitor) has registered graph-destroy
+        # hooks, arm the per-graph state purge for this capture cycle. The callback
+        # captures the exec-id SET OBJECT (empty now, filled as this graph
+        # records/instantiates) and the module fan-out function, never self and never
+        # a hook: a closure reachable to the graph would pin it past collection so it
+        # never fires. reset() re-arms a fresh holder, so this re-registers per cycle;
+        # a graph that records nothing just fires on an empty set (a no-op).
+        if graph_destroy_hooks_active():
+            exec_ids = self._recorded_exec_ids
+            self.register_destroy_callback(lambda: run_graph_destroy_hooks(exec_ids))
 
     def register_capture_end_hook(
         self, hook: Callable[[CUDAGraph], None]
@@ -370,6 +453,11 @@ class CUDAGraph(_CUDAGraph):
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
         remap_to_exec_graph(self)
+        # Record the exec id we remapped to so the destroy callback (armed in
+        # capture_end_post) hands it to the graph-destroy hooks for per-graph state
+        # cleanup. A re-instantiate mints a fresh exec id, so the set accumulates each.
+        if self._remapped_exec_id is not None:
+            self._recorded_exec_ids.add(self._remapped_exec_id)
 
     def _release_python_resources(self) -> None:
         # Single source of truth for GC-critical Python resources released by
@@ -479,6 +567,9 @@ class CUDAGraph(_CUDAGraph):
         """
         super().instantiate()
         self._maybe_remap_annotations()
+        # Fire registered instantiate hooks (e.g. a profiler observer inspecting the freshly
+        # instantiated graph). Registering a hook is the opt-in; no consumer -> a no-op.
+        run_graph_instantiate_hooks(self)
         for hook in list(self._post_instantiate_hooks.values()):
             hook(self)
 
@@ -517,6 +608,9 @@ class CUDAGraph(_CUDAGraph):
         self._retained.fire()
         if self._retained_finalizer is not None:
             self._retained_finalizer.detach()
+        # Start a fresh id set BEFORE re-arming: _arm_retained captures it into the
+        # next cycle's destroy callback. The just-fired holder dropped the old one.
+        self._recorded_exec_ids = set()
         self._arm_retained()
         # Reset-only state: scrubbed here because the object is reused after
         # reset(); on death these ints die with the object.
