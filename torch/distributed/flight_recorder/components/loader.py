@@ -98,3 +98,6 @@ def read_dir(args: argparse.Namespace) -> tuple[dict[str, dict[str, Any]], str]:
         )
     logger.debug("loaded %s files in %ss", filecount, tb - t0)
     return details, version
+    finally:
+        if gc_was_enabled:
+            gc.enable()
