@@ -263,6 +263,7 @@ The two APIs have different gradient behavior even when they perform the same
 communication. Choose the `torch.distributed.nn.functional` variant explicitly
 for model code that needs gradients to flow through the collective, and check
 the function documentation for the supported operations and arguments.
+
 ## Initialization
 
 The package needs to be initialized using the {func}`torch.distributed.init_process_group`
