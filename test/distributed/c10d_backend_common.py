@@ -60,7 +60,7 @@ C10D_BACKENDS = (
         supports_work_sequence_number=True,
     ),
     BackendConfig(
-        "nccl",
+        "nccl-legacy",
         "cuda",
         supports_coalescing=True,
         supports_dropped_p2p_work=True,
