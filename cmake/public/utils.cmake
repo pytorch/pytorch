@@ -358,7 +358,6 @@ function(torch_compile_options libname)
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
-        ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
         /bigobj>
@@ -414,6 +413,9 @@ function(torch_compile_options libname)
         -Werror=pedantic
         -Werror=unused
         -Wno-error=unused-parameter
+        # Deprecated APIs (e.g. c10::checked_convert) must warn, not break the
+        # build, so they can be retired while external/BC callers migrate.
+        -Wno-error=deprecated-declarations
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         list(APPEND private_compile_options -Werror=unused-but-set-variable -Werror=cpp)
@@ -431,9 +433,6 @@ function(torch_compile_options libname)
     foreach(option IN LISTS private_compile_options)
       if(CMAKE_CUDA_HOST_COMPILER_ID STREQUAL "GNU")
         if("${option}" STREQUAL "-Wextra-semi")
-          continue()
-        endif()
-        if("${option}" STREQUAL "-Wunused-private-field")
           continue()
         endif()
       endif()
@@ -496,7 +495,7 @@ include(CheckCCompilerFlag)
 include(CheckLinkerFlag)
 
 ##############################################################################
-# CHeck if given flag is supported and append it to provided outputvar
+# Check if given flag is supported and append it to provided outputvar
 # Also define HAS_UPPER_CASE_FLAG_NAME variable
 # Usage:
 #   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
@@ -543,9 +542,14 @@ function(target_compile_options_if_supported target flag)
 endfunction()
 
 # Check if a global link option is supported
+# Also defines HAS_LINKER_UPPER_CASE_FLAG_NAME
+# Usage:
+#   add_link_options_if_supported("--emit-relocs")
 function(add_link_options_if_supported flag)
-  check_linker_flag(C "LINKER:${flag}" _supported)
-  if("${_supported}")
+  string(TOUPPER "HAS_LINKER${flag}" _FLAG_NAME)
+  string(REGEX REPLACE "[=,-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+  check_linker_flag(C "LINKER:${flag}" ${_FLAG_NAME})
+  if(${_FLAG_NAME})
     add_link_options("LINKER:${flag}")
   else()
     message(WARNING "Attempted to use unsupported link option : ${flag}.")
@@ -553,8 +557,10 @@ function(add_link_options_if_supported flag)
 endfunction()
 
 function(target_link_options_if_supported tgt flag)
-  check_linker_flag(C "LINKER:${flag}" _supported)
-  if("${_supported}")
+  string(TOUPPER "HAS_LINKER${flag}" _FLAG_NAME)
+  string(REGEX REPLACE "[=,-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+  check_linker_flag(C "LINKER:${flag}" ${_FLAG_NAME})
+  if(${_FLAG_NAME})
     target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
   else()
     message(WARNING "Attempted to use unsupported link option : ${flag}.")

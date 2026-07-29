@@ -184,12 +184,16 @@ class TestSACILP(TestCase):
         expected_ac_candidates = {f"Transformer.layers.{i}" for i in range(4)}
         self.assertTrue(
             set(ac_decisions.keys()).issubset(expected_ac_candidates),
-            f"Unexpected AC modules: "
+            lambda msg: f"{msg}\nUnexpected AC modules: "
             f"{set(ac_decisions.keys()) - expected_ac_candidates}",
         )
         for fqn, ratio in ac_decisions.items():
-            self.assertGreater(ratio, 0, f"discard ratio for {fqn} should be > 0")
-            self.assertLessEqual(ratio, 1, f"discard ratio for {fqn} should be <= 1")
+            self.assertGreater(
+                ratio, 0, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be > 0"
+            )
+            self.assertLessEqual(
+                ratio, 1, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be <= 1"
+            )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
