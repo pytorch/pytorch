@@ -1766,7 +1766,7 @@ def native_group_norm_backward(
                 rstd.unsqueeze(-1),
                 torch.ones((1, group, cpg), device=rstd.device),
             )
-        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c2 = torch.addcmul(-ds_val, db_val, mean) * rstd * rstd * rstd * s
         c3 = -c2 * mean - db_val * rstd * s
 
         c1 = c1.unsqueeze(-1)
