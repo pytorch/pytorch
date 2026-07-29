@@ -1004,12 +1004,54 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
-        """Look up *name* in the instance __dict__ (tp_dictoffset equivalent).
+        """Look up *name* in the instance __dict__ (step 3 of GenericGetAttr).
 
-        Returns a VT if the attribute exists in the instance dict, None if
-        the attribute is absent or the VT has no instance dict at all.
-        UDOV overrides to check self.value.__dict__ + side effects.
+        Generic over any VT whose type exposes an instance __dict__ (see
+        type_has_dict). Returns a VT if *name* is present in the instance dict
+        -- honoring pending side-effect mutations -- or None if absent or the
+        type has no instance dict. UDOV overrides to also wrap the source for
+        nn.Module instances.
         """
+        from .object_protocol import type_has_dict
+
+        if not type_has_dict(maybe_get_python_type(self)):
+            return None
+
+        se = tx.output.side_effects
+        source = AttrSource(self.source, name) if self.source else None
+
+        if se.has_pending_mutation_of_attr(
+            self,
+            name,
+            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+        ):
+            result = se.load_attr(self, name, deleted_ok=True)
+            if isinstance(result, variables.DeletedVariable):
+                return None
+            return result
+
+        if se.has_pending_mutation_of_attr(
+            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        ):
+            # __dict__ was replaced wholesale; read the replacement dict VT
+            # straight from the side-effects table instead of materializing a
+            # DunderDictVariable proxy over it.
+            dict_vt = se.load_attr(self, "__dict__")
+            if isinstance(dict_vt, variables.ConstDictVariable):
+                key = variables.ConstantVariable.create(name)
+                return dict_vt.maybe_getitem_const(key)
+            return None
+
+        value = self.get_real_python_backed_value()
+        if value is not NO_SUCH_SUBOBJ:
+            instance_dict = object.__getattribute__(value, "__dict__")
+            if name in instance_dict:
+                if isinstance(self, variables.UnspecializedNNModuleVariable):
+                    source = self.maybe_wrap_nn_module_source_for_instance(
+                        tx, name, source
+                    )
+                return VariableTracker.build(tx, instance_dict[name], source)
+
         return None
 
     def call_getattr_fallback(
