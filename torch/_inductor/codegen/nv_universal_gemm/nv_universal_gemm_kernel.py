@@ -48,6 +48,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
+    "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
+)
+
 
 class CuTeDSLEpilogueArguments:
     """Epilogue arguments for direct CuTeDSL functions that bypass EVT tracing."""
@@ -364,12 +368,12 @@ def _worker_nvgemm_autotuning_precompile(
     epilogue_source = ""
     aux_tensors: tuple = ()
     if has_bias_epilogue:
-        from cutlass.operators.arguments import EpilogueArguments
-
         *gemm_list, bias = input_tensors
         input_tensors = tuple(gemm_list)
-        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
-        epilogue_source = "nvgemm_addmm_bias_v1"
+        epilogue_args = CuTeDSLEpilogueArguments(
+            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
+        )
+        epilogue_source = "nvgemm_addmm_bias_v2"
         aux_tensors = (bias,)
 
     cache_key = _create_gemm_cache_key(
@@ -1132,16 +1136,6 @@ class NVUniversalGemmKernelWrapper:
 
 
 # ── Kernel codegen class ─────────────────────────────────────────────────────
-
-
-# Module-level bias-add epilogue for benchmark tracing. Must be a real
-# (introspectable) function -- EpilogueArguments parses its source via
-# inspect.getsource -- and must contain NO string literals (the AST tracer
-# treats any constant as an immediate). The param name is deliberately not
-# ``C`` (see _build_bias_epilogue) so a 1D bias routes to the row-broadcast impl.
-def _nvgemm_bias_add_epilogue(accum, bias):
-    D = accum + bias
-    return D
 
 
 def _build_bias_epilogue(

@@ -348,6 +348,23 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
 
+    def test_direct_dense_epilogue_support_check(self):
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+            VendoredDenseGemmEFCOperator,
+        )
+
+        operator = object.__new__(VendoredDenseGemmEFCOperator)
+        args = MagicMock()
+        args.epilogue._is_direct_cutedsl = True
+        args.epilogue.traced_epilogue = None
+        reduction = MagicMock(enabled=False)
+        with patch(
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers."
+            "dense_gemm_efc_kernel.GemmReductionArguments.from_operator_args",
+            return_value=reduction,
+        ):
+            self.assertTrue(operator._supports(args))
+
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
         kernel is not pre-resolved and misses the args cache, calls
@@ -1372,17 +1389,32 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, torch.bmm(a, b).relu(), atol=2e-2, rtol=2e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
 
-    @parametrize("bias_kind", ("batch", "tile", "row_1d", "row_2d", "col_2d"))
+    @parametrize(
+        "bias_kind",
+        (
+            "batch",
+            "batch_broadcast",
+            "tile",
+            "row_1d",
+            "row_2d",
+            "row_3d",
+            "col_2d",
+            "col_3d",
+        ),
+    )
     def test_flex_gemm_baddbmm_pointwise_epilogue_fusion(self, bias_kind):
         batch, m, n, k = 2, 128, 192, 64
         bias_shapes = {
             "batch": (batch, m, n),
+            "batch_broadcast": (1, m, n),
             "tile": (m, n),
             "row_1d": (n,),
             "row_2d": (1, n),
+            "row_3d": (batch, 1, n),
             "col_2d": (m, 1),
+            "col_3d": (batch, m, 1),
         }
-        bias = torch.randn(*bias_shapes[bias_kind], device="cuda", dtype=torch.bfloat16)
+        bias = torch.randn(bias_shapes[bias_kind], device="cuda", dtype=torch.bfloat16)
         a = torch.randn(batch, m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(batch, k, n, device="cuda", dtype=torch.bfloat16)
 
