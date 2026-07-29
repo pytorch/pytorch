@@ -234,7 +234,8 @@ def rocm_bundle(
     """
     libs: list[BundledLib] = []
     so_files = list(ROCM_SO_FILES)
-    if gpu_arch_version and float(gpu_arch_version) <= 7.2:
+    # librocm_smi64.so is only needed for ROCm7.2 and earlier
+    if gpu_arch_version and tuple(map(int, gpu_arch_version.split(".")[:2])) <= (7, 2):
         so_files.append("librocm_smi64.so")
     for stem in so_files:
         path = find_rocm_lib(rocm_home, stem)
