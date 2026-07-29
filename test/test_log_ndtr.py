@@ -5,7 +5,7 @@ import math
 import torch
 import torch._refs.special
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 
 
 class TestLogNdtr(TestCase):
@@ -20,7 +20,7 @@ class TestLogNdtr(TestCase):
             return torch.special.log_ndtr(x)
 
         devices = ["cpu"]
-        if HAS_CUDA:
+        if HAS_GPU:
             devices.append("cuda")
 
         dtypes = [torch.float32, torch.float64]
@@ -43,7 +43,7 @@ class TestLogNdtr(TestCase):
                     self.assertEqual(math.copysign(1.0, expected_decomp.item()), -1.0)
 
                     # 3. Check Inductor Compiled Mode (if environment supports it)
-                    if (device == "cpu" and HAS_CPU) or (device == "cuda" and HAS_CUDA):
+                    if (device == "cpu" and HAS_CPU) or (device == "cuda" and HAS_GPU):
                         try:
                             # Use torch.compile to trigger the Inductor compiler
                             compiled_func = torch.compile(func, backend="inductor")
