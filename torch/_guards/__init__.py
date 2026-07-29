@@ -1614,11 +1614,14 @@ def active_fake_mode() -> FakeTensorMode | None:
 
 
 def __getattr__(name: str) -> object:
-    # Lazily expose the guard-dispatch facade so it is importable as
-    # torch._guards.Guards / torch._guards.FuncDispatch without eagerly importing
-    # the dispatch module.
+    # Lazily expose the guard-dispatch facade and install_guard so they are
+    # importable as torch._guards.<name> without eagerly importing those modules.
     if name in ("FuncDispatch", "Guards"):
         from torch._guards import dispatch
 
         return getattr(dispatch, name)
+    if name == "install_guard":
+        from torch._guards.install import install_guard
+
+        return install_guard
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
