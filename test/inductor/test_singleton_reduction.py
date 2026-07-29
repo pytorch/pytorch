@@ -6,18 +6,16 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.fx_passes import singleton_reduction
-from torch._inductor.fx_passes.singleton_reduction import (
-    eliminate_singleton_reductions,
-)
+from torch._inductor.fx_passes.singleton_reduction import eliminate_singleton_reductions
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, TEST_CUDA
+from torch.testing._internal.common_utils import parametrize
 
 
-LIVE_VOCAB = 4096
+LIVE_VOCAB = 8000
 
 
 class SingletonReductionTests(TestCase):
@@ -36,9 +34,7 @@ class SingletonReductionTests(TestCase):
             pattern_matcher=False,
             **patches,
         ):
-            actual, codes = run_and_get_code(
-                torch.compile(fn, fullgraph=True), *args
-            )
+            actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
 
         self.assertEqual(actual, expected, equal_nan=True)
         self.assertEqual(
@@ -71,9 +67,7 @@ class SingletonReductionTests(TestCase):
             )
             selected = torch.ops.aten.where.self(target == iota, hit, miss)
             dense = torch.ops.aten.mul.Tensor(selected, scale)
-            dense = torch.ops.prims.convert_element_type.default(
-                dense, torch.bfloat16
-            )
+            dense = torch.ops.prims.convert_element_type.default(dense, torch.bfloat16)
             dense = torch.ops.prims.convert_element_type.default(dense, torch.float32)
             row_sum = torch.ops.aten.sum.dim_IntList(dense, [1], True)
             return torch.ops.aten.sub.Tensor(dense, row_sum)
@@ -88,9 +82,7 @@ class SingletonReductionTests(TestCase):
         self, device, force_shape_pad, expected_fold, bf16_roundtrip
     ):
         def fn(target, scale):
-            iota = torch.arange(LIVE_VOCAB, device=target.device).view(
-                1, LIVE_VOCAB
-            )
+            iota = torch.arange(LIVE_VOCAB, device=target.device).view(1, LIVE_VOCAB)
             selected = torch.where(target == iota, -1.0, 0.0)
             dense = selected * scale
             if bf16_roundtrip:
@@ -100,9 +92,9 @@ class SingletonReductionTests(TestCase):
 
         targets = [-100, -1, 0, LIVE_VOCAB - 1, LIVE_VOCAB, LIVE_VOCAB + 2]
         scales = [0.0, -0.0, 0.3333, float("inf"), -float("inf"), float("nan")]
-        target = torch.tensor(targets, device=device).repeat_interleave(
-            len(scales)
-        )[:, None]
+        target = torch.tensor(targets, device=device).repeat_interleave(len(scales))[
+            :, None
+        ]
         scale = torch.tensor(scales, device=device).repeat(len(targets))[:, None]
 
         actual, expected = self._run_and_check(
@@ -146,9 +138,7 @@ class SingletonReductionTests(TestCase):
 
     def test_dynamic_batch(self, device):
         def fn(target, scale):
-            iota = torch.arange(LIVE_VOCAB, device=target.device).view(
-                1, LIVE_VOCAB
-            )
+            iota = torch.arange(LIVE_VOCAB, device=target.device).view(1, LIVE_VOCAB)
             dense = torch.where(target == iota, -1.0, 0.0) * scale
             dense = dense.to(torch.bfloat16).to(torch.float32)
             row_sum = dense.sum(dim=1, keepdim=True)
@@ -208,9 +198,7 @@ class SingletonReductionTests(TestCase):
             dense = torch.where(target == iota, hit, miss) * scale
             if case == "second_mul":
                 dense = dense * scale
-            low_dtype = (
-                torch.float16 if case == "float16_rounding" else torch.bfloat16
-            )
+            low_dtype = torch.float16 if case == "float16_rounding" else torch.bfloat16
             dense = dense.to(low_dtype).to(torch.float32)
             if case == "extra_cast":
                 dense = dense.to(torch.bfloat16).to(torch.float32)
@@ -229,6 +217,7 @@ class SingletonReductionTests(TestCase):
             "small_row",
             "no_expanding_user",
             "downstream_sum",
+            "row_sum_downstream_sum",
             "transitive_sum",
             "cat_sum",
             "split_sum",
@@ -247,6 +236,8 @@ class SingletonReductionTests(TestCase):
             output = dense - row_sum
             if case == "downstream_sum":
                 return output, dense.sum(dim=0, keepdim=True)
+            if case == "row_sum_downstream_sum":
+                return output, row_sum.expand(2, vocab).sum(dim=1, keepdim=True)
             if case == "transitive_sum":
                 return output, (dense + 1).transpose(0, 1).sum(dim=1)
             if case == "cat_sum":
@@ -286,9 +277,7 @@ class SingletonReductionTests(TestCase):
 
     def test_rank3_rejected(self, device):
         def fn(target, scale):
-            iota = torch.arange(LIVE_VOCAB, device=target.device).view(
-                1, 1, LIVE_VOCAB
-            )
+            iota = torch.arange(LIVE_VOCAB, device=target.device).view(1, 1, LIVE_VOCAB)
             dense = torch.where(target == iota, -1.0, 0.0) * scale
             dense = dense.to(torch.bfloat16).to(torch.float32)
             row_sum = dense.sum(dim=2, keepdim=True)
@@ -314,10 +303,11 @@ class SingletonReductionTests(TestCase):
         output = next(node for node in graph.nodes if node.op == "output")
         with graph.inserting_before(output):
             extra_reduction = graph.node_copy(reduction, lambda node: node)
-            graph.node_copy(
+            extra_consumer = graph.node_copy(
                 consumer,
                 lambda node: extra_reduction if node is reduction else node,
             )
+        output.args = ((output.args[0], extra_consumer),)
 
         find_reductions = singleton_reduction._find_downstream_reductions
         with mock.patch.object(
@@ -341,7 +331,8 @@ class SingletonReductionTests(TestCase):
         dense = reduction.args[0]
         output = next(node for node in graph.nodes if node.op == "output")
         with graph.inserting_before(output):
-            graph.call_function(opaque, (dense,))
+            unknown = graph.call_function(opaque, (dense,))
+        output.args = ((output.args[0], unknown),)
 
         self.assertEqual(eliminate_singleton_reductions(graph), 0)
 
@@ -352,20 +343,49 @@ class SingletonReductionTests(TestCase):
 
     def test_does_not_run_global_dce(self, device):
         graph = self._make_pass_graph(device)
-        placeholder = next(node for node in graph.nodes if node.op == "placeholder")
+        reduction = next(
+            node
+            for node in graph.nodes
+            if node.target is torch.ops.aten.sum.dim_IntList
+        )
+        dense = reduction.args[0]
         output = next(node for node in graph.nodes if node.op == "output")
         with graph.inserting_before(output):
-            dead = graph.call_function(torch.ops.aten.neg.default, (placeholder,))
+            dead = graph.call_function(
+                torch.ops.aten.sum.dim_IntList, (dense, [0], True)
+            )
 
         self.assertEqual(eliminate_singleton_reductions(graph), 1)
         self.assertIn(dead, graph.nodes)
 
+    def test_dead_reuse_does_not_trigger(self, device):
+        graph = self._make_pass_graph(device)
+        reduction = next(
+            node
+            for node in graph.nodes
+            if node.target is torch.ops.aten.sum.dim_IntList
+        )
+        dense = reduction.args[0]
+        consumer = next(iter(reduction.users))
+        output = next(node for node in graph.nodes if node.op == "output")
+        with graph.inserting_before(consumer):
+            independent = graph.call_function(
+                torch.ops.aten.full.default,
+                ([2, LIVE_VOCAB], 0.0),
+                {"dtype": torch.float32, "device": torch.device(device)},
+            )
+        consumer.replace_input_with(dense, independent)
+        with graph.inserting_before(output):
+            dead = graph.call_function(torch.ops.aten.neg.default, (dense,))
 
-devices = ("cuda",) if TEST_CUDA else ()
+        self.assertEqual(eliminate_singleton_reductions(graph), 0)
+        self.assertIn(dead, graph.nodes)
+
+
 instantiate_device_type_tests(
     SingletonReductionTests,
     globals(),
-    only_for=devices,
+    only_for="cuda",
 )
 
 

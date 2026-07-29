@@ -22,7 +22,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 _RESHAPE_OPS = (aten.reshape.default, aten.view.default)
 _MAX_ANALYSIS_NODES = 64
-_MIN_LIVE_REDUCTION_ROW_BYTES = 16 * 1024
+_MIN_LIVE_REDUCTION_ROW_BYTES = 32_000
 _Scalar = int | float
 
 
@@ -47,14 +47,8 @@ class _OneHotMask:
 class _OneHotRow:
     index: torch.fx.Node
     length: int
-    select: torch.fx.Node
-    hit_scalar: _Scalar | None
     multiplier: torch.fx.Node | None = None
     steps: tuple[torch.fx.Node, ...] = ()
-
-    @property
-    def tail(self) -> torch.fx.Node:
-        return self.steps[-1] if self.steps else self.select
 
 
 _Value = _Uniform | _Iota | _OneHotMask | _OneHotRow | None
@@ -74,9 +68,7 @@ class _RowAnalyzer:
         value = _tensor_val(node)
         if value is None or value.dim() > 2:
             return False
-        return value.dim() == 0 or statically_known_true(
-            value.shape[-1] == 1
-        )
+        return value.dim() == 0 or statically_known_true(value.shape[-1] == 1)
 
     @staticmethod
     def _constructor_scalar(node: torch.fx.Node) -> _Scalar | None:
@@ -135,9 +127,7 @@ class _RowAnalyzer:
             and len(branch_val.shape) <= len(index_val.shape)
             and all(
                 statically_known_true(a == 1) or statically_known_true(sym_eq(a, b))
-                for a, b in zip(
-                    reversed(branch_val.shape), reversed(index_val.shape)
-                )
+                for a, b in zip(reversed(branch_val.shape), reversed(index_val.shape))
             )
         )
 
@@ -192,7 +182,6 @@ class _RowAnalyzer:
         other_val = _tensor_val(other) if other is not None else None
         if (
             row.steps
-            or row.hit_scalar != -1
             or node_val is None
             or other_val is None
             or not node_val.dtype.is_floating_point
@@ -217,7 +206,7 @@ class _RowAnalyzer:
             or not self._matches_reduction_shape(node, source.index)
         ):
             return None
-        source_val = _tensor_val(source.tail)
+        source_val = _tensor_val(source.steps[-1])
         if (
             len(source.steps) == 1
             and source_val is not None
@@ -300,17 +289,13 @@ class _RowAnalyzer:
                 and isinstance(miss, _Uniform)
                 and node_val is not None
                 and node_val.dtype.is_floating_point
+                and hit.scalar == -1
                 and self._is_positive_zero(miss.scalar)
                 and self._matches_reduction_shape(node, mask.index)
                 and self._branch_is_compatible(node, mask.index, hit)
                 and self._branch_is_compatible(node, mask.index, miss)
             ):
-                result = _OneHotRow(
-                    mask.index,
-                    mask.length,
-                    node,
-                    hit.scalar,
-                )
+                result = _OneHotRow(mask.index, mask.length)
         elif node.target is aten.mul.Tensor:
             result = self._analyze_mul(node)
         elif node.target is prims.convert_element_type.default:
@@ -346,12 +331,26 @@ class _RowAnalyzer:
         return self.memo.get(node)
 
 
-def _has_expanding_pointwise_consumer(reduction: torch.fx.Node) -> bool:
+def _find_live_nodes(graph: torch.fx.Graph) -> OrderedSet[torch.fx.Node]:
+    live = OrderedSet[torch.fx.Node]()
+    pending = [node for node in graph.nodes if node.op == "output"]
+    while pending:
+        node = pending.pop()
+        if node in live:
+            continue
+        live.add(node)
+        pending.extend(node.all_input_nodes)
+    return live
+
+
+def _has_expanding_pointwise_consumer(
+    reduction: torch.fx.Node, live: OrderedSet[torch.fx.Node]
+) -> bool:
     reduction_val = _tensor_val(reduction)
     if reduction_val is None:
         return False
     for user in reduction.users:
-        if user.op != "call_function" or not isinstance(
+        if user not in live or user.op != "call_function" or not isinstance(
             user.target, torch._ops.OpOverload
         ):
             continue
@@ -366,14 +365,14 @@ def _has_expanding_pointwise_consumer(reduction: torch.fx.Node) -> bool:
 
 
 def _find_downstream_reductions(
-    dense: torch.fx.Node,
+    dense: torch.fx.Node, live: OrderedSet[torch.fx.Node]
 ) -> OrderedSet[torch.fx.Node] | None:
     reductions = OrderedSet[torch.fx.Node]()
     pending = list(dense.users)
     seen = OrderedSet[torch.fx.Node]()
     while pending:
         user = pending.pop()
-        if user in seen:
+        if user not in live or user in seen:
             continue
         seen.add(user)
         if len(seen) > _MAX_ANALYSIS_NODES:
@@ -385,8 +384,7 @@ def _find_downstream_reductions(
         if isinstance(user.target, torch._ops.OpOverload):
             if torch.Tag.reduction in user.target.tags:
                 reductions.add(user)
-            else:
-                pending.extend(user.users)
+            pending.extend(user.users)
         elif user.target is operator.getitem:
             pending.extend(user.users)
         else:
@@ -418,15 +416,13 @@ def _replay_branch(
         value = graph.call_function(aten.neg.default, (row.multiplier,))
     else:
         # Only the zero-or-NaN property matters for unselected lanes.
-        value = graph.call_function(
-            aten.sub.Tensor, (row.multiplier, row.multiplier)
-        )
+        value = graph.call_function(aten.sub.Tensor, (row.multiplier, row.multiplier))
     value = _expand_to_index(graph, value, row.index)
-    replacements = {row.select: value, row.steps[0]: value}
+    replacements = {row.steps[0]: value}
     for step in row.steps[1:]:
         value = graph.node_copy(step, lambda node: replacements.get(node, node))
         replacements[step] = _expand_to_index(graph, value, row.index)
-    return replacements[row.tail]
+    return replacements[row.steps[-1]]
 
 
 def _sum_args(node: torch.fx.Node) -> tuple[torch.fx.Node, int] | None:
@@ -452,9 +448,8 @@ def eliminate_singleton_reductions(graph: torch.fx.Graph) -> int:
     """Replace profitable live one-hot row sums with compact expressions."""
     count = 0
     analysis_cache: dict[tuple[torch.fx.Node, int], _Value] = {}
-    reduction_cache: dict[
-        torch.fx.Node, OrderedSet[torch.fx.Node] | None
-    ] = {}
+    reduction_cache: dict[torch.fx.Node, OrderedSet[torch.fx.Node] | None] = {}
+    live: OrderedSet[torch.fx.Node] | None = None
     for reduction in list(graph.nodes):
         if reduction.op != "call_function":
             continue
@@ -475,7 +470,6 @@ def eliminate_singleton_reductions(graph: torch.fx.Graph) -> int:
             or dim != 1
             or not isinstance(dense_val.shape[dim], int)
             or dense_val.shape[dim] <= 1
-            or len(dense.users) <= 1
             or config.force_shape_pad
         ):
             continue
@@ -489,11 +483,16 @@ def eliminate_singleton_reductions(graph: torch.fx.Graph) -> int:
             not isinstance(row, _OneHotRow)
             or len(row.steps) != 3
             or length * dense_val.element_size() < _MIN_LIVE_REDUCTION_ROW_BYTES
-            or not _has_expanding_pointwise_consumer(reduction)
         ):
             continue
+        if live is None:
+            live = _find_live_nodes(graph)
+        if not any(user is not reduction and user in live for user in dense.users):
+            continue
+        if not _has_expanding_pointwise_consumer(reduction, live):
+            continue
         if dense not in reduction_cache:
-            reduction_cache[dense] = _find_downstream_reductions(dense)
+            reduction_cache[dense] = _find_downstream_reductions(dense, live)
         downstream_reductions = reduction_cache[dense]
         if (
             downstream_reductions is None
@@ -513,9 +512,7 @@ def eliminate_singleton_reductions(graph: torch.fx.Graph) -> int:
 
         with graph.inserting_before(reduction):
             ge_zero = graph.call_function(aten.ge.Scalar, (row.index, 0))
-            in_range = graph.call_function(
-                aten.le.Scalar, (row.index, row.length - 1)
-            )
+            in_range = graph.call_function(aten.le.Scalar, (row.index, row.length - 1))
             valid = graph.call_function(aten.bitwise_and.Tensor, (ge_zero, in_range))
             hit = _replay_branch(graph, row, True)
             miss = _replay_branch(graph, row, False)
