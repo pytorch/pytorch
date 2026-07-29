@@ -440,6 +440,45 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
   return work;
 }
 
+c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
+    at::Tensor& outputBuffer,
+    at::Tensor& inputBuffer,
+    const ::c10d::GatherOptions& opts) {
+  TORCH_CHECK(
+      opts.rootRank >= 0 && opts.rootRank < getSize(),
+      "invalid root rank: ",
+      opts.rootRank);
+  ensureInitialized(inputBuffer.device());
+
+  // outputBuffer is only meaningful on the root; elsewhere the caller passes an
+  // empty placeholder and gatherImpl ignores the (empty) output list.
+  std::vector<at::Tensor> outputList;
+  if (getRank() == opts.rootRank) {
+    ensureTensorContiguous(outputBuffer);
+    TORCH_CHECK(
+        inputBuffer.dtype() == outputBuffer.dtype(),
+        "output tensor must have the same type as input tensor");
+    const auto count = inputBuffer.numel();
+    TORCH_CHECK(
+        outputBuffer.numel() == count * getSize(),
+        "output tensor size must be equal to world_size times input tensor size");
+    auto flat = outputBuffer.view(-1);
+    outputList.reserve(getSize());
+    for (const auto r : c10::irange(getSize())) {
+      outputList.push_back(flat.narrow(0, r * count, count));
+    }
+  }
+  ++sequence_number_;
+  auto work = gatherImpl(
+      outputList,
+      inputBuffer,
+      static_cast<int>(opts.rootRank),
+      opts.asyncOp,
+      operationTimeout(opts.timeout));
+  work->setOutputs(std::vector<at::Tensor>{outputBuffer});
+  return work;
+}
+
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
