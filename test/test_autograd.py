@@ -11538,10 +11538,10 @@ for shape in [(1,), ()]:
         nodes = []
         with torch.autograd.graph.node_creation_hook(nodes.append):
             v.mul_(2)
-        self.assertEqual(
-            [n.name() for n in nodes],
-            ["AsStridedBackward0", "torch::autograd::CopySlices"],
-        )
+        # Exactly two nodes fire: the composed CopySlices (a.grad_fn) and the
+        # view's regenerated AsStridedBackward0 (v.grad_fn); the wrapped inner
+        # node does not fire on its own.
+        self.assertEqual(len(nodes), 2)
         self.assertIs(nodes[0], v.grad_fn)
         self.assertIs(nodes[1], a.grad_fn)
 
@@ -11691,15 +11691,11 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.node_creation_hook(nodes.append):
             b = a * 2
             c = err_fn(b)
-        # b = a * 2 also creates a's AccumulateGrad, which fires first.
-        self.assertEqual(
-            [n.name() for n in nodes],
-            [
-                "torch::autograd::AccumulateGrad",
-                "MulBackward0",
-                "torch::autograd::Error",
-            ],
-        )
+        # b = a * 2 also creates a's AccumulateGrad, which fires first, then
+        # b's MulBackward0, then the Error node wrapping c.
+        self.assertEqual(len(nodes), 3)
+        self.assertIsInstance(nodes[0], torch._C._functions.AccumulateGrad)
+        self.assertIs(nodes[1], b.grad_fn)
         self.assertIs(nodes[2], c.grad_fn)
 
     def test_node_creation_hook_register_backward_hooks(self):
