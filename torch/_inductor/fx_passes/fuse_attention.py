@@ -946,6 +946,10 @@ def _warn_tf32_disabled() -> None:
 def _sfdp_params_check(match):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
+    if "inv_scale" in match.kwargs and not isinstance(
+        match.kwargs["inv_scale"], (float, int)
+    ):
+        return False
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]

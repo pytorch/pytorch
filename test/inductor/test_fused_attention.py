@@ -750,6 +750,25 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
             )
 
+    def _test_pattern_fails_with_tensor_scale(self):
+        # https://github.com/pytorch/pytorch/issues/191203
+        def model(query, key, value, attn_mask, scale):
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (2, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+            torch.tensor(0.5, device=self.device),
+        ]
+        self._check_common(
+            model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
+        )
+
     def _test_pattern_fails_with_unsupported_mask(self):
         if not self.use_static_shapes:
             self.skipTest("Causes shape specialization. TODO: investigate")
@@ -1811,6 +1830,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_pattern_fails_with_tensor_factor_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
+        test_pattern_fails_with_tensor_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+        )
         test_pattern_fails_with_unsupported_mask_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
         )
@@ -1945,6 +1967,9 @@ if HAS_CPU:
         test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
         test_pattern_fails_with_tensor_factor_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
+        )
+        test_pattern_fails_with_tensor_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
         )
         test_pattern_fails_with_unsupported_mask_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
