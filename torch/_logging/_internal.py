@@ -978,6 +978,19 @@ class TorchLogsFormatter(logging.Formatter):
         self._trace_id_filter = trace_id_filter
 
     def format(self, record):
+        record.traceid = ""
+        if (
+            not self._is_trace
+            and (trace_id := torch._guards.CompileContext.current_trace_id())
+            is not None
+        ):
+            record.traceid = f" [{trace_id}]"
+        if (
+            self._trace_id_filter
+            and record.traceid.strip() not in self._trace_id_filter
+        ):
+            return ""
+
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
         if artifact_name is not None:
             artifact_formatter = log_registry.artifact_log_formatters.get(
@@ -1016,14 +1029,6 @@ class TorchLogsFormatter(logging.Formatter):
         if not self._is_trace and dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
 
-        record.traceid = ""
-        if (
-            not self._is_trace
-            and (trace_id := torch._guards.CompileContext.current_trace_id())
-            is not None
-        ):
-            record.traceid = f" [{trace_id}]"
-
         glog_level_to_abbr = {
             "DEBUG": "V",  # V is for VERBOSE in glog
             "INFO": "I",
@@ -1039,12 +1044,6 @@ class TorchLogsFormatter(logging.Formatter):
             record.artifactprefix = f" [__{artifact_name}]"
 
         filepath = make_module_path_relative(record.pathname)
-
-        if (
-            self._trace_id_filter
-            and record.traceid.strip() not in self._trace_id_filter
-        ):
-            return ""
 
         prefix = (
             f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs * 1000):06d} {record.process} "
