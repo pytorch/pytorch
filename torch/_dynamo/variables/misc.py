@@ -371,7 +371,9 @@ class SuperVariable(VariableTracker):
             # to the shared implementation so that __dict__, __class__,
             # polyfilled C descriptors, etc. are all handled consistently.
             if isinstance(self.objvar, UserDefinedObjectVariable):
-                return self.objvar.generic_getattr(tx, attr_name)
+                return self.objvar.generic_getattr(
+                    tx, attr_name, skip_getattr_fallback=True
+                )
 
             attr_value = None
             try:

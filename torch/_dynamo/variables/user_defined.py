@@ -3417,7 +3417,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def generic_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        skip_getattr_fallback: bool = False,
     ) -> VariableTracker:
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
@@ -3426,9 +3429,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
 
-        The algorithm: MRO walk → data descriptor → instance __dict__ →
-        non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
+        When skip_getattr_fallback is True, step 6 (__getattr__) is skipped,
+        matching object.__getattribute__ semantics (no __getattr__ fallback).
+
+        The algorithm: MRO walk -> data descriptor -> instance __dict__ ->
+        non-data descriptor / plain class attr -> dynamic fallback ->
+        __getattr__ -> AttributeError.
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
@@ -3515,9 +3521,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
 
         # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
-        if result is not None:
-            return result
+        if not skip_getattr_fallback:
+            result = self.call_getattr_fallback(tx, name)
+            if result is not None:
+                return result
 
         # Step 7: AttributeError.
         raise_observed_exception(
@@ -3549,6 +3556,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 handle_observed_exception(tx)
 
         return self.generic_getattr(tx, name)
+
+    def call_getattribute(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if self._object_has_getattribute:
+            getattribute_fn = inspect.getattr_static(
+                type(self.value), "__getattribute__"
+            )
+            new_source: AttrSource | None = (
+                AttrSource(self.source, "__getattribute__") if self.source else None
+            )
+            return variables.UserMethodVariable(
+                getattribute_fn,
+                self,
+                source=new_source,
+            ).call_function(tx, [VariableTracker.build(tx, name)], {})
+
+        return self.generic_getattr(tx, name, skip_getattr_fallback=True)
 
     def resolve_data_descriptor(
         self,

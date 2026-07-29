@@ -1029,6 +1029,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return None
 
+    def call_getattribute(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """Polymorphic hook for obj.__getattribute__(name).
+
+        This is a distinct hook (not just a getattro_impl call at the caller)
+        because UDOV overrides it to give the correct __getattribute__
+        semantics: it dispatches to a user-defined __getattribute__ when one
+        exists, and passes skip_getattr_fallback=True so lookup never chains to
+        __getattr__ (only the normal obj.attr path in getattro_impl does that).
+        UDOV.getattro_impl differs -- it invokes the __getattr__ fallback -- so
+        inlining getattro_impl here would break __getattribute__ for UDOVs.
+
+        The base delegates to getattro_impl, which is equivalent for base VTs
+        since they have no __getattr__ (call_getattr_fallback returns None)."""
+        return self.getattro_impl(tx, name)
+
     def getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
@@ -1424,25 +1441,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and args[0].is_python_constant()
             and not kwargs
         ):
-            # TODO(tp_getattro): In CPython, obj.__getattr__("foo") calls only
-            # the type's __getattr__ method, not the full attribute resolution.
-            # Currently we dispatch through getattro_impl which does the full
-            # GenericGetAttr + __getattr__ fallback. Fix in a follow-up to
-            # call __getattr__ directly for UDOV types.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            attr_name = args[0].as_python_constant()
+            result = self.call_getattr_fallback(tx, attr_name)
+            if result is not None:
+                return result
+            type_name = self.python_type_name()
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'{type_name}' object has no attribute '__getattr__'"],
+            )
         elif (
             name == "__getattribute__"
             and len(args) == 1
             and args[0].is_python_constant()
             and not kwargs
         ):
-            # TODO(tp_getattro): In CPython, obj.__getattribute__("foo")
-            # calls GenericGetAttr WITHOUT the __getattr__ fallback.
-            # Currently we route through getattro_impl which, for UDOV,
-            # includes __getattr__. Fix in a follow-up to have UDOV
-            # override this to call generic_getattr (the inner helper)
-            # directly, skipping __getattr__.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            return self.call_getattribute(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
         elif name == "__int__" and not args and not kwargs:

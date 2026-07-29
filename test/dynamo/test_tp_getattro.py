@@ -765,6 +765,185 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 123)
 
+    def test_dunder_getattr_bypasses_instance_dict(self):
+        """obj.__getattr__("x") should call __getattr__ directly,
+        not go through full attribute resolution."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = "from_dict"
+
+            def __getattr__(self, name):
+                return "from_getattr"
+
+        def fn(obj):
+            return obj.__getattr__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "from_getattr")
+
+    def test_dunder_getattr_no_fallback_raises(self):
+        """obj.__getattr__("x") on an object without __getattr__ should raise."""
+
+        class MyObj:
+            pass
+
+        def fn(obj):
+            try:
+                obj.__getattr__("x")
+                return False
+            except AttributeError:
+                return True
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertTrue(result)
+
+    def test_dunder_getattr_inherited(self):
+        """obj.__getattr__("x") finds __getattr__ on a parent class."""
+
+        class Base:
+            def __getattr__(self, name):
+                return "from_base"
+
+        class Child(Base):
+            pass
+
+        def fn(obj):
+            return obj.__getattr__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(Child())
+        self.assertEqual(result, "from_base")
+
+    def test_dunder_getattr_non_attribute_error_propagates(self):
+        """obj.__getattr__("x") raising non-AttributeError should propagate."""
+
+        class MyObj:
+            def __getattr__(self, name):
+                raise ValueError("custom error")
+
+        def fn(obj):
+            try:
+                return obj.__getattr__("x")
+            except ValueError:
+                return "caught"
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "caught")
+
+    def test_dunder_getattribute_skips_getattr_fallback(self):
+        """obj.__getattribute__("x") should NOT fall back to __getattr__."""
+
+        class MyObj:
+            def __getattr__(self, name):
+                return "from_getattr"
+
+        def fn(obj):
+            try:
+                obj.__getattribute__("nonexistent")
+                return False
+            except AttributeError:
+                return True
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertTrue(result)
+
+    def test_dunder_getattribute_finds_instance_attr(self):
+        """obj.__getattribute__("x") should still find instance dict attrs."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 42
+
+        def fn(obj):
+            return obj.__getattribute__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 42)
+
+    def test_dunder_getattribute_resolves_property(self):
+        """obj.__getattribute__("x") should resolve data descriptors."""
+
+        class MyObj:
+            @property
+            def x(self):
+                return 99
+
+        def fn(obj):
+            return obj.__getattribute__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 99)
+
+    def test_super_getattribute_skips_getattr(self):
+        """super().__getattribute__("x") should NOT fall back to __getattr__."""
+
+        class Base:
+            def __getattr__(self, name):
+                return "from_getattr"
+
+        class Child(Base):
+            def lookup(self, name):
+                return super().__getattribute__(name)
+
+        def fn(obj):
+            try:
+                obj.lookup("nonexistent")
+                return False
+            except AttributeError:
+                return True
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(Child())
+        self.assertTrue(result)
+
+    def test_custom_getattribute_skips_getattr(self):
+        """obj.__getattribute__("x") with custom __getattribute__ should NOT
+        fall back to __getattr__, even though normal attribute access does."""
+
+        class WithBoth:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+            def __getattr__(self, name):
+                return "fallback"
+
+        obj = WithBoth()
+
+        def fn_normal():
+            return obj.nonexistent
+
+        def fn_dunder():
+            try:
+                return obj.__getattribute__("nonexistent")
+            except AttributeError:
+                return "raised"
+
+        normal = torch.compile(fn_normal, backend="eager", fullgraph=True)()
+        self.assertEqual(normal, "fallback")
+        result = torch.compile(fn_dunder, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "raised")
+
+    def test_custom_getattribute_non_attribute_error_propagates(self):
+        """Non-AttributeError from __getattribute__ propagates without
+        falling back to __getattr__."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                if name.startswith("_"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("boom")
+
+            def __getattr__(self, name):
+                return "should_not_reach"
+
+        def fn(obj):
+            try:
+                return obj.x
+            except RuntimeError:
+                return "caught"
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "caught")
+
     # --- BoundBuiltinMethodVariable slots ---
 
     def test_bound_builtin_method_hash(self):
