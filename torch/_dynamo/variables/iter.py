@@ -469,7 +469,7 @@ class RepeatIteratorVariable(IteratorVariable):
         return ConstantVariable.create(self.remaining)
 
     tp_methods = {
-        "__length_hint__": Method(repeat_length_hint, "__length_hint__"),
+        "__length_hint__": Method(repeat_length_hint),
     }
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -932,7 +932,7 @@ class DictViewIterator(IteratorVariable):
         return ConstantVariable.create(operator.length_hint(self._iter))
 
     tp_methods = {
-        "__length_hint__": Method(dict_view_iter_length_hint, "__length_hint__"),
+        "__length_hint__": Method(dict_view_iter_length_hint),
     }
 
     def python_type(self) -> type:
