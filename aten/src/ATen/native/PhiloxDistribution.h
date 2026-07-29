@@ -14,18 +14,25 @@ class Tensor;
 
 namespace native {
 
-using philox_normal_shards_fn = void (*)(
+// Numeric values cross the dispatcher and must match Python callers.
+enum class PhiloxDistributionKind : int64_t {
+  Normal = 0,
+};
+
+using philox_distribution_shards_fn = void (*)(
     Tensor& self,
     IntArrayRef global_shape,
     IntArrayRef global_offsets,
     IntArrayRef local_offsets,
     IntArrayRef local_sizes,
     int64_t chunk_count,
-    double mean,
-    double stddev,
+    PhiloxDistributionKind distribution,
+    ArrayRef<Scalar> params,
     std::optional<Generator> generator);
 
-DECLARE_DISPATCH(philox_normal_shards_fn, philox_normal_shards_stub)
+DECLARE_DISPATCH(
+    philox_distribution_shards_fn,
+    philox_distribution_shards_stub)
 
 namespace detail {
 

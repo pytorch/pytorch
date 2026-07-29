@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from collections.abc import Callable
 from typing import Any, cast
 
 import torch
@@ -14,11 +15,35 @@ from torch.testing._internal.common_utils import parametrize, run_tests, TestCas
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-class _StatefulRNGMode(TorchDispatchMode):
-    @staticmethod
-    def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
-        return [value for chunk in chunks for value in chunk]
+# Must match PhiloxDistributionKind::Normal.
+_NORMAL_DISTRIBUTION = 0
 
+
+def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
+    return [value for chunk in chunks for value in chunk]
+
+
+def _normal_shards_(
+    tensor: torch.Tensor,
+    metadata: CheckpointableTensor,
+    mean: float,
+    std: float,
+    generator: torch.Generator | None,
+) -> torch.Tensor:
+    return torch.ops.aten._philox_distribution_shards_.default(
+        tensor,
+        metadata.global_shape,
+        _flatten_chunks(metadata.global_offsets),
+        _flatten_chunks(metadata.local_offsets),
+        _flatten_chunks(metadata.local_sizes),
+        len(metadata.global_offsets),
+        _NORMAL_DISTRIBUTION,
+        (mean, std),
+        generator=generator,
+    )
+
+
+class _StatefulRNGMode(TorchDispatchMode):
     def __torch_dispatch__(
         self,
         func: torch._ops.OpOverload,
@@ -49,16 +74,12 @@ class _StatefulRNGMode(TorchDispatchMode):
         rng_metadata = cast(CheckpointableTensor, tensor_arg)
 
         _, mean, std = filled_args
-        torch.ops.aten._philox_normal_shards_.default(
+        _normal_shards_(
             tensor_arg,
-            rng_metadata.global_shape,
-            self._flatten_chunks(rng_metadata.global_offsets),
-            self._flatten_chunks(rng_metadata.local_offsets),
-            self._flatten_chunks(rng_metadata.local_sizes),
-            len(rng_metadata.global_offsets),
+            rng_metadata,
             mean,
             std,
-            generator=filled_kwargs["generator"],
+            filled_kwargs["generator"],
         )
         return tensor_arg
 
@@ -274,64 +295,85 @@ class TestCheckpointableTensorRNG(TestCase):
         self.assertEqual(actual_generator.get_state(), expected_state)
 
 
-class TestPhiloxNormalShardsOp(TestCase):
+class TestPhiloxDistributionShardsOp(TestCase):
     def test_invalid_calls_do_not_advance_generator(self, device):
         generator = torch.Generator(device=device).manual_seed(123)
 
-        def assert_invalid_without_advancing(regex, fn):
+        def assert_invalid_without_advancing(
+            regex: str, fn: Callable[[], torch.Tensor]
+        ) -> None:
             state = generator.get_state().clone()
             with self.assertRaisesRegex(RuntimeError, regex):
                 fn()
             self.assertEqual(generator.get_state(), state)
 
-        assert_invalid_without_advancing(
-            "local shards 0 and 1 must not overlap",
-            lambda: torch.ops.aten._philox_normal_shards_(
-                torch.empty(2, device=device),
-                [4],
-                [0, 2],
-                [0, 0],
-                [1, 1],
-                2,
-                0.0,
-                1.0,
-                generator=generator,
-            ),
-        )
-        assert_invalid_without_advancing(
-            "normal expects std >= 0.0",
-            lambda: torch.ops.aten._philox_normal_shards_(
+        def call_distribution(
+            distribution: int, params: list[complex | float]
+        ) -> torch.Tensor:
+            return torch.ops.aten._philox_distribution_shards_.default(
                 torch.empty(1, device=device),
                 [1],
                 [0],
                 [0],
                 [1],
                 1,
-                0.0,
-                -1.0,
+                distribution,
+                params,
+                generator=generator,
+            )
+
+        assert_invalid_without_advancing(
+            "local shards 0 and 1 must not overlap",
+            lambda: torch.ops.aten._philox_distribution_shards_.default(
+                torch.empty(2, device=device),
+                [4],
+                [0, 2],
+                [0, 0],
+                [1, 1],
+                2,
+                _NORMAL_DISTRIBUTION,
+                [0.0, 1.0],
                 generator=generator,
             ),
         )
         assert_invalid_without_advancing(
+            "normal expects std >= 0.0",
+            lambda: call_distribution(_NORMAL_DISTRIBUTION, [0.0, -1.0]),
+        )
+        assert_invalid_without_advancing(
             "logical global tensor requires 64-bit indexing",
-            lambda: torch.ops.aten._philox_normal_shards_(
+            lambda: torch.ops.aten._philox_distribution_shards_.default(
                 torch.empty(0, dtype=torch.float64, device=device),
                 [268435457],
                 [],
                 [],
                 [],
                 0,
-                0.0,
-                1.0,
+                _NORMAL_DISTRIBUTION,
+                [0.0, 1.0],
                 generator=generator,
             ),
+        )
+        assert_invalid_without_advancing(
+            "unsupported distribution kind 1",
+            lambda: call_distribution(1, [0.0, 1.0]),
+        )
+        assert_invalid_without_advancing(
+            "expects 2 parameters, got 1",
+            lambda: call_distribution(_NORMAL_DISTRIBUTION, [0.0]),
+        )
+        assert_invalid_without_advancing(
+            "parameters must be real",
+            lambda: call_distribution(_NORMAL_DISTRIBUTION, [0.0j, 1.0]),
         )
 
 
 instantiate_device_type_tests(
     TestCheckpointableTensorRNG, globals(), only_for=("cuda",)
 )
-instantiate_device_type_tests(TestPhiloxNormalShardsOp, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestPhiloxDistributionShardsOp, globals(), only_for=("cuda",)
+)
 
 
 if __name__ == "__main__":

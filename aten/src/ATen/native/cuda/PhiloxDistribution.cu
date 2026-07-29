@@ -29,7 +29,7 @@ namespace at::native {
 
 namespace {
 
-void philox_normal_shards_cuda(
+void run_normal_distribution_shards(
     Tensor& self,
     IntArrayRef global_shape,
     IntArrayRef global_offsets,
@@ -40,9 +40,31 @@ void philox_normal_shards_cuda(
     double stddev,
     std::optional<Generator> generator);
 
-} // anonymous namespace
-
-namespace {
+void philox_distribution_shards_cuda(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    PhiloxDistributionKind distribution,
+    ArrayRef<Scalar> params,
+    std::optional<Generator> generator) {
+  switch (distribution) {
+    case PhiloxDistributionKind::Normal:
+      run_normal_distribution_shards(
+          self,
+          global_shape,
+          global_offsets,
+          local_offsets,
+          local_sizes,
+          chunk_count,
+          params[0].toDouble(),
+          params[1].toDouble(),
+          generator);
+      break;
+  }
+}
 
 using at::cuda::philox_4x32;
 
@@ -149,7 +171,7 @@ void append_shard_dimension(
 
   TORCH_CHECK(
       calculator.dims < kMaxDistributionShardDims,
-      "_philox_normal_shards_: too many non-trivial shard dimensions");
+      "_philox_distribution_shards_: too many non-trivial shard dimensions");
   const int index = calculator.dims++;
   calculator.sizes[index] =
       at::cuda::detail::IntDivider<uint32_t>(static_cast<uint32_t>(size));
@@ -165,7 +187,7 @@ std::vector<DistributionShardLaunch> build_shard_launches(
     IntArrayRef local_sizes,
     int64_t chunk_count,
     const detail::ValidatedPhiloxShardMetadata& metadata) {
-  constexpr const char* op_name = "_philox_normal_shards_";
+  constexpr const char* op_name = "_philox_distribution_shards_";
   const size_t ndim = global_shape.size();
   if (metadata.global_numel == 0) {
     return {};
@@ -369,7 +391,7 @@ void distribution_shards(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void philox_normal_shards_cuda(
+void run_normal_distribution_shards(
     Tensor& self,
     IntArrayRef global_shape,
     IntArrayRef global_offsets,
@@ -410,7 +432,7 @@ void philox_normal_shards_cuda(
       kHalf,
       kBFloat16,
       self.scalar_type(),
-      "_philox_normal_shards_",
+      "_philox_distribution_shards_",
       [&] {
         distribution_shards<scalar_t>(
             self,
@@ -680,7 +702,7 @@ Tensor& _philox_normal_cuda_(
 }
 
 REGISTER_DISPATCH(
-    philox_normal_shards_stub,
-    &philox_normal_shards_cuda)
+    philox_distribution_shards_stub,
+    &philox_distribution_shards_cuda)
 
 } // namespace at::native

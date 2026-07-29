@@ -12,13 +12,13 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_philox_normal_shards_native.h>
+#include <ATen/ops/_philox_distribution_shards_native.h>
 #endif
 
 namespace at::native {
 
-DEFINE_DISPATCH(philox_normal_shards_stub);
-REGISTER_NO_CPU_DISPATCH(philox_normal_shards_stub)
+DEFINE_DISPATCH(philox_distribution_shards_stub);
+REGISTER_NO_CPU_DISPATCH(philox_distribution_shards_stub)
 
 namespace {
 
@@ -26,22 +26,41 @@ void validate_normal_std(double stddev);
 
 } // anonymous namespace
 
-Tensor& _philox_normal_shards_symint(
+Tensor& _philox_distribution_shards_symint(
     Tensor& self,
     c10::SymIntArrayRef global_shape,
     c10::SymIntArrayRef global_offsets,
     c10::SymIntArrayRef local_offsets,
     c10::SymIntArrayRef local_sizes,
     int64_t chunk_count,
-    double mean,
-    double stddev,
+    int64_t distribution,
+    ArrayRef<Scalar> params,
     std::optional<Generator> generator) {
   const auto global_shape_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_shape);
   const auto global_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(global_offsets);
   const auto local_offsets_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_offsets);
   const auto local_sizes_int = C10_AS_INTARRAYREF_SLOW_ALLOC(local_sizes);
-  validate_normal_std(stddev);
-  philox_normal_shards_stub(
+  const auto distribution_kind =
+      static_cast<PhiloxDistributionKind>(distribution);
+  TORCH_CHECK(
+      distribution_kind == PhiloxDistributionKind::Normal,
+      "_philox_distribution_shards_: unsupported distribution kind ",
+      distribution);
+  switch (distribution_kind) {
+    case PhiloxDistributionKind::Normal:
+      TORCH_CHECK(
+          params.size() == 2,
+          "_philox_distribution_shards_: distribution kind ",
+          distribution,
+          " expects 2 parameters, got ",
+          params.size());
+      TORCH_CHECK(
+          !params[0].isComplex() && !params[1].isComplex(),
+          "_philox_distribution_shards_: parameters must be real");
+      validate_normal_std(params[1].toDouble());
+      break;
+  }
+  philox_distribution_shards_stub(
       self.device().type(),
       self,
       global_shape_int,
@@ -49,8 +68,8 @@ Tensor& _philox_normal_shards_symint(
       local_offsets_int,
       local_sizes_int,
       chunk_count,
-      mean,
-      stddev,
+      distribution_kind,
+      params,
       generator);
   return self;
 }
@@ -94,7 +113,7 @@ ValidatedPhiloxShardMetadata validate_philox_shard_metadata(
     IntArrayRef local_offsets,
     IntArrayRef local_sizes,
     int64_t chunk_count) {
-  constexpr const char* op_name = "_philox_normal_shards_";
+  constexpr const char* op_name = "_philox_distribution_shards_";
   TORCH_CHECK(
       self.layout() == kStrided,
       op_name,
