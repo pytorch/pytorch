@@ -99,8 +99,13 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
+  // These paired methods reuse inactive private-pool segments across an IF
+  // node. See Note [Conditional node memory reuse] in CUDAGraph.cpp.
+  void begin_capture_to_if_node_with_memory_reuse(
+      const Tensor& scalar_cuda_pred_tensor);
   void begin_capture_to_while_node(const Tensor& scalar_cuda_pred_tensor);
   void end_capture_to_conditional_node();
+  void end_capture_to_conditional_node_with_memory_reuse();
   void set_conditional_handle_for_current_node(
       const Tensor& scalar_cuda_pred_tensor);
   static void set_conditional_handle(
@@ -111,6 +116,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
+  void transfer_inactive_segments_to_conditional_node();
+  void transfer_inactive_segments_from_conditional_node();
   void record_retained_pool(MempoolId_t pool);
   bool has_retained_pool(MempoolId_t pool) const;
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
