@@ -87,6 +87,11 @@ class FlexGemmGroupedLayoutMatch:
     layout: FlexGemmLocalReduceGeometry
     structural_values: tuple[FlexGemmStructuralInt, ...] = ()
 
+    def commit_guards(self) -> None:
+        """Install structural guards after analysis makes this layout active."""
+        for structural in self.structural_values:
+            structural.guard()
+
 
 def _is_inferred_reshape_dim(value: Any) -> bool:
     """Return whether a reshape dimension is the literal inferred-size marker."""
@@ -175,7 +180,7 @@ def _grouped_layout_matches_source_shape(
             return False
 
 
-def grouped_tensor_layout_match(
+def grouped_tensor_layout(
     shape: Any, source_shape: Any | None = None
 ) -> FlexGemmGroupedLayoutMatch | None:
     """Recognize grouped M/N geometry without guarding backed dimensions."""
@@ -206,18 +211,6 @@ def grouped_tensor_layout_match(
             return None
     layout = _syntactic_grouped_tensor_layout(shape)
     return None if layout is None else FlexGemmGroupedLayoutMatch(layout)
-
-
-def grouped_tensor_layout(
-    shape: Any, source_shape: Any | None = None
-) -> FlexGemmLocalReduceGeometry | None:
-    """Recognize grouped M/N geometry and guard accepted backed dimensions."""
-    match = grouped_tensor_layout_match(shape, source_shape)
-    if match is None:
-        return None
-    for structural in match.structural_values:
-        structural.guard()
-    return match.layout
 
 
 def _cute_op_name(target: Any) -> str | None:
@@ -461,11 +454,10 @@ def iter_fx_node_inputs(value: Any):
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmViewForm:
-    """Canonical source, shape, and optional grouped-layout interpretation."""
+    """Canonical source and shape for one view or reshape node."""
 
     source: torch.fx.Node
     shape: tuple[Any, ...]
-    grouped_layout: FlexGemmGroupedLayoutMatch | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -672,11 +664,7 @@ def flex_gemm_structural_form(
             arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
             for arg in shape
         )
-        return FlexGemmViewForm(
-            source,
-            canonical_shape,
-            grouped_tensor_layout_match(canonical_shape, tensor_meta_shape(source)),
-        )
+        return FlexGemmViewForm(source, canonical_shape)
     if node.target in (
         torch.ops.flex_gemm.nvfp4_pack.default,
         torch.ops.flex_gemm.to_blocked.default,
