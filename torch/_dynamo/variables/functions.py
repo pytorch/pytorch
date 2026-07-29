@@ -472,8 +472,6 @@ class BaseUserFunctionVariable(VariableTracker):
             return ConstantVariable.create(
                 val, source=self.source and AttrSource(self.source, name)
             )
-        elif name == "__dict__":
-            return fn_dict
         elif name == "__annotations__":
             return fn_dict.getitem_or_default(
                 name,
@@ -491,6 +489,7 @@ class BaseUserFunctionVariable(VariableTracker):
                 ),
             )
         else:
+            # TODO(dynamo-team): This should be done in super().getattro_impl
             if fn_dict.contains(name):
                 return fn_dict.getitem(name)
             else:

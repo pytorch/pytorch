@@ -216,11 +216,6 @@ class SetVariable(VariableTracker):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
-        if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
-        return super().getattro_impl(tx, name)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
