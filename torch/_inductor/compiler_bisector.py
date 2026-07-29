@@ -669,8 +669,8 @@ class CompilerBisector:
                 cls.bisection_enabled = bisection_enabled_orig
                 try:
                     cls.delete_bisect_status()
-                except Exception:
-                    pass
+                except OSError as e:
+                    print(f"Failed to delete bisect status during cleanup: {e}")
                 cls.in_process_cache = in_process_cache_orig
             if pre_grad_graph_subsystem is not None:
                 try:
