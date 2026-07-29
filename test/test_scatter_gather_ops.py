@@ -713,7 +713,10 @@ def _build_alignment_case(case):
 
 
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")
-@unittest.skipUnless(SM90OrLater, "both scatter_add kernels gate on sm_90+")
+@unittest.skipUnless(
+    torch.version.hip is None and SM90OrLater,
+    "both scatter_add kernels gate on NVIDIA sm_90+",
+)
 @skipIfNoCuteDSL
 class TestScatterAddOverrideConds(TestCase):
     """Unit tests for the dispatch predicates in
