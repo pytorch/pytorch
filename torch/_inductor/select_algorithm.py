@@ -4863,10 +4863,10 @@ class AlgorithmSelectorCache(PersistentCache):
                             "select_algorithm_num_precompilation_exceptions"
                         ] += 1
                         exceptions.append((futures[future], e))
-                        log.debug(
-                            "Precompilation failed for benchmark choice %s: %s",
-                            futures[future],
+                        log.exception(
+                            "Exception %s for benchmark choice %s",
                             e,
+                            futures[future],
                             exc_info=e,
                         )
                         futures[future].mark_failed()
@@ -6280,10 +6280,7 @@ def _log_autotune_choices_stats(
     get_chromium_event_logger().add_event_data(
         event_name, autotune_choices_stats=payload
     )
-    console_metadata = {
-        name: value for name, value in metadata.items() if not name.endswith("_desc")
-    }
-    sys.stderr.write(f"Autotune Choices Stats:\n{json.dumps(console_metadata)}\n")
+    sys.stderr.write(f"Autotune Choices Stats:\n{payload}\n")
 
 
 def _log_autotune_exceptions(
