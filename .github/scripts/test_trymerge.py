@@ -28,9 +28,11 @@ from trymerge import (
     DRCI_CHECKRUN_NAME,
     find_matching_merge_rule,
     get_classifications,
+    get_docker_build_checks,
     get_drci_classifications,
     gh_get_team_members,
     GitHubPR,
+    is_docker_affecting_files,
     iter_issue_timeline_until_comment,
     JobCheckState,
     main as trymerge_main,
@@ -1455,6 +1457,48 @@ class TestTimelineFunctions(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 77700)
         sha = pr.get_commit_sha_at_comment(100)
         self.assertIsNone(sha)
+
+
+class TestDockerCiGates(TestCase):
+    """Unit tests for the pure helpers behind the docker-image merge gates.
+
+    The gate functions themselves (check_docker_builds_ready /
+    check_no_docker_merge_skew) are exercised through a real GitHubPR backed by
+    recorded fixtures; that coverage is left as a follow-up.
+    """
+
+    def test_is_docker_affecting_files(self) -> None:
+        self.assertTrue(is_docker_affecting_files([".ci/docker/build.sh"]))
+        self.assertTrue(
+            is_docker_affecting_files(["README.md", ".ci/docker/ubuntu/Dockerfile"])
+        )
+        # Exact directory path also counts
+        self.assertTrue(is_docker_affecting_files([".ci/docker"]))
+        # Unrelated files, including a lookalike prefix, don't count
+        self.assertFalse(is_docker_affecting_files(["torch/foo.py", "README.md"]))
+        self.assertFalse(is_docker_affecting_files([".ci/docker-something/x"]))
+        self.assertFalse(is_docker_affecting_files([]))
+
+    def test_get_docker_build_checks(self) -> None:
+        def check(name: str) -> JobCheckState:
+            return JobCheckState(name, "", "SUCCESS", None, None, None, None)
+
+        checks = {
+            name: check(name)
+            for name in (
+                "docker-builds / docker-build (pytorch-linux-jammy)",
+                "docker-builds",
+                "linux-build / build",
+                "docker-builds-nightly / x",
+            )
+        }
+        self.assertEqual(
+            set(get_docker_build_checks(checks)),
+            {
+                "docker-builds / docker-build (pytorch-linux-jammy)",
+                "docker-builds",
+            },
+        )
 
 
 if __name__ == "__main__":
