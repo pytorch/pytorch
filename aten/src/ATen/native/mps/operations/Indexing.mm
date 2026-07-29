@@ -339,6 +339,12 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
   });
 }
 
+// Nonzero kernel-name suffix selecting the flat-index width: "uint" when the
+// tensor's element/output offsets fit 32-bit index math, "ulong" otherwise.
+static inline const char* index_kernel_suffix(bool use_32bit_index) {
+  return use_32bit_index ? "uint" : "ulong";
+}
+
 // Metal kernel-based nonzero using prefix-sum + scatter.
 // Step 1: Per-element exclusive prefix sum of nonzero flags + block totals.
 // Step 2: GPU prefix sum of block totals → block offsets + total count.
@@ -347,9 +353,6 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
 static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int64_t> max_elements) {
   using namespace mps;
 
-  TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
-              "nonzero is not supported for tensors with more than INT_MAX elements, "
-              "See https://github.com/pytorch/pytorch/issues/51871");
   TORCH_CHECK(out_.dtype() == at::kLong, "Expected output type to be Long, but got ", out_.dtype());
   TORCH_CHECK(self.device() == out_.device(),
               "expected self and out to be on the same device, but got out on ",
@@ -360,24 +363,49 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
 
   Tensor input = self.contiguous();
   const int64_t nDim = self.dim();
-  const auto numel = static_cast<uint32_t>(input.numel());
+  const int64_t numel = input.numel();
+
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
-  auto pso_step1 = lib.getPipelineStateForFunc(fmt::format("count_nonzero_prefix_sum_{}", type_str));
-  auto pso_step2 = lib.getPipelineStateForFunc("prefix_sum_blocks");
-  auto pso_step3 = lib.getPipelineStateForFunc(fmt::format("scatter_nonzero_indices_{}", type_str));
-  TORCH_INTERNAL_ASSERT([pso_step1 maxTotalThreadsPerThreadgroup] == [pso_step3 maxTotalThreadsPerThreadgroup],
-                        "nonzero: step 1 and step 3 threadgroup sizes must match");
+  // Count (step 1) indexes input/prefix by the flat element id, which is
+  // bounded by numel, so its index width depends only on the input. Scatter
+  // (step 3) also indexes the output, so it recomputes the width including out.
+  const bool count_use_32bit_index = canUse32BitIndexMath(input);
+  auto pso_step1 = lib.getPipelineStateForFunc(
+      fmt::format("count_nonzero_prefix_sum_{}_{}", type_str, index_kernel_suffix(count_use_32bit_index)));
+  // The block-scan running count is bounded by numel, so it fits uint32 (and can
+  // use the fast parallel simd_shuffle scan) whenever numel <= UINT32_MAX. Only
+  // genuinely >2^32-element tensors need the 64-bit scan.
+  const bool count_fits_u32 = static_cast<uint64_t>(numel) <= std::numeric_limits<uint32_t>::max();
+  auto pso_step2 =
+      lib.getPipelineStateForFunc(fmt::format("prefix_sum_blocks_{}", index_kernel_suffix(count_fits_u32)));
 
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
-  uint32_t num_blocks = (numel + threads_per_group - 1) / threads_per_group;
+  uint64_t num_blocks = at::ceil_div(static_cast<uint64_t>(numel), static_cast<uint64_t>(threads_per_group));
+  uint32_t num_blocks_u32 = static_cast<uint32_t>(num_blocks);
 
-  auto tmp = at::empty({input.numel() + 2 * num_blocks + 1}, input.options().dtype(kInt));
-  Tensor prefix_buf = tmp.slice(0, 0, numel);
-  Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks);
-  Tensor block_offsets_buf = tmp.slice(0, numel + num_blocks, numel + 2 * num_blocks);
-  Tensor total_nonzero_buf = tmp.slice(0, numel + 2 * num_blocks, numel + 2 * num_blocks + 1);
+  // Metal's thread_position_in_grid is 32-bit, so a single dispatch is bounded
+  // at UINT32_MAX threads. For tensors with more elements, the count (step 1)
+  // and scatter (step 3) dispatches are chunked over threadgroup-aligned
+  // ranges, each passing a 64-bit flat_base / block_base so the kernels index
+  // the global element and block. The block prefix-sum (step 2) still runs once
+  // over all blocks, so the running count stays global across chunks.
+  // chunk_elems is the largest multiple of threads_per_group not exceeding
+  // 2^31; tensors that fit in one chunk (the common case) dispatch exactly once
+  // with base 0, identical to the unchunked path.
+  const uint64_t chunk_elems = (static_cast<uint64_t>(1) << 31) / threads_per_group * threads_per_group;
+
+  // Scratch buffers. prefix (intra-block, <= threadgroup size) and block_sums
+  // (per-block totals, likewise bounded) fit in uint32. block_offsets (the
+  // running cumulative count) and total_nonzero can exceed 2^32 for a large
+  // dense input, so they are int64, matching CUDA's int64 aggregate.
+  auto tmp32 = at::empty({numel + num_blocks_u32}, input.options().dtype(kInt));
+  Tensor prefix_buf = tmp32.slice(0, 0, numel);
+  Tensor block_sums_buf = tmp32.slice(0, numel, numel + num_blocks_u32);
+  auto tmp64 = at::empty({num_blocks_u32 + 1}, input.options().dtype(kLong));
+  Tensor block_offsets_buf = tmp64.slice(0, 0, num_blocks_u32);
+  Tensor total_nonzero_buf = tmp64.slice(0, num_blocks_u32, num_blocks_u32 + 1);
 
   // Steps 1+2: compute prefix sums and block offsets entirely on GPU
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -385,20 +413,25 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       auto computeEncoder = stream->commandEncoder();
 
       [computeEncoder setComputePipelineState:pso_step1];
-      mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf);
-      mtl_dispatch1DJob(computeEncoder, pso_step1, numel);
+      for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
+        uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
+        uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
+        mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf, base, block_base);
+        mtl_dispatch1DJob(computeEncoder, pso_step1, this_chunk);
+      }
 
       [computeEncoder setComputePipelineState:pso_step2];
-      mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks);
-      uint32_t tg_size_blocks = std::min(1024u, c10::metal::round_up(num_blocks, 32u));
+      mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks_u32);
+      uint32_t tg_size_blocks = std::min(1024u, c10::metal::round_up(num_blocks_u32, 32u));
       [computeEncoder dispatchThreads:MTLSizeMake(tg_size_blocks, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake(tg_size_blocks, 1, 1)];
     }
   });
 
   if (!max_elements) {
-    // Dynamic path: sync to learn output size
-    const int64_t total_nonzero = total_nonzero_buf.item<int>();
+    // Dynamic path: sync to learn output size. total_nonzero is int64, so the
+    // count reads back directly even when it exceeds INT_MAX.
+    const int64_t total_nonzero = total_nonzero_buf.item<int64_t>();
     at::native::resize_output(out_, {total_nonzero, nDim});
     max_elements = total_nonzero;
   }
@@ -411,15 +444,41 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
   int ndim_int = static_cast<int>(nDim);
-  int max_entries = static_cast<int>(*max_elements);
+  // max_entries caps how many nonzeros scatter writes. It is int64 (kernel-side
+  // too), so a user-supplied static size or a dynamic count above 2^32 is not
+  // truncated.
+  int64_t max_entries = *max_elements;
+
+  // Pick the scatter index width. tid is a 32-bit grid position, so the flat
+  // input index is bounded by numel; the output offset is num_nonzeros * ndim.
+  // Small tensors that fit 32-bit index math use the uint variant (fast 32-bit
+  // div/mod in the coordinate decomposition); only larger ones pay for 64-bit.
+  const bool use_32bit_index = canUse32BitIndexMath(input) && canUse32BitIndexMath(out);
+  auto pso_step3 = lib.getPipelineStateForFunc(
+      fmt::format("scatter_nonzero_indices_{}_{}", type_str, index_kernel_suffix(use_32bit_index)));
+  TORCH_INTERNAL_ASSERT([pso_step1 maxTotalThreadsPerThreadgroup] == [pso_step3 maxTotalThreadsPerThreadgroup],
+                        "nonzero: step 1 and step 3 threadgroup sizes must match");
 
   // Step 3: scatter indices, capped at max_entries
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:pso_step3];
-      mtl_setArgs(computeEncoder, input, prefix_buf, out, ndim_int, input.sizes(), block_offsets_buf, max_entries);
-      mtl_dispatch1DJob(computeEncoder, pso_step3, numel);
+      for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
+        uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
+        uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
+        mtl_setArgs(computeEncoder,
+                    input,
+                    prefix_buf,
+                    out,
+                    ndim_int,
+                    input.sizes(),
+                    block_offsets_buf,
+                    max_entries,
+                    base,
+                    block_base);
+        mtl_dispatch1DJob(computeEncoder, pso_step3, this_chunk);
+      }
     }
   });
 

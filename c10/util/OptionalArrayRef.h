@@ -39,7 +39,7 @@ class OptionalArrayRef final {
   constexpr OptionalArrayRef(std::optional<ArrayRef<T>>&& other) noexcept
       : wrapped_opt_array_ref(std::move(other)) {}
 
-  constexpr OptionalArrayRef(const T& value) noexcept
+  constexpr OptionalArrayRef(const T& value C10_LIFETIMEBOUND) noexcept
       : wrapped_opt_array_ref(value) {}
 
   template <
@@ -52,7 +52,7 @@ class OptionalArrayRef final {
               std::is_convertible_v<U&&, ArrayRef<T>> &&
               !std::is_convertible_v<U&&, T>,
           bool> = false>
-  constexpr OptionalArrayRef(U&& value) noexcept(
+  constexpr OptionalArrayRef(U&& value C10_LIFETIMEBOUND) noexcept(
       std::is_nothrow_constructible_v<ArrayRef<T>, U&&>)
       : wrapped_opt_array_ref(std::forward<U>(value)) {}
 
@@ -65,7 +65,7 @@ class OptionalArrayRef final {
               std::is_constructible_v<ArrayRef<T>, U&&> &&
               !std::is_convertible_v<U&&, ArrayRef<T>>,
           bool> = false>
-  constexpr explicit OptionalArrayRef(U&& value) noexcept(
+  constexpr explicit OptionalArrayRef(U&& value C10_LIFETIMEBOUND) noexcept(
       std::is_nothrow_constructible_v<ArrayRef<T>, U&&>)
       : wrapped_opt_array_ref(std::forward<U>(value)) {}
 
@@ -82,7 +82,8 @@ class OptionalArrayRef final {
       Args&&... args)
       : wrapped_opt_array_ref(ip, il, std::forward<Args>(args)...) {}
 
-  constexpr OptionalArrayRef(const std::initializer_list<T>& Vec)
+  constexpr OptionalArrayRef(
+      const std::initializer_list<T>& Vec C10_LIFETIMEBOUND)
       : wrapped_opt_array_ref(ArrayRef<T>(Vec)) {}
 
   // Destructor
