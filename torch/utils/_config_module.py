@@ -1,9 +1,12 @@
 import contextlib
 import copy
+import functools
 import hashlib
 import importlib
 import inspect
 import io
+import keyword
+import math
 import os
 import pickle
 import tokenize
@@ -705,6 +708,76 @@ class ConfigModule(ModuleType):
             # functools.partial has no attributes below but is a callable
             return callable(v) and hasattr(v, "__module__") and hasattr(v, "__name__")
 
+        def importable_ref(func: Any) -> tuple[str, str] | None:
+            try:
+                module_name = getattr(func, "__module__", None)
+                qualname = getattr(func, "__qualname__", None)
+                if (
+                    not callable(func)
+                    or not isinstance(module_name, str)
+                    or not isinstance(qualname, str)
+                    or not module_name
+                    or not qualname
+                    or module_name == "__main__"
+                    or "<" in qualname
+                ):
+                    return None
+                names = module_name.split(".") + qualname.split(".")
+                if any(
+                    not name.isidentifier() or keyword.iskeyword(name) for name in names
+                ):
+                    return None
+                resolved = importlib.import_module(module_name)
+                for name in qualname.split("."):
+                    resolved = getattr(resolved, name)
+                if resolved is not func:
+                    return None
+                import_name = "" if module_name == "builtins" else module_name
+                prefix = f"{import_name}." if import_name else ""
+                return f"{prefix}{qualname}", import_name
+            except Exception:
+                return None
+
+        def serialize_partial_arg(val: Any) -> str:
+            if type(val) in (type(None), bool, int, str, bytes) or (
+                type(val) is float and math.isfinite(val)
+            ):
+                return repr(val)
+            if type(val) not in (list, tuple, dict):
+                raise ValueError(
+                    f"unsupported functools.partial argument type {type(val).__name__}"
+                )
+
+            if type(val) in (list, tuple):
+                for item in val:
+                    serialize_partial_arg(item)
+            else:
+                for key, item in val.items():
+                    serialize_partial_arg(key)
+                    serialize_partial_arg(item)
+            return repr(val)
+
+        def get_partial_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
+            if type(v) is not functools.partial:
+                return f"# {mod}.{k} omitted: unsupported partial subclass"
+            func_info = importable_ref(v.func)
+            if func_info is None:
+                return f"# {mod}.{k} omitted: partial callable cannot be re-imported"
+            func_ref, import_name = func_info
+            try:
+                parts = [func_ref]
+                parts.extend(serialize_partial_arg(arg) for arg in v.args)
+                if v.keywords:
+                    parts.append(f"**{serialize_partial_arg(v.keywords)}")
+                expression = f"functools.partial({', '.join(parts)})"
+                compile(expression, "<config>", "eval")
+            except Exception:
+                return f"# {mod}.{k} omitted: partial arguments cannot be serialized"
+            if import_name:
+                imports.add(import_name)
+            imports.add("functools")
+            return f"{mod}.{k} = {expression}"
+
         def get_config_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
             """
             Return a string version of the config line.
@@ -716,7 +789,9 @@ class ConfigModule(ModuleType):
                 import _warnings
                 torch._dynamo.config.reorderable_logging_functions = { _warnings.warn, logging.warn, print }
             """
-            if importable_callable(v):
+            if isinstance(v, functools.partial):
+                return get_partial_line(mod, k, v)
+            elif importable_callable(v):
                 add_import(v)
                 return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
             elif isinstance(v, (list, set)) and all(

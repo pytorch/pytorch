@@ -12,6 +12,7 @@ import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
+from torch._inductor.codegen.cpp import CppScheduling, ReasonFusedNodes
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
@@ -20,7 +21,9 @@ from torch._inductor.scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     ExternKernelSchedulerNode,
+    ForeachKernelSchedulerNode,
     FusedExternTritonKernelSchedulerNode,
+    FusedSchedulerNode,
     NestedReduction,
     NodeUser,
     Scheduler,
@@ -97,6 +100,92 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _mock_base_snode(self, name, device=None):
+        node = Mock()
+        node.get_name.return_value = name
+        node.get_first_name.return_value = name
+        node.get_device.return_value = device
+        node.get_nodes.return_value = [node]
+        node.get_buffer_names.return_value = OrderedSet()
+        node.used_buffer_names.return_value = OrderedSet()
+        node.is_template.return_value = False
+        node.is_reduction.return_value = False
+        return node
+
+    class _FakeBuffer:
+        def __init__(self, name):
+            self.name = name
+
+        def get_name(self):
+            return self.name
+
+    class _FakeSchedulerBuffer:
+        def __init__(self, defining_op_name):
+            self._defining_op_name = defining_op_name
+
+        def defining_op_name(self):
+            return self._defining_op_name
+
+    class _FakeScheduler:
+        def __init__(self):
+            self.name_to_buf = {}
+
+    class _FakeNode:
+        def __init__(
+            self,
+            scheduler,
+            name,
+            *,
+            reads=(),
+            outputs=(),
+            ancestors=(),
+            operation_names=None,
+            order=0,
+        ):
+            self.scheduler = scheduler
+            self.name = name
+            self.operation_names = tuple(operation_names or (name,))
+            self.node = None
+            self.ancestors = OrderedSet(ancestors)
+            self.outputs = [TestScheduler._FakeBuffer(name) for name in outputs]
+            self.outputs_by_name = {buf.get_name(): buf for buf in self.outputs}
+            self.read_writes = ReadWrites(
+                OrderedSet(
+                    [MemoryDep(name, sympy.Integer(0), (), ()) for name in reads]
+                ),
+                OrderedSet(
+                    [MemoryDep(name, sympy.Integer(0), (), ()) for name in outputs]
+                ),
+                OrderedSet(),
+            )
+            self.unmet_dependencies = OrderedSet(self.read_writes.reads)
+            self.min_order = order
+            self.max_order = order
+            self.min_input_distance = order
+            self.max_input_distance = order
+            self.group = (torch.device("cpu"), ((sympy.Integer(1),), ()))
+
+        def get_outputs(self):
+            return self.outputs
+
+        def get_buffer_names(self):
+            return OrderedSet([buf.get_name() for buf in self.outputs])
+
+        def get_operation_names(self):
+            return OrderedSet(self.operation_names)
+
+        def get_nodes(self):
+            return [self]
+
+        def get_device(self):
+            return torch.device("cpu")
+
+        def is_reduction(self):
+            return False
+
+        def is_foreach(self):
+            return False
+
     def _extern_snode_for_op(self, op_overload, python_kernel_name):
         node = object.__new__(ir.ExternKernel)
         node.op_overload = op_overload
@@ -150,6 +239,64 @@ class TestScheduler(TestCase):
             )
         )
 
+    def test_fuse_two_nodes_propagates_mempool(self):
+        scheduler = object.__new__(Scheduler)
+        device = torch.device("cuda", 0)
+        node1 = self._mock_base_snode("node1", device)
+        node2 = self._mock_base_snode("node2", device)
+        node3 = self._mock_base_snode("node3", device)
+        node3.get_nodes.return_value = [node1, node2]
+        backend = Mock()
+        backend.fuse.return_value = node3
+        scheduler.get_backend = Mock(return_value=backend)
+        scheduler.node_to_stream = {node1: 0, node2: 0}
+        scheduler.node_to_mempool = {node1: (7, 0), node2: (7, 0)}
+        scheduler.name_to_fused_node = {}
+        fused_nodes = OrderedSet([node1, node2])
+
+        self.assertIs(
+            Scheduler.fuse_two_nodes(scheduler, node1, node2, fused_nodes), node3
+        )
+
+        self.assertEqual(scheduler.node_to_mempool[node3], (7, 0))
+        self.assertEqual(scheduler.node_to_stream[node3], 0)
+        self.assertIn(node3, fused_nodes)
+        self.assertNotIn(node1, fused_nodes)
+        self.assertNotIn(node2, fused_nodes)
+
+    @inductor_config.patch(combo_kernel_max_num_nodes=16)
+    def test_combo_kernel_grouping_respects_mempool(self):
+        scheduler = Mock()
+        device = torch.device("cuda", 0)
+        pool_node1 = self._mock_base_snode("pool_node1", device)
+        pool_node2 = self._mock_base_snode("pool_node2", device)
+        default_node = self._mock_base_snode("default_node", device)
+        other_pool_node = self._mock_base_snode("other_pool_node", device)
+        scheduler._topological_sort_nodes.return_value = [
+            [pool_node1, default_node, pool_node2, other_pool_node]
+        ]
+        scheduler.node_to_stream = {
+            pool_node1: 0,
+            pool_node2: 0,
+            default_node: 0,
+            other_pool_node: 0,
+        }
+        scheduler.get_node_stream.side_effect = scheduler.node_to_stream.__getitem__
+        scheduler.node_to_mempool = {
+            pool_node1: (7, 0),
+            pool_node2: (7, 0),
+            default_node: None,
+            other_pool_node: (8, 0),
+        }
+
+        groups = ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels(
+            scheduler
+        )
+
+        self.assertEqual(
+            groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
+        )
+
     def test_epilogue_fuse_dry_run_defers_user_list_update(self):
         node1, node2, user = self._extern_triton_epilogue_snodes()
         users = node1.scheduler.name_to_buf["real_mutated"].users
@@ -193,6 +340,106 @@ class TestScheduler(TestCase):
             self.assertIs(BaseScheduling(None).fuse(node1, node2, dry_run=True), fused)
         epilogue_fuse.assert_called_once_with(node1, node2, dry_run=True)
 
+    def test_foreach_dry_run_candidate_does_not_alias_source_state(self):
+        scheduler = self._FakeScheduler()
+        base_node = self._FakeNode(
+            scheduler,
+            "base_op",
+            reads=("base_read",),
+            outputs=("base_out",),
+            ancestors=("base_ancestor",),
+        )
+        foreach_node = ForeachKernelSchedulerNode(
+            scheduler, [base_node], use_custom_partition_algo=False
+        )
+        original_ancestors = OrderedSet(foreach_node.ancestors)
+        original_name_to_node = dict(foreach_node.name_to_node)
+        original_read_to_node = dict(foreach_node.read_to_node)
+
+        fused_subnode = self._FakeNode(
+            scheduler,
+            "fused_op",
+            reads=("base_read", "other_read"),
+            outputs=("base_out", "other_out"),
+            ancestors=("base_ancestor", "other_ancestor"),
+            operation_names=("base_op", "other_op"),
+        )
+        candidate = ForeachKernelSchedulerNode(
+            scheduler,
+            [fused_subnode],
+            use_custom_partition_algo=False,
+            prev_node_1=foreach_node,
+            prev_node_2=fused_subnode,
+        )
+
+        self.assertEqual(foreach_node.ancestors, original_ancestors)
+        self.assertEqual(foreach_node.name_to_node, original_name_to_node)
+        self.assertEqual(foreach_node.read_to_node, original_read_to_node)
+        self.assertIn("other_ancestor", candidate.ancestors)
+        self.assertIs(candidate.name_to_node["other_op"], fused_subnode)
+        self.assertIs(candidate.read_to_node["other_read"], fused_subnode)
+
+    def test_foreach_ignores_stale_subnode_lookup_entries(self):
+        scheduler = self._FakeScheduler()
+        live_node = self._FakeNode(
+            scheduler,
+            "live_op",
+            reads=("live_read",),
+            outputs=("live_out",),
+        )
+        foreach_node = ForeachKernelSchedulerNode(
+            scheduler, [live_node], use_custom_partition_algo=False
+        )
+
+        stale_node = self._FakeNode(scheduler, "stale_op")
+        foreach_node.name_to_node["stale_op"] = stale_node
+        scheduler.name_to_buf["stale_read"] = self._FakeSchedulerBuffer("stale_op")
+        scheduler.name_to_buf["live_read"] = self._FakeSchedulerBuffer("live_op")
+        consumer = self._FakeNode(scheduler, "consumer", reads=("stale_read",))
+        self.assertIsNone(foreach_node.get_producer_subnode_for(consumer))
+        consumer = self._FakeNode(
+            scheduler, "consumer", reads=("stale_read", "live_read")
+        )
+        self.assertIs(foreach_node.get_producer_subnode_for(consumer), live_node)
+
+        foreach_node.read_to_node["producer_out"] = stale_node
+        producer = self._FakeNode(scheduler, "producer", outputs=("producer_out",))
+        self.assertIsNone(foreach_node.get_consumer_subnode_for(producer))
+
+    def test_cpp_compatible_range_dry_run_restores_loop_state(self):
+        backend = CppScheduling.__new__(CppScheduling)
+        node1 = Mock()
+        node1.is_foreach.return_value = False
+        node1.is_template.return_value = False
+        node2 = Mock()
+        node2.is_foreach.return_value = False
+        node2.is_template.return_value = False
+        fused = object()
+
+        def snapshots(node):
+            return [(node, "state1" if node is node1 else "state2")]
+
+        with (
+            patch.object(
+                CppScheduling,
+                "_why_fuse_nodes",
+                return_value=ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION,
+            ),
+            patch.object(
+                CppScheduling, "_snapshot_node_loop_states", side_effect=snapshots
+            ),
+            patch.object(
+                CppScheduling, "_align_compatible_range_nodes", return_value=True
+            ),
+            patch.object(FusedSchedulerNode, "fuse", return_value=fused),
+        ):
+            self.assertIs(
+                CppScheduling.fuse(backend, node1, node2, dry_run=True), fused
+            )
+
+        node1.restore_loop_state.assert_called_once_with("state1")
+        node2.restore_loop_state.assert_called_once_with("state2")
+
     def test_fuse_two_nodes_builds_fusion(self):
         scheduler = object.__new__(Scheduler)
         backend = Mock()
@@ -213,6 +460,7 @@ class TestScheduler(TestCase):
         backend.fuse.return_value = fused
         fused_nodes = OrderedSet([node1, node2])
         scheduler.node_to_stream = {node1: 0}
+        scheduler.node_to_mempool = {}
 
         self.assertIs(
             Scheduler.fuse_two_nodes(scheduler, node1, node2, fused_nodes),
@@ -790,6 +1038,8 @@ class TestScheduler(TestCase):
             scheduler = Scheduler.__new__(Scheduler)
             scheduler.mutation_renames = {}
             scheduler._has_multi_stream_nodes = Mock(return_value=False)
+            scheduler._mempool_nodes = False
+            scheduler.node_to_mempool = {}
             scheduler._nested_index_equivalent_dep_names = Mock(
                 return_value=OrderedSet()
             )
