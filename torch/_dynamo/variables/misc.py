@@ -739,7 +739,7 @@ class ExceptionVariable(VariableTracker):
         return self
 
     tp_methods = {
-        "with_traceback": Method(with_traceback, "with_traceback"),
+        "with_traceback": Method(with_traceback),
     }
 
     def _get_args(self, tx: "InstructionTranslatorBase"):
@@ -2896,15 +2896,15 @@ class RandomVariable(VariableTracker):
         return self._call_random(tx, "uniform", args, kwargs)
 
     tp_methods = {
-        "seed": Method(seed, "seed"),
-        "getstate": Method(getstate, "getstate"),
-        "setstate": Method(setstate, "setstate"),
-        "shuffle": Method(shuffle, "shuffle"),
-        "sample": Method(sample, "sample"),
-        "random": Method(_random, "random"),
-        "randint": Method(_randint, "randint"),
-        "randrange": Method(_randrange, "randrange"),
-        "uniform": Method(_uniform, "uniform"),
+        "seed": Method(seed),
+        "getstate": Method(getstate),
+        "setstate": Method(setstate),
+        "shuffle": Method(shuffle),
+        "sample": Method(sample),
+        "random": Method(_random),
+        "randint": Method(_randint),
+        "randrange": Method(_randrange),
+        "uniform": Method(_uniform),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
