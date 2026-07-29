@@ -107,16 +107,14 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-# _gpu_types()/get_gpu_type()/GPU_TYPES are defined before the torch._dynamo
-# import below to avoid a circular import when they are pulled in from dynamo;
-# hence the lazy imports of the device-interface registry inside the bodies.
+# Defined before the torch._dynamo import below to avoid a circular import
+# when pulled in from dynamo; hence the lazy registry imports in the bodies.
+@functools.cache
 def _gpu_types() -> list[str]:
-    """GPU-class device types, derived from the registered DeviceInterfaces.
-
-    This is intentionally not a hardcoded list: any backend (including
-    out-of-tree ones such as NPU) that registers a DeviceInterface whose
-    is_gpu() returns True is picked up automatically. Indexed aliases such as
-    "cuda:0" are skipped so only base device types are returned.
+    """GPU-class device types from the registered DeviceInterfaces, skipping
+    indexed aliases such as "cuda:0". Memoized so the hot is_gpu() path is
+    constant-time; register_interface_for_device() invalidates it when a
+    backend registers late.
     """
     from torch._dynamo.device_interface import get_registered_device_interfaces
 
@@ -128,18 +126,21 @@ def _gpu_types() -> list[str]:
 
 
 class _GpuTypes:
-    """Live, registry-derived view of the GPU-class device types.
-
-    Behaves like the old GPU_TYPES list for iteration and membership, but
-    reflects backends that register their DeviceInterface late (e.g. NPU),
-    instead of freezing a hardcoded list at import time.
-    """
+    """Registry-derived, list-like replacement for the old hardcoded GPU_TYPES."""
 
     def __iter__(self) -> Iterator[str]:
         return iter(_gpu_types())
 
     def __contains__(self, item: object) -> bool:
         return item in _gpu_types()
+
+    def __len__(self) -> int:
+        return len(_gpu_types())
+
+    def __eq__(self, other: object) -> bool:
+        return _gpu_types() == other
+
+    __hash__ = None  # type: ignore[assignment]
 
     def __repr__(self) -> str:
         return repr(_gpu_types())
@@ -165,13 +166,14 @@ def get_gpu_type() -> str:
     if len(avail_gpus) == 1:
         return avail_gpus[0]
 
-    # More than one GPU type is available (e.g. cuda + an out-of-tree backend).
-    # Disambiguate via the process-wide current accelerator rather than
-    # asserting there can only be one.
+    # >1 GPU type available: disambiguate via the current accelerator.
     acc = torch.accelerator.current_accelerator()
     if acc is not None and acc.type in avail_gpus:
         return acc.type
-    return avail_gpus[0]
+    # Registry order is insertion order and may differ between processes
+    # (out-of-tree backends register at import time), so fall back to a
+    # stable choice rather than a positional one.
+    return "cuda" if "cuda" in avail_gpus else sorted(avail_gpus)[0]
 
 
 from torch._dynamo.device_interface import get_interface_for_device

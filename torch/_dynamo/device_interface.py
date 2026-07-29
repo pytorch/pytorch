@@ -16,6 +16,7 @@ specialized implementations for each hardware backend's unique features.
 """
 
 import inspect
+import sys
 import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
@@ -168,8 +169,14 @@ class DeviceInterface:
 
     @classmethod
     def exposes_streams(cls) -> bool:
-        # True when a subclass provides its own Stream. The base Stream is a
-        # sentinel that raises, so compare against it rather than None.
+        """
+        True when a subclass provides its own Stream. The base Stream is a
+        raising sentinel, so compare against it rather than None.
+
+        Overriding the Stream slot is the contract for stream support: it is
+        what opts a GPU-class device into stream guards (device_need_guard),
+        so stream-capable backends must override it.
+        """
         return cls.Stream is not DeviceInterface.Stream
 
     @classmethod
@@ -654,6 +661,14 @@ def register_interface_for_device(
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
+    # Late registration must refresh inductor's registry-derived GPU-type
+    # caches. sys.modules avoids importing inductor from dynamo.
+    inductor_utils = sys.modules.get("torch._inductor.utils")
+    if inductor_utils is not None:
+        for cached in ("_gpu_types", "get_gpu_type"):
+            fn = getattr(inductor_utils, cached, None)
+            if fn is not None:
+                fn.cache_clear()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:

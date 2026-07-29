@@ -1199,11 +1199,15 @@ class TestDeviceClassification(TestCase):
     def setUp(self):
         super().setUp()
         self._registered = []
+        inductor_utils._gpu_types.cache_clear()
         get_gpu_type.cache_clear()
 
     def tearDown(self):
+        # pop() bypasses register_interface_for_device's cache invalidation,
+        # so clear the registry-derived caches manually.
         for name in self._registered:
             di.device_interfaces.pop(name, None)
+        inductor_utils._gpu_types.cache_clear()
         get_gpu_type.cache_clear()
         super().tearDown()
 
@@ -1264,29 +1268,24 @@ class TestDeviceClassification(TestCase):
 
     def test_gpu_types_consumer_resolves_out_of_tree_via_registry(self):
         # A third-party PrivateUse1 backend (here "acc") registers a GPU-class
-        # DeviceInterface but exposes no torch.acc submodule. Consumers that
-        # iterate GPU_TYPES must resolve availability through the interface
-        # registry; getattr(torch, name) would raise AttributeError here.
+        # DeviceInterface but exposes no torch.acc submodule, so GPU_TYPES
+        # consumers must resolve through the registry, not getattr(torch, name).
+        # Drive the real consumers so reverting their fixes fails this test.
+        from torch._inductor.fx_passes.freezing_patterns import _addmm_pattern_device
+        from torch.testing._internal.inductor_utils import _is_multigpu
+
         self._register("acc", _GpuWithStream)
         self.assertFalse(hasattr(torch, "acc"))
         with mock.patch.object(inductor_utils, "_gpu_types", return_value=["acc"]):
             self.assertIn("acc", inductor_utils.GPU_TYPES)
-            # Mirrors freezing_patterns.addmm_patterns_init()'s device pick.
-            device = next(
-                (
-                    gpu
-                    for gpu in inductor_utils.GPU_TYPES
-                    if di.get_interface_for_device(gpu).is_available()
-                ),
-                "cpu",
-            )
-        self.assertEqual(device, "acc")
+            self.assertEqual(_addmm_pattern_device(), "acc")
+            # The fake interface has no device_count: must be False, not raise.
+            self.assertFalse(_is_multigpu("acc"))
 
     # ---- get_gpu_type() ----
     def test_get_gpu_type_single_available(self):
         self._register("fakegpu", _GpuWithStream)
         with mock.patch.object(inductor_utils, "_gpu_types", return_value=["fakegpu"]):
-            get_gpu_type.cache_clear()
             self.assertEqual(get_gpu_type(), "fakegpu")
 
     def test_get_gpu_type_none_available_falls_back_to_cuda(self):
@@ -1295,7 +1294,6 @@ class TestDeviceClassification(TestCase):
             mock.patch.object(inductor_utils, "_gpu_types", return_value=["fakegpu"]),
             mock.patch("torch.accelerator.current_accelerator", return_value=None),
         ):
-            get_gpu_type.cache_clear()
             self.assertEqual(get_gpu_type(), "cuda")
 
     def test_get_gpu_type_multiple_disambiguates_without_assert(self):
@@ -1310,7 +1308,6 @@ class TestDeviceClassification(TestCase):
             ),
             mock.patch("torch.accelerator.current_accelerator", return_value=acc),
         ):
-            get_gpu_type.cache_clear()
             self.assertEqual(get_gpu_type(), "fakegpu2")
 
 

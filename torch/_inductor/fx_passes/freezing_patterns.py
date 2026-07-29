@@ -121,18 +121,25 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     )
 
 
+def _addmm_pattern_device() -> str:
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    # Resolve availability through the DeviceInterface registry rather than
+    # getattr(torch, gpu): GPU_TYPES may include out-of-tree PrivateUse1
+    # backends that register an interface but expose no torch.<name> module.
+    return next(
+        (gpu for gpu in GPU_TYPES if get_interface_for_device(gpu).is_available()),
+        "cpu",
+    )
+
+
 @functools.cache
 def addmm_patterns_init():
     """
     addmm related patterns.
     To avoid duplication, also includes int8 WoQ GEMM pattern without bias.
     """
-    from torch._dynamo.device_interface import get_interface_for_device
-
-    device = next(
-        (gpu for gpu in GPU_TYPES if get_interface_for_device(gpu).is_available()),
-        "cpu",
-    )
+    device = _addmm_pattern_device()
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
     scale = functools.partial(torch.empty, (10,), device=device, requires_grad=False)
 
