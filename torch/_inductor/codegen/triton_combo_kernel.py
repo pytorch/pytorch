@@ -628,9 +628,11 @@ class ComboKernel(Kernel):
 
     @property
     def bake_blocks(self) -> bool:
-        """Bake block sizes as constexpr in the body (only the no-autotune path, which has no
-        autotuner to pass a config through). Otherwise blocks are args; compile-time autotune
-        supplies the chosen blocks via the config (default_config)."""
+        """Whether autotuning is disabled and default block values are required.
+
+        Legacy combo kernels bake these values into the kernel body. Per-subkernel
+        block combos pass them as constexpr arguments through default_config.
+        """
         return not self.enable_autotune
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
@@ -1116,18 +1118,20 @@ class ComboKernel(Kernel):
         return extra_args
 
     def _merge_noinline_kernel_args(self) -> None:
-        self.noinline_arg_name_maps = [
+        for sub_kernel in self.sub_kernels:
             self._merge_noinline_kernel_arg(sub_kernel)
+
+        self.noinline_arg_name_maps = [
+            self._resolve_noinline_kernel_arg_names(sub_kernel)
             for sub_kernel in self.sub_kernels
         ]
 
-    def _merge_noinline_kernel_arg(self, sub_kernel: TritonKernel) -> dict[str, str]:
+    def _merge_noinline_kernel_arg(self, sub_kernel: TritonKernel) -> None:
         # Each noinline body codegens in a local namespace, so different members
-        # can all have local names like in_ptr0/out_ptr0. Replay those local args
-        # into the combo-main args and remember the chosen names, e.g.
-        # local in_ptr0(buf_b) -> combo main in_ptr1.
+        # can all have local names like in_ptr0/out_ptr0. First replay every
+        # local arg into the combo-main namespace; names are resolved only after
+        # all members have registered their in-place relationships.
         local_args = sub_kernel.args
-        local_to_main: dict[str, str] = {}
         local_argdefs, _, local_signature, _ = local_args.python_argdefs()
 
         for argdef, signature in zip(local_argdefs, local_signature, strict=True):
@@ -1143,27 +1147,43 @@ class ComboKernel(Kernel):
                     for output_name in output_names:
                         if output_name not in self.args.inplace_buffers:
                             self.args.make_inplace(input_name, output_name)
-                    local_to_main[argdef.name] = self.args.output(output_names[-1])
                 elif local_args.output_buffers.get(buffer) == argdef.name:
-                    local_to_main[argdef.name] = self.args.output(buffer)
+                    self.args.output(buffer)
                 else:
-                    local_to_main[argdef.name] = self.args.input(buffer)
+                    self.args.input(buffer)
             elif isinstance(signature, SizeArg):
                 expr = signature.expr
                 if isinstance(expr, Symbol):
-                    local_to_main[argdef.name] = self.args.size(expr)
-                elif expr not in self.args.sizevars:
-                    name = argdef.name
-                    existing_names = OrderedSet(self.args.sizevars.values())
-                    if name in existing_names:
-                        suffix = 1
-                        while f"{name}{suffix}" in existing_names:
-                            suffix += 1
-                        name = f"{name}{suffix}"
-                    self.args.sizevars[expr] = name
-                    local_to_main[argdef.name] = name
+                    self.args.size(expr)
                 else:
-                    local_to_main[argdef.name] = self.args.sizevars[expr]
+                    self.args.seed_offset(argdef.name, int(expr))
+
+    def _resolve_noinline_kernel_arg_names(
+        self, sub_kernel: TritonKernel
+    ) -> dict[str, str]:
+        local_args = sub_kernel.args
+        local_to_main: dict[str, str] = {}
+        local_argdefs, _, local_signature, _ = local_args.python_argdefs()
+
+        for argdef, signature in zip(local_argdefs, local_signature, strict=True):
+            if isinstance(signature, TensorArg):
+                buffer = signature.buffer
+                if (
+                    buffer in local_args.inplace_buffers
+                    or local_args.output_buffers.get(buffer) == argdef.name
+                ):
+                    main_name = self.args.output(buffer)
+                else:
+                    main_name = self.args.input(buffer)
+            elif isinstance(signature, SizeArg):
+                main_name = self.args.sizevars[signature.expr]
+            else:
+                raise AssertionError(
+                    f"unsupported combo noinline argument "
+                    f"{argdef.name}: {type(signature).__name__}"
+                )
+
+            local_to_main[argdef.name] = main_name
 
         return local_to_main
 
@@ -1650,6 +1670,19 @@ class ComboKernel(Kernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
+        if self.per_subkernel_blocks:
+            main_arg_names = OrderedSet(arg.name for arg in argdefs)
+            mapped_arg_names = OrderedSet(
+                name
+                for name_map in self.noinline_arg_name_maps
+                for name in name_map.values()
+            )
+            missing_arg_names = mapped_arg_names - main_arg_names
+            if missing_arg_names:
+                raise AssertionError(
+                    "combo noinline call arguments missing from main signature: "
+                    f"{sorted(missing_arg_names)}"
+                )
         block_args = self.get_block_args()
         if not self.bake_blocks or self.per_subkernel_blocks:
             argdefs.extend([ArgName(x.name, is_constexpr=True) for x in block_args])
@@ -1902,6 +1935,7 @@ class ComboKernel(Kernel):
             # Captured at codegen time so runtime sees the same value the
             # source was generated with, regardless of later config changes.
             "autotune_grouping": config.combo_kernel_autotune_grouping,
+            "block_arg_names": tuple(self.block_args),
         }
 
         if self.bake_blocks or self.combo_compile_time_autotune:
