@@ -70,6 +70,16 @@ def _get_is_fx_tracing() -> bool:
     return getattr(_is_fx_tracing_tls, "flag", False)
 
 
+@contextlib.contextmanager
+def _is_fx_tracing_context(value: bool) -> Iterator[None]:
+    previous = _get_is_fx_tracing()
+    _set_is_fx_tracing(value)
+    try:
+        yield
+    finally:
+        _set_is_fx_tracing(previous)
+
+
 def is_fx_tracing() -> bool:
     is_fx_tracing_warning()
     return _get_is_fx_tracing()
