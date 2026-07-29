@@ -240,7 +240,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """FXIR does not emit deferred alignment copies.
         Alignment is handled by the runtime wrapper."""
 
-    def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
+    def codegen_deferred_alignment_copies(
+        self, input_names: Iterable[str], stream: int = 0
+    ) -> None:
         """FXIR does not emit deferred alignment copies."""
 
     @classmethod
