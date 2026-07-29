@@ -626,6 +626,16 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
+            # Constant-folding grad_fn to None is only valid while the tensor
+            # stays a leaf. requires_grad alone does not distinguish a leaf
+            # (grad_fn is None) from a non-leaf with the same metadata, so
+            # guard on grad_fn being None to force a recompile otherwise.
+            if self.source is not None:
+                install_guard(
+                    AttrSource(self.source, "grad_fn").make_guard(
+                        GuardBuilder.NONE_MATCH
+                    )
+                )
             return variables.ConstantVariable.create(None)
 
     def method_attr__version(self, tx: "InstructionTranslatorBase") -> VariableTracker:
