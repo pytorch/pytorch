@@ -2357,7 +2357,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
-        from .user_defined import _CONSTANT_BASE_TYPES
+        from .ctx_manager import GenericContextWrappingVariable
+        from .user_defined import _CONSTANT_BASE_TYPES, is_generic_ctx_manager_cls
 
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
@@ -2372,6 +2373,12 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
             result = UserDefinedConstantVariable(value, source=self.source)
+        elif is_generic_ctx_manager_cls(type(value)):
+            # A generic context manager built inside the compiled region (via
+            # SideEffects.get_variable_cls) must wrap the same way when it is
+            # reconstructed from a source across a graph break, so a `with` on
+            # the reconstructed object can still be entered.
+            result = GenericContextWrappingVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
