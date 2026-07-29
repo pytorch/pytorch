@@ -6,6 +6,11 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG PIP_EXTRA_INDEX_URL
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ARG PIP_PREFER_BINARY
+ENV PIP_PREFER_BINARY=${PIP_PREFER_BINARY}
+
 ARG CLANG_VERSION
 
 # Allow APT to run as root
@@ -154,10 +159,11 @@ RUN rm install_onnx.sh common_utils.sh
 
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
+ARG CLANG_VERSION
 COPY ./common/install_cpython.sh install_cpython.sh
 COPY requirements-ci.txt /tmp/requirements-ci.txt
 RUN if [ -n "${TSAN}" ]; then \
-      CC=clang-18 CXX=clang++-18 \
+      CC=clang-${CLANG_VERSION} CXX=clang++-${CLANG_VERSION} \
       CPYTHON_VERSIONS="3.14.4t+tsan" bash ./install_cpython.sh && \
       /opt/python/cp314-cp314t+tsan/bin/pip install -r /tmp/requirements-ci.txt; \
     fi

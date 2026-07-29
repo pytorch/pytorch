@@ -2458,34 +2458,47 @@ kernel void unpack_pivots(
 }
 
 template <typename T>
-kernel void linalg_qr_householder(
-    device T* A [[buffer(0)]],
-    device T* Q [[buffer(1)]],
-    device T* R [[buffer(2)]],
-    device int* info [[buffer(3)]],
-    constant QrParams& params [[buffer(4)]],
-    device T* v_work [[buffer(5)]],
-    uint3 thread_pos [[thread_position_in_threadgroup]],
-    uint3 tpg [[threads_per_threadgroup]],
-    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+kernel void geqrf(
+    device T* R [[buffer(0)]],
+    device T* tau [[buffer(1)]],
+    constant GeqrfParams<>& params [[buffer(2)]],
+    device T* v_work [[buffer(3)]],
+    uint thread_pos [[thread_position_in_threadgroup]],
+    uint tpg [[threads_per_threadgroup]],
+    uint tg_pos [[threadgroup_position_in_grid]]) {
   using opmath_t = c10::metal::opmath_t<T>;
 
-  const uint32_t tid = thread_pos.x;
-  const uint32_t group_size = tpg.x;
-  const uint32_t m = params.m;
-  const uint32_t n = params.n;
+  const uint32_t tid = thread_pos;
+  const uint32_t group_size = tpg;
+  const uint32_t m = params.A_sizes[params.num_batch_dims];
+  const uint32_t n = params.A_sizes[params.num_batch_dims + 1];
+  const uint32_t K = min(m, n);
 
   // Batch indexing
-  const uint32_t batch_idx = tg_pos.x;
-  const uint32_t A_stride = m * n;
-  const uint32_t Q_stride = m * m;
-  const uint32_t R_stride = m * n;
+  uint32_t batch_idx = tg_pos;
   const uint32_t v_stride = m;
-
-  device T* A_batch = A + batch_idx * A_stride;
-  device T* Q_batch = Q + batch_idx * Q_stride;
-  device T* R_batch = R + batch_idx * R_stride;
   device T* v_batch = v_work + batch_idx * v_stride;
+
+  // Find the matrices for this thread's batch index
+  uint32_t A_offset = 0;
+  uint32_t tau_offset = 0;
+
+  for (int32_t dim = params.num_batch_dims - 1; dim >= 0; dim--) {
+    auto dim_size = params.A_sizes[dim];
+    auto dim_idx = batch_idx % dim_size;
+
+    A_offset += dim_idx * params.A_strides[dim];
+    tau_offset += dim_idx * params.tau_strides[dim];
+
+    batch_idx /= dim_size;
+  }
+
+  device T* R_batch = R + A_offset;
+  device T* tau_batch = tau + tau_offset;
+
+  const uint32_t tau_stride = params.tau_strides[params.num_batch_dims];
+  const uint32_t R_stride_r = params.A_strides[params.num_batch_dims];
+  const uint32_t R_stride_c = params.A_strides[params.num_batch_dims + 1];
 
   constexpr auto kMaxThreadsPerThreadgroup = 1024;
   constexpr auto kMaxSIMDGroups =
@@ -2494,22 +2507,13 @@ kernel void linalg_qr_householder(
   threadgroup opmath_t scratch[kMaxSIMDGroups];
   threadgroup opmath_t tau_shared;
 
-  // initialize Q = Identity (m x m)
-  for (uint32_t i = tid; i < m * m; i += group_size) {
-    Q_batch[i] = static_cast<T>((i / m == i % m) ? 1.0 : 0.0);
-  }
-
-  // initialize R = A (m x n)
-  for (uint32_t i = tid; i < m * n; i += group_size) {
-    R_batch[i] = A_batch[i];
-  }
-  threadgroup_barrier(mem_flags::mem_device);
-
-  for (uint32_t k = 0; k < min(m, n); k++) {
+  for (uint32_t k = 0; k < K; k++) {
+    uint32_t R_k_offset = k * R_stride_c;
+    uint32_t tau_k_offset = k * tau_stride;
     // Step 1: compute norm of R[k:m, k] and copy to v_batch
     opmath_t norm_sq = 0.0;
     for (uint32_t i = k + tid; i < m; i += group_size) {
-      T r_ik = R_batch[i * n + k];
+      T r_ik = R_batch[i * R_stride_r + R_k_offset];
       v_batch[i] = r_ik;
       const auto val = static_cast<opmath_t>(r_ik);
       norm_sq = fma(val, val, norm_sq);
@@ -2542,18 +2546,23 @@ kernel void linalg_qr_householder(
           v_batch[i] = static_cast<T>(static_cast<opmath_t>(v_batch[i]) / u1);
         }
 
-        R_batch[k * n + k] = static_cast<T>(-beta);
+        R_batch[k * R_stride_r + R_k_offset] = static_cast<T>(-beta);
       }
+      tau_batch[tau_k_offset] = static_cast<T>(tau_shared);
     }
     threadgroup_barrier(mem_flags::mem_device);
 
-    const auto tau = tau_shared;
-    if (tau < tau_eps)
-      continue;
+    const auto tau_val = tau_shared;
 
-    // (zero out column k below diagonal)
+    // Store the essential part of the Householder vector, below the diagonal.
+    // The implicit leading 1 at row k is not stored.
     for (uint32_t i = k + 1 + tid; i < m; i += group_size) {
-      R_batch[i * n + k] = static_cast<T>(0.0);
+      R_batch[i * R_stride_r + R_k_offset] = v_batch[i];
+    }
+
+    if (tau_val < tau_eps) {
+      threadgroup_barrier(mem_flags::mem_device);
+      continue;
     }
 
     // Step 3: apply reflection to trailing columns of R
@@ -2565,73 +2574,47 @@ kernel void linalg_qr_householder(
 
     for (uint32_t j_base = k + 1; j_base < n; j_base += num_simd_groups) {
       uint32_t j = j_base + simd_group_id;
+      uint32_t R_j_offset = j * R_stride_c;
       if (j < n) {
         // Each SIMD group computes dot product for its column
         // Use SIMD reduction within the group
         opmath_t dot = 0.0;
         for (uint32_t i = k + simd_lane; i < m; i += 32) {
           opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
-          opmath_t r_ij = static_cast<opmath_t>(R_batch[i * n + j]);
+          opmath_t r_ij =
+              static_cast<opmath_t>(R_batch[i * R_stride_r + R_j_offset]);
           dot = fma(v_i, r_ij, dot);
         }
         opmath_t vt_col = simd_sum(dot);
-        opmath_t factor = tau * vt_col;
+        opmath_t factor = tau_val * vt_col;
 
         // Update column
         for (uint32_t i = k + simd_lane; i < m; i += 32) {
           opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
-          opmath_t r_ij = static_cast<opmath_t>(R_batch[i * n + j]);
-          R_batch[i * n + j] = static_cast<T>(r_ij - v_i * factor);
-        }
-      }
-    }
-    threadgroup_barrier(mem_flags::mem_device);
-
-    // Step 4: accumulate Q = Q * H_k
-    // each SIMD group handles one row
-    for (uint32_t i_base = 0; i_base < m; i_base += num_simd_groups) {
-      uint32_t i = i_base + simd_group_id;
-      if (i < m) {
-        opmath_t dot = 0.0;
-        for (uint32_t j = k + simd_lane; j < m; j += 32) {
-          opmath_t v_j = static_cast<opmath_t>(v_batch[j]);
-          opmath_t q_ij = static_cast<opmath_t>(Q_batch[i * m + j]);
-          dot = fma(q_ij, v_j, dot);
-        }
-        opmath_t row_v = simd_sum(dot);
-        opmath_t factor = tau * row_v;
-
-        // Update row
-        for (uint32_t j = k + simd_lane; j < m; j += 32) {
-          opmath_t v_j = static_cast<opmath_t>(v_batch[j]);
-          opmath_t q_ij = static_cast<opmath_t>(Q_batch[i * m + j]);
-          Q_batch[i * m + j] = static_cast<T>(q_ij - v_j * factor);
+          opmath_t r_ij =
+              static_cast<opmath_t>(R_batch[i * R_stride_r + R_j_offset]);
+          R_batch[i * R_stride_r + R_j_offset] =
+              static_cast<T>(r_ij - v_i * factor);
         }
       }
     }
 
     threadgroup_barrier(mem_flags::mem_device);
-  }
-
-  if (tid == 0) {
-    info[0] = 0;
   }
 }
 
-#define REGISTER_QR(T)                                \
-  template [[host_name("linalg_qr_householder_" #T)]] \
-  kernel void linalg_qr_householder<T>(               \
-      device T * A [[buffer(0)]],                     \
-      device T * Q [[buffer(1)]],                     \
-      device T * R [[buffer(2)]],                     \
-      device int* info [[buffer(3)]],                 \
-      constant QrParams& params [[buffer(4)]],        \
-      device T* v_work [[buffer(5)]],                 \
-      uint3 tid [[thread_position_in_threadgroup]],   \
-      uint3 tpg [[threads_per_threadgroup]],          \
-      uint3 tg_pos [[threadgroup_position_in_grid]]);
+#define REGISTER_GEQRF(T)              \
+  template [[host_name("geqrf_" #T)]]  \
+  kernel void geqrf<T>(                \
+      device T * R,                    \
+      device T * tau,                  \
+      constant GeqrfParams<> & params, \
+      device T * v_work,               \
+      uint tid,                        \
+      uint tpg,                        \
+      uint tg_pos);
 
-REGISTER_QR(float);
+REGISTER_GEQRF(float);
 
 #define INSTANTIATE_MM_OPS(DTYPE)                                           \
   template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \

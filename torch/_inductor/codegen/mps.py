@@ -672,7 +672,7 @@ class MetalKernel(SIMDKernel):
             raise AssertionError("expected no load mask during reduction")
 
         def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
-            # Uwraps vec3 dtype into individual components
+            # Unwraps vec3 dtype into individual components
             return OpsWrapper._unwrap(
                 [CSEVariable(f"{res3}.{t}", res3.bounds, res3.dtype) for t in "xyz"]
             )
