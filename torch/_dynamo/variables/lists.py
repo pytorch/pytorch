@@ -2177,7 +2177,7 @@ class SliceVariable(VariableTracker):
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(pynumber_index(tx, member).as_python_constant())
+            members.append(member.nb_index_impl(tx).as_python_constant())
         return slice(*members)
 
     def is_hashable(self) -> bool:
