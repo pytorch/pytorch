@@ -112,6 +112,7 @@ def rocm_rpaths() -> str:
     return (
         "$ORIGIN/../../_rocm_sdk_core/lib"
         ":$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib"
+        ":$ORIGIN/../../_rocm_sdk_libraries/lib"
     )
 
 
