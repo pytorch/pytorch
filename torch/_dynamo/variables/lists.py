@@ -52,7 +52,13 @@ from ..utils import (
     unpack_and_apply_fn,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    Method,
+    MethodFlags,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
@@ -1362,7 +1368,6 @@ _deque_state_mutating_methods = frozenset(
         "insert",
         "remove",
         "clear",
-        "rotate",
     }
 )
 
@@ -1377,6 +1382,40 @@ class DequeVariable(CommonListMethodsVariable):
         "state",
         *CommonListMethodsVariable._nonvar_fields,
     }
+
+    def _rotate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # deque_rotate: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L927
+        # rotate(n=1, /) shifts n steps to the right (left if n < 0). n is
+        # resolved through nb_index. A deque of length <= 1 is a no-op. A
+        # non-mutable deque declines (returns None) so dispatch falls through
+        # to the object protocol, matching the old is_mutable() guard.
+        if not self.is_mutable():
+            return None
+        # VARARGS rejects kwargs centrally; only the 0-or-1 arg bound is left.
+        if len(args) > 1:
+            raise_args_mismatch(
+                tx,
+                "rotate",
+                "at most 1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        n_vt = args[0] if args else ConstantVariable.create(1)
+        n = n_vt.nb_index_impl(tx).as_python_constant()
+        length = len(self.items)
+        if length > 1:
+            tx.output.side_effects.mutation(self)
+            k = n % length
+            if k:
+                self.items[:] = self.items[-k:] + self.items[:-k]
+            self.state += 1
+        return ConstantVariable.create(None)
+
+    tp_methods = {"rotate": Method(_rotate, flags=MethodFlags.VARARGS)}
 
     def richcompare_impl(
         self,
@@ -1595,6 +1634,21 @@ class DequeVariable(CommonListMethodsVariable):
         # below (which uses the pre-call maxlen captured here).
         if name == "__init__":
             return self.tp_init_impl(tx, args, kwargs)
+
+        if name == "__setattr__":
+            # deque has no __dict__, so every attribute write raises. maxlen is a
+            # read-only getset descriptor; anything else is simply absent.
+            attr_name = args[0].as_python_constant()
+            if attr_name == "maxlen":
+                msg = (
+                    "attribute 'maxlen' of 'collections.deque' objects is not writable"
+                )
+            else:
+                msg = (
+                    f"'collections.deque' object has no attribute '{attr_name}' "
+                    "and no __dict__ for setting new attributes"
+                )
+            raise_observed_exception(AttributeError, tx, args=[msg])
 
         if name == "__reversed__":
             # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
