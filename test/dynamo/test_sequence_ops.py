@@ -3,7 +3,6 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -250,12 +249,6 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
             self.assertEqual(list(d), list(ref))
             self.assertEqual(d.maxlen, ref.maxlen)
 
-    # In-place concat (+=) on a deque subclass is not yet supported: it routes
-    # to the base deque __iadd__, whose type-identity check rejects the RHS
-    # UserDefinedDeque operand (it is not unwrapped to its base deque first),
-    # raising TypeError. Eager's deque.__iadd__ accepts any iterable. Tracked
-    # for a later gate.
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_user_defined_deque_inplace_concat(self):
         a = UserDefinedDeque([1, 2])
@@ -300,6 +293,39 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d += collections.deque([3, 4])
         # Result respects maxlen of 3
         self.assertEqual(list(d), [2, 3, 4])
+
+    # --- Inplace deque repeat (*=) ---
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat(self):
+        d = collections.deque([1, 2])
+        d *= 3
+        self.assertEqual(list(d), [1, 2, 1, 2, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_with_maxlen(self):
+        d = collections.deque([1, 2], maxlen=3)
+        d *= 3
+        # A bounded deque keeps the last maxlen items after repeating.
+        self.assertEqual(list(d), [2, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_maxlen_zero(self):
+        d = collections.deque([1, 2], maxlen=0)
+        d *= 3
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_zero(self):
+        d = collections.deque([1, 2, 3])
+        d *= 0
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_negative(self):
+        d = collections.deque([1, 2, 3])
+        d *= -1
+        self.assertEqual(list(d), [])
 
     # --- list re-init (list.__init__) ---
 

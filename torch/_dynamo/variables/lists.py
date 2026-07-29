@@ -328,7 +328,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # list_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L335-L351
         # tuple_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/tupleobject.c#L421-L430
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
@@ -497,31 +497,6 @@ class BaseListVariable(VariableTracker):
                 [self, args[0]],
                 kwargs,
             )
-        elif name in ("__add__", "__iadd__"):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            if type(self) is not type(args[0]):
-                tp_name = self.python_type_name()
-                other = args[0].python_type_name()
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
-                    ],
-                )
-
-            if name == "__add__":
-                return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
-            else:
-                self.items += args[0].items  # type: ignore[attr-defined]
-                return self
         elif name == "__reversed__":
             # list/tuple/namedtuple __reversed__: reverse iterator over items.
             if args or kwargs:
@@ -818,7 +793,7 @@ class RangeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # range_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L405-L416
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript (range_subscript), no slices.
         index = key.as_python_constant()
         return self.apply_index(tx, index)
@@ -1056,7 +1031,6 @@ class CommonListMethodsVariable(BaseListVariable):
 class ListVariable(CommonListMethodsVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
-    _has_instance_dict = False
 
     def richcompare_impl(
         self,
@@ -1463,7 +1437,7 @@ class DequeVariable(CommonListMethodsVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # deque_item: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1888
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
         try:
@@ -1527,6 +1501,31 @@ class DequeVariable(CommonListMethodsVariable):
         self.call_method(tx, "extend", [other], {})
         return self
 
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # deque_inplace_repeat: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L811
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # A bounded deque drops from the left, keeping the last maxlen items
+        # (maxlen == 0 yields an empty deque).
+        maxlen = self.maxlen.as_python_constant()
+        if maxlen is not None:
+            new_items = new_items[-maxlen:] if maxlen else new_items[:0]
+        tx.output.side_effects.mutation(self)
+        self.items[:] = new_items
+        return self
+
     def debug_repr(self) -> str:
         if self.maxlen.as_python_constant() is None:
             return self.debug_repr_helper("deque([", "])")
@@ -1537,10 +1536,10 @@ class DequeVariable(CommonListMethodsVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
-            return VariableTracker.build(tx, f"deque([{items}])")
+            return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
             tx,
-            f"deque([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
+            f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
     def as_python_constant(self) -> collections.deque[Any]:

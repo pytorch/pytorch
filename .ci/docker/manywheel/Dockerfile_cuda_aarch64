@@ -96,6 +96,8 @@ ARG BASE_CUDA_VERSION
 RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
+# Newer CUPTI headers staged outside the default include path (see CUDA_CUPTI_VERSION in install_cuda.sh)
+COPY --from=cuda     /usr/local/cupti-headers-13.3         /usr/local/cupti-headers-13.3
 COPY --from=nvpl /opt/nvpl/lib/  /usr/local/lib/
 COPY --from=nvpl /opt/nvpl/include/  /usr/local/include/
 COPY --from=arm_compute /acl /acl
