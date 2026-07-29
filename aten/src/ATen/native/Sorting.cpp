@@ -25,6 +25,7 @@
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argsort_native.h>
 #include <ATen/ops/broadcast_tensors.h>
+#include <ATen/ops/cat.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/full_like.h>
@@ -44,7 +45,10 @@
 #include <ATen/ops/topk_native.h>
 #endif
 
+#include <algorithm>
+#include <numeric>
 #include <utility>
+#include <vector>
 
 namespace at::meta {
 
@@ -184,6 +188,85 @@ void quick_select_template(
 
 namespace {
 
+// Resolve the order statistics at the requested `ranks` (distinct, ascending) for one
+// row: nth_element around the middle rank, then recurse into the lower/upper rank
+// subsets. `idx` is a 0..L-1 scratch permutation; on return idx[r] is the original
+// column of the r-th smallest. NaN sorts last to match sort(). ~O(L log U), not a sort.
+template <typename scalar_t>
+void quantile_select_recurse(
+    int64_t* idx,
+    const scalar_t* data,
+    const int64_t* ranks,
+    int64_t lo,
+    int64_t hi,
+    int64_t ulo,
+    int64_t uhi) {
+  if (ulo >= uhi) {
+    return;
+  }
+  const int64_t umid = ulo + (uhi - ulo) / 2;
+  const int64_t r = ranks[umid];
+  std::nth_element(
+      idx + lo, idx + r, idx + hi, [data](int64_t a, int64_t b) {
+        const scalar_t x = data[a];
+        const scalar_t y = data[b];
+        return !_isnan(x) && (_isnan(y) || x < y);
+      });
+  quantile_select_recurse(idx, data, ranks, lo, r, ulo, umid);
+  quantile_select_recurse(idx, data, ranks, r + 1, hi, umid + 1, uhi);
+}
+
+// CPU fast path: for contiguous `reduced` [..., L], return the original column index of
+// the order statistic at each rank in `ranks` [..., M]. The caller gathers these, so the
+// result stays autograd-differentiable through gather and no full sort is materialized.
+Tensor quantile_select_indices_cpu(const Tensor& reduced, const Tensor& ranks) {
+  const int64_t L = reduced.size(-1);
+  const int64_t M = ranks.size(-1);
+  if (M == 0) {
+    return at::empty(ranks.sizes(), ranks.options());
+  }
+  TORCH_INTERNAL_ASSERT(reduced.is_contiguous());
+  const int64_t R = reduced.numel() / L;
+  const auto ranks2d = ranks.reshape({R, M});
+  auto out = at::empty({R, M}, ranks.options());
+  const int64_t grain =
+      std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(L, 1));
+  // Accessors read ranks and write out by stride, so neither is forced
+  // contiguous; the hot per-row select still uses the raw data pointer below.
+  const auto rk = ranks2d.accessor<int64_t, 2>();
+  auto outp = out.accessor<int64_t, 2>();
+  AT_DISPATCH_FLOATING_TYPES(
+      reduced.scalar_type(), "quantile_select_indices_cpu", [&]() {
+        const scalar_t* data = reduced.const_data_ptr<scalar_t>();
+        at::parallel_for(0, R, grain, [&](int64_t r0, int64_t r1) {
+          std::vector<int64_t> idx(L);
+          std::vector<int64_t> sorted_ranks(M);
+          for (const auto r : c10::irange(r0, r1)) {
+            const scalar_t* drow = data + r * L;
+            const auto rkrow = rk[r];
+            auto outrow = outp[r];
+            for (const auto m : c10::irange(M)) {
+              sorted_ranks[m] = rkrow[m];
+            }
+            std::sort(sorted_ranks.begin(), sorted_ranks.end());
+            const int64_t U =
+                std::unique(sorted_ranks.begin(), sorted_ranks.end()) -
+                sorted_ranks.begin();
+            TORCH_INTERNAL_ASSERT(
+                sorted_ranks[0] >= 0 && sorted_ranks[U - 1] < L,
+                "quantile() rank out of range");
+            std::iota(idx.begin(), idx.end(), int64_t{0});
+            quantile_select_recurse<scalar_t>(
+                idx.data(), drow, sorted_ranks.data(), 0, L, 0, U);
+            for (const auto m : c10::irange(M)) {
+              outrow[m] = idx[rkrow[m]];
+            }
+          }
+        });
+      });
+  return out.reshape(ranks.sizes());
+}
+
 QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
     const std::string_view interpolation) {
   if (interpolation == "linear") {
@@ -264,14 +347,14 @@ Tensor quantile_compute(
   }
 
   // Flatten input if no dim provided else move dim to reduce as last dimension.
-  // Sort to efficiently query kth values.
-  Tensor sorted;
+  // Left unsorted: the fast path selects directly, the fallback sorts.
+  Tensor reduced;
   if (!orginal_dim) {
-    sorted = std::get<0>(self.flatten().sort());
+    reduced = self.flatten();
   } else if (wrapped_dim == self.dim() - 1) {
-    sorted = std::get<0>(self.sort());
+    reduced = self;
   } else {
-    sorted = std::get<0>(self.unsqueeze(-1).transpose(wrapped_dim, -1).sort());
+    reduced = self.unsqueeze(-1).transpose(wrapped_dim, -1);
   }
 
   // Treat q as a 1D tensor for the following computations
@@ -282,8 +365,8 @@ Tensor quantile_compute(
   // View input as reduced_size + size of dim to reduce
   std::vector<c10::SymInt> in_shape(out_shape.size());
   std::copy(out_shape.begin() + 1, out_shape.end(), in_shape.begin());
-  in_shape[in_shape.size() - 1] = sorted.sym_size(-1);
-  sorted = sorted.view_symint(in_shape);
+  in_shape[in_shape.size() - 1] = reduced.sym_size(-1);
+  reduced = reduced.reshape_symint(in_shape);
 
   // quantile maps q to ranks via q * (size - 1), rounded to gather indices, so
   // size must be exactly representable in the rank dtype. float32 reaches only
@@ -299,21 +382,22 @@ Tensor quantile_compute(
       ? (1LL << std::numeric_limits<double>::digits)
       : (1LL << std::numeric_limits<float>::digits);
   TORCH_SYM_CHECK(
-      sorted.sym_size(-1).sym_le(max_size),
+      reduced.sym_size(-1).sym_le(max_size),
       "quantile() input tensor is too large for ",
       self.scalar_type(),
       " dtype: the dimension being reduced has ",
-      sorted.sym_size(-1),
+      reduced.sym_size(-1),
       " elements but at most ",
       max_size,
       " are supported");
 
-  // Convert q in [0, 1] to ranks in [0, reduction_size)
+  // Convert q in [0, 1] to ranks in [0, reduction_size). isnan reductions are order
+  // independent, so the unsorted input yields the same ranks as the fallback's sort.
   Tensor ranks;
   if (ignore_nan) {
     // For nanquantile, compute ranks based on number of non-nan values.
     // If all values are nan, set rank to 0 so the quantile computed is nan.
-    ranks = q.to(rank_dtype) * (sorted.isnan().logical_not_().sum(-1, true) - 1);
+    ranks = q.to(rank_dtype) * (reduced.isnan().logical_not_().sum(-1, true) - 1);
     // For Composite Compliance,
     // if `ranks` is `CCT` but it's tangent is a regular Tensor,
     // then while computing jvp, we end calling `masked_fill_`
@@ -327,9 +411,9 @@ Tensor quantile_compute(
   } else {
     // For quantile, compute ranks based on reduction size. If there is nan
     // set rank to last index so the quantile computed will be nan.
-    auto last_index = sorted.sym_size(-1) - 1;
+    auto last_index = reduced.sym_size(-1) - 1;
     std::vector<Tensor> tl = at::broadcast_tensors(
-        {q.to(rank_dtype) * last_index, sorted.isnan().any(-1, true)});
+        {q.to(rank_dtype) * last_index, reduced.isnan().any(-1, true)});
     ranks = at::masked_fill(tl[0], tl[1], last_index);
   }
 
@@ -343,21 +427,56 @@ Tensor quantile_compute(
   }
 
   Tensor ranks_below = ranks.toType(kLong);
-  Tensor values_below = sorted.gather(-1, ranks_below);
+  const bool interpolate =
+      interpolation == QUANTILE_INTERPOLATION_MODE::LINEAR ||
+      interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT;
 
-  // Actual interpolation is only needed for the liner and midpoint modes
-  if (interpolation == QUANTILE_INTERPOLATION_MODE::LINEAR ||
-      interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT) {
-    // calculate weights for linear and midpoint
-    // ranks may be double while values stay float32; the lerp weight must match
-    // the value dtype or the interpolation upcasts the output.
-    Tensor weights = interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT
+  // Weights and the upper ranks are shared by both value-acquisition paths.
+  // ranks may be double while values stay float32; the lerp weight must match
+  // the value dtype or the interpolation upcasts the output.
+  Tensor weights, ranks_above;
+  if (interpolate) {
+    weights = interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT
         ? at::full_like(ranks, 0.5, self.options())
         : (ranks - ranks_below).to(self.scalar_type());
+    ranks_above = ranks.ceil_().toType(kLong);
+  }
 
-    // Interpolate to compute quantiles and store in values_below
-    Tensor ranks_above = ranks.ceil_().toType(kLong);
-    Tensor values_above = sorted.gather(-1, ranks_above);
+  // Acquire the values at the requested ranks. On CPU with real (non-subclass) tensors,
+  // select the order statistics and gather them: skips the sort, keeps autograd through
+  // gather. Subclass-like inputs (other backends, tracing, vmap) and large rank sets fall
+  // back to the sort, gated by num_ranks <= 100 and num_ranks^2 <= L (where selection wins).
+  Tensor values_below, values_above;
+  bool use_fast_path =
+      self.device().is_cpu() && !areAnyTensorSubclassLike({self, q});
+  if (use_fast_path) {
+    // Sizes are concrete here: tracing uses subclass-like tensors, excluded above.
+    const int64_t num_ranks = (interpolate ? 2 : 1) * ranks_below.size(-1);
+    use_fast_path =
+        num_ranks <= 100 && num_ranks * num_ranks <= reduced.size(-1);
+  }
+  if (use_fast_path) {
+    const Tensor reduced_contig = reduced.contiguous();
+    if (interpolate) {
+      const Tensor idx = quantile_select_indices_cpu(
+          reduced_contig, at::cat({ranks_below, ranks_above}, -1));
+      const int64_t k = ranks_below.size(-1);
+      values_below = reduced_contig.gather(-1, idx.narrow(-1, 0, k));
+      values_above = reduced_contig.gather(-1, idx.narrow(-1, k, k));
+    } else {
+      values_below = reduced_contig.gather(
+          -1, quantile_select_indices_cpu(reduced_contig, ranks_below));
+    }
+  } else {
+    const Tensor sorted = std::get<0>(reduced.sort());
+    values_below = sorted.gather(-1, ranks_below);
+    if (interpolate) {
+      values_above = sorted.gather(-1, ranks_above);
+    }
+  }
+
+  // Actual interpolation is only needed for the linear and midpoint modes
+  if (interpolate) {
     // For Composite Compliance,
     // if either `values_below`, `values_above` or `weights` are a CCT
     // or tangents of `value_above` and `weights` are a CCT,

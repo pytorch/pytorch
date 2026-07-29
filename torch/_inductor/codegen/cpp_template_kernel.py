@@ -184,7 +184,7 @@ class CppTemplateKernel(CppKernel):
     def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data  # type: ignore[arg-type]
+        return L.view(node, sizes).data
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
@@ -515,7 +515,7 @@ class CppTemplateKernel(CppKernel):
                                 in all_read_names
                                 and orig_src[gemm_idx].get_name() not in all_read_names
                             ):
-                                # Epilogue might directly read the MultiOutput, Locallize MultiOutput to the local Buffer
+                                # Epilogue might directly read the MultiOutput, Localize MultiOutput to the local Buffer
                                 # if this MultiOutput has not been stored by in-template epilogue
                                 # otherwise, use the cse store cache if it will be stored before used
                                 global_buffers.append(multi_output_buffers[gemm_idx])

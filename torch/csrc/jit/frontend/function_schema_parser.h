@@ -8,7 +8,7 @@
 namespace torch::jit {
 
 // allow_typevars: If true, we assume that lowercase types that we don't
-// understand are type variables. This is only needed for TorchScript (and not
+// understand are type variables. This is only needed for TorchScript (and
 // not needed for custom ops).
 // If false, we disallow typevars, except in certain cases for BC reason (i.e.
 // your op is in the aten or prim namespace).

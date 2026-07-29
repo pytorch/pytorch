@@ -68,7 +68,7 @@ def load_aoti_eager_cache(
             with open(op_conf) as f:
                 json_data = json.load(f)
                 for item in json_data:
-                    # Get absolution path for kernel library
+                    # Get absolute path for kernel library
                     kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
                     item["kernel_path"] = kernel_lib_abs_path.as_posix()
 
