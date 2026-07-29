@@ -6,7 +6,9 @@ carry grouped TensorSSA layouts, matches supported local reductions, and plans
 the main, auxiliary, and local-reduction consumers.
 
 ``materialize_flex_gemm_epilogue`` uses that analysis to generate the CuTeDSL
-epilogue and physical reduction callbacks.
+epilogue and physical reduction callbacks. Structural FX schemas are normalized
+once during analysis; materialization consumes those forms while ordinary
+pointwise nodes remain on the open-ended ops-handler path.
 """
 
 import dataclasses
@@ -69,6 +71,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmStructuralInt,
     FlexGemmUnsupportedReductionForm,
     FlexGemmViewForm,
+    grouped_tensor_layout,
     is_shape_preserving_pointwise_node,
     iter_fx_node_inputs,
     lower_full_scalar,
@@ -406,9 +409,12 @@ class FlexGemmLocalReduceAnalysis:
 
     def bind_grouped_layout(self, node: torch.fx.Node, form: FlexGemmViewForm) -> bool:
         """Attach a grouped TensorSSA layout introduced by a reshape."""
-        if form.grouped_layout is None:
+        grouped_layout = grouped_tensor_layout(
+            form.shape, tensor_meta_shape(form.source)
+        )
+        if grouped_layout is None:
             return False
-        self.grouped_layouts[node] = form.grouped_layout
+        self.grouped_layouts[node] = grouped_layout
         return True
 
     def propagate_local_reduce_match(
@@ -647,9 +653,10 @@ class FlexGemmLocalReduceAnalysis:
         if not isinstance(form, FlexGemmViewForm):
             return None
         source_node = form.source
-        if form.grouped_layout is None:
+        grouped_layout = self.grouped_layouts.get(grouped_source)
+        if grouped_layout is None:
             return None
-        layout = form.grouped_layout.layout
+        layout = grouped_layout.layout
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
@@ -989,8 +996,7 @@ def match_grouped_main_lane(
         if grouped_layout is None or grouped_layout.layout.axis != 1:
             return None
         group = grouped_layout.layout.group
-        if view_form.grouped_layout is not None:
-            structural_values.extend(view_form.grouped_layout.structural_values)
+        structural_values.extend(grouped_layout.structural_values)
         chunked = False
         layout_node = None
     else:
@@ -1095,11 +1101,13 @@ class FlexGemmEpilogueAnalysis:
     """Bundle the immutable analysis consumed by FlexGEMM lowering and emission.
 
     Attributes:
+        gemm: The validated GEMM node shared by lowering and emission.
         outputs: Classification of main, auxiliary, and local-reduction outputs.
         local_reduce: Grouped layouts and local-reduction matches from the FX graph.
         grouped_select_indices: Select indices committed after grouped validation.
     """
 
+    gemm: torch.fx.Node
     outputs: FlexGemmOutputPlan
     local_reduce: FlexGemmLocalReduceAnalysis
     grouped_select_indices: dict[torch.fx.Node, int] = dataclasses.field(
@@ -1146,7 +1154,12 @@ class FlexGemmEpilogueAnalysis:
             match.commit_guards()
         if outputs.local_reduce is not None:
             outputs.local_reduce.match.commit_guards()
-        return cls(outputs, local_reduce, grouped_select_indices)
+        analysis = cls(gemm, outputs, local_reduce, grouped_select_indices)
+        active_geometries = OrderedSet(analysis.required_geometries)
+        for grouped_layout in local_reduce.grouped_layouts.values():
+            if grouped_layout.layout in active_geometries:
+                grouped_layout.commit_guards()
+        return analysis
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
@@ -1179,7 +1192,7 @@ def analyze_flex_gemm_epilogue(
 
     Args:
         graph_module: FlexGEMM body graph containing GEMM and epilogue nodes.
-        gemm: The GEMM node within ``graph_module`` that the epilogue consumes.
+        gemm: The validated GEMM node within ``graph_module``.
 
     Returns:
         Output and local-reduction analysis shared by later lowering phases.
@@ -1239,7 +1252,6 @@ class FlexGemmEpilogueEmitter:
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
-        gemm_op: torch._ops.OpOverload,
         analysis: FlexGemmEpilogueAnalysis,
         epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
         *,
@@ -1248,7 +1260,7 @@ class FlexGemmEpilogueEmitter:
         self.graph_module = graph_module
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.fast_math = fast_math
-        self.gemm = gemm_node(graph_module, gemm_op)
+        self.gemm = analysis.gemm
         self.outputs = analysis.outputs
         self.structural_forms = analysis.local_reduce.graph.structural_forms
         self.grouped_select_indices = analysis.grouped_select_indices
@@ -1582,7 +1594,6 @@ class FlexGemmEpilogueEmitter:
 
 def materialize_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
-    gemm_op: torch._ops.OpOverload,
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
     *,
@@ -1597,8 +1608,7 @@ def materialize_flex_gemm_epilogue(
 
     Args:
         graph_module: FlexGEMM body graph containing the GEMM and epilogue nodes.
-        gemm_op: GEMM overload expected to occur exactly once in the body.
-        analysis: Shared output and local-reduction analysis for the graph.
+        analysis: Shared GEMM, output, and local-reduction analysis for the graph.
         epilogue_arg_placeholders: Captured tensor placeholders exposed as
             generated epilogue parameters.
         fast_math: Whether supported CuTeDSL math operations may use approximate
@@ -1611,7 +1621,6 @@ def materialize_flex_gemm_epilogue(
     """
     return FlexGemmEpilogueEmitter(
         graph_module,
-        gemm_op,
         analysis,
         epilogue_arg_placeholders,
         fast_math=fast_math,
