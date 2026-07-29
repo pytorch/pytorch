@@ -6967,7 +6967,6 @@ Tensor gather_with_keepdimed_indices(
     int64_t dim,
     const Tensor& indices,
     bool keepdim) {
-  dim = at::maybe_wrap_dim(dim, input.dim());
   if (input.dim() > 0 && input.sym_size(dim) == 0) {
     return input.new_zeros_symint(indices.sym_sizes());
   }

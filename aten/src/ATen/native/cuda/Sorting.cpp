@@ -121,7 +121,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   indices.resize_(out_shape);
 
   if (self.numel() == 0) {
-    if (self.is_floating_point()) {
+    if (self.is_floating_point() && self.size(dim) == 0) {
       values.fill_(std::numeric_limits<float>::quiet_NaN());
     }
     indices.zero_();
