@@ -354,6 +354,11 @@ class _KinetoProfile:
                     self._custom_profiler_config.get("enable_pm_sampling")
                 ),
                 pm_metrics=self._custom_profiler_config.get("pm_metrics"),
+                # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
+                # instantiate + arrow rendering); off unless the config requests them.
+                enable_graph_dependencies=bool(
+                    self._custom_profiler_config.get("enable_graph_dependencies")
+                ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )
