@@ -136,7 +136,7 @@ namespace c10::xpu {
   _(memory_clock_rate, memory_clock_rate, 0)                                  \
                                                                               \
   /* the maximum bus width between device and memory in bits. */              \
-  _(memory_bus_width, memory_bus_width, 0)                                    \
+  _(memory_bus_width, memory_bus_width, 0)
 
 
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
