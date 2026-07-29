@@ -25,7 +25,7 @@ def sample_function(a: torch.Tensor, b: torch.Tensor, x: torch.Tensor) -> torch.
 
 class ComplexTests(ComplexDynamoTestCase):
     def test_simple(self):
-        fn_c = torch.compile(sample_function, fullgraph=True)
+        fn_c = torch.compile(sample_function, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         a = torch.randn(2, 2, dtype=torch.complex64)
         b = torch.randn(2, 2, dtype=torch.complex64)
         x = torch.randn(2, 2)
@@ -39,7 +39,7 @@ class ComplexTests(ComplexDynamoTestCase):
 
         re = torch.randn(2, 2, dtype=torch.float32)
         im = torch.randn(2, 2, dtype=torch.float32)
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(fn_c(re, im), f(re, im))
 
     def test_no_complex_inputs(self):
@@ -48,7 +48,7 @@ class ComplexTests(ComplexDynamoTestCase):
             b = torch.complex(torch.cos(x), torch.sin(y))
             return sample_function(a, b, x)
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
@@ -58,7 +58,7 @@ class ComplexTests(ComplexDynamoTestCase):
         def f(a, b, x):
             return [sample_function(a, b, x), sample_function(b, a, x)]
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         a = torch.randn(2, 2, dtype=torch.complex64)
         b = torch.randn(2, 2, dtype=torch.complex64)
@@ -74,7 +74,7 @@ class ComplexTests(ComplexDynamoTestCase):
             return out
 
         a = torch.randn(2, 2, dtype=torch.complex64)
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertRaises(RuntimeError, fn_c, a)
 
     @unittest.expectedFailure
@@ -86,7 +86,7 @@ class ComplexTests(ComplexDynamoTestCase):
             return out
 
         a = torch.randn(2, 2, dtype=torch.complex64)
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         ref = f(a)
         test = fn_c(a)
         self.assertEqual(ref, test)
@@ -98,7 +98,7 @@ class ComplexTests(ComplexDynamoTestCase):
             b[...] = torch.ones_like(b)
             return a
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(f(), fn_c())
 
     def test_neg_alias(self):
@@ -108,7 +108,7 @@ class ComplexTests(ComplexDynamoTestCase):
             b[...] = torch.ones_like(b)
             return a
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(f(), fn_c())
 
     def test_complex_output_aliases_input(self):
@@ -117,7 +117,7 @@ class ComplexTests(ComplexDynamoTestCase):
             return a[...]
 
         a = torch.randn(2, 2, dtype=torch.complex64)
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         ref = f(a)
         test = fn_c(a)
         self.assertEqual(ref, test)
@@ -132,7 +132,7 @@ class ComplexTests(ComplexDynamoTestCase):
         a = torch.randn(2, 2, dtype=torch.complex64)
         b = torch.randn(2, 2, dtype=torch.complex64)
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertRaises(RuntimeError, fn_c, a, b)
 
     @unittest.expectedFailure
@@ -145,7 +145,7 @@ class ComplexTests(ComplexDynamoTestCase):
         a = torch.randn(2, 2, dtype=torch.complex64)
         b = torch.randn(2, 2, dtype=torch.complex64)
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         a_ref = a.clone()
         a_test = a.clone()
@@ -159,7 +159,7 @@ class ComplexTests(ComplexDynamoTestCase):
             a[...] = torch.zeros_like(a)
             return out
 
-        mutate_c = torch.compile(mutate, fullgraph=True)
+        mutate_c = torch.compile(mutate, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(mutate(), mutate_c())
 
     def test_view_as_real(self):
@@ -168,7 +168,7 @@ class ComplexTests(ComplexDynamoTestCase):
             b = torch.zeros(2, 2, dtype=torch.complex64)
             return torch.view_as_real(a).clone(), b
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(f(), fn_c())
 
     def test_rope(self):
@@ -211,7 +211,7 @@ class ComplexTests(ComplexDynamoTestCase):
         xq = torch.randn(4, 32, 64, generator=g)
         xk = torch.randn(4, 32, 64, generator=g)
 
-        fn_c = torch.compile(f, fullgraph=True)
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(f(xq, xk), fn_c(xq, xk))
 
 

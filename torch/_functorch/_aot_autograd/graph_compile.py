@@ -38,6 +38,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
@@ -599,7 +600,7 @@ def collect_fw_donated_buffer_idxs(
 
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
         # Only access storage if a tensor has storage (not sparse)
-        if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
+        if t is not None and is_fake_tensor(t) and not is_sparse_any(t):
             storage_refs.add(StorageWeakRef(t.untyped_storage()))
 
     num_saved_tensor = len(saved_tensors)
@@ -608,7 +609,7 @@ def collect_fw_donated_buffer_idxs(
         t = saved_tensors[i]
         if (
             t is not None
-            and isinstance(t, FakeTensor)
+            and is_fake_tensor(t)
             and not is_sparse_any(t)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
@@ -857,6 +858,9 @@ def run_joint_graph_passes_on_hops(
     recursive partitioning of nested regions is left to downstream passes.
     """
     from torch._higher_order_ops import invoke_subgraph
+    from torch._higher_order_ops.invoke_subgraph import (
+        get_backward_nested_region_config,
+    )
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
         return len(mod.graph.find_nodes(op="output")[0].args[0])
@@ -1232,6 +1236,25 @@ def run_joint_graph_passes_on_hops(
             # inputs for the new partitioned backward graph. For the forward
             # graph, it was fine because the input signature remains same.
             new_bw_node.meta.pop("eager_input_vals", None)
+
+            # When the region sets backward-specific inductor config, compile the
+            # partitioned backward under it; the forward keeps its own config.
+            fw_region_config = fw_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            # get_backward_nested_region_config returns fw_config unchanged when
+            # the region has no distinct backward config, so identity tells us
+            # whether to stamp.
+            bw_region_config = get_backward_nested_region_config(fw_region_config)
+            if bw_region_config is not fw_region_config:
+                # Re-stamp on the fresh backward node's meta["custom"] (the source
+                # of truth: unlike a GraphModule's meta it survives FX transforms).
+                # Lowering picks it up via the subgraph-module mirror (_propagate_*)
+                # or the ir.py node fallback.
+                new_bw_node.meta["custom"] = {
+                    **new_bw_node.meta.get("custom", {}),
+                    "nested_region_config": bw_region_config,
+                }
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
@@ -1995,13 +2018,19 @@ def _categorize_saved_tensors_for_backward(
 
     num_symints_saved_for_bw = 0
     num_opaque_objects_saved_for_bw = 0
+    saved_tensor_is_graph_input: list[bool] = []
     for idx, node in enumerate(fw_outs_saved_for_bw):
         if is_sym_node(node):
             num_symints_saved_for_bw += 1
         elif is_opaque_node(node):
             num_opaque_objects_saved_for_bw += 1
         elif isinstance(node, torch.fx.Node) and "val" in getattr(node, "meta", {}):
-            if isinstance(node.meta["val"], FakeTensor):
+            if is_fake_tensor(node.meta["val"]):
+                # If the saved_tensor is a view, a graph intermediate,
+                # and returned from the autograd.Function output, we need to
+                # detach() it to prevent a reference cycle. Record
+                # if the saved_tensor is a graph input here to help.
+                saved_tensor_is_graph_input.append(node.op == "placeholder")
                 # record dynamic tensor activations
                 dynamic_dims: set[int] = {
                     dim
@@ -2012,11 +2041,25 @@ def _categorize_saved_tensors_for_backward(
                     fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
             elif isinstance(node.meta["val"], (FakeScriptObject, CustomClassBase)):
                 num_opaque_objects_saved_for_bw += 1
+        else:
+            saved_tensor_is_graph_input.append(False)
 
     fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
     fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
+    num_tensors_saved_for_bw = (
+        num_fw_outs_saved_for_bw
+        - num_symints_saved_for_bw
+        - num_opaque_objects_saved_for_bw
+    )
+    if len(saved_tensor_is_graph_input) != num_tensors_saved_for_bw:
+        raise AssertionError(
+            "expected one saved_tensor_is_graph_input entry per saved tensor, "
+            f"got {len(saved_tensor_is_graph_input)} != {num_tensors_saved_for_bw}"
+        )
+    fw_metadata.saved_tensor_is_graph_input = saved_tensor_is_graph_input
     inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
     inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
+    inner_meta.saved_tensor_is_graph_input = saved_tensor_is_graph_input
 
     # See Note [Activations with no version counter checks in eager]
     # Count tensors saved with no version counter check.

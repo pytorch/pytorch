@@ -454,7 +454,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 break
 
         self.assertFalse(
-            error_messages, f"concurrent patch usage failed: {error_messages}"
+            error_messages,
+            lambda msg: f"{msg}\nconcurrent patch usage failed: {error_messages}",
         )
         self.assertTrue(config.e_bool)
 
