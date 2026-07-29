@@ -1757,6 +1757,12 @@ def get_dynamo_stats():
         {
             "calls_captured": torch._dynamo.utils.counters["stats"]["calls_captured"],
             "unique_graphs": torch._dynamo.utils.counters["stats"]["unique_graphs"],
+            # Frames Dynamo saw but could not convert (SkipFrame / error), so
+            # they fell back to running eagerly.
+            "fallbacks_to_eager": (
+                torch._dynamo.utils.counters["frames"]["total"]
+                - torch._dynamo.utils.counters["frames"]["ok"]
+            ),
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
