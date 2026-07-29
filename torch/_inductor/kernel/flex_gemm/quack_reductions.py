@@ -36,11 +36,9 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
-from torch._inductor.kernel.gemm_epilogue import (
-    GemmReductionGeometry,
-    iter_fx_node_inputs,
-    statically_known_equal,
-)
+from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
