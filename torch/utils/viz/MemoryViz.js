@@ -65,7 +65,8 @@ import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@3/+esm";
 import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@3/+esm";
 import {process_alloc_data, isPrivatePoolId, formatSize, formatAddr,
         elideRepeats, frameFilter, format_user_metadata,
-        format_forward_frames, format_frames} from "./process_alloc_data.js";
+        format_annotations, format_forward_frames,
+        format_frames} from "./process_alloc_data.js";
 
 // Global configuration for trace interaction mode
 // 'hover' = show trace on hover (default)
@@ -113,8 +114,8 @@ function Segment(addr, size, stream, frames, version, user_metadata, segment_poo
   return {addr, size, stream, version, frames, user_metadata, segment_pool_id};
 }
 
-function Block(addr, size, requested_size, frames, free_requested, version, user_metadata) {
-  return {addr, size, requested_size, frames, free_requested, version, user_metadata};
+function Block(addr, size, requested_size, frames, free_requested, version, user_metadata, annotations) {
+  return {addr, size, requested_size, frames, free_requested, version, user_metadata, annotations};
 }
 
 function EventSelector(outer, events, stack_info, memory_view) {
@@ -304,6 +305,22 @@ function MemoryView(outer, stack_info, snapshot, device) {
         b.version,
         b.user_metadata,
       );
+    }
+  }
+  // Attach post-facto annotations ('annotate' trace events) to the blocks
+  // that are live at snapshot time. Annotations for an address reset when
+  // that address is reused by a new alloc.
+  const annotation_map = {};
+  for (const event of snapshot.device_traces[device] ?? []) {
+    if (event.action === 'alloc') {
+      delete annotation_map[event.addr];
+    } else if (event.action === 'annotate') {
+      (annotation_map[event.addr] ??= []).push(event.user_metadata);
+    }
+  }
+  for (const addr in annotation_map) {
+    if (addr in block_map) {
+      block_map[addr].annotations = annotation_map[addr];
     }
   }
   sorted_segments.sort((x, y) => {
@@ -609,6 +626,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
             requested = ' (block freed but waiting due to record_stream)';
           }
           const user_metadata_str = format_user_metadata(t.user_metadata);
+          const annotations_str = format_annotations(t.annotations);
           const frames_str = format_frames(t.frames);
           const forward_frames_str = format_forward_frames(t.forward_frames);
           let pool_str = '';
@@ -621,6 +639,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
               t.segment.stream
             }${pool_str})\n` +
             (user_metadata_str ? user_metadata_str + '\n' : '') +
+            (annotations_str ? annotations_str + '\n' : '') +
             frames_str +
             forward_frames_str
           );

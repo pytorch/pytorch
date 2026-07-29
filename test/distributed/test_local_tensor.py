@@ -68,6 +68,7 @@ class LocalTensorTestBase(TestCase):
 class LocalTensorRankTest(LocalTensorTestBase):
     def setUp(self):
         super().setUp()
+        self._current_rank = 0
 
     def tearDown(self):
         super().tearDown()
@@ -87,6 +88,7 @@ class LocalTensorRankTest(LocalTensorTestBase):
                 torch.distributed.init_process_group(
                     "fake", rank=rank, world_size=self.world_size
                 )
+                self._current_rank = rank
             original_test()
 
         setattr(self, test_name, rank_loop_wrapper)
@@ -96,7 +98,10 @@ class LocalTensorRankTest(LocalTensorTestBase):
     def rank(self):
         if not dist.is_initialized():
             raise AssertionError("Process group is not initialized!")
-        return dist.get_rank()
+        # Can't use dist.get_rank() because it is patched inside LocalTensorMode
+        # to return a multi-rank SymInt, which isn't hashable for dict indexing
+        # (self._local_tensors[self.rank]).
+        return self._current_rank
 
 
 class LocalTensorWorldTest(LocalTensorTestBase):
@@ -645,6 +650,40 @@ class TestLocalTensorWorld3(LocalTensorWorldTest):
 @instantiate_parametrized_tests
 class TestLocalTensorWorld4(LocalTensorWorldTest):
     world_size = 4
+
+    def test_dist_get_rank_default_group(self):
+        with LocalTensorMode(self.world_size):
+            rank = dist.get_rank()
+            self.assertIsInstance(rank, torch.SymInt)
+            self.assertIsInstance(rank.node, LocalIntNode)
+            for r in range(self.world_size):
+                self.assertEqual(rank.node._local_ints[r], r)
+
+    def test_dist_get_rank_sub_group(self):
+        sub_ranks = [0, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks)
+        with LocalTensorMode(self.world_size):
+            rank = dist.get_rank(sub_pg)
+            self.assertIsInstance(rank, torch.SymInt)
+            self.assertIsInstance(rank.node, LocalIntNode)
+            # All ranks should be present — LocalTensorMode sims the entire
+            # mesh, so complement groups [1,3] also need group-local ranks.
+            self.assertEqual(
+                set(rank.node._local_ints.keys()), set(range(self.world_size))
+            )
+            # sub_pg=[0,2]: rank 0 -> local 0, rank 2 -> local 1
+            # complement=[1,3]: rank 1 -> local 0, rank 3 -> local 1
+            self.assertEqual(rank.node._local_ints[0], 0)
+            self.assertEqual(rank.node._local_ints[1], 0)
+            self.assertEqual(rank.node._local_ints[2], 1)
+            self.assertEqual(rank.node._local_ints[3], 1)
+
+    def test_dist_get_rank_unpatched_outside_mode(self):
+        # Verify that dist.get_rank is restored after exiting
+        orig_get_rank = dist.get_rank
+        with LocalTensorMode(self.world_size):
+            pass
+        self.assertIs(dist.get_rank, orig_get_rank)
 
     def test_dtensor_cat(self):
         with LocalTensorMode(self.world_size):

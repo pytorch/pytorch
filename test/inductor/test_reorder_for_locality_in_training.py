@@ -13,7 +13,11 @@ import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.fx_passes import post_grad
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TestCase,
+    xfailIfNoAcceleratorTriton,
+)
 
 
 def _flag_in_subprocess(env_value):
@@ -120,6 +124,7 @@ class TestReorderForLocalityInTrainingEnv(TestCase):
 
 
 class TestReorderForLocalityInTraining(TestCase):
+    @xfailIfNoAcceleratorTriton
     def test_training_flag_reorders_and_preserves_semantics(self, device):
         p_off, g_off, rec_off = _train_once(device, flag_on=False)
         p_on, g_on, rec_on = _train_once(device, flag_on=True)
@@ -144,6 +149,7 @@ class TestReorderForLocalityInTraining(TestCase):
             "flag on must reorder at least one node on the training graph",
         )
 
+    @xfailIfNoAcceleratorTriton
     def test_training_flag_noop_when_reorder_off(self, device):
         # The training flag is gated by reorder_for_locality: enabling it while
         # reorder_for_locality is off must not run the pass on a training graph.
