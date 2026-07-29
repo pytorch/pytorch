@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM)
+    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM, HardwareClassification)
 from unittest.mock import patch, call
 
 
@@ -25,6 +25,7 @@ if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
 class TestModule(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     precision = 1e-5
@@ -1012,6 +1013,8 @@ class TestModule(TestCase):
 
 
 class TestJitReplaceSubmodule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_jit_replace_submodule(self):
         from torch.jit._recursive import wrap_cpp_module
 
