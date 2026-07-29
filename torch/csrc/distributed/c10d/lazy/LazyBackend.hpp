@@ -75,6 +75,10 @@ class LazyBackend : public Backend {
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return primary_->getBackendOptions();
   }
+  void setGroupUid(const std::string& pg_uid) override {
+    Backend::setGroupUid(pg_uid);
+    primary_->setGroupUid(pg_uid);
+  }
 
   // ---- P2P: dispatched to per-peer 2-rank pair comms ----
   c10::intrusive_ptr<Work> send(
