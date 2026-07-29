@@ -133,7 +133,6 @@ def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
 _Py_TPFLAGS_MANAGED_DICT = 1 << 4 if sys.version_info >= (3, 11) else 0
 
 
-@lru_cache(maxsize=256)
 def type_has_dict(obj_type: type) -> bool:
     """Whether instances of obj_type carry an instance __dict__.
 
@@ -142,6 +141,11 @@ def type_has_dict(obj_type: type) -> bool:
     tp_dictoffset (legacy C types like BaseException). __slots__-only types and
     the builtin scalar/container bases (int, str, tuple, ...) have neither.
     Both signals are read from the type via __flags__ / __dictoffset__.
+
+    Not memoized: caching by type object would hold locally-defined classes
+    (and anything their methods close over) alive, leaking compiled models.
+    The computation is two attribute reads and a bitwise op, so caching buys
+    nothing.
     """
     return (
         bool(obj_type.__flags__ & _Py_TPFLAGS_MANAGED_DICT)
