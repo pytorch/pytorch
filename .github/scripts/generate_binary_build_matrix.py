@@ -77,7 +77,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
-    "7.14": ("rocm[libraries]==7.14"),
+    "7.14": ("rocm[libraries,device-all]==7.14"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.0 | "
         "intel-cmplr-lib-ur==2026.1.0 | "
