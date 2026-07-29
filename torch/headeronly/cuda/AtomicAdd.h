@@ -11,9 +11,9 @@
 // units.
 #if defined(__CUDACC__) || defined(__HIPCC__)
 
-// Header-only fastAtomicAdd for libtorch-agnostic (stable ABI) CUDA and HIP
-// extensions, ported from ATen/native/cuda/KernelUtils.cuh with the
-// gpuAtomicAddNoReturn fallbacks (ATen/cuda/Atomic.cuh) inlined as
+// Header-only fastAtomicAdd, usable from libtorch-agnostic (stable ABI) CUDA
+// and HIP extensions; ATen/native/cuda/KernelUtils.cuh delegates here. The
+// gpuAtomicAddNoReturn fallbacks (ATen/cuda/Atomic.cuh) are inlined as
 // detail::atomicAddScalar. This file is consumed un-hipified, so ROCm paths
 // are spelled with HIP-native types behind USE_ROCM.
 

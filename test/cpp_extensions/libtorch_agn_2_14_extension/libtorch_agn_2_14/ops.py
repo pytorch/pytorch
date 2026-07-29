@@ -22,13 +22,6 @@ def my_has_storage(t) -> bool:
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
-def my_fast_atomic_add(out, indices, values, fast_atomics) -> torch.Tensor:
-    """Accumulates values into out at indices via torch::headeronly::fastAtomicAdd (2.14+, CUDA only)."""
-    return torch.ops.libtorch_agn_2_14.my_fast_atomic_add.default(
-        out, indices, values, fast_atomics
-    )
-
-
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

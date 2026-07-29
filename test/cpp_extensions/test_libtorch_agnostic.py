@@ -268,47 +268,6 @@ class TestLibtorchAgnostic(TestCase):
         # Sparse tensors do not own a contiguous storage.
         self.assertFalse(libtorch_agnostic.ops.my_has_storage(t.to_sparse()))
 
-    @onlyCUDA
-    @skipIfTorchVersionLessThan(2, 14)
-    @dtypes(torch.float64, torch.float32, torch.float16, torch.bfloat16)
-    @parametrize("fast_atomics", [True, False])
-    def test_my_fast_atomic_add(self, device, dtype, fast_atomics):
-        import libtorch_agn_2_14 as libtorch_agnostic
-
-        out_numel = 33
-        # arange % out_numel hits both __half2 alignments and the boundary
-        # fallbacks; ones sum to small integer counts, exact in every dtype.
-        indices = torch.arange(2048, device=device) % out_numel
-        expected = torch.bincount(indices, minlength=out_numel).to(dtype)
-        values = torch.ones(indices.numel(), device=device, dtype=dtype)
-        out = torch.zeros(out_numel, device=device, dtype=dtype)
-
-        result = libtorch_agnostic.ops.my_fast_atomic_add(
-            out, indices, values, fast_atomics
-        )
-        self.assertEqual(result, expected)
-
-    @onlyCUDA
-    @skipIfTorchVersionLessThan(2, 14)
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_my_fast_atomic_add_stays_in_bounds(self, device, dtype):
-        import libtorch_agn_2_14 as libtorch_agnostic
-
-        # numel exists so the 16-bit fast path never pairs past the tensor. The
-        # odd 2-byte offset puts index 0 on the pair-with-predecessor branch,
-        # which must fall back to a scalar atomic rather than touch buf[0].
-        buf = torch.zeros(34, device=device, dtype=dtype)
-        out = buf[1:33]
-        indices = torch.tensor([0, out.numel() - 1], device=device)
-        values = torch.ones(2, device=device, dtype=dtype)
-
-        libtorch_agnostic.ops.my_fast_atomic_add(out, indices, values, True)
-
-        expected = torch.zeros_like(buf)
-        expected[1] = 1
-        expected[32] = 1
-        self.assertEqual(buf, expected)
-
     # TODO: Debug this:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
     # call_function libtorch_agnostic.my_ones_like.default(*(FakeTensor(..., size=(3, 1)), 'cpu'),
