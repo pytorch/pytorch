@@ -169,6 +169,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
     PANIC(to_meta_tensor);
   }
+  bool allow_non_fake_inputs() const override {
+    PANIC(allow_non_fake_inputs);
+  }
 };
 
 // Construct this in Global scope instead of within `disarm`

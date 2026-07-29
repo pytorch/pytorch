@@ -247,6 +247,9 @@ struct C10_API PyInterpreterVTable {
   // delegates to the mode's fake tensor converter to build a meta tensor
   virtual c10::intrusive_ptr<TensorImpl> to_meta_tensor(
       const c10::intrusive_ptr<TensorImpl>& real) const = 0;
+  // whether the active fake mode permits non-fake (real) tensor inputs, reading
+  // the live Python value (mode attr + fake_tensor_tls override)
+  virtual bool allow_non_fake_inputs() const = 0;
 };
 
 struct C10_API PyInterpreter {
