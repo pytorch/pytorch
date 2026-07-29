@@ -42,9 +42,7 @@ def empty_host_cache() -> None:
     torch._C._accelerator_emptyHostCache()
 
 
-def _flatten_stats(
-    result: list[tuple[str, Any]], prefix: str, value: Any
-) -> None:
+def _flatten_stats(result: list[tuple[str, Any]], prefix: str, value: Any) -> None:
     if isinstance(value, dict):
         for key, nested_value in value.items():
             nested_prefix = f"{prefix}.{key}" if prefix else key
