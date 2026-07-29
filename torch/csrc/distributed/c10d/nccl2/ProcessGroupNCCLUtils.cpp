@@ -469,11 +469,7 @@ void ProcessGroupNCCL::graphCleanupCallback(void* userData) {
 }
 
 cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
-  // c10d does not guarantee the ambient CUDA device matches this comm's device
-  // (unlike upstream torchcomms, which ran with the device already set). Pin it
-  // here -- the first call in every collective -- so subsequent event/record
-  // ops in this op target device_ (events are pooled per device_).
-  c10::cuda::set_device(device_.index());
+  c10::cuda::CUDAGuard gpuGuard(device_);
   if (async_op) {
     auto current_stream = at::cuda::getCurrentCUDAStream(device_.index());
     if (!dependency_event_.has_value() || !internal_stream_.has_value()) {
@@ -499,9 +495,9 @@ void ProcessGroupNCCL::ensureTensorContiguous(const at::Tensor& tensor) {
 
 void ProcessGroupNCCL::checkTensorDevice(const at::Tensor& tensor) const {
   TORCH_CHECK(
-      tensor.device().type() == device_.type(),
+      tensor.device() == device_,
       "Expected tensor on ",
-      device_.type(),
+      device_,
       " but found tensor on ",
       tensor.device());
 }

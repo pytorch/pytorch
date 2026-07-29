@@ -57,6 +57,51 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_restores_current_device(self) -> None:
+        tensor = torch.ones(4, device=self.device)
+        other_device = torch.device("cuda", 1 - self.rank)
+        torch.cuda.set_device(other_device)
+
+        dist.all_reduce(tensor)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_device_all_gather(self) -> None:
+        tensor = torch.full((4,), float(self.rank), device=self.device)
+        other_device = torch.device("cuda", 1 - self.rank)
+        outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
+        outputs[-1] = torch.empty(4, device=other_device)
+        torch.cuda.set_device(other_device)
+
+        work = dist.all_gather(outputs, tensor, async_op=True)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        work.wait()
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        torch.cuda.synchronize(self.device)
+        torch.cuda.synchronize(other_device)
+        for rank, output in enumerate(outputs):
+            self.assertEqual(output, torch.full_like(output, rank))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_list_collective_rejects_foreign_device(self) -> None:
+        other_device = torch.device("cuda", 1 - self.rank)
+        inputs = [
+            torch.full((1,), float(self.rank), device=self.device)
+            for _ in range(self.world_size)
+        ]
+        inputs[-1] = torch.full((1,), float(self.rank), device=other_device)
+        outputs = [torch.empty(1, device=self.device) for _ in range(self.world_size)]
+
+        with self.assertRaisesRegex(RuntimeError, "Expected tensor on"):
+            dist.all_to_all(outputs, inputs)
+
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
