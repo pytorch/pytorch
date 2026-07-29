@@ -5,7 +5,9 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/MathConstants.h>
 #include <c10/util/irange.h>
+#include <array>
 
 #if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
@@ -22,9 +24,8 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 // However for now opting for STL, since we are not building
 // with Sleef for mobile yet.
 
-namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
-inline namespace CPU_CAPABILITY {
+namespace at::vec::inline CPU_CAPABILITY {
 
 // Right now contains only aarch64 implementation.
 // Due to follow two reasons aarch32 is not currently supported.
@@ -96,7 +97,7 @@ struct is_vec_specialized_for<float> : std::bool_constant<true> {};
 template <>
 class Vectorized<float> {
  private:
-  float32x4_t values;
+  float32x4_t values{vmovq_n_f32(0)};
 
  public:
   using value_type = float;
@@ -104,14 +105,15 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {
-    values = vmovq_n_f32(0);
-  }
-  Vectorized(float32x4_t v) : values(v) {}
+  Vectorized() = default;
+  Vectorized(float32x4_t v) : values{v} {}
   Vectorized(float val) : values{vdupq_n_f32(val)} {}
   Vectorized(float val0, float val1, float val2, float val3)
       : values{val0, val1, val2, val3} {}
-  Vectorized(float (&arr)[4]) : Vectorized(arr[0], arr[1], arr[2], arr[3]) {}
+  Vectorized(float (&arr)[4]) // NOLINT(*-avoid-c-arrays)
+      : Vectorized{arr[0], arr[1], arr[2], arr[3]} {}
+  Vectorized(const std::array<float, 4>& arr)
+      : Vectorized{arr[0], arr[1], arr[2], arr[3]} {}
   operator float32x4_t() const {
     return values;
   }
@@ -184,30 +186,33 @@ class Vectorized<float> {
             vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
         return vec;
       }
+      default:
+        return b;
     }
-    return b;
   }
   static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size()) {
       return vld1q_f32(reinterpret_cast<const float*>(ptr));
     } else {
       // Zero tail past `count`.
-      __at_align__ float tmp_values[size()] = {};
+      __at_align__ std::array<float, size()> tmp_values{};
       std::memcpy(
-          tmp_values,
+          tmp_values.data(),
           reinterpret_cast<const float*>(ptr),
           std::min<int64_t>(count, size()) * sizeof(float));
-      return vld1q_f32(reinterpret_cast<const float*>(tmp_values));
+      return vld1q_f32(reinterpret_cast<const float*>(tmp_values.data()));
     }
   }
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {
       vst1q_f32(reinterpret_cast<float*>(ptr), values);
     } else {
-      float tmp_values[size()];
-      vst1q_f32(reinterpret_cast<float*>(tmp_values), values);
+      __at_align__ std::array<float, size()> tmp_values{};
+      vst1q_f32(reinterpret_cast<float*>(tmp_values.data()), values);
       std::memcpy(
-          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(float));
+          ptr,
+          tmp_values.data(),
+          std::min<int64_t>(count, size()) * sizeof(float));
     }
   }
   // Very slow implementation of indexing.
@@ -215,13 +220,13 @@ class Vectorized<float> {
   // Once we specialize that implementation for ARM
   // this should be removed. TODO (kimishpatel)
   float operator[](int idx) const {
-    __at_align__ float tmp[size()];
-    store(tmp);
+    __at_align__ std::array<float, size()> tmp{};
+    store(tmp.data());
     return tmp[idx];
   }
   float operator[](int idx) {
-    __at_align__ float tmp[size()];
-    store(tmp);
+    __at_align__ std::array<float, size()> tmp{};
+    store(tmp.data());
     return tmp[idx];
   }
   int zero_mask() const {
@@ -231,14 +236,14 @@ class Vectorized<float> {
         vcreate_s32(0x2 | (int64_t(0x3) << 32)));
     uint32x4_t bits_vec =
         vshlq_u32(vandq_u32(is_zero_vec, vdupq_n_u32(1)), shift);
-    return vaddvq_u32(bits_vec);
+    return vaddvq_u32(bits_vec); // NOLINT(*-narrowing-conversions)
   }
   Vectorized<float> isnan() const {
     return vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, values)));
   }
   bool has_inf_nan() const {
-    __at_align__ float tmp[size()];
-    store(tmp);
+    __at_align__ std::array<float, size()> tmp{};
+    store(tmp.data());
     for (const auto i : c10::irange(size())) {
       if (_isnan(tmp[i]) || _isinf(tmp[i])) {
         return true;
@@ -247,24 +252,24 @@ class Vectorized<float> {
     return false;
   }
   Vectorized<float> map(float (*const f)(float)) const {
-    __at_align__ float tmp[size()];
-    store(tmp);
+    __at_align__ std::array<float, size()> tmp{};
+    store(tmp.data());
     for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
-    return loadu(tmp);
+    return loadu(tmp.data());
   }
   Vectorized<float> map2(
       const Vectorized<float>& second,
       float (*const f)(float, float)) const {
-    __at_align__ float tmp[size()];
-    __at_align__ float tmp_second[size()];
-    store(tmp);
-    second.store(tmp_second);
+    __at_align__ std::array<float, size()> tmp{};
+    __at_align__ std::array<float, size()> tmp_second{};
+    store(tmp.data());
+    second.store(tmp_second.data());
     for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i], tmp_second[i]);
     }
-    return loadu(tmp);
+    return loadu(tmp.data());
   }
   Vectorized<float> abs() const {
     return Vectorized<float>(vabsq_f32(values));
@@ -350,7 +355,10 @@ class Vectorized<float> {
       return exp();
     }
 
-    const float32x4_t inv_ln2 = vdupq_n_f32(0x1.715476p+0f);
+    const float32x4_t inv_ln2 =
+        vdupq_n_f32(static_cast<float>(1 / c10::ln_2<double>));
+    // The difference from std::numbers::ln2_v<float> is intentional.
+    // NOLINTNEXTLINE(modernize-use-std-numbers)
     constexpr float ln2_hi = 0x1.62e4p-1f;
     constexpr float ln2_lo = 0x1.7f7d1cp-20f;
     constexpr float c0 = 0x1.0e4020p-7f;
@@ -414,8 +422,9 @@ class Vectorized<float> {
 
     const float32x4_t lower_bound = vdupq_n_f32(-0x1.5ebb82p+6f);
     const float32x4_t upper_bound = vdupq_n_f32(0x1.61814ap+6f);
-    const float32x4_t inv_ln2 = vdupq_n_f32(0x1.715476p+0f);
-    constexpr float ln2 = 0x1.62e43p-1f;
+    const float32x4_t inv_ln2 =
+        vdupq_n_f32(static_cast<float>(1 / c10::ln_2<double>));
+    constexpr auto ln2 = c10::ln_2<float>;
     constexpr float c2 = 0x1.5592ecp-3f;
     const float32x4_t c3 = vdupq_n_f32(0x1.017d34p-1f);
     const uint32x4_t lt_lower = vcltq_f32(values, lower_bound);
@@ -746,7 +755,6 @@ inline Vectorized<float> Vectorized<float>::erf() const {
 #undef DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC
 #endif /* defined(aarch64) */
 
-} // namespace CPU_CAPABILITY
-} // namespace at::vec
+} // namespace at::vec::inline CPU_CAPABILITY
 
 C10_DIAGNOSTIC_POP()
