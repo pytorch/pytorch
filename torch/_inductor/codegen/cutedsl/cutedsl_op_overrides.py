@@ -111,6 +111,7 @@ class CuteDSLOpOverrides(OpOverrides):
         torch.int32: "cutlass.Int32",
         torch.int64: "cutlass.Int64",
         torch.uint8: "cutlass.Uint8",
+        torch.uint16: "cutlass.Uint16",
         torch.bool: "cutlass.Boolean",
         torch.float8_e4m3fn: "cutlass.Float8E4M3FN",
         torch.float8_e5m2: "cutlass.Float8E5M2",
@@ -718,6 +719,42 @@ class CuteDSLOpOverrides(OpOverrides):
             )
         return CuteDSLOpOverrides._apply_unary_op(
             x, "(-{x})", index_expr_fn=lambda expr: -expr
+        )
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def inline_asm_elementwise(
+        *inputs: CuteDSLArg,
+        asm: str,
+        constraints: str | None = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+        input_dtypes: tuple[torch.dtype, ...] | None = None,
+    ) -> CuteDSLArg:
+        """Emit an inline PTX block elementwise over a fragment.
+
+        The requested dtype is used verbatim rather than upcast to a compute
+        type, because the asm operands name specific register classes.
+        """
+        if constraints is None:
+            raise NotImplementedError(
+                "CuteDSL inline asm requires an explicit constraint list"
+            )
+        result_type = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(dtype)
+        if result_type is None:
+            raise NotImplementedError(
+                f"CuteDSL inline asm result dtype not supported: {dtype}"
+            )
+        operands = ", ".join(
+            str(CuteDSLOpOverrides._as_expr(value)) for value in inputs
+        )
+        return V.kernel.cse.generate(
+            V.kernel.body,
+            f"inline_asm_elementwise_intrinsic({operands}, asm={asm!r}, "
+            f"constraints={constraints!r}, result_type={result_type}, "
+            f"is_pure={is_pure!r}, pack={pack!r})",
+            dtype=dtype,
         )
 
     @staticmethod
