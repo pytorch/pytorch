@@ -2015,6 +2015,14 @@ def xfailIfPy312Plus(func):
     return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
+def xfailIfPy314Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 14) else func
+
+
+def xfailIfPy313AndEarlier(func):
+    return unittest.expectedFailure(func) if sys.version_info < (3, 14) else func
+
+
 def xfailIfLinux(func):
     return unittest.expectedFailure(func) if IS_LINUX and not TEST_WITH_ROCM and not IS_FBCODE else func
 
@@ -2549,6 +2557,8 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
         lambda: IS_WINDOWS and torch.xpu.is_available(), f"skipIfWindowsXPU: {msg}"
     )
     return decorator(func) if func is not None else decorator
+
+requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
