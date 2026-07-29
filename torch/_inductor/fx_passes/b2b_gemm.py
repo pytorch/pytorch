@@ -355,9 +355,16 @@ b2b_gemm_configs = [
         "num_stages": 2,
         "num_warps": 4,
     },
-    # XPU-friendly configs: num_stages=1 with smaller tiles
-    # Triton->SPIR-V backend on XPU benefits from simpler pipeline
-    # (no software pipelining) and reduced register pressure.
+]
+
+
+# XPU-specific configs: num_stages=1 with smaller tiles. Appended to the
+# autotune candidate set only on XPU (see tuned_b2b_gemm). The triton-xpu
+# SPIR-V backend regresses on num_stages>=2 for the nested b2b loops, so
+# these simpler-pipeline configs (no software pipelining, lower register
+# pressure) keep the Triton template at parity with the unfused fallback.
+# Gated to XPU so CUDA/HIP autotune sees no extra candidates.
+b2b_gemm_xpu_configs = [
     {
         "BLOCK_SIZE_M": 32,
         "BLOCK_SIZE_N": 16,
@@ -638,8 +645,19 @@ def tuned_b2b_gemm(
         placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
     )
+    # XPU gets extra num_stages=1 / small-tile candidates: triton-xpu's
+    # SPIR-V backend regresses on deeper pipelines (num_stages>=2) for the
+    # nested b2b loops, so simpler-pipeline configs keep the Triton template
+    # at parity with the unfused fallback. Gated by device so that CUDA and
+    # HIP share the original CUDA-oriented b2b_gemm_configs candidate set.
+    device = A.get_device_or_error()
+    candidate_configs = (
+        b2b_gemm_configs + b2b_gemm_xpu_configs
+        if device.type == "xpu"
+        else b2b_gemm_configs
+    )
     choices: list[TritonTemplateCaller] = []
-    for config in b2b_gemm_configs:
+    for config in candidate_configs:
         if is_left_assoc:
             b2b_gemm_left_template.maybe_append_choice(
                 choices,
