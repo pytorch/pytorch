@@ -115,6 +115,28 @@
     export_graph_data
 ```
 
+### CUDA graph lifecycle hooks
+
+Register callbacks that fire when any CUDA graph is instantiated or destroyed --
+for example, a profiler observing graph lifecycle without the graph code carrying
+any consumer knowledge. Registering a hook is the opt-in; with none registered
+both are no-ops. Live in `torch.cuda.graphs`.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.graphs
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_graph_instantiate_hook
+    run_graph_instantiate_hooks
+    register_graph_destroy_hook
+    run_graph_destroy_hooks
+    graph_destroy_hooks_active
+
+.. currentmodule:: torch.cuda
+```
+
 ## Graph Kernel Annotations (prototype)
 
 `torch.cuda.graph_annotations` annotates the kernels captured in a CUDA
