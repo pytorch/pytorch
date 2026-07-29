@@ -287,6 +287,46 @@ def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: st
         size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
         return torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
 
+
+def make_strided_sdpa_input(
+    shape: tuple[int, int, int, int],
+    layout: str,
+    device: str,
+    dtype: torch.dtype,
+    requires_grad: bool = True,
+) -> torch.Tensor:
+    """Create a leaf SDPA input with last-dimension stride one."""
+    batch, num_heads, seq_len, head_dim = shape
+    match layout:
+        case "padded":
+            tensor = torch.randn(
+                batch, num_heads, seq_len, head_dim + 8, device=device, dtype=dtype
+            )[..., :head_dim]
+        case "offset":
+            tensor = torch.randn(
+                batch, num_heads, seq_len, head_dim + 16, device=device, dtype=dtype
+            )[..., 8 : head_dim + 8]
+        case "sequence_sliced":
+            tensor = torch.randn(
+                batch, num_heads, seq_len * 2, head_dim, device=device, dtype=dtype
+            )[:, :, ::2]
+        case "head_sliced":
+            tensor = torch.randn(
+                batch, num_heads * 2, seq_len, head_dim, device=device, dtype=dtype
+            )[:, ::2]
+        case "transposed":
+            tensor = torch.randn(
+                num_heads, batch, seq_len, head_dim, device=device, dtype=dtype
+            ).transpose(0, 1)
+        case "batch_expanded":
+            tensor = torch.randn(
+                1, num_heads, seq_len, head_dim, device=device, dtype=dtype
+            ).expand(batch, -1, -1, -1)
+        case _:
+            raise AssertionError(f"Unknown layout: {layout}")
+    return tensor.detach().requires_grad_(requires_grad)
+
+
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -1854,7 +1894,7 @@ class TestSDPAFailureModes(NNTestCase):
                 with self.assertWarnsRegex(UserWarning, "For dense inputs, both fused kernels require query, "
                                            "key and value to have"):
                     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0,
-                                                   is_causal=False, enable_gqa=True)
+                                                   is_causal=False, enable_gqa=False)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
@@ -2619,6 +2659,19 @@ class TestSDPACpuOnly(NNTestCase):
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol_grad.atol, rtol=tol_grad.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol_grad.atol, rtol=tol_grad.rtol)
 
+    def test_mqa_singleton_head_broadcast(self, device):
+        """Singleton KV heads should select CPU flash attention without GQA."""
+        query = torch.randn(2, 8, 16, 32, device=device)
+        key = torch.randn(2, 1, 32, 32, device=device)
+        value = torch.randn(2, 1, 32, 32, device=device)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = scaled_dot_product_attention(query, key, value)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            actual = scaled_dot_product_attention(query, key, value)
+
+        self.assertEqual(actual, expected)
+
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("n_heads", [[65, 5], [16, 4], [27, 1], [5, 1]])
@@ -3047,6 +3100,341 @@ class TestSDPACudaOnly(NNTestCase):
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    @parametrize("enable_gqa", [False, True])
+    def test_mqa_singleton_head_broadcast(self, device, enable_gqa):
+        """Singleton KV heads should use fused attention with either GQA mode."""
+        make_tensor = partial(
+            torch.randn, device=device, dtype=torch.float32, requires_grad=True
+        )
+        query = make_tensor(2, 8, 16, 32)
+        key = make_tensor(2, 1, 32, 32)
+        value = make_tensor(2, 1, 32, 32)
+        grad_out = torch.randn(2, 8, 16, 32, device=device)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = scaled_dot_product_attention(
+                query, key, value, enable_gqa=enable_gqa
+            )
+            expected_grads = torch.autograd.grad(
+                expected, (query, key, value), grad_out
+            )
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = scaled_dot_product_attention(
+                query, key, value, enable_gqa=enable_gqa
+            )
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
+
+        self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize(
+        "num_query_heads,num_kv_heads,is_causal,use_attn_mask,q_layout,k_layout,v_layout",
+        [
+            (8, 2, False, True, "padded", "sequence_sliced", "transposed"),
+            (8, 4, True, False, "transposed", "offset", "head_sliced"),
+            (6, 2, False, False, "sequence_sliced", "batch_expanded", "padded"),
+        ],
+    )
+    def test_mem_efficient_attention_gqa(
+        self,
+        device,
+        dtype,
+        num_query_heads,
+        num_kv_heads,
+        is_causal,
+        use_attn_mask,
+        q_layout,
+        k_layout,
+        v_layout,
+    ):
+        """Map query heads to KV groups while keeping masks query-head indexed."""
+        query = make_strided_sdpa_input(
+            (2, num_query_heads, 16, 32), q_layout, device, dtype
+        )
+        key = make_strided_sdpa_input(
+            (2, num_kv_heads, 32, 32), k_layout, device, dtype
+        )
+        value = make_strided_sdpa_input(
+            (2, num_kv_heads, 32, 16), v_layout, device, dtype
+        )
+        attn_mask = (
+            make_strided_sdpa_input(
+                (2, num_query_heads, 16, 32), "offset", device, dtype
+            )
+            if use_attn_mask
+            else None
+        )
+        grad_out = torch.randn(
+            2, num_query_heads, 16, 16, device=device, dtype=dtype
+        )
+        inputs = (query, key, value, attn_mask) if attn_mask is not None else (query, key, value)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                is_causal=is_causal,
+                enable_gqa=True,
+            )
+            expected_grads = torch.autograd.grad(expected, inputs, grad_out)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                is_causal=is_causal,
+                enable_gqa=True,
+            )
+            actual_grads = torch.autograd.grad(actual, inputs, grad_out)
+
+        forward_tolerance = 1e-2 if dtype == torch.float16 else 1e-5
+        grad_tolerance = 1e-1 if dtype == torch.float16 else 1e-4
+        self.assertEqual(
+            actual,
+            expected,
+            atol=forward_tolerance,
+            rtol=forward_tolerance,
+        )
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(
+                actual_grad,
+                expected_grad,
+                atol=grad_tolerance,
+                rtol=grad_tolerance,
+            )
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    def test_mem_efficient_attention_gqa_dropout(self, device):
+        """GQA should preserve query-head dropout and mask semantics."""
+        batch, num_query_heads, num_kv_heads = 2, 6, 2
+        group_size = num_query_heads // num_kv_heads
+        query = make_strided_sdpa_input(
+            (batch, num_query_heads, 17, 32), "sequence_sliced", device, torch.float32
+        )
+        key = make_strided_sdpa_input(
+            (batch, num_kv_heads, 33, 32), "offset", device, torch.float32
+        )
+        value = make_strided_sdpa_input(
+            (batch, num_kv_heads, 33, 24), "transposed", device, torch.float32
+        )
+        attn_mask = make_strided_sdpa_input(
+            (batch, num_query_heads, 17, 33), "padded", device, torch.float32
+        )
+        grad_out = torch.randn(
+            batch, num_query_heads, 17, 24, device=device, dtype=torch.float32
+        )
+
+        query_expanded = query.detach().clone().requires_grad_()
+        key_expanded = (
+            key.detach().repeat_interleave(group_size, dim=1).requires_grad_()
+        )
+        value_expanded = (
+            value.detach().repeat_interleave(group_size, dim=1).requires_grad_()
+        )
+        attn_mask_expanded = attn_mask.detach().clone().requires_grad_()
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            torch.cuda.manual_seed(1234)
+            actual = scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask,
+                dropout_p=0.2,
+                scale=0.37,
+                enable_gqa=True,
+            )
+            torch.cuda.manual_seed(1234)
+            expected = scaled_dot_product_attention(
+                query_expanded,
+                key_expanded,
+                value_expanded,
+                attn_mask_expanded,
+                dropout_p=0.2,
+                scale=0.37,
+            )
+
+        actual_grads = torch.autograd.grad(
+            actual, (query, key, value, attn_mask), grad_out
+        )
+        expanded_grads = torch.autograd.grad(
+            expected,
+            (query_expanded, key_expanded, value_expanded, attn_mask_expanded),
+            grad_out,
+        )
+        expected_grads = (
+            expanded_grads[0],
+            expanded_grads[1]
+            .unflatten(1, (num_kv_heads, group_size))
+            .sum(2),
+            expanded_grads[2]
+            .unflatten(1, (num_kv_heads, group_size))
+            .sum(2),
+            expanded_grads[3],
+        )
+
+        self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=4e-4, rtol=3e-4)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    def test_mem_efficient_attention_gqa_split_key(self, device):
+        """Split-key backward should reduce per-query-head KV gradients."""
+        batch, num_query_heads, num_kv_heads = 1, 6, 2
+        query = torch.randn(
+            batch, num_query_heads, 17, 64, device=device, requires_grad=True
+        )
+        key = torch.randn(
+            batch, num_kv_heads, 4096, 64, device=device, requires_grad=True
+        )
+        value = torch.randn(
+            batch, num_kv_heads, 4096, 40, device=device, requires_grad=True
+        )
+        grad_out = torch.randn(batch, num_query_heads, 17, 40, device=device)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = scaled_dot_product_attention(
+                query, key, value, enable_gqa=True
+            )
+        expected_grads = torch.autograd.grad(expected, (query, key, value), grad_out)
+
+        query_bmhd = query.detach().transpose(1, 2)
+        key_bmhd = key.detach().transpose(1, 2)
+        value_bmhd = value.detach().transpose(1, 2)
+        output, logsumexp, seed, offset, max_q, max_k = (
+            torch.ops.aten._efficient_attention_forward.default(
+                query_bmhd,
+                key_bmhd,
+                value_bmhd,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                0,
+                True,
+            )
+        )
+        grad_query, grad_key, grad_value, _ = (
+            torch.ops.aten._efficient_attention_backward.default(
+                grad_out.transpose(1, 2),
+                query_bmhd,
+                key_bmhd,
+                value_bmhd,
+                None,
+                output,
+                None,
+                None,
+                max_q,
+                max_k,
+                logsumexp,
+                0.0,
+                seed,
+                offset,
+                0,
+                False,
+                num_splits_key=4,
+            )
+        )
+        actual_grads = (
+            grad_query.transpose(1, 2),
+            grad_key.transpose(1, 2),
+            grad_value.transpose(1, 2),
+        )
+
+        self.assertEqual(output.transpose(1, 2), expected, atol=3e-5, rtol=2e-5)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    def test_mem_efficient_attention_zero_heads(self, device):
+        """Zero-head low-level attention should return empty outputs and gradients."""
+        query = torch.empty(2, 3, 0, 8, device=device)
+        key = torch.empty(2, 4, 0, 8, device=device)
+        value = torch.empty(2, 4, 0, 16, device=device)
+        output, logsumexp, seed, offset, max_q, max_k = (
+            torch.ops.aten._efficient_attention_forward.default(
+                query,
+                key,
+                value,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                0,
+                True,
+            )
+        )
+        grad_query, grad_key, grad_value, _ = (
+            torch.ops.aten._efficient_attention_backward.default(
+                torch.empty_like(output),
+                query,
+                key,
+                value,
+                None,
+                output,
+                None,
+                None,
+                max_q,
+                max_k,
+                logsumexp,
+                0.0,
+                seed,
+                offset,
+                0,
+                False,
+            )
+        )
+
+        self.assertEqual(output.shape, (2, 3, 0, 16))
+        self.assertEqual(logsumexp.shape[:2], (2, 0))
+        for grad, source in zip(
+            (grad_query, grad_key, grad_value), (query, key, value)
+        ):
+            self.assertEqual(grad.shape, source.shape)
+            self.assertEqual(grad.numel(), 0)
+
+    @parametrize(
+        "fused_kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
+    )
+    def test_mqa_singleton_head_broadcast_native_cuda(self, device, fused_kernel):
+        """Native GQA backends should accept implicit MQA broadcasting."""
+        if fused_kernel == SDPBackend.FLASH_ATTENTION and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            self.skipTest("Flash attention is not supported on this system")
+        if fused_kernel == SDPBackend.CUDNN_ATTENTION and not PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+            self.skipTest("cuDNN attention is not supported on this system")
+
+        query = torch.randn(2, 8, 16, 32, device=device, dtype=torch.float16)
+        key = torch.randn(2, 1, 32, 32, device=device, dtype=torch.float16)
+        value = torch.randn(2, 1, 32, 32, device=device, dtype=torch.float16)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = scaled_dot_product_attention(query, key, value)
+        with sdpa_kernel(backends=[fused_kernel]):
+            actual = scaled_dot_product_attention(query, key, value)
+
+        self.assertEqual(actual, expected, atol=1e-3, rtol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_gqa(self, device):
@@ -3573,7 +3961,14 @@ class TestSDPACudaOnly(NNTestCase):
     def test_mem_efficient_attention_vmap_attn_mask(self, device, mask_factory: str):
         """Exercise vmap masking through the fused memory-efficient SDPA batch rule."""
         batch, vmap_batch, num_heads, seq_len, embed_dim = 2, 8, 2, 4, 64
-        x = torch.randn(batch, vmap_batch, seq_len, embed_dim, device=device)
+        x = torch.randn(
+            batch,
+            vmap_batch,
+            seq_len,
+            embed_dim,
+            device=device,
+            requires_grad=True,
+        )
 
         def run_attention(x):
             qkv = x.view(batch, seq_len, num_heads, embed_dim // num_heads).transpose(1, 2)
@@ -3587,14 +3982,19 @@ class TestSDPACudaOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
             actual = torch.vmap(run_attention, in_dims=1, out_dims=1)(x)
             expected = torch.stack([run_attention(x[:, i]) for i in range(vmap_batch)], dim=1)
+        actual_grad = torch.autograd.grad(actual.sum(), x)[0]
+        expected_grad = torch.autograd.grad(expected.sum(), x)[0]
         self.assertEqual(actual, expected)
+        self.assertEqual(actual_grad, expected_grad)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_efficient_attention_vmap_attn_mask_only(self, device):
         """Exercise vmap when only the SDPA attention mask is batched."""
         vmap_batch, batch, num_heads, seq_len, head_dim = 8, 2, 2, 4, 32
         query = torch.randn(batch, num_heads, seq_len, head_dim, device=device)
-        attn_masks = torch.ones(vmap_batch, seq_len, seq_len, device=device, dtype=torch.bool)
+        attn_masks = torch.randn(
+            vmap_batch, seq_len, seq_len, device=device, requires_grad=True
+        )
 
         def run_attention(attn_mask):
             return F.scaled_dot_product_attention(query, query, query, attn_mask=attn_mask)
@@ -3602,7 +4002,51 @@ class TestSDPACudaOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
             actual = torch.vmap(run_attention)(attn_masks)
             expected = torch.stack([run_attention(attn_masks[i]) for i in range(vmap_batch)])
+        actual_grad = torch.autograd.grad(actual.sum(), attn_masks)[0]
+        expected_grad = torch.autograd.grad(expected.sum(), attn_masks)[0]
         self.assertEqual(actual, expected)
+        self.assertEqual(actual_grad, expected_grad)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_efficient_attention_vmap_gqa_backward(self, device):
+        """Exercise GQA backward with a per-query-head mask under vmap."""
+        vmap_batch, batch, num_query_heads, num_kv_heads = 3, 2, 6, 2
+        make_tensor = partial(
+            torch.randn,
+            vmap_batch,
+            batch,
+            device=device,
+            requires_grad=True,
+        )
+        query = make_tensor(num_query_heads, 7, 32)
+        key = make_tensor(num_kv_heads, 11, 32)
+        value = make_tensor(num_kv_heads, 11, 24)
+        attn_mask = make_tensor(num_query_heads, 7, 11)
+        grad_out = torch.randn(
+            vmap_batch, batch, num_query_heads, 7, 24, device=device
+        )
+
+        def run_attention(query, key, value, attn_mask):
+            return F.scaled_dot_product_attention(
+                query, key, value, attn_mask, enable_gqa=True
+            )
+
+        inputs = (query, key, value, attn_mask)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = torch.vmap(run_attention)(*inputs)
+            expected = torch.stack(
+                [
+                    run_attention(query[i], key[i], value[i], attn_mask[i])
+                    for i in range(vmap_batch)
+                ]
+            )
+        actual_grads = torch.autograd.grad(actual, inputs, grad_out)
+        expected_grads = torch.autograd.grad(expected, inputs, grad_out)
+
+        self.assertEqual(actual, expected)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
