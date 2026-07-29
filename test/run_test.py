@@ -860,6 +860,51 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
+    # A test that failed and then passed on an in-process rerun
+    # (pytest-rerunfailures) is not trustworthy: the first failure can leave
+    # behind state (e.g. warm compile caches) that changes the retry's
+    # behavior, making a deterministic bug look flaky. Re-verify each such
+    # test in a fresh process, with in-process reruns disabled so the
+    # verification cannot be poisoned the same way.
+    reruns_raw = read_pytest_cache("reruns")
+    rerun_passed = json.loads(reruns_raw) if reruns_raw else []
+    verify_command = [
+        "--reruns=0" if re.fullmatch(r"--reruns=\d+", arg) else arg for arg in command
+    ]
+    for nodeid in rerun_passed:
+        key = json.dumps(nodeid)  # num_failures keys keep their JSON quotes
+        if num_failures[key] > 0:
+            # Already went through the fresh-process retry loop above
+            continue
+        print_to_file(f"Verifying in-process rerun pass in a new process: {nodeid}")
+        while num_failures[key] < 3:
+            lastrun_file = (
+                REPO_ROOT
+                / ".pytest_cache/v/cache/stepcurrent"
+                / stepcurrent_key
+                / "lastrun"
+            )
+            lastrun_file.parent.mkdir(parents=True, exist_ok=True)
+            lastrun_file.write_text(key)
+            verify_ret, _ = retry_shell(
+                verify_command + [f"--rs={stepcurrent_key}"],
+                test_directory,
+                stdout=output,
+                stderr=output,
+                env=env,
+                timeout=timeout,
+                retries=0,
+            )
+            if verify_ret == 0 or verify_ret == 5:
+                print_to_file("Test succeeded in new process")
+                break
+            num_failures[key] += 1
+            print_to_file(f"Got exit code {verify_ret}, retrying single test...")
+        if num_failures[key] >= 3:
+            print_to_file(f"FAILED CONSISTENTLY: {nodeid}")
+            if IS_CI and options.upload_artifacts_while_running:
+                upload_adhoc_failure_json(test_file, nodeid)
+
     consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:

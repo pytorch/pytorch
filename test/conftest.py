@@ -411,6 +411,19 @@ class StepcurrentPlugin:
         self.made_failing_xml_location = f"{directory}/made_failing_xml"
         self.cache.set(self.made_failing_xml_location, False)
 
+        # Tests that pytest-rerunfailures reran, accumulated across the pytest
+        # invocations sharing this stepcurrent key. run_test.py re-verifies any
+        # that ultimately passed in a fresh process, since an in-process rerun
+        # can be poisoned by state the first failure left behind (e.g. warm
+        # compile caches).
+        self.reruns_location = f"{directory}/reruns"
+        self.rerun_nodeids: list[str] = self.cache.get(self.reruns_location, [])
+
+    def pytest_runtest_logreport(self, report) -> None:
+        if report.outcome == "rerun" and report.nodeid not in self.rerun_nodeids:
+            self.rerun_nodeids.append(report.nodeid)
+            self.cache.set(self.reruns_location, self.rerun_nodeids)
+
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         if not self.lastrun:
             self.report_status = "Cannot find last run test, not skipping"
