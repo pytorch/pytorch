@@ -54,7 +54,7 @@ void angle_kernel_cuda(TensorIteratorBase& iter) {
     });
 #endif
   } else {
-    AT_DISPATCH_FLOATING_TYPES(dtype, "angle_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "angle_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return angle_wrapper(a);
         });
