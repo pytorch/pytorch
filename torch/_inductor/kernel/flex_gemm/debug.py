@@ -165,11 +165,8 @@ def _format_main_transform(transform: Any | None) -> str:
 def _format_structural_dataflow(node: torch.fx.Node, form: Any) -> str:
     """Render one canonical FX structural operation as compact dataflow."""
     match form:
-        case FlexGemmViewForm(shape=shape, grouped_layout=grouped):
-            grouping = (
-                "" if grouped is None else f" [{_format_geometry(grouped.layout)}]"
-            )
-            operation = f"view(shape={shape}){grouping}"
+        case FlexGemmViewForm(shape=shape):
+            operation = f"view(shape={shape})"
         case FlexGemmReductionForm(
             dim=dim,
             keepdim=keepdim,
