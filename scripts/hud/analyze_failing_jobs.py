@@ -47,7 +47,17 @@ PER_PAGE = 100
 # treated as no-data rather than breaking a streak -- otherwise an in-flight
 # rerun, or a runner-queue backlog at the tip, would look like a failure streak
 # for a job that is actually green (queue-backlogged jobs report "queued").
-SKIPPED_CONCLUSIONS = {"neutral", "skipped", "pending", "queued", "in_progress"}
+# "cancelled" is a superseded/aborted run (e.g. a concurrency cancel-in-progress
+# when a newer commit lands), not a real result -- counting it as a failure
+# makes jobs that are otherwise skipped/green look like they are failing.
+SKIPPED_CONCLUSIONS = {
+    "neutral",
+    "skipped",
+    "pending",
+    "queued",
+    "in_progress",
+    "cancelled",
+}
 # Two failures whose captured error text is at least this similar are treated
 # as the same underlying failure.
 SIMILARITY_THRESHOLD = 0.75

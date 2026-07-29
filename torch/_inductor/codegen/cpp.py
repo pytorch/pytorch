@@ -630,14 +630,18 @@ class RecordOptimizationContext:
         return self.current_node
 
 
-def decltype_promoted(*args):
+def arith_promoted(op, a, b):
+    args = (a, b)
     if any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args):
         raise AssertionError("Promotion of vector types is not supported")
 
-    if (dt := get_promote_dtype(args)) is not None:
-        return DTYPE_TO_CPP[dt]
-    else:
-        return f"decltype({args[0]})"
+    dtype = get_promote_dtype(args)
+    cpp_type = DTYPE_TO_CPP[dtype] if dtype is not None else f"decltype({a})"
+    if dtype in (torch.int32, torch.int64):
+        # signed overflow is UB in C++; int8/int16 promote to int and cannot overflow
+        cast = f"static_cast<std::make_unsigned_t<{cpp_type}>>"
+        return f"{cpp_type}({cast}({a}) {op} {cast}({b}))"
+    return f"{cpp_type}({a} {op} {b})"
 
 
 class CppOverrides(OpOverrides):
@@ -645,15 +649,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def add(a, b):
-        return f"{decltype_promoted(a, b)}({a} + {b})"
+        return arith_promoted("+", a, b)
 
     @staticmethod
     def sub(a, b):
-        return f"{decltype_promoted(a, b)}({a} - {b})"
+        return arith_promoted("-", a, b)
 
     @staticmethod
     def mul(a, b):
-        return f"{decltype_promoted(a, b)}({a} * {b})"
+        return arith_promoted("*", a, b)
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -1335,9 +1339,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def expm1(x):
-        # decompose for a better performance
-        vec_one = f"decltype({x})(1)"
-        return f"{x}.exp() - {vec_one}"
+        return f"{x}.expm1()"
 
     @staticmethod
     def erf(x):
@@ -5238,7 +5240,7 @@ class CppScheduling(BaseScheduling):
         dry_run: bool = False,
     ) -> FusedSchedulerNode:
         if node1.is_foreach() or node2.is_foreach():
-            return ForeachKernelSchedulerNode.fuse(node1, node2)
+            return ForeachKernelSchedulerNode.fuse(node1, node2, dry_run=dry_run)
         elif node1.is_template():
             if node2.is_template():
                 raise AssertionError("expected not node2.is_template()")
@@ -5248,14 +5250,22 @@ class CppScheduling(BaseScheduling):
                 self._why_fuse_nodes(node1, node2)
                 == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
             ):
-                if not (self._align_compatible_range_nodes(node1, node2)):
-                    raise AssertionError(
-                        (
-                            node1.group,
-                            node2.group,
+                snapshots = []
+                if dry_run:
+                    snapshots = self._snapshot_node_loop_states(node1)
+                    snapshots.extend(self._snapshot_node_loop_states(node2))
+                try:
+                    if not (self._align_compatible_range_nodes(node1, node2)):
+                        raise AssertionError(
+                            (
+                                node1.group,
+                                node2.group,
+                            )
                         )
-                    )
-                return FusedSchedulerNode.fuse(node1, node2)
+                    return FusedSchedulerNode.fuse(node1, node2)
+                finally:
+                    for node, state in reversed(snapshots):
+                        node.restore_loop_state(state)
             elif self.can_fuse_vertical_outer_loop(node1, node2):
                 return OuterLoopFusedSchedulerNode.fuse(
                     node1, node2, self._get_outer_loop_fusion_depth(node1, node2)
