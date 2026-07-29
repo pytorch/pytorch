@@ -57,6 +57,9 @@ from torch.utils.checkpoint import checkpoint_sequential
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
 HAS_PYZES = importlib.util.find_spec("pyzes") is not None
+skipIfXpuGraphUnsupported = unittest.skipIf(
+    not Xe2_Or_Later, "XPUGraph are not supported on PVC"
+)
 
 cpu_device = torch.device("cpu")
 xpu_device = torch.device("xpu")
@@ -1757,6 +1760,7 @@ if __name__ == "__main__":
         torch.xpu.synchronize()
         self.assertTrue(s_cpu.is_pinned())
 
+    @skipIfXpuGraphUnsupported
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
         s = torch.xpu.Stream()
@@ -1769,6 +1773,7 @@ if __name__ == "__main__":
             self.assertTrue(s.is_capturing())
             g.capture_end()
 
+    @skipIfXpuGraphUnsupported
     def test_graph_capture_simple(self):
         s = torch.xpu.Stream()
 
@@ -1787,6 +1792,7 @@ if __name__ == "__main__":
 
         self.assertEqual(b.sum().item(), 11000.0)
 
+    @skipIfXpuGraphUnsupported
     def test_accelerator_graph_simple(self):
         s = torch.Stream()
         g = torch.accelerator.Graph()
@@ -1802,6 +1808,7 @@ if __name__ == "__main__":
 
         self.assertEqual(b.sum().item(), 11000.0)
 
+    @skipIfXpuGraphUnsupported
     def test_graphsafe_set_get_rng_state(self):
         # Define a function to create generator states, with optional graph registration
         def create_states(generator):
@@ -1878,6 +1885,7 @@ if __name__ == "__main__":
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
 
+    @skipIfXpuGraphUnsupported
     def test_graph_capture_reset_recapture(self):
         s = torch.xpu.Stream()
 
@@ -1912,6 +1920,7 @@ if __name__ == "__main__":
         g.reset()
         del g
 
+    @skipIfXpuGraphUnsupported
     def test_graph_warn_if_has_zero_nodes(self):
         with warnings.catch_warnings(record=True) as caught:
             g = torch.xpu.XPUGraph()
@@ -1921,12 +1930,14 @@ if __name__ == "__main__":
                 g.capture_end()
         self.assertTrue(any("The XPU Graph is empty" in str(w.message) for w in caught))
 
+    @skipIfXpuGraphUnsupported
     def test_graph_capture_oom(self):
         oom_regex = "out of memory"
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             with torch.xpu.graph(torch.xpu.XPUGraph()):
                 torch.zeros(2**40, device="xpu")
 
+    @skipIfXpuGraphUnsupported
     def test_repeat_graph_capture_oneDNN_memory(self):
         if self.expandable_segments:
             self.skipTest("oneDNN does not support expandable_segments memory")
@@ -1951,6 +1962,7 @@ if __name__ == "__main__":
 
         self.assertFalse(used_gb_before + 0.1 < used_gb_after)
 
+    @skipIfXpuGraphUnsupported
     def test_graph_rng_functional(self):
         ops_with_kwargs = (
             (torch.nn.functional.dropout, {"p": 0.1}),
@@ -2036,6 +2048,7 @@ if __name__ == "__main__":
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
 
+    @skipIfXpuGraphUnsupported
     def test_graph_rng_distributions(self):
         size = 10000
         input = torch.rand((size,), device="xpu", dtype=torch.float)
@@ -2149,6 +2162,7 @@ if __name__ == "__main__":
             # Adds an empty dict for kwargs, which none of the Tensor methods use
             run("Tensor", *(meth_with_args + ({},)))
 
+    @skipIfXpuGraphUnsupported
     def test_graph_two_successive(self):
         torch.xpu.empty_cache()
 
@@ -2218,6 +2232,7 @@ if __name__ == "__main__":
             torch.xpu.synchronize()
             torch.xpu.empty_cache()
 
+    @skipIfXpuGraphUnsupported
     def test_graph_three_successive(self):
         torch.xpu.empty_cache()
 
@@ -2282,6 +2297,7 @@ if __name__ == "__main__":
             torch.xpu.empty_cache()
 
     @serialTest()
+    @skipIfXpuGraphUnsupported
     def test_graph_empty_cache_after_side_stream_free_during_capture(self):
         # Freeing a block during capture must be deferred until capture ends:
         # the block is used on a side stream that was forked into the capture,
@@ -2315,6 +2331,7 @@ if __name__ == "__main__":
                 f"capture with a side-stream free must complete without error, got {e!r}"
             ) from e
 
+    @skipIfXpuGraphUnsupported
     def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
         kSmallSize = 1048576
         kSmallBuffer = 2097152
@@ -2468,6 +2485,7 @@ if __name__ == "__main__":
             torch.xpu.empty_cache()
 
     @serialTest()
+    @skipIfXpuGraphUnsupported
     def test_graph_checkpoint_preserve_rng_state(self):
         torch.xpu.manual_seed(42)
 
@@ -2497,6 +2515,7 @@ if __name__ == "__main__":
         self.assertEqual(eager_in_grad, graph_in_grad, rtol=0.0, atol=0.0)
 
     @serialTest()
+    @skipIfXpuGraphUnsupported
     def test_graph_manual_seed_mismatch_raises(self):
         torch.xpu.manual_seed(0)
         g = torch.xpu.XPUGraph()
@@ -2520,6 +2539,7 @@ if __name__ == "__main__":
         ),
     )
     @serialTest()
+    @skipIfXpuGraphUnsupported
     def test_graph_make_graphed_callables(
         self, with_amp, cache_enabled, allow_unused_input
     ):
@@ -2670,6 +2690,7 @@ if __name__ == "__main__":
         ),
     )
     @serialTest()
+    @skipIfXpuGraphUnsupported
     def test_graph_make_graphed_callables_parameterless_nograd_module(
         self, with_amp, cache_enabled, allow_unused_input
     ):
@@ -2733,6 +2754,7 @@ if __name__ == "__main__":
             model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
         )
 
+    @skipIfXpuGraphUnsupported
     def test_graph_make_graphed_callables_same_pool(self):
         if self.expandable_segments:
             self.skipTest("oneDNN does not support expandable_segments memory")
@@ -2776,6 +2798,7 @@ if __name__ == "__main__":
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
                 self.assertNotEqual(p.grad.data_ptr(), pg.grad.data_ptr())
 
+    @skipIfXpuGraphUnsupported
     def test_graph_optims_with_explicitly_capturable_param_groups(self):
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product(
@@ -2843,6 +2866,7 @@ if __name__ == "__main__":
                 self.assertEqual(ref_p1, param1)
                 self.assertEqual(ref_p2, param2)
 
+    @skipIfXpuGraphUnsupported
     def test_xpu_graph_error_options(self):
         def fn():
             x = torch.zeros([2000], device="xpu")
@@ -2893,6 +2917,7 @@ if __name__ == "__main__":
 
         self.assertFalse(throws_on_xpu_event())
 
+    @skipIfXpuGraphUnsupported
     def test_xpu_graph_raw_graph_keep_graph_false(self):
         graph = torch.xpu.XPUGraph(keep_graph=False)
         x = torch.zeros([2000], device="xpu")
@@ -2912,6 +2937,7 @@ if __name__ == "__main__":
         ):
             raw_pointer = graph.raw_xpu_graph()
 
+    @skipIfXpuGraphUnsupported
     def test_xpu_graph_raw_graph_reset_and_recapture(self):
         graph = torch.xpu.XPUGraph(keep_graph=True)
         x = torch.zeros([2000], device="xpu")
@@ -2972,6 +2998,7 @@ def caching_host_allocator_use_background_threads(use_background_threads: bool):
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+@skipIfXpuGraphUnsupported
 class TestCachingHostAllocatorXpuGraph(TestCase):
     @parametrize("use_xpu_host_register", [True, False])
     def test_pin_memory_no_use(self, use_xpu_host_register):
@@ -3109,6 +3136,7 @@ class TestXpuNativeMath(TestCase):
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+@skipIfXpuGraphUnsupported
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestXpuOptims(TestCase):
     @optims(
