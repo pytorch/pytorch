@@ -2976,11 +2976,10 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
 def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
-    from .variables.lazy import ComputedLazyConstantVariable
 
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized() and not isinstance(arg, ComputedLazyConstantVariable):
+        if not arg.is_realized():
             # Find if the arg would be realized as SymNodeVariable later on. If yes,
             # realize it and specialize. Else return the arg.
 
@@ -3302,6 +3301,55 @@ def raise_args_mismatch(
         tx,
         args=[msg_str],
     )
+
+
+def check_positional(
+    tx: InstructionTranslatorBase,
+    funcname: str,
+    nargs: int,
+    min_args: int,
+    max_args: int,
+) -> None:
+    # Mirrors CPython _PyArg_CheckPositional (Python/getargs.c): enforce
+    # min_args <= nargs <= max_args with CPython's exact TypeError text. Used
+    # for METH_FASTCALL methods, whose positional count MethodFlags (derived
+    # from ml_flags) cannot check.
+    from torch._dynamo.exc import raise_type_error
+
+    if nargs < min_args:
+        rel = "" if min_args == max_args else "at least "
+        s = "" if min_args == 1 else "s"
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{min_args} argument{s}, got {nargs}"
+        )
+    if nargs > max_args:
+        rel = "" if min_args == max_args else "at most "
+        s = "" if max_args == 1 else "s"
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{max_args} argument{s}, got {nargs}"
+        )
+
+
+def no_positional(
+    tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoPositional (Python/getargs.c).
+    from torch._dynamo.exc import raise_type_error
+
+    if args:
+        raise_type_error(tx, f"{funcname}() takes no positional arguments")
+
+
+def no_keywords(
+    tx: InstructionTranslatorBase, funcname: str, kwargs: dict[str, VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoKeywords / _PyArg_NoKwnames (Python/getargs.c).
+    # For methods reached via tp_methods, MethodFlags already rejects kwargs;
+    # use this only where MethodFlags does not run (e.g. tp_init constructors).
+    from torch._dynamo.exc import raise_type_error
+
+    if kwargs:
+        raise_type_error(tx, f"{funcname}() takes no keyword arguments")
 
 
 def iter_contains(

@@ -852,48 +852,6 @@ class ConstDictVariable(VariableTracker):
         return super().getattro_impl(tx, name)
 
 
-def _ordered_dict_move_to_end(
-    self: "OrderedDictVariable",
-    tx: "InstructionTranslatorBase",
-    args: list[VariableTracker],
-    kwargs: dict[str, VariableTracker],
-) -> VariableTracker:
-    self.install_dict_keys_match_guard()
-    tx.output.side_effects.mutation(self)
-    if args[0] not in self:
-        raise_observed_exception(KeyError, tx)
-
-    last = True
-    if len(args) == 2 and args[0].is_python_constant():
-        last = args[1].as_python_constant()
-    if "last" in kwargs and kwargs["last"].is_python_constant():
-        last = kwargs["last"].as_python_constant()
-
-    self.items.move_to_end(HashableTracker(args[0]), last=last)
-    return ConstantVariable.create(None)
-
-
-def _ordered_dict_popitem(
-    self: "OrderedDictVariable",
-    tx: "InstructionTranslatorBase",
-    args: list[VariableTracker],
-    kwargs: dict[str, VariableTracker],
-) -> VariableTracker:
-    if not self.items:
-        raise_observed_exception(KeyError, tx, args=["popitem(): dictionary is empty"])
-
-    last = True
-    if len(args) == 1 and args[0].is_python_constant():
-        last = args[0].as_python_constant()
-    if "last" in kwargs and kwargs["last"].is_python_constant():
-        last = kwargs["last"].as_python_constant()
-
-    k, v = self.items.popitem(last=last)
-    self.should_reconstruct_all = True
-    tx.output.side_effects.mutation(self)
-    return variables.TupleVariable([k.vt, v])
-
-
 class OrderedDictVariable(ConstDictVariable):
     _cpython_type = collections.OrderedDict
 
@@ -901,9 +859,52 @@ class OrderedDictVariable(ConstDictVariable):
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+
+    def move_to_end(
+        self: "OrderedDictVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self.install_dict_keys_match_guard()
+        tx.output.side_effects.mutation(self)
+        if args[0] not in self:
+            raise_observed_exception(KeyError, tx)
+
+        last = True
+        if len(args) == 2 and args[0].is_python_constant():
+            last = args[1].as_python_constant()
+        if "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
+
+        self.items.move_to_end(HashableTracker(args[0]), last=last)
+        return ConstantVariable.create(None)
+
+    def popitem(
+        self: "OrderedDictVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not self.items:
+            raise_observed_exception(
+                KeyError, tx, args=["popitem(): dictionary is empty"]
+            )
+
+        last = True
+        if len(args) == 1 and args[0].is_python_constant():
+            last = args[0].as_python_constant()
+        if "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
+
+        k, v = self.items.popitem(last=last)
+        self.should_reconstruct_all = True
+        tx.output.side_effects.mutation(self)
+        return variables.TupleVariable([k.vt, v])
+
     tp_methods = {
-        "move_to_end": Method(_ordered_dict_move_to_end),
-        "popitem": Method(_ordered_dict_popitem),
+        "move_to_end": Method(move_to_end),
+        "popitem": Method(popitem),
     }
 
     def call_method(
