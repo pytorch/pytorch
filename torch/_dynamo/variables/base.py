@@ -375,12 +375,11 @@ class Method:
     Handlers have signature `(self, tx, args, kwargs)` and return the result
     VariableTracker, or None to decline the call (the equivalent of the old
     `super().call_method` fall-through) so `call_method` continues to the
-    object-protocol dispatch below. `name` is the CPython method this entry
-    mirrors; its arity convention is derived on demand from that method's
-    ml_flags (see _derive_method_flags), so it is not declared here."""
+    object-protocol dispatch below. The method name is the tp_methods key this
+    entry is stored under (passed to `invoke`); its arity convention is derived
+    on demand from that method's ml_flags (see _derive_method_flags)."""
 
     handler: Callable[..., VariableTracker | None]
-    name: str
 
     def invoke(
         self,
@@ -390,7 +389,7 @@ class Method:
         args: Any,
         kwargs: Any,
     ) -> VariableTracker | None:
-        flags = _derive_method_flags(vt, self.name)
+        flags = _derive_method_flags(vt, name)
         _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
