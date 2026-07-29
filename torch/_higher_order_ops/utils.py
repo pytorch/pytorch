@@ -182,20 +182,22 @@ def _maybe_reenter_make_fx(fn, subgraph_decomp_table=None):
 
 
 def check_meta_consistency(
-    lhs_list: list[torch.Tensor | torch.SymInt | int],
-    rhs_list: list[torch.Tensor | torch.SymInt | int],
+    lhs_list: Sequence[torch.Tensor | torch.SymInt | int | None],
+    rhs_list: Sequence[torch.Tensor | torch.SymInt | int | None],
     lhs_name: str,
     rhs_name: str,
     include_contiguity: bool = True,
 ) -> None:
     def diff_meta_pairs(
-        lhs_list: list[torch.Tensor | torch.SymInt | int],
-        rhs_list: list[torch.Tensor | torch.SymInt | int],
+        lhs_list: Sequence[torch.Tensor | torch.SymInt | int | None],
+        rhs_list: Sequence[torch.Tensor | torch.SymInt | int | None],
     ) -> list[str]:
         def diff_meta(
-            lhs: torch.Tensor | torch.SymInt | int,
-            rhs: torch.Tensor | torch.SymInt | int,
+            lhs: torch.Tensor | torch.SymInt | int | None,
+            rhs: torch.Tensor | torch.SymInt | int | None,
         ) -> str:
+            if lhs is None and rhs is None:
+                return ""
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 return ", ".join(
                     diff_tensor_meta(
@@ -227,8 +229,8 @@ def check_meta_consistency(
 
         # Manually check the device of lhs and rhs as this field is currently not part of TensorMetadata
         def diff_device(
-            lhs: torch.Tensor | torch.SymInt | int,
-            rhs: torch.Tensor | torch.SymInt | int,
+            lhs: torch.Tensor | torch.SymInt | int | None,
+            rhs: torch.Tensor | torch.SymInt | int | None,
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 if (
@@ -1419,7 +1421,7 @@ def _has_gen_schema(op: HigherOrderOperator):
     )
 
 
-def filter_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
+def filter_with_masks(data: Sequence[torch.Tensor | None], masks: list[bool]):
     if len(data) != len(masks):
         raise AssertionError(
             f"data length ({len(data)}) != masks length ({len(masks)})"
@@ -1427,7 +1429,7 @@ def filter_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     return [item for item, keep in zip(data, masks) if keep]
 
 
-def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
+def fill_none_with_masks(data: Sequence[torch.Tensor | None], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
 

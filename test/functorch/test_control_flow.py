@@ -3336,7 +3336,8 @@ class <lambda>(torch.nn.Module):
             combine_fn=counting_combine,
             spec_init=pytree.tree_flatten(init)[1],
             spec_xs=pytree.tree_flatten(xs)[1],
-            num_init_leaves=len(init),
+            init_tensor_mask=[True] * len(init),
+            num_tensor_init=len(init),
             num_inp_leaves=len(xs),
         )
 
@@ -3351,7 +3352,8 @@ class <lambda>(torch.nn.Module):
             combine_fn=counting_combine,
             spec_init=pytree.tree_flatten(init)[1],
             spec_xs=pytree.tree_flatten(xs_one)[1],
-            num_init_leaves=len(init),
+            init_tensor_mask=[True] * len(init),
+            num_tensor_init=len(init),
             num_inp_leaves=len(xs_one),
         )
         counter[0] = 0
@@ -3826,8 +3828,8 @@ class GraphModule(torch.nn.Module):
             a: "f32[1, 10, 2]" = child + child_2;  child = None
             b: "f32[1, 10, 2]" = child_1 - child_2;  child_1 = child_2 = None
 
-            child_3: "f32[1, 10, 2]" = a - b
-            return [a, b, child_3]
+            y: "f32[1, 10, 2]" = a - b
+            return [a, b, y]
 """,
         )
 
@@ -4699,6 +4701,161 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    @decorateIf(
+        unittest.skip("autograd through None carry not yet implemented"),
+        lambda params: params["autograd"],
+    )
+    def test_scan_none_carry(self, compile_mode, reverse, device, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        xs = torch.arange(4.0, device=device, requires_grad=autograd)
+
+        def body(c, x):
+            return c, (x + 1).clone()
+
+        carry, ys = scan_fct(body, None, xs, reverse=reverse)
+        carry_f, ys_f = _fake_scan(body, None, xs, reverse=reverse)
+        self.assertIsNone(carry)
+        self.assertIsNone(carry_f)
+        self.assertEqual(ys, ys_f)
+        if autograd:
+            # carry is None; only ys has tensor leaves
+            self.check_autograd(ys, ys_f, (xs,))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    @decorateIf(
+        unittest.skip("autograd through None y not yet implemented"),
+        lambda params: params["autograd"],
+    )
+    def test_scan_none_y(self, compile_mode, reverse, device, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        init = torch.tensor(0.0, device=device, requires_grad=autograd)
+        xs = torch.arange(4.0, device=device, requires_grad=autograd)
+
+        def body(c, x):
+            return c + x, None
+
+        carry, ys = scan_fct(body, init, xs, reverse=reverse)
+        carry_f, ys_f = _fake_scan(body, init, xs, reverse=reverse)
+        self.assertEqual(carry, carry_f)
+        self.assertIsNone(ys)
+        self.assertIsNone(ys_f)
+        if autograd:
+            # ys is None; only carry has tensor leaves
+            self.check_autograd(carry, carry_f, (init, xs))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_none_carry_and_none_y(self, compile_mode, device):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        xs = torch.arange(4.0, device=device)
+
+        def body(c, x):
+            return c, None
+
+        carry, ys = scan_fct(body, None, xs)
+        carry_f, ys_f = _fake_scan(body, None, xs)
+        self.assertIsNone(carry)
+        self.assertIsNone(carry_f)
+        self.assertIsNone(ys)
+        self.assertIsNone(ys_f)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    @decorateIf(
+        unittest.skip("autograd through None-slot carry pytree not yet implemented"),
+        lambda params: params["autograd"],
+    )
+    def test_scan_mixed_pytree_carry_none_slot(self, compile_mode, device, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        xs = torch.arange(4.0, device=device, requires_grad=autograd)
+        init = (torch.tensor(0.0, device=device, requires_grad=autograd), None)
+
+        def body(c, x):
+            return (c[0] + x, None), (c[0] + x).clone()
+
+        carry, ys = scan_fct(body, init, xs)
+        carry_f, ys_f = _fake_scan(body, init, xs)
+        self.assertIsInstance(carry, tuple)
+        self.assertEqual(carry[0], torch.tensor(6.0, device=device))
+        self.assertIsNone(carry[1])
+        self.assertEqual(ys, torch.tensor([0.0, 1.0, 3.0, 6.0], device=device))
+        self.assertEqual(carry[0], carry_f[0])
+        self.assertIsNone(carry_f[1])
+        self.assertEqual(ys, ys_f)
+        if autograd:
+            # carry[1] and ys slot 1 are None; pass only the tensor parts
+            self.check_autograd((carry[0], ys), (carry_f[0], ys_f), (init[0], xs))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    @decorateIf(
+        unittest.skip("autograd through None-slot y pytree not yet implemented"),
+        lambda params: params["autograd"],
+    )
+    def test_scan_mixed_y_none_slot(self, compile_mode, device, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        init = torch.tensor(0.0, device=device, requires_grad=autograd)
+        xs = torch.arange(4.0, device=device, requires_grad=autograd)
+
+        def body(c, x):
+            return c + x, ((c + x).clone(), None)
+
+        carry, ys = scan_fct(body, init, xs)
+        carry_f, ys_f = _fake_scan(body, init, xs)
+        self.assertEqual(carry, torch.tensor(6.0, device=device))
+        self.assertIsInstance(ys, tuple)
+        self.assertEqual(ys[0], torch.tensor([0.0, 1.0, 3.0, 6.0], device=device))
+        self.assertIsNone(ys[1])
+        self.assertEqual(carry, carry_f)
+        self.assertEqual(ys[0], ys_f[0])
+        self.assertIsNone(ys_f[1])
+        if autograd:
+            self.check_autograd((carry, ys[0]), (carry_f, ys_f[0]), (init, xs))
+
+    def test_scan_none_carry_invalid_init_type_raises(self):
+        xs = torch.arange(4.0)
+
+        def body(c, x):
+            return c, x.clone()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "All init leaves must be a Tensor or None"
+        ):
+            scan(body, 3.14, xs)
+
+    def test_scan_none_carry_vmap(self):
+        xs = torch.arange(12.0).reshape(3, 4)
+
+        @torch.vmap
+        def f(row):
+            def body(c, x):
+                return c, (x + 1.0).clone()
+
+            _, ys = scan(body, None, row)
+            return ys
+
+        ys = f(xs)
+        self.assertEqual(ys, xs + 1.0)
 
 
 class AssociativeScanModels:

@@ -3274,16 +3274,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 ],
             )
 
-        if len(init_vars) == 0:
-            unimplemented(
-                gb_type="torch.scan: no init leaves",
-                context="",
-                explanation="Expected init leaves.",
-                hints=[
-                    *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
-
         # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
             unimplemented(
