@@ -229,10 +229,10 @@ class TestCostModel(DTensorOpTestBase):
 
     def test_redistribute_cost_latency(self):
         mesh = DeviceMesh("cpu", torch.arange(self.world_size))
-        torch.manual_seed(0)
-        bias = torch.randn(8)
-        mat1 = torch.randn(50, 6)
-        mat2 = torch.randn(6, 8)
+        gen = torch.Generator().manual_seed(0)
+        bias = torch.randn(8, generator=gen)
+        mat1 = torch.randn(50, 6, generator=gen)
+        mat2 = torch.randn(6, 8, generator=gen)
 
         dist_bias = distribute_tensor(bias, mesh, [Shard(0)])
         dist_mat1 = DTensor.from_local(
