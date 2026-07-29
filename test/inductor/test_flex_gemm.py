@@ -340,11 +340,11 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
         from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueGraph
         from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-            FlexGemmNormalizedGetItem,
-            FlexGemmNormalizedReduction,
-            FlexGemmNormalizedSqueeze,
-            FlexGemmNormalizedUnsupportedReduction,
-            FlexGemmNormalizedView,
+            NormalizedGetItem,
+            NormalizedReduction,
+            NormalizedSqueeze,
+            NormalizedUnsupportedReduction,
+            NormalizedView,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -376,22 +376,16 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         squeeze = nodes[torch.ops.aten.squeeze.dim]
         unsupported = nodes[torch.ops.aten.var.correction]
-        self.assertEqual(
-            normalized_nodes[view], FlexGemmNormalizedView(placeholder, (4, 2, 4))
-        )
+        self.assertEqual(normalized_nodes[view], NormalizedView(placeholder, (4, 2, 4)))
         self.assertEqual(
             normalized_nodes[reduction],
-            FlexGemmNormalizedReduction(view, [-1], True, None, "sum"),
+            NormalizedReduction(view, [-1], True, None, "sum"),
         )
-        self.assertEqual(
-            normalized_nodes[squeeze], FlexGemmNormalizedSqueeze(reduction)
-        )
-        self.assertEqual(
-            normalized_nodes[getitem], FlexGemmNormalizedGetItem(maximum, 0)
-        )
+        self.assertEqual(normalized_nodes[squeeze], NormalizedSqueeze(reduction))
+        self.assertEqual(normalized_nodes[getitem], NormalizedGetItem(maximum, 0))
         self.assertEqual(
             normalized_nodes[unsupported],
-            FlexGemmNormalizedUnsupportedReduction(
+            NormalizedUnsupportedReduction(
                 view,
                 str(torch.ops.aten.var.correction),
             ),
