@@ -15,7 +15,7 @@ class TestOpCompleteness(TestCase):
             self.assertIsNot(
                 getattr(handler, op),
                 getattr(OpsHandler, op),
-                msg=f"{handler} must implement {op}",
+                msg=lambda msg: f"{msg}\n{handler} must implement {op}",
             )
         extra_ops = list_ops(handler) - OP_NAMES
         if extra_ops:

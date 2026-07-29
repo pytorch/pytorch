@@ -15,7 +15,7 @@ def pack_int4_to_int8(weight):
     return ((weight[:, 1::2] & 0xF) << 4) | (weight[:, 0::2] & 0xF)
 
 
-# Unpack quandruples of bits in int8 values into int4 values, in row
+# Unpack quadruples of bits in int8 values into int4 values, in row
 # major order; lower 4 bits go into first int4 value goes, and upper 4
 # bits go into second int4 value.
 def unpack_int8_to_int4(weight):
