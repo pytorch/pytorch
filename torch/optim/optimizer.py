@@ -3,7 +3,7 @@
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
-from collections.abc import Callable, Hashable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
 from typing import Any, cast, overload, TypeAlias, TypeVar
@@ -86,7 +86,15 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return _use_grad
 
 
-def _get_value(x: torch.Tensor | float) -> Any:
+@overload
+def _get_value(x: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def _get_value(x: float) -> float: ...
+
+
+def _get_value(x: torch.Tensor | float) -> torch.Tensor | float:
     # item is significantly faster than a cpu tensor in eager mode
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
@@ -94,7 +102,9 @@ def _get_value(x: torch.Tensor | float) -> Any:
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
-def _stack_if_compiling(x: list[torch.Tensor | float]) -> Any:
+def _stack_if_compiling(
+    x: Sequence[torch.Tensor | float],
+) -> torch.Tensor | Sequence[torch.Tensor | float]:
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return torch.stack(cast(list[torch.Tensor], x))
     else:
@@ -226,7 +236,15 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x: float | torch.Tensor) -> Any:
+@overload
+def _to_scalar(x: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def _to_scalar(x: float) -> float: ...
+
+
+def _to_scalar(x: torch.Tensor | float) -> torch.Tensor | float:
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -776,8 +794,8 @@ class Optimizer:
         param: torch.Tensor,
         value: torch.Tensor,
         param_id: int,
-        param_groups: list[dict[Any, Any]],
-        key: Hashable = None,
+        param_groups: list[dict[str, Any]],
+        key: str | None = None,
     ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.
@@ -964,36 +982,35 @@ class Optimizer:
 
         def _cast(
             param: torch.Tensor,
-            value: Any,
-            param_id: int | None = None,
-            param_groups: list[dict[str, Any]] | None = None,
-            key: Hashable = None,
-        ) -> Any:
+            value: _T,
+            param_id: int,
+            param_groups: list[dict[str, Any]],
+            key: str | None = None,
+        ) -> _T:
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
-                return Optimizer._process_value_according_to_param_policy(
-                    param,
-                    value,
-                    # pyrefly: ignore [bad-argument-type]
-                    param_id,
-                    # pyrefly: ignore [bad-argument-type]
-                    param_groups,
-                    key,
+                return cast(
+                    _T,
+                    Optimizer._process_value_according_to_param_policy(
+                        param, value, param_id, param_groups, key
+                    ),
                 )
             elif isinstance(value, dict):
-                return {
+                casted = {
                     k: _cast(
                         param, v, param_id=param_id, param_groups=param_groups, key=k
                     )
                     for k, v in value.items()
                 }
+                return cast(_T, casted)
             elif isinstance(value, Iterable):
                 # pyrefly: ignore [bad-instantiation]
-                return type(value)(
+                rebuilt = type(value)(
                     # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]
+                return cast(_T, rebuilt)
             else:
                 return value
 
