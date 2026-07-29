@@ -780,19 +780,31 @@ def _register_builtin_gloo_backend() -> None:
 
 
 def _register_builtin_nccl_backend() -> None:
+    creator_fn = (
+        _create_nccl2_process_group
+        if os.environ.get("TORCH_DIST_USE_NCCL2") == "1"
+        else _create_nccl_process_group
+    )
     Backend.register_backend(
         Backend.NCCL,
-        _create_nccl_process_group,
+        creator_fn,
         extended_api=True,
         devices=Backend.backend_capability[Backend.NCCL],
         _backend_type=ProcessGroup.BackendType.NCCL,
     )
 
 
+def _register_builtin_nccl_legacy_backend() -> None:
+    Backend.register_backend(
+        "nccl-legacy",
+        _create_nccl_process_group,
+        extended_api=True,
+        devices=["cuda"],
+        _backend_type=ProcessGroup.BackendType.CUSTOM,
+    )
+
+
 def _register_builtin_nccl2_backend() -> None:
-    # In-tree torchcomms NCCL backend. CUSTOM backend type; registering with
-    # devices=["cuda"] sets capability without claiming the cuda default (which
-    # stays "nccl"), so this only takes effect when explicitly requested.
     Backend.register_backend(
         "nccl2",
         _create_nccl2_process_group,
