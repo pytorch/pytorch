@@ -1655,7 +1655,7 @@ jobs:
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
-      image: python:3.11
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -1715,8 +1715,6 @@ jobs:
             build_name: "libtorch-rocm7_2-shared-with-deps-release"
             container_image: "manylinux2_28-builder"
             container_image_tag_prefix: "rocm7.2"
-    container:
-      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
     env:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
