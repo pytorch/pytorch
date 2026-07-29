@@ -971,7 +971,7 @@ class TensorVariable(VariableTracker):
         # fall-through.
         method = self.tp_methods.get(name)
         if method is not None:
-            flags = _derive_method_flags(self, method.name)
+            flags = _derive_method_flags(self, name)
             _check_method_arity(self, tx, name, flags, args, kwargs)
             # Realize any LazyVariableTracker in kwargs before calling handler.
             realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
@@ -2413,7 +2413,9 @@ class TensorVariable(VariableTracker):
         "sparse_resize_and_clear_": Method(method_sparse_resize_and_clear_),
         "set_": Method(method_set_),
         "register_hook": Method(method_register_hook),
-        "register_post_accumulate_grad_hook": Method(method_register_post_accumulate_grad_hook),
+        "register_post_accumulate_grad_hook": Method(
+            method_register_post_accumulate_grad_hook
+        ),
         "requires_grad_": Method(method_requires_grad_),
         "detach_": Method(method_detach_),
         "share_memory_": Method(method_share_memory_),
