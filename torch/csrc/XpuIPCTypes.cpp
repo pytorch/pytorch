@@ -14,6 +14,7 @@
 #include <sycl/ext/oneapi/backend/level_zero.hpp>
 #include <sycl/sycl.hpp>
 
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -192,7 +193,7 @@ struct XpuIPCGlobalEntities final {
     }
   }
 
-  static bool alive;
+  static std::atomic<bool> alive;
   std::mutex ref_counters_mutex_;
   std::unordered_map<std::string, std::shared_ptr<XpuIPCRefCountersFile>>
       ref_counters_files_;
@@ -200,7 +201,7 @@ struct XpuIPCGlobalEntities final {
   XpuIPCSentDataLimbo limbo_;
 };
 
-bool XpuIPCGlobalEntities::alive = false;
+std::atomic<bool> XpuIPCGlobalEntities::alive{false};
 XpuIPCGlobalEntities xpu_ipc_global_entities;
 
 void ReturnXpuRefCounter(const std::string& handle, uint64_t offset) {
