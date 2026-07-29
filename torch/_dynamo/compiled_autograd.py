@@ -30,6 +30,7 @@ from torch._dynamo.external_utils import (
     call_accumulate_grad,
     call_backward,
     call_hook,
+    call_vjp,
     FakeCompiledAutogradEngine,
     unwrap_maybe_dynamic_int,
 )
@@ -310,6 +311,7 @@ _impure_targets = OrderedSet(
     [
         call_hook,
         call_backward,
+        call_vjp,
         FakeCompiledAutogradEngine._exec_final_callbacks_stub,
         call_accumulate_grad,
     ]
@@ -751,9 +753,11 @@ class AutogradCompilerInstance:
                     f"boxed_grads_call=True on {ctx._forward_cls.__name__} "  # type: ignore[attr-defined]
                     "is not supported with compiled autograd. "
                 )
+            # resolve vjp-vs-backward like eager's BackwardCFunction._get_user_fn
+            vjp_overridden = ctx._forward_cls.vjp is not torch.autograd.Function.vjp  # type: ignore[attr-defined]
             proxies = self.fx_tracer.create_proxy(
                 kind="call_function",
-                target=call_backward,
+                target=call_vjp if vjp_overridden else call_backward,
                 args=(
                     pctx,
                     psaved_tensors,

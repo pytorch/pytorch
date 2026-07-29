@@ -138,6 +138,22 @@ def call_backward(
     return grads
 
 
+# for vjp-only custom Functions; the caller (proxy_call_backward) resolves
+# vjp-vs-backward like eager's BackwardCFunction._get_user_fn
+def call_vjp(
+    backward_c_function: torch.autograd.function.BackwardCFunction,
+    saved_tensors: list[torch.Tensor],
+    *args: Any,
+) -> torch.Tensor | tuple[torch.Tensor, ...]:
+    fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
+    grads = fake._forward_cls.vjp(fake, *args)  # type: ignore[attr-defined]
+
+    if not isinstance(grads, tuple):
+        grads = (grads,)
+
+    return grads
+
+
 def normalize_as_list(x: Any) -> list[Any]:
     if isinstance(x, tuple):
         return list(x)
