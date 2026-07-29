@@ -3064,17 +3064,16 @@ def type_as(g: jit_utils.GraphContext, self, other):
 
 
 @_onnx_symbolic("aten::cosine_similarity")
-@symbolic_helper.parse_args("v", "v", "i", "f", "b")
-def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps, keepdim):
-    keepdims = 1 if keepdim else 0
+@symbolic_helper.parse_args("v", "v", "i", "f")
+def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps):
     cross = symbolic_helper._reducesum_helper(
-        g, mul(g, x1, x2), axes_i=[dim], keepdims_i=keepdims
+        g, mul(g, x1, x2), axes_i=[dim], keepdims_i=0
     )
     x1_l2 = symbolic_helper._reducesum_helper(
-        g, mul(g, x1, x1), axes_i=[dim], keepdims_i=keepdims
+        g, mul(g, x1, x1), axes_i=[dim], keepdims_i=0
     )
     x2_l2 = symbolic_helper._reducesum_helper(
-        g, mul(g, x2, x2), axes_i=[dim], keepdims_i=keepdims
+        g, mul(g, x2, x2), axes_i=[dim], keepdims_i=0
     )
     # pyrefly: ignore [no-matching-overload]
     div_tens = max(
