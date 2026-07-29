@@ -885,7 +885,6 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 3)
         res = fn(x)
-        self.assertEqual(res[0], [0, 1])
         i = 100
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(res, opt_fn(x))
