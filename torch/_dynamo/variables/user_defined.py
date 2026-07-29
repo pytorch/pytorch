@@ -5301,6 +5301,23 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # list.__init__ ignores excess keyword args when the instance's type
+        # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
+        # them. See the generated list___init__ wrapper's tp_new comparison:
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
+        if name == "__init__" and kwargs:
+            overrides_new = type(self.value).__new__ is not list.__new__
+            if overrides_new:
+                kwargs = {}
+        return super().call_method(tx, name, args, kwargs)
+
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
     """
