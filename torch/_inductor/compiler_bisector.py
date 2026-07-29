@@ -673,10 +673,11 @@ class CompilerBisector:
                     print(f"Failed to delete bisect status during cleanup: {e}")
                 cls.in_process_cache = in_process_cache_orig
             if pre_grad_graph_subsystem is not None:
-                try:
-                    BACKENDS["inductor"].remove(pre_grad_graph_subsystem)
-                except ValueError:
-                    pass
+                inductor_backends = BACKENDS["inductor"]
+                for i, subsystem in enumerate(inductor_backends):
+                    if subsystem is pre_grad_graph_subsystem:
+                        del inductor_backends[i]
+                        break
 
 
 HELP_TEXT = """\
