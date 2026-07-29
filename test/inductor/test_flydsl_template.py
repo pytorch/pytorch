@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import torch
+import torch.nn.functional as F
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
 from torch._inductor.codegen.flydsl.flydsl_scheduling import (
@@ -18,6 +19,10 @@ from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class _CacheParam:
@@ -302,6 +307,21 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
         return code
 
+    def _assert_compiled_grouped_mm(self, a, b, offs, *, expect_flydsl=True):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, offs):
+            return F.grouped_mm(a, b, offs=offs)
+
+        torch._dynamo.reset()
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor"), a, b, offs
+        )
+        assertion = self.assertIn if expect_flydsl else self.assertNotIn
+        assertion("async_compile.flydsl", code)
+        self.assertEqual(result, fn(a, b, offs), atol=3e-2, rtol=3e-2)
+        return code
+
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -398,6 +418,160 @@ class TestFlyDSLTemplate(TestCase):
                     b = torch.randn(64, k, device="cuda", dtype=torch.bfloat16)
                     self._assert_compiled_mm(a, b)
 
+    @parametrize(
+        "dtype,k,n",
+        [
+            (torch.bfloat16, 128, 128),
+            (torch.bfloat16, 160, 256),
+        ],
+    )
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_grouped_mm_e2e(self, dtype, k, n):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        group_sizes = torch.tensor(
+            [0, 1, 67, 0, 130, 3], device="cuda", dtype=torch.int32
+        )
+        offs = group_sizes.cumsum(0).to(torch.int32)
+        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=dtype)
+        b = torch.randn(group_sizes.numel(), k, n, device="cuda", dtype=dtype)
+        code = self._assert_compiled_grouped_mm(a, b, offs)
+        self.assertIn(".mark_layout_dynamic()", code)
+        self.assertIn("COMPILE_ONLY", code)
+        self.assertIn("_precompile", code)
+
+    @parametrize("k", (96, 192))
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        max_autotune_gemm_search_space="EXHAUSTIVE",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=True,
+    )
+    def test_flydsl_grouped_mm_autotune_e2e(self, k):
+        from torch._inductor.template_heuristics import flydsl as flydsl_heuristics
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        configs = [
+            asdict(config)
+            for config in flydsl_heuristics.get_default_grouped_gemm_configs()
+        ]
+        configs = [
+            next(config for config in configs if not config["USE_HALF_TILE_INTERLEAVED"]),
+            next(config for config in configs if config["USE_HALF_TILE_INTERLEAVED"]),
+        ]
+        group_sizes = torch.tensor(
+            [0, 1, 67, 0, 130, 3], device="cuda", dtype=torch.int32
+        )
+        offs = group_sizes.cumsum(0).to(torch.int32)
+        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(group_sizes.numel(), k, 128, device="cuda", dtype=torch.bfloat16)
+        with mock.patch.object(
+            flydsl_heuristics,
+            "get_grouped_gemm_configs",
+            return_value=configs,
+        ):
+            self._assert_compiled_grouped_mm(a, b, offs)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=False,
+    )
+    def test_flydsl_grouped_mm_kernel_paths_e2e(self):
+        from torch._inductor.template_heuristics import flydsl as flydsl_heuristics
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        config_fields = (
+            "TILE_M",
+            "TILE_N",
+            "TILE_K",
+            "STAGES",
+            "BLOCK_M_WARPS",
+            "BLOCK_N_WARPS",
+            "GROUP_M",
+            "USE_HALF_TILE_INTERLEAVED",
+        )
+        cases = (
+            ("block_swizzle", 4096, 1024, 128, (128, 128, 64, 2, 1, 4, 4, False)),
+            ("deep_pipeline", 128, 128, 192, (64, 128, 64, 3, 1, 4, 0, False)),
+            ("large_tile", 1024, 256, 128, (256, 256, 64, 2, 2, 4, 0, True)),
+        )
+        configs = [
+            asdict(config)
+            for config in flydsl_heuristics.get_default_grouped_gemm_configs()
+        ]
+
+        for name, m, n, k, expected_values in cases:
+            with self.subTest(name=name):
+                config = next(
+                    config
+                    for config in configs
+                    if tuple(config[field] for field in config_fields)
+                    == expected_values
+                )
+                group_sizes = torch.tensor([m], device="cuda", dtype=torch.int32)
+                offs = group_sizes.cumsum(0).to(torch.int32)
+                a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+                b = torch.randn(1, k, n, device="cuda", dtype=torch.bfloat16)
+                with mock.patch.object(
+                    flydsl_heuristics,
+                    "get_grouped_gemm_configs",
+                    return_value=[config],
+                ):
+                    code = self._assert_compiled_grouped_mm(a, b, offs)
+                self.assertIn("launch_gemm_gfx950_grouped", code)
+                for field, value in zip(config_fields, expected_values):
+                    self.assertIn(f"{field}: fx.Constexpr = {value}", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="ATEN,FLYDSL",
+    )
+    def test_flydsl_grouped_mm_fallback_e2e(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        group_sizes = torch.tensor([32, 64], device="cuda", dtype=torch.int32)
+        offs = group_sizes.cumsum(0).to(torch.int32)
+        k = 128
+        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=torch.bfloat16)
+        cases = (
+            (
+                "b_transposed",
+                torch.randn(2, 256, k, device="cuda", dtype=torch.bfloat16).transpose(
+                    -1, -2
+                ),
+            ),
+            (
+                "n_not_tile_divisible",
+                torch.randn(2, k, 96, device="cuda", dtype=torch.bfloat16),
+            ),
+        )
+
+        for name, b in cases:
+            with self.subTest(name=name):
+                self._assert_compiled_grouped_mm(a, b, offs, expect_flydsl=False)
+
+instantiate_parametrized_tests(TestFlyDSLTemplate)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

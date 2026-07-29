@@ -225,3 +225,82 @@ def get_gemm_configs() -> list[dict[str, int | bool]]:
         log.warning("No valid FlyDSL GEMM configuration is available")
         return []
     return [asdict(gemm_config) for gemm_config in configs]
+
+
+def get_exhaustive_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """Return exhaustive configs for the gfx950 FlyDSL grouped GEMM kernel."""
+    return get_exhaustive_gemm_configs()
+
+
+def get_default_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """Return default configs for the gfx950 FlyDSL grouped GEMM kernel.
+
+    The grouped kernel always stages N-contiguous B vectors into LDS and reads
+    them back transposed.
+    """
+    config_tuples: list[FlyDSLGemmConfigArgs] = [
+        # Small-M grouped/decode configs.  These reduce wasted work when each
+        # group has far fewer than 32 rows.
+        (16, 64, 64, 2, 1, 1, 2, 1, 0, True),
+        (16, 128, 64, 2, 1, 1, 2, 1, 0, True),
+        (32, 64, 64, 2, 1, 1, 2, 1, 0, True),
+        (32, 256, 64, 2, 1, 1, 4, 1, 0, True),
+        (32, 128, 64, 2, 1, 1, 4, 1, 0, True),
+        (64, 128, 64, 2, 1, 1, 4, 1, 0, True),
+        (64, 256, 64, 2, 1, 1, 4, 1, 0, True),
+        (128, 128, 64, 2, 1, 1, 4, 1, 0, True),
+        (128, 256, 64, 2, 1, 1, 4, 1, 0, True),
+        # Deeper pipelines, autotuned for the multi-stage overlap.
+        (64, 128, 64, 3, 1, 1, 4, 1, 0, True),
+        (128, 128, 64, 3, 1, 1, 4, 1, 0, True),
+        (128, 256, 64, 3, 1, 1, 4, 1, 0, True),
+        # Swizzled group-M variant remaps sufficiently large per-group tile grids.
+        (128, 128, 64, 2, 1, 1, 4, 1, 4, True),
+    ]
+    hti_config_tuples: list[FlyDSLHTIGemmConfigArgs] = [
+        # 2x2 half-tile-interleaved variant (stages=2 only): four half-block
+        # accumulators + per-quadrant cshuffle store for better register tiling
+        # and MMA scheduling. Requires m_waves=2, n_waves>=2 and even tiles.
+        (64, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
+        (128, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
+        (128, 128, 64, 2, 1, 2, 2, 1, 4, True, True),
+        (128, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
+        (256, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
+        (256, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
+    ]
+    # Tuple order must match the FlyDSLGemmConfig field declaration order.
+    candidates = [FlyDSLGemmConfig(*args) for args in config_tuples]
+    candidates.extend(FlyDSLGemmConfig(*args) for args in hti_config_tuples)
+    return candidates
+
+
+def get_grouped_gemm_configs(m: int, n: int, k: int) -> list[dict[str, object]]:
+    """Return supported configs for the persistent multi-stage grouped kernel."""
+    if (
+        config.flydsl_enable_autotuning
+        and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+    ):
+        candidates = get_exhaustive_grouped_gemm_configs()
+    elif config.flydsl_enable_autotuning:
+        candidates = get_default_grouped_gemm_configs()
+    else:
+        candidates = get_default_grouped_gemm_configs()
+        candidates = candidates[:1]
+
+    configs: list[dict[str, object]] = []
+    for grouped_config in candidates:
+        if grouped_config.TILE_M > max(128, m):
+            continue
+        if n < grouped_config.TILE_N or n % grouped_config.TILE_N != 0:
+            continue
+        if (k // grouped_config.TILE_K) < grouped_config.STAGES:
+            continue
+        gemm_config = asdict(grouped_config)
+        try:
+            _make_gemm_param(gemm_config)
+        except Exception:
+            continue
+        configs.append(gemm_config)
+    if not configs:
+        log.warning("No valid FlyDSL grouped GEMM configuration is available")
+    return configs
