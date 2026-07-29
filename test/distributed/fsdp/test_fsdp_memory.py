@@ -38,7 +38,7 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 def get_cur_mem(rank, result, prefix):
     """Collect memory allocated values in a result dict in MB"""
     if TEST_CUDA:
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
     result[prefix] = round(torch.accelerator.memory_allocated() / 1024 / 1024)
 
 
