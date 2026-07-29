@@ -79,7 +79,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     ),
     "7.14": {
         "rocm[libraries]==7.14"
-    }
+    },
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.0 | "
         "intel-cmplr-lib-ur==2026.1.0 | "
