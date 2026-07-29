@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import ast
 import contextlib
 import unittest
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ from torch._inductor.codegen.triton import (
     TritonKernelOverrides,
     TritonSymbols,
 )
+from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
@@ -144,6 +146,31 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_escape_triton_kernel_source_for_wrapper(self):
+        source = """\
+@triton.jit
+def helper(x):
+    s = "slash \\\\"
+    t = '''quoted'''
+    \"\"\"doc\"\"\"
+    return x
+"""
+
+        for cpp_wrapper in (False, True):
+            with inductor_config.patch("cpp_wrapper", cpp_wrapper):
+                escaped = _escape_triton_kernel_source_for_wrapper(source)
+
+            wrapper_src = f"async_compile.triton('helper', '''{escaped}''')"
+            compile(wrapper_src, "<test-wrapper-source>", "exec")
+
+            if cpp_wrapper:
+                nested_src = f'wrapper_src = r"""{wrapper_src}"""'
+                compile(nested_src, "<test-nested-wrapper-source>", "exec")
+                wrapper_src = ast.literal_eval(ast.parse(nested_src).body[0].value)
+
+            call = ast.parse(wrapper_src).body[0].value
+            self.assertEqual(ast.literal_eval(call.args[1]), source)
 
     def test_persistent_reduction_choice_two_arg_override(self):
         seen_scores = []
