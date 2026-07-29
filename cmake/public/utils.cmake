@@ -394,12 +394,6 @@ function(torch_compile_options libname)
         # I.e. failures look like torch/headeronly/util/complex.h:334:40: error: identifier '_if' preceded by whitespace in a literal operator declaration is deprecated
         # but if one to look at the source code, there are no space there
         list(APPEND private_compile_options -Wno-deprecated-literal-operator)
-        # CUDA 13.2's CCCL deprecates thrust::greater/plus/... in favor of
-        # cuda::std::. Silence it here (unconditionally, since the CUDA build
-        # applies -Werror globally rather than via the WERROR block below, so a
-        # -Wno-error= demote would not be honored); migrating the sources to
-        # cuda::std is a followup (switching outright risks older CUDA toolkits).
-        list(APPEND private_compile_options -Wno-deprecated-declarations)
       endif()
       list(APPEND private_compile_options -Wmove)
     else()
