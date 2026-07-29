@@ -215,6 +215,13 @@ def side_effect_func(x: torch.Tensor):
     print(x)
 
 
+@torch.fx.wrap
+def wrapped_optional_typing_dict(
+    value: dict[int, tuple[torch.Tensor, torch.Tensor]] | None,
+):
+    return value
+
+
 def _enrich_profiler_traces(prof):
     """
     Helper function to extract and augment profiler events with stack traces.
@@ -385,6 +392,40 @@ class TestFX(JitTestCase):
         gm = GraphModule(torch.nn.Module(), graph)
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
+
+    def test_tuple_return_annotation_for_schemas(self):
+
+        # Target an op that returns multiple tensors (e.g., var_mean)
+        op = torch.ops.aten.var_mean.default
+
+        # get_signature_for_torch_op returns a list of signatures
+        sigs = get_signature_for_torch_op(op)
+        self.assertTrue(len(sigs) > 0, "Expected at least one signature")
+
+        # Grab the first signature schema
+        sig = sigs[0]
+        ret_ann = sig.return_annotation
+
+        # 1. Ensure it's not a raw Python tuple (The bug you fixed)
+        self.assertNotEqual(
+            type(ret_ann), tuple,
+            "return_annotation should be a generic type hint, not a raw tuple of types"
+        )
+
+        # 2. Ensure it resolves to a proper tuple typing origin (tuple or typing.Tuple)
+        origin = getattr(ret_ann, "__origin__", None)
+        self.assertIn(
+            origin, (tuple, tuple),
+            f"Expected tuple or typing.Tuple origin, got {origin}"
+        )
+
+        # 3. Ensure the inner arguments are properly set to torch.Tensor
+        args = getattr(ret_ann, "__args__", None)
+        self.assertIsNotNone(args, "Tuple annotation must have __args__")
+        self.assertTrue(
+            all(issubclass(a, torch.Tensor) for a in args),
+            "Inner tuple arguments should be subclass of torch.Tensor"
+        )
 
     def test_boxed_arg_indices_codegen(self):
         def multi_boxed_call(left, passthrough, right):
@@ -1874,6 +1915,42 @@ class TestFX(JitTestCase):
         offsets = torch.LongTensor([0, 4])
         self.assertEqual(loaded(input, offsets), traced(input, offsets))
 
+    def test_save_string_type_annotation(self):
+        def f(x: "torch.Tensor") -> "torch.Tensor":
+            return x
+
+        traced = symbolic_trace(f)
+        _, (body, import_block) = traced.__reduce__()
+        self.assertExpectedInline(
+            import_block + body["_code"].rstrip(),
+            """\
+NoneType = type(None)
+_torch_Tensor_ = 'torch.Tensor'
+from math import inf
+from math import nan
+from torch import device
+import torch
+import torch.fx._pytree as fx_pytree
+import torch.utils._pytree as pytree
+
+
+def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
+    return x""",
+        )
+
+        bio = io.BytesIO()
+        torch.save(traced, bio)
+        bio.seek(0)
+        loaded = torch.load(bio, weights_only=False)
+        loaded.graph.lint()
+
+        x = torch.randn(2, 3)
+        self.assertEqual(loaded(x), traced(x))
+        self.assertEqual(
+            loaded.forward.__annotations__,
+            {"x": "torch.Tensor", "return": "torch.Tensor"},
+        )
+
     def test_return_tuple(self):
         class M(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -2510,6 +2587,25 @@ class TestFX(JitTestCase):
             return a[0]
 
         torch.jit.script(symbolic_trace(forward))
+
+    def test_optional_typing_dict_placeholder_annotation_python314(self):
+        class OptionalTypingDictModule(torch.nn.Module):
+            def forward(
+                self,
+                value: typing.Optional[  # noqa: UP045
+                    typing.Dict[  # noqa: UP006
+                        int, typing.Tuple[torch.Tensor, torch.Tensor]  # noqa: UP006
+                    ]
+                ],
+            ):
+                return wrapped_optional_typing_dict(value)
+
+        traced = symbolic_trace(OptionalTypingDictModule())
+
+        FileCheck().check("value : typing_Union[typing_Dict").check(
+            "typing_Tuple"
+        ).check("NoneType]").run(traced.code)
+        torch.jit.script(traced)
 
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
