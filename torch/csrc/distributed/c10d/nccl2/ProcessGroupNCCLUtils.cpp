@@ -266,7 +266,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         break;
       }
       if (comm_state_ != CommState::NORMAL &&
-          abort_process_on_timeout_or_error_ &&
+          options_c10d_->abort_process_on_timeout_or_error &&
           !options_c10d_->enable_reconfigure) {
         if (comm_state_ == CommState::TIMEOUT) {
           TC_LOG(ERROR, this)
@@ -360,7 +360,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       throw std::runtime_error("NCCL operation timed out");
     } else {
       abortNcclComm();
-      if (abort_process_on_timeout_or_error_) {
+      if (options_c10d_->abort_process_on_timeout_or_error) {
         TC_LOG(ERROR, this) << "Aborting process due to timeout";
         runAbortHooks();
         ::abort();
@@ -384,7 +384,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       throw std::move(ncclException);
     }
     abortNcclComm();
-    if (abort_process_on_timeout_or_error_) {
+    if (options_c10d_->abort_process_on_timeout_or_error) {
       TC_LOG(ERROR, this) << "Aborting process due to error: "
                           << ncclException.what();
       runAbortHooks();

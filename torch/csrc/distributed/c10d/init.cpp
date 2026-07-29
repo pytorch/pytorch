@@ -4051,26 +4051,32 @@ Returns:
           .def(
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>())
-          .def_property_readonly(
-              "options",
-              &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
-              R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
+              py::call_guard<py::gil_scoped_release>());
 
-  processGroupNCCL2.attr("Options") = processGroupNCCL.attr("Options");
+  intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
+      processGroupNCCL2, "Options", backendOptions)
+      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+      .def_readwrite(
+          "is_high_priority_stream",
+          &::c10d::nccl2::ProcessGroupNCCL::Options::is_high_priority_stream)
+      .def_readwrite(
+          "abort_process_on_timeout_or_error",
+          &::c10d::nccl2::ProcessGroupNCCL::Options::
+              abort_process_on_timeout_or_error);
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)
       .def(
-          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                      int rank,
-                      int size,
-                      const c10::intrusive_ptr<
-                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options) {
-            py::gil_scoped_release nogil{};
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
-          }),
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL::Options>
+                     options) {
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, std::move(options));
+              }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),

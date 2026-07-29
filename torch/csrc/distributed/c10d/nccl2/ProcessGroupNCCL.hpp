@@ -34,7 +34,6 @@
 #include <nccl.h>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
@@ -47,13 +46,6 @@ namespace c10d::nccl2 {
 // Hint key names for NCCL backend configuration
 constexpr std::string_view kHintMaxEventPoolSize = "max_event_pool_size";
 constexpr size_t kDefaultMaxEventPoolSize = 1000;
-
-// ncclConfig_t::netName is a strdup'ed const char* (see the NCCLConfig pybind
-// setter) and ncclConfig_t tracks no ownership, so plainly copying the struct
-// would leave two owners sharing one allocation -- which double frees on the
-// NCCL versions that free the caller's netName when the communicator is
-// destroyed. Copy the string as well so each config owns its own.
-TORCH_API ncclConfig_t cloneNcclConfig(const ncclConfig_t& config);
 
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
@@ -95,7 +87,22 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
  public:
   static constexpr std::string_view kBackendName = "nccl2";
 
-  using Options = ::c10d::ProcessGroupNCCL::Options;
+  // c10d Backend options for this backend (a c10d::Backend::Options subclass,
+  // like ProcessGroupNCCL::Options); surfaced to Python via the Options pybind.
+  struct TORCH_API Options : ::c10d::Backend::Options {
+    bool abort_process_on_timeout_or_error{true};
+    bool is_high_priority_stream{false};
+    std::unordered_map<std::string, std::string> hints;
+
+    explicit Options(bool is_high_priority_stream = false)
+        : ::c10d::Backend::Options(std::string(kBackendName)),
+          is_high_priority_stream(is_high_priority_stream) {}
+
+    static c10::intrusive_ptr<Options> create(
+        bool is_high_priority_stream = false) {
+      return c10::make_intrusive<Options>(is_high_priority_stream);
+    }
+  };
 
   // c10d-style constructor: the NCCL communicator is bootstrapped lazily, on
   // the first collective (or via eagerConnectSingleDevice / bound_device_id),
@@ -512,7 +519,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::mutex timeout_mutex_;
 
   bool is_high_priority_stream_{false};
-  bool abort_process_on_timeout_or_error_{true};
   std::string name_;
 
   c10::intrusive_ptr<Options> options_c10d_;
