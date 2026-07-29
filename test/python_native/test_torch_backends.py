@@ -1,5 +1,8 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import os
+from unittest.mock import patch
+
 import torch.backends.python_native as pn
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -112,6 +115,16 @@ class TestTorchBackendsPythonNative(RegistryTestMixin, TestCase):
                 # Test enabled property
                 enabled = dsl.enabled
                 self.assertIsInstance(enabled, bool)
+
+    def test_dsl_backend(self):
+        """Helion exposes a chosen lowering backend; other DSLs do not."""
+        with patch.dict(os.environ):
+            os.environ.pop("HELION_BACKEND", None)
+            self.assertEqual(pn.helion.backend, "triton")
+        with patch.dict(os.environ, {"HELION_BACKEND": "cutedsl"}):
+            self.assertEqual(pn.helion.backend, "cutedsl")
+        with self.assertRaises(AttributeError):
+            pn.triton.backend
 
     def test_dsl_enable_disable(self):
         """Test DSL enable/disable functionality."""

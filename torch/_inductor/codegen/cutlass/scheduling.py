@@ -341,7 +341,7 @@ size: {cutlass_template_buffer.get_size()}"
         try:
             from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
 
-            CutlassEVTCodegen.ir_to_evt_python_code(
+            read_names, _, _, _ = CutlassEVTCodegen.ir_to_evt_python_code(
                 cutlass_template_buffer.get_name(),
                 existing_epilogue_nodes + list(node_to_fuse.get_nodes()),
                 OrderedSet(),
@@ -360,6 +360,29 @@ likely due to unsupported operation: {not_implemented_op}"
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}. \
 Reason: {not_implemented_op}"
+                )
+                return False
+
+        # An external read whose shape is a compatible reshape of the 2D GEMM
+        # output is normalized to the template shape during rendering, but only
+        # when it is contiguous (the row-major flatten is memory-equivalent).
+        # A non-contiguous compatible-reshape read cannot be safely flattened,
+        # and EVT would fail shape propagation against the (1, M, N) accumulator,
+        # so reject the fusion in that case.
+        template_size = cutlass_template_buffer.get_size()
+        all_bufs = V.graph.name_to_buffer | V.graph.graph_inputs
+        for read_name in read_names:
+            buf = all_bufs.get(read_name)
+            if (
+                buf is not None
+                and self._is_compatible_reshape(template_size, buf.get_size())
+                and not buf.get_layout().is_contiguous()
+            ):
+                why(
+                    f"external read {read_name} with size {buf.get_size()} is a "
+                    f"non-contiguous compatible reshape of template size "
+                    f"{template_size}, which CUTLASS EVT cannot align to the "
+                    f"accumulator shape"
                 )
                 return False
 
