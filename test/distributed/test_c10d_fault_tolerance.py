@@ -15,13 +15,25 @@ if not dist.is_available():
 
 import torch.distributed.distributed_c10d as c10d
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TestCase,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
+)
 
+_pu1_backend = (
+    dist.get_default_backend_for_device(TEST_PRIVATEUSE1_DEVICE_TYPE)
+    if TEST_PRIVATEUSE1
+    else None
+)
 
 FAULT_TOLERANCE_BACKENDS = [
     ("gloo", "cpu"),
     ("nccl2", "cuda"),
 ]
+if _pu1_backend is not None:
+    FAULT_TOLERANCE_BACKENDS.append((_pu1_backend, TEST_PRIVATEUSE1_DEVICE_TYPE))
 
 
 class AbstractFaultToleranceTest:
@@ -31,8 +43,8 @@ class AbstractFaultToleranceTest:
 
     @property
     def device(self):
-        if self.device_type == "cuda":
-            return f"cuda:{self.rank}"
+        if self.device_type != "cpu":
+            return torch.device(self.device_type, self.rank)
         return self.device_type
 
     def setUp(self):
@@ -53,8 +65,8 @@ class AbstractFaultToleranceTest:
 
     def _init_reconfigurable_pg(self):
         self.store = self._create_store()
-        if self.device_type == "cuda":
-            torch.cuda.set_device(self.rank)
+        if self.device_type != "cpu":
+            torch.get_device_module(self.device_type).set_device(self.rank)
         dist.init_process_group(
             self.backend_name,
             world_size=self.world_size,
@@ -258,10 +270,11 @@ def _make_fault_tolerance_test_class(backend_name, device_type):
         not dist.is_backend_available(backend_name),
         f"{backend_name} backend is not available",
     )(FaultToleranceTest)
-    if device_type == "cuda":
+    if device_type != "cpu":
+        _device_module = torch.get_device_module(device_type)
         cls = unittest.skipIf(
-            not TEST_CUDA or torch.cuda.device_count() < 3,
-            "fault tolerance CUDA tests require at least 3 GPUs",
+            not _device_module.is_available() or _device_module.device_count() < 3,
+            "fault tolerance tests require at least 3 accelerators",
         )(cls)
     return cls
 
