@@ -24,7 +24,12 @@ from torch.distributed.tensor._random import (
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -44,6 +49,8 @@ def get_generator_seed_for_device_type(device_type: str):
 
 
 class DistTensorRandomInitTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -373,6 +380,8 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @skip_unless_torch_gpu
     def test_rng_tracker_init(self):
@@ -712,6 +721,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
             blockwise_iter_if_localtensor(local_tensor, local_shard_offset)
 
+
+class DistTensorRandomGenericTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_philox_state_seed_roundtrip(self):
         """
         Test that _PhiloxState seed can be read and re-set without error.
@@ -734,16 +747,19 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
 
 class DistTensorRandomOpCompileTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_with_seed(self, fn, create_input, num_runs):
         """Run fn num_runs times after resetting RNG, returning results and states."""
         torch.manual_seed(0)
+        device_mod = torch.get_device_module(self.device_type)
         results = []
-        rng_states = [torch.cuda.get_rng_state()]
+        rng_states = [device_mod.get_rng_state()]
         for _ in range(num_runs):
             x = create_input()
             result = fn(x)
             results.append(result.to_local().clone())
-            rng_states.append(torch.cuda.get_rng_state())
+            rng_states.append(device_mod.get_rng_state())
         # verify RNG state advances after each call
         for i in range(len(rng_states) - 1):
             self.assertFalse(
@@ -950,6 +966,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -1048,6 +1066,11 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
 DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpsTest3D,
 )
+
+instantiate_device_type_tests(DistTensorRandomInitTest, globals(), except_for="cpu")
+instantiate_device_type_tests(DistTensorRandomOpTest, globals(), except_for="cpu")
+instantiate_device_type_tests(DistTensorRandomOpCompileTest, globals(), except_for="cpu")
+instantiate_device_type_tests(DistTensorRandomOpsTest3D, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
