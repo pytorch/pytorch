@@ -645,11 +645,9 @@ std::unordered_map<std::string, std::string> ncclMetaToStringMap(
     // @lint-ignore CLANGTIDY
     const collective_meta_t& metadata) {
   std::unordered_map<std::string, std::string> map;
-#ifdef USE_DISTRIBUTED
   for (const auto& [key, value] : metadata) {
     map.emplace(key, ivalueToStr(value, value.isString()));
   }
-#endif // USE_DISTRIBUTED
   return map;
 }
 
