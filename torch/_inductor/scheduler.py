@@ -3541,6 +3541,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             config.combo_kernels_autotune > 0
             and config.combo_kernel_per_subkernel_blocks
             and config.combo_kernel_compile_time_autotune
+            and not config.deterministic
         ):
             indirect_nodes = [
                 n
