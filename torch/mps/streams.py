@@ -4,6 +4,15 @@ import torch
 from torch._utils import _dummy_type
 
 
+__all__ = [
+    "Stream",
+    "StreamContext",
+    "stream",
+    "current_stream",
+    "default_stream",
+    "set_stream",
+]
+
 if not hasattr(torch._C, "_MPSStreamBase"):
     torch._C.__dict__["_MPSStreamBase"] = _dummy_type("_MPSStreamBase")
 
