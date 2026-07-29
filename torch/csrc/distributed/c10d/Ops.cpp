@@ -44,6 +44,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "gather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
   m.def(
+      "gather_into_tensor_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+  m.def(
       "scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
@@ -494,6 +496,33 @@ IMPL_GATHER(CPU)
 IMPL_GATHER(CUDA)
 IMPL_GATHER(PrivateUse1)
 
+#define IMPL_GATHER_INTO_TENSOR(DEV)                                          \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> gather_into_tensor_##DEV(  \
+      at::Tensor& output_tensor,                                              \
+      at::Tensor& input_tensor,                                               \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,                  \
+      int64_t root_rank,                                                      \
+      bool asyncOp,                                                           \
+      int64_t timeout) {                                                      \
+    auto hook_op_id = process_group->firePreHook(                             \
+        HookOpName::GATHER, asyncOp, root_rank, input_tensor, output_tensor); \
+    auto work =                                                               \
+        process_group->getBackend(c10::DeviceType::DEV)                       \
+            ->gather_into_tensor(                                             \
+                output_tensor,                                                \
+                input_tensor,                                                 \
+                GatherOptions{                                                \
+                    root_rank, std::chrono::milliseconds(timeout), asyncOp}); \
+    process_group->firePostHook(                                              \
+        HookOpName::GATHER, asyncOp, hook_op_id, work);                       \
+    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                  \
+        output_tensor, std::move(work));                                      \
+  }
+
+IMPL_GATHER_INTO_TENSOR(CPU)
+IMPL_GATHER_INTO_TENSOR(CUDA)
+IMPL_GATHER_INTO_TENSOR(PrivateUse1)
+
 #define IMPL_SCATTER(DEV)                                                      \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_##DEV( \
       const at::TensorList& output_tensors,                                    \
@@ -689,6 +718,7 @@ REGISTER_C10D_OP(reduce_scatter_)
 REGISTER_C10D_OP(_reduce_scatter_base_)
 REGISTER_C10D_OP(reduce_scatter_tensor_coalesced_)
 REGISTER_C10D_OP(gather_)
+REGISTER_C10D_OP(gather_into_tensor_)
 REGISTER_C10D_OP(scatter_)
 REGISTER_C10D_OP(alltoall_)
 REGISTER_C10D_OP(alltoall_base_)

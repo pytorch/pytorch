@@ -257,6 +257,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .memory import CUDAMemPoolVariable
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
@@ -1585,6 +1586,17 @@ class VariableBuilder:
                 stream_proxy, value, source=self.source, user_object_index=index
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
+        elif isinstance(value, torch.cuda.MemPool):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
+            mempool_proxy = self.tx.output.create_proxy(
+                "call_function", get_external_object_by_index, (index,), {}
+            )
+            set_example_value(mempool_proxy.node, value)
+            var = CUDAMemPoolVariable(
+                mempool_proxy, value, source=self.source, user_object_index=index
+            )
+            return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
@@ -1938,6 +1950,7 @@ class VariableBuilder:
                 torch.utils.hooks.BackwardHook,
                 torch.nn.Parameter,
                 torch.nn.Buffer,
+                torch.backends.cuda.SDPAParams,
             ):
                 # TODO(jansel): combine this case with the one above
                 # type: ignore[attr-defined]
@@ -2610,13 +2623,13 @@ class VariableBuilder:
                 ],
             )
 
-        if getattr(value, "_is_fsdp_managed_module", False):
+        if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            if not getattr(value, "_fsdp_use_orig_params", False):
+            if not inspect.getattr_static(value, "_fsdp_use_orig_params", False):
                 unimplemented(
                     gb_type="FSDP with use_orig_params=False",
                     context="",
@@ -3008,6 +3021,24 @@ class VariableBuilder:
                 explanation="torch.compile does not support sparse Tensors",
                 hints=[*graph_break_hints.SPARSE_TENSOR],
             )
+
+        if (
+            isinstance(value, torch.Tensor)
+            and torch._C._functorch.peek_interpreter_stack() is None
+        ):
+            try:
+                tangent = torch.autograd.forward_ad.unpack_dual(value).tangent
+            except RuntimeError:
+                tangent = None
+            if tangent is not None:
+                unimplemented(
+                    gb_type="Attempted to wrap a dual tensor input",
+                    context="",
+                    explanation="torch.compile does not support input tensors that "
+                    "carry a forward-mode AD tangent; compiled code would silently "
+                    "drop the tangent.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
         if (
             safe_has_grad(value)
