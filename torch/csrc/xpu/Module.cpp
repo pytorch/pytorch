@@ -385,8 +385,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
                    << ", has_atomic64=" << prop.has_atomic64
-                   << ", is_integrated_gpu=" << prop.is_integrated_gpu
-                   << ')';
+                   << ", is_integrated_gpu=" << prop.is_integrated_gpu << ')';
             return std::move(stream).str();
           });
 }
