@@ -37,6 +37,12 @@ GraphAnnotationResolver = Callable[[int], "Any | None"]
 # annotation resolver; it reads the node's name via the graph annotation registry.
 LaneResolver = Callable[[int], "tuple[int, str] | None"]
 
+# graph_node_id -> predecessor graph_node_ids (or None when the node has no recorded
+# dependencies): the CUDA-graph node->node edges the export draws as dependency arrows, read
+# from the observer's own dependency map (recorded at graph instantiate, keyed on graph_node_id
+# like the annotation resolver). See ObserverAnnotationSettings.record_graph_dependencies.
+GraphDependencyResolver = Callable[[int], "list[int] | None"]
+
 
 def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     """Default resolver: map a CUDA-graph node id to its registered annotation, or None when
@@ -72,6 +78,11 @@ class ObserverAnnotationSettings:
     # CUDA stream lane (no reassignment). Independent of graph_annotation_resolver, though a
     # consumer's implementation typically maps the node's annotation to a lane.
     graph_lane_resolver: LaneResolver | None = None
+    # Record each graph's node->node dependency topology at instantiate into the observer's own
+    # map (the source for dependency arrows). Off by default (extra work at graph instantiate +
+    # arrow rendering); the observer registers an instantiate hook + a resolver over its map
+    # only when this is set.
+    record_graph_dependencies: bool = False
 
 
 class CuptiMonitorObserver:
@@ -113,21 +124,51 @@ class CuptiMonitorObserver:
     def _lane_resolver(self, fn: LaneResolver | None) -> None:
         self._lane_resolver_cached = functools.cache(fn) if fn is not None else None
 
+    @property
+    def _dependency_resolver(self) -> GraphDependencyResolver | None:
+        return self._dependency_resolver_cached
+
+    @_dependency_resolver.setter
+    def _dependency_resolver(self, fn: GraphDependencyResolver | None) -> None:
+        self._dependency_resolver_cached = (
+            functools.cache(fn) if fn is not None else None
+        )
+
     def __init__(
         self,
         activities: Any,
         *,
         annotations: ObserverAnnotationSettings | None = None,
     ) -> None:
+        record_deps = annotations is not None and annotations.record_graph_dependencies
+        # Graph node->node dependency map (graph_node_id -> predecessor graph_node_ids), read
+        # by our dependency resolver. When recording, share the process-global recorder's map
+        # by reference: it is armed early (before graphs are captured) and persists across
+        # windows, so it holds topology this per-window observer -- created at prepare_trace,
+        # long after warm-up capture, and torn down each window -- would otherwise never see.
+        if record_deps:
+            from torch.profiler._cupti._graph_deps import (
+                arm_graph_dependency_recording,
+                graph_dependencies,
+            )
+
+            arm_graph_dependency_recording()
+            self._graph_dependencies: dict[int, list[int]] = graph_dependencies()
+        else:
+            self._graph_dependencies = {}
         # Region naming (see ObserverAnnotationSettings): an enabled source folds its
         # required fields into the selection (graph: just graph_node_id; eager: extra kinds).
         if annotations is None:
             self._annotation_resolver = None
             self._lane_resolver = None
+            self._dependency_resolver = None
             self._eager = False
         else:
             self._annotation_resolver = annotations.graph_annotation_resolver
             self._lane_resolver = annotations.graph_lane_resolver
+            self._dependency_resolver = (
+                self._make_dependency_resolver() if record_deps else None
+            )
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
             activities = self._with_graph_fields(activities)
@@ -151,6 +192,19 @@ class CuptiMonitorObserver:
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
+
+    def _make_dependency_resolver(self) -> GraphDependencyResolver:
+        """A resolver over the shared graph dependency map: graph_node_id -> predecessor
+        graph_node_ids (None when the node has none). Captures the map, not self, so the
+        cached resolver never pins the observer."""
+        deps = self._graph_dependencies
+
+        def resolve(graph_node_id: int) -> list[int] | None:
+            if graph_node_id == 0:
+                return None
+            return deps.get(graph_node_id)
+
+        return resolve
 
     @property
     def available(self) -> bool:

@@ -745,6 +745,27 @@ class TestGetGraphData(TestCase):
             for dep_idx in node["dependents"]:
                 self.assertIn(node["index"], nodes[dep_idx]["dependencies"])
 
+    def test_cached_across_instantiate_hooks(self):
+        # Within one instantiate(), every post-instantiate hook that calls
+        # get_graph_data() shares a single query (same object); the cache is
+        # dropped afterwards so a later call recomputes a fresh dict.
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            _ = (x + 1).relu()
+
+        seen = []
+        g.register_post_instantiate_hook(lambda cg: seen.append(cg.get_graph_data()))
+        g.register_post_instantiate_hook(lambda cg: seen.append(cg.get_graph_data()))
+        g.instantiate()
+
+        self.assertEqual(len(seen), 2)
+        self.assertIs(seen[0], seen[1])
+
+        after = g.get_graph_data()
+        self.assertIsNot(after, seen[0])
+        self.assertEqual(after, seen[0])
+
     def test_keep_graph_false_raises(self):
         g = torch.cuda.CUDAGraph(keep_graph=False)
         x = torch.zeros([2000], device="cuda")
