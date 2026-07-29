@@ -3673,14 +3673,43 @@ class DynamoTracerOutput:
     def _cleanup_output_graph(self) -> None:
         output_graph = self.output_graph_for_cleanup
         if output_graph:
+            # Lazy import to avoid a circular import (convert_frame imports
+            # output_graph at module load time).
+            from .convert_frame import _clear_fake_mode_weakrefs
+
+            # A discarded restart/skip attempt fakified real tensors and built
+            # guards on them, leaving weakrefs on the real params that block
+            # torch.utils.swap_tensors after compile (issue #186796): guard
+            # create_fn partials hold a TensorWeakRef, and tensor_to_context /
+            # the describer memos / grapharg examples hold WeakIdRef/weakref.
+            # The end-of-compile clear_compile_context_weakrefs only clears the
+            # final attempt's tracing_context, never these discarded attempts,
+            # and never touches guards. Unlike that final clear (which is gated
+            # by config.invalidate_compile_context_weakrefs), the discard-path
+            # clear is unconditional: a discarded attempt has no consumers, so
+            # dropping its weakrefs can never break anything downstream.
+            # Drop grapharg examples first, before clearing nodes drops the meta.
+            for node in output_graph.graph.nodes:
+                if "grapharg" in node.meta:
+                    del node.meta["grapharg"]
             for tracer in output_graph.tracers:
                 tracer.graph._clear_nodes()
-            # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
-            if (
-                output_graph.tracing_context.fake_mode
-                and output_graph.tracing_context.fake_mode.shape_env
-            ):
-                output_graph.tracing_context.fake_mode.shape_env.tracked_fakes = None
+            output_graph.guards.clear()
+            tc = output_graph.tracing_context
+            tc.tensor_to_context.clear()
+            # Clear the describer weakrefs from both the current tracing_context
+            # fake_mode and the _old_fake_mode saved during compile: on a
+            # backend-raised restart (e.g. TensorifyScalarRestartAnalysis),
+            # tracing_context.fake_mode has already been swapped to a fresh
+            # empty backend fake_mode, so the real-param weakrefs live on
+            # _old_fake_mode instead.
+            _clear_fake_mode_weakrefs(tc.fake_mode)
+            if hasattr(output_graph, "_old_fake_mode"):
+                _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
+            # Also clear tracked_fakes to break the
+            # FakeTensorMode -> ShapeEnv -> TrackedFake -> FakeTensor cycle.
+            if tc.fake_mode and tc.fake_mode.shape_env:
+                tc.fake_mode.shape_env.tracked_fakes = None
 
 
 err_epilogue = (
