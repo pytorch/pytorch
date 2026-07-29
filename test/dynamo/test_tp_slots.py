@@ -10,6 +10,8 @@ import collections
 import collections.abc
 import dataclasses
 import enum
+import sys
+import unittest
 
 from torch._C._dynamo import (
     get_tp_flags,
@@ -348,6 +350,7 @@ class TestTypeFlags(TestCase):
         self.assertFalse(has_tp_flag(get_tp_flags(SlotsCls), PyTypeFlags.MANAGED_DICT))
         self.assertFalse(self._has_dict(SlotsCls))
 
+    @unittest.skipIf(sys.version_info < (3, 11), "managed dict is CPython 3.11+")
     def test_python_class_has_managed_dict(self):
         class PyCls:
             pass
@@ -355,6 +358,7 @@ class TestTypeFlags(TestCase):
         self.assertTrue(has_tp_flag(get_tp_flags(PyCls), PyTypeFlags.MANAGED_DICT))
         self.assertTrue(self._has_dict(PyCls))
 
+    @unittest.skipIf(sys.version_info < (3, 11), "managed dict is CPython 3.11+")
     def test_c_base_subclass_has_managed_dict(self):
         # Subclassing a C base in Python adds a managed __dict__.
         class MyBytes(bytes):
@@ -377,6 +381,7 @@ class TestTypeFlags(TestCase):
 
         self.assertEqual(get_tp_flags(PyCls), get_tp_flags(PyCls()))
 
+    @unittest.skipIf(sys.version_info < (3, 11), "managed dict is CPython 3.11+")
     def test_managed_dict_flag_value(self):
         # PyTypeFlags masks equal the real CPython Py_TPFLAGS_* values.
         self.assertEqual(int(PyTypeFlags.MANAGED_DICT), 1 << 4)
