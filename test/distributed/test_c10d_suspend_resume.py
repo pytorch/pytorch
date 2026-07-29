@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 #
 # Backend-agnostic tests for the c10d memory offload API (Backend.suspend /
-# resume / memory_stats). Parameterized over backends; today both entries are
+# resume / memory_stats). Parameterized over backends; the entries are
 # NCCL-based (the API needs communicator memory offload support, NCCL
 # 2.29.7+), but other backends can be enabled by extending
 # SUSPEND_RESUME_BACKENDS.
@@ -24,8 +24,9 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
 SUSPEND_RESUME_BACKENDS = [
-    ("nccl-legacy", "cuda"),
-    ("nccl2", "cuda"),
+    ("nccl-legacy", "cuda", False),
+    ("nccl2", "cuda", False),
+    ("nccl-lazy", "cuda", True),
 ]
 
 
@@ -58,6 +59,19 @@ class AbstractSuspendResumeTest:
         except OSError:
             pass
 
+    def _exchange_with_peer(self):
+        send_tensor = torch.full((1,), float(self.rank), device=self.device)
+        recv_tensor = torch.empty(1, device=self.device)
+        peer = 1 - self.rank
+        if self.rank == 0:
+            dist.send(send_tensor, peer)
+            dist.recv(recv_tensor, peer)
+        else:
+            dist.recv(recv_tensor, peer)
+            dist.send(send_tensor, peer)
+        torch.cuda.synchronize()
+        self.assertEqual(recv_tensor, torch.full_like(recv_tensor, float(peer)))
+
     def _init_pg(self):
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
@@ -74,6 +88,9 @@ class AbstractSuspendResumeTest:
         # (suspendable) memory.
         dist.all_reduce(torch.zeros(1024 * 1024 * 64, device=self.device))
         torch.cuda.synchronize()
+        if self.create_pair_channel:
+            self._exchange_with_peer()
+            self.assertEqual(self.backend._num_active_channels(), 1)
 
     def test_memory_stats(self):
         self._init_pg()
@@ -86,8 +103,12 @@ class AbstractSuspendResumeTest:
     def test_suspend(self):
         self._init_pg()
         self.backend.suspend()
-        stats = self.backend.memory_stats()
-        self.assertEqual(stats["suspended"], 1)
+        try:
+            stats = self.backend.memory_stats()
+            expected = 2 if self.create_pair_channel else 1
+            self.assertEqual(stats["suspended"], expected)
+        finally:
+            self.backend.resume()
 
     def test_suspend_resume_cycle(self):
         self._init_pg()
@@ -102,14 +123,17 @@ class AbstractSuspendResumeTest:
         torch.cuda.synchronize()
         expected = torch.full((1024,), float(self.world_size), device=self.device)
         self.assertEqual(tensor, expected)
+        if self.create_pair_channel:
+            self._exchange_with_peer()
 
 
-def _make_suspend_resume_test_class(backend_name, device_type):
+def _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel):
     class SuspendResumeTest(AbstractSuspendResumeTest, MultiProcessTestCase):
         pass
 
     SuspendResumeTest.backend_name = backend_name
     SuspendResumeTest.device_type = device_type
+    SuspendResumeTest.create_pair_channel = create_pair_channel
     SuspendResumeTest.__name__ = f"{backend_name.capitalize()}SuspendResumeTest"
     SuspendResumeTest.__qualname__ = SuspendResumeTest.__name__
     cls = unittest.skipIf(
@@ -124,9 +148,9 @@ def _make_suspend_resume_test_class(backend_name, device_type):
     return cls
 
 
-for backend_name, device_type in SUSPEND_RESUME_BACKENDS:
+for backend_name, device_type, create_pair_channel in SUSPEND_RESUME_BACKENDS:
     globals()[f"{backend_name.capitalize()}SuspendResumeTest"] = (
-        _make_suspend_resume_test_class(backend_name, device_type)
+        _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel)
     )
 
 

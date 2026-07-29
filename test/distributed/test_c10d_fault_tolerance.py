@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 FAULT_TOLERANCE_BACKENDS = [
     ("gloo", "cpu"),
     ("nccl2", "cuda"),
+    ("nccl-lazy", "cuda"),
 ]
 
 
@@ -129,6 +130,32 @@ class AbstractFaultToleranceTest:
         send_work.wait()
         recv_work.wait()
         self.assertEqual(recv_tensor.cpu(), torch.full((4,), recv_rank + 1.0))
+
+    def test_reconfigure_drops_lazy_pair_channels(self):
+        if self.backend_name != "nccl-lazy":
+            self.skipTest("pair channels are specific to nccl-lazy")
+        self._create_reconfigured_pg("ft_lazy_pair", 1300)
+
+        rank = dist.get_rank()
+        send_rank = (rank + 1) % self.world_size
+        recv_rank = (rank - 1 + self.world_size) % self.world_size
+        send_tensor = torch.full((1,), rank + 1.0, device=self.device)
+        recv_tensor = torch.zeros(1, device=self.device)
+        if rank % 2 == 0:
+            send_work = self.backend.send([send_tensor], send_rank, 0)
+            recv_work = self.backend.recv([recv_tensor], recv_rank, 0)
+        else:
+            recv_work = self.backend.recv([recv_tensor], recv_rank, 0)
+            send_work = self.backend.send([send_tensor], send_rank, 0)
+        send_work.wait()
+        recv_work.wait()
+        del send_work, recv_work
+        self.assertEqual(self.backend._num_active_channels(), 2)
+
+        handles = self._collect_handles("ft_lazy_pair_post")
+        self._reconfigure(1301, handles)
+        self.assertEqual(self.backend._num_active_channels(), 0)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)

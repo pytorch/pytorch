@@ -53,9 +53,9 @@ class LazyBackend : public Backend {
  public:
   // Builds the 2-rank sibling backend for a peer. The pair rank is 0 for the
   // lower-numbered global rank and 1 for the higher; pair_name is unique per
-  // allocation for the same pair.
-  using PairFactory = std::function<
-      c10::intrusive_ptr<T>(int pair_rank, const std::string& pair_name)>;
+  // allocation for the same pair, and device is the P2P tensor's device.
+  using PairFactory = std::function<c10::intrusive_ptr<
+      T>(int pair_rank, const std::string& pair_name, at::Device device)>;
 
   LazyBackend(
       int rank,
@@ -75,6 +75,10 @@ class LazyBackend : public Backend {
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return primary_->getBackendOptions();
   }
+  void setGroupUid(const std::string& pg_uid) override {
+    Backend::setGroupUid(pg_uid);
+    primary_->setGroupUid(pg_uid);
+  }
 
   // ---- P2P: dispatched to per-peer 2-rank pair comms ----
   c10::intrusive_ptr<Work> send(
@@ -84,7 +88,8 @@ class LazyBackend : public Backend {
     if (coalescing_active_) {
       return primary_->send(tensors, dstRank, tag);
     }
-    return channelFor(dstRank)->send(tensors, peerInPair(dstRank), tag);
+    return channelFor(dstRank, tensors.at(0).device())
+        ->send(tensors, peerInPair(dstRank), tag);
   }
   c10::intrusive_ptr<Work> recv(
       std::vector<at::Tensor>& tensors,
@@ -93,7 +98,8 @@ class LazyBackend : public Backend {
     if (coalescing_active_) {
       return primary_->recv(tensors, srcRank, tag);
     }
-    return channelFor(srcRank)->recv(tensors, peerInPair(srcRank), tag);
+    return channelFor(srcRank, tensors.at(0).device())
+        ->recv(tensors, peerInPair(srcRank), tag);
   }
 
   // Batched P2P stays on the primary (multiple peers per group).
@@ -249,16 +255,38 @@ class LazyBackend : public Backend {
     }
   }
   ErrorType getError() override {
-    return primary_->getError();
+    auto error = primary_->getError();
+    if (error != ErrorType::SUCCESS) {
+      return error;
+    }
+    for (const auto& channel : snapshotPairComms()) {
+      error = channel->getError();
+      if (error != ErrorType::SUCCESS) {
+        return error;
+      }
+    }
+    return ErrorType::SUCCESS;
   }
   void suspend() override {
     primary_->suspend();
+    for (const auto& channel : snapshotPairComms()) {
+      channel->suspend();
+    }
   }
   void resume() override {
     primary_->resume();
+    for (const auto& channel : snapshotPairComms()) {
+      channel->resume();
+    }
   }
   std::unordered_map<std::string, uint64_t> getMemoryStats() override {
-    return primary_->getMemoryStats();
+    auto stats = primary_->getMemoryStats();
+    for (const auto& channel : snapshotPairComms()) {
+      for (const auto& [name, value] : channel->getMemoryStats()) {
+        stats[name] += value;
+      }
+    }
+    return stats;
   }
   void registerAbortHook(int64_t hook_id, AbortHook hook) override {
     abort_hooks_.emplace(hook_id, hook);
@@ -301,6 +329,11 @@ class LazyBackend : public Backend {
   c10::intrusive_ptr<T> getPrimary() const {
     return primary_;
   }
+  c10::intrusive_ptr<T> getPeerChannel(int peer) const {
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    auto it = pair_comms_.find(peer);
+    return it == pair_comms_.end() ? nullptr : it->second;
+  }
   size_t numActiveChannels() const {
     std::lock_guard<std::mutex> lk(pair_mu_);
     return pair_comms_.size();
@@ -308,7 +341,7 @@ class LazyBackend : public Backend {
 
  protected:
   // Returns the pair comm for the given peer, creating it on first use.
-  c10::intrusive_ptr<T> channelFor(int peer) {
+  c10::intrusive_ptr<T> channelFor(int peer, at::Device device) {
     TORCH_CHECK(
         peer != getRank() && peer >= 0 && peer < getSize(),
         "LazyBackend: invalid peer rank ",
@@ -342,7 +375,7 @@ class LazyBackend : public Backend {
         nextPairAttempt(lo, hi));
 
     const int pair_rank = (getRank() < peer) ? 0 : 1;
-    auto sub = pair_factory_(pair_rank, pair_name);
+    auto sub = pair_factory_(pair_rank, pair_name, device);
     TORCH_CHECK(sub, "LazyBackend: pair factory returned null for peer ", peer);
     if (getBoundDeviceId().has_value()) {
       sub->setBoundDeviceId(getBoundDeviceId());
@@ -377,6 +410,16 @@ class LazyBackend : public Backend {
   }
 
  private:
+  std::vector<c10::intrusive_ptr<T>> snapshotPairComms() const {
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    std::vector<c10::intrusive_ptr<T>> channels;
+    channels.reserve(pair_comms_.size());
+    for (const auto& [_, channel] : pair_comms_) {
+      channels.push_back(channel);
+    }
+    return channels;
+  }
+
   // Per-pair monotonically increasing counter so successive pair-comm
   // allocations for the same {lo,hi} produce distinct names (and therefore
   // distinct store-bootstrap key namespaces). Both ranks of a pair increment
