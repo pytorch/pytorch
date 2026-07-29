@@ -2014,6 +2014,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         type_attr, source = self._lookup_slot_type_attr(tx, "__index__")
         if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_index_impl(tx)
+        if type_attr is int.__index__:
+            # int subclass (e.g. IntEnum/IntFlag member): __index__ is the
+            # inherited int slot. CPython's PyNumber_Index returns the
+            # underlying int directly; resolving and calling the slot here
+            # would re-dispatch into call_method("__index__") and recurse back
+            # into nb_index_impl forever. Const-fold to the real int value.
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+            real_value: int = self.get_real_python_backed_value()  # type: ignore[assignment]
+            return variables.ConstantVariable.create(operator.index(real_value))
         method_var = self.resolve_type_attr(tx, "__index__", type_attr, source)
         result = self._call_method_var_or_const_fold(tx, method_var, operator.index)
         # CPython validates that __index__ returns an int.
@@ -5290,6 +5300,23 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         self._base_methods = list_methods
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # list.__init__ ignores excess keyword args when the instance's type
+        # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
+        # them. See the generated list___init__ wrapper's tp_new comparison:
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
+        if name == "__init__" and kwargs:
+            overrides_new = type(self.value).__new__ is not list.__new__
+            if overrides_new:
+                kwargs = {}
+        return super().call_method(tx, name, args, kwargs)
 
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):

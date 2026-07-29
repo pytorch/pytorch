@@ -3046,6 +3046,113 @@ dropped on copy. This is acceptable here because those cases were already
 failing/xfail before this change and remain so (verified above); closing them is
 follow-up work.
 
+### Cycle5-H: test_collections.TestChainMap.test_basics (recursive_repr / _thread.get_ident)
+
+Status: DEFERRED (gate does NOT pass). Root cause is two-layered: the FIRST
+blocker (`_thread.get_ident` inside `reprlib.recursive_repr`) is genuinely
+in-scope and was fixed with a `substitute_in_graph` polyfill, but the test then
+hits a SECOND, out-of-scope blocker (`pickle.dumps`/`pickle.loads` C
+serialization round-trips, and `eval(repr(d))`) that has no `VariableTracker`
+analog. The target sentinel is LEFT IN PLACE. The get_ident polyfill is kept in
+the working tree as a standalone capability improvement (it removes no CPython
+sentinel on its own -- see collateral audit below).
+
+Target: `CPython313-test_collections-TestChainMap.test_basics`.
+
+Repro (sentinel removed) BEFORE the fix -- blocker 1:
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python test/cpython/v3_13/test_collections.py TestChainMap.test_basics
+# torch._dynamo.exc.Unsupported: Attempted to call function marked as skipped
+# module: _thread, qualname: get_ident
+# at test_collections.py:133 self.assertIn(repr(d), [...]) -> reprlib.py:16 get_ident()
+```
+
+Repro (sentinel removed) AFTER the get_ident fix -- blocker 2 (out of scope):
+```bash
+# same command
+# torch._dynamo.exc.Unsupported: Attempted to call function marked as skipped
+# module: _pickle, qualname: dumps
+# at test_collections.py:148 e = pickle.loads(pickle.dumps(d, proto))
+```
+
+Fix kept (blocker 1, standalone value): `reprlib.recursive_repr`'s wrapper calls
+`_thread.get_ident()` purely as part of a dict key for per-thread reentrancy
+detection during a single repr call. Dynamo traces one frame on one thread, so
+the identifier is a stable constant for the whole trace; folding it to the
+current thread id is semantically exact and cannot change any repr result. Added
+a `substitute_in_graph(_thread.get_ident, can_constant_fold_through=True)`
+polyfill so `repr()` of any container whose `__repr__` is wrapped by
+`reprlib.recursive_repr` (e.g. `collections.ChainMap`, and any user function
+decorated with `reprlib.recursive_repr`) now traces without a graph break.
+
+Files changed (kept in working tree, pending manager landing decision):
+- `torch/_dynamo/polyfills/_thread.py` (new; `get_ident` polyfill)
+- `torch/_dynamo/polyfills/loader.py` (register `_thread` module)
+- `torch/_dynamo/polyfills/__init__.py` (TYPE_CHECKING import alias)
+- `test/dynamo/test_repr_protocol.py` (new `RecursiveReprTests`: get_ident is an
+  int, ChainMap repr, and a user function decorated with
+  `reprlib.recursive_repr` including the recursive-cycle fillvalue path)
+
+Sentinels removed: NONE. The get_ident fix alone flips no currently-sentineled
+CPython test to passing:
+- Full `test_collections.py` runs `OK (skipped=39)` with NO unexpected successes
+  (so no `test_collections` sentinel became stale).
+- Verified NOT collateral (each still FAILS with the fix, for an unrelated
+  blocker): `test_ordered_dict-PurePythonOrderedDictTests.test_repr` /
+  `test_repr_recursive` / `test_repr_recursive_values` (blocked on
+  `OrderedDict.fromkeys`/`__new__`), `test_deque-TestBasic.test_repr` (blocked on
+  a separate "Failed to trace builtin operator"), `test_userdict-UserDictTest.test_repr`
+  (blocked on an assertEqual "Observed exception"). The default
+  `collections.OrderedDict`/`deque`/`Counter` reprs are C implementations that
+  use `Py_ReprEnter`, not `_thread.get_ident`, so they never exercised this path.
+
+Why deferred (blocker 2 out of scope): `pickle.dumps`/`pickle.loads` serialize an
+arbitrary object graph to and from a byte stream via the C `_pickle` module.
+There is no `VariableTracker` analog for producing/consuming a pickle byte
+stream symbolically, and it carries no tensor-tracing relevance. Per
+`CPYTHON_MIRRORING.md` "What not to mirror" (CPython C-implementation details
+with no tracing semantics), this is out of scope for a focused object-protocol
+gate -- analogous to the deferred G10 (`gc.is_tracked`) and G11 (iterator
+`__reduce__`) gates. `eval(repr(d))` at line 155 is a further blocker. The gate
+cannot pass without pickle/eval support, which is not authorized here.
+
+Exact commands run and results (current tree, fix kept, sentinel restored):
+```bash
+# Full affected CPython file -> no regressions from the polyfill, target
+# correctly remains an expected failure
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python test/cpython/v3_13/test_collections.py
+# Ran 100 tests -> OK (skipped=39)
+
+# New regression tests -> PASS
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+  python test/dynamo/test_repr_protocol.py -k RecursiveRepr
+# Ran 3 tests -> OK
+
+# Full repr_protocol + polyfills suites -> PASS
+python test/dynamo/test_repr_protocol.py       # Ran 41 -> OK
+python test/dynamo/test_polyfills.py           # Ran 7 -> OK
+
+# Nearby Dynamo suite sanity -> PASS
+python test/dynamo/test_functions.py           # Ran 528 -> OK (skipped=10, xfail=2)
+```
+
+Manager decision needed: land the get_ident polyfill as a standalone Dynamo
+improvement (it stands on its own with the new regression test and unblocks
+`reprlib.recursive_repr` broadly), or discard it. It removes no sentinel, so it
+is not a conventional gate commit.
+
+Python 3.10 compat: no local py3.10 interpreter; static audit clean (new file
+uses only `from __future__ import annotations`, `import _thread`,
+`substitute_in_graph`; no 3.10+ typing features).
+
+Known risks: low. The polyfill only affects code paths that previously
+graph-broke on `_thread.get_ident`; converting that break into a
+constant-returning traced call can only reduce (never increase) hard graph
+breaks, and the returned value is identical to eager under single-threaded
+tracing.
+
 ## Proposed Gate Changes Awaiting Human Approval
 
 Use this section only when an implementation subagent believes a gate is too
