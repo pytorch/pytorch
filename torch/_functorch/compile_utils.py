@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import operator
 import struct
 from typing import Any, TYPE_CHECKING
@@ -23,14 +24,19 @@ if TYPE_CHECKING:
 aten = torch.ops.aten
 
 
+@dataclasses.dataclass(frozen=True)
+class _ScalarKey:
+    tag: str
+    bits: bytes
+
+
 def _normalize_cse_arg(val: Any) -> Any:
-    """Key floats and complex by IEEE 754 bit pattern for consistent hashing."""
     # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
     # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
     if isinstance(val, float):
-        return ("__CSE_FLOAT__", struct.pack(">d", val))
+        return _ScalarKey("float", struct.pack(">d", val))
     if isinstance(val, complex):
-        return ("__CSE_COMPLEX__", struct.pack(">dd", val.real, val.imag))
+        return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
     return val
 
 
