@@ -480,6 +480,23 @@ class TestLayoutOptim(TestCase):
             "decide_layout_opt should return False for graphs without conv nodes",
         )
 
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    def test_backward_conv_channels_last_count(self):
+        conv = nn.Conv2d(64, 128, 3, padding=1, device=GPU_TYPE)
+        x = torch.randn(2, 64, 32, 32, device=GPU_TYPE, requires_grad=True)
+
+        ref = conv(x)
+        ref.sum().backward()
+        ref_grad = x.grad.clone()  # type: ignore[union-attr]
+
+        x.grad = None
+        compiled = torch.compile(conv, backend="inductor", fullgraph=True)
+        out = compiled(x)
+        out.sum().backward()
+
+        self.assertEqual(ref, out)
+        self.assertTrue(torch.allclose(ref_grad, x.grad, atol=1e-4, rtol=1e-4))  # type: ignore[arg-type]
+
 
 if __name__ == "__main__":
     if HAS_GPU:
