@@ -494,15 +494,27 @@ class Shard(torch._C._distributed.Shard):
 
         # Assume padding (uneven sharding) as general case for unbacked sizes,
         # unless an optimization hint can prove the even-shard branch.
-        is_padded = not _hint_proves_even_shard(
-            tensor.size(self.dim), num_chunks
-        ) and guard_or_true(tensor.size(self.dim) % num_chunks != 0)
+        dim_size = tensor.size(self.dim)
+        is_padded = not _hint_proves_even_shard(dim_size, num_chunks) and guard_or_true(
+            dim_size % num_chunks != 0
+        )
         pad_sizes = None
         if is_padded:
-            scattered_list, pad_sizes = self._split_tensor(
-                tensor, num_chunks, with_padding=True, contiguous=True
+            full_chunk_size = (dim_size + num_chunks - 1) // num_chunks
+            pad_sizes = [
+                full_chunk_size
+                - Shard.local_shard_size_and_offset(
+                    dim_size,
+                    num_chunks,
+                    rank,
+                )[0]
+                for rank in range(num_chunks)
+            ]
+            tensor = pad_tensor(
+                tensor,
+                self.dim,
+                full_chunk_size * num_chunks - dim_size,
             )
-            tensor = torch.cat(scattered_list, dim=self.dim)
         elif not tensor.is_contiguous():
             tensor = tensor.contiguous()
 

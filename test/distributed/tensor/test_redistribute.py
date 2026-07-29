@@ -494,9 +494,11 @@ class RedistributeTest(DTensorContinuousTestBase):
             ((self.world_size * 3, 3), 0),
             ((self.world_size * 3 + 1, 3), 0),
             ((self.world_size * 3 + 2, 3), 0),
+            ((self.world_size - 1, 3), 0),
             ((3, self.world_size * 3), 1),
             ((3, self.world_size * 3 + 1), 1),
             ((3, self.world_size * 3 + 2), 1),
+            ((3, self.world_size - 1), 1),
         ]
 
         comm_mode = CommDebugMode()
@@ -543,6 +545,73 @@ class RedistributeTest(DTensorContinuousTestBase):
             self.assertEqual(
                 comm_mode.get_comm_counts()[funcol.reduce_scatter_tensor], 1
             )
+
+    @parametrize("shard_dim", [0, 1])
+    @parametrize("dim_size_offset", [-1, 1, 2])
+    def test_partial_to_shard_uneven_matches_shard_placement(
+        self, shard_dim, dim_size_offset
+    ):
+        device_mesh = self.build_device_mesh()
+        input_size = [3, 3]
+        input_size[shard_dim] = self.world_size + dim_size_offset
+        partial_local = torch.arange(
+            input_size[0] * input_size[1],
+            dtype=torch.float32,
+            device=self.device_type,
+        ).reshape(input_size)
+        partial_tensor = DTensor.from_local(
+            partial_local,
+            device_mesh,
+            [Partial()],
+            run_check=False,
+        )
+
+        actual = partial_tensor.redistribute(device_mesh, [Shard(shard_dim)])
+        expected = distribute_tensor(
+            partial_local * self.world_size,
+            device_mesh,
+            [Shard(shard_dim)],
+        )
+
+        self.assertEqual(actual.to_local(), expected.to_local())
+
+    def test_partial_to_shard_uneven_ops(self):
+        device_mesh = self.build_device_mesh()
+        my_rank = device_mesh.get_local_rank()
+        shard_dim = 0
+        input_size = (self.world_size + 1, 2)
+
+        @maybe_run_for_local_tensor
+        def _make_tensors(rank):
+            partial_local = torch.full(input_size, rank + 1.0, device=self.device_type)
+            full_chunk_size = (
+                input_size[shard_dim] + self.world_size - 1
+            ) // self.world_size
+            shard_start = full_chunk_size * rank
+            logical_size = max(
+                min(input_size[shard_dim] - shard_start, full_chunk_size), 0
+            )
+            expected_shape = list(input_size)
+            expected_shape[shard_dim] = logical_size
+            expected = torch.full(
+                expected_shape,
+                self.world_size * (self.world_size + 1) / 2,
+                device=self.device_type,
+            )
+            return partial_local, expected
+
+        partial_local, expected = _make_tensors(my_rank)
+
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            output = Shard(shard_dim)._reduce_shard_tensor(
+                partial_local, device_mesh, "sum", mesh_dim=0
+            )
+
+        self.assertEqual(output, expected)
+
+        debug_str = debug_mode.debug_string()
+        self.assertNotIn("aten::split", debug_str)
+        self.assertNotIn("aten::cat", debug_str)
 
     def _test_all_gather_optimization(
         self,
