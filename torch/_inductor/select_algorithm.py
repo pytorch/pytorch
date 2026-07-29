@@ -4863,10 +4863,10 @@ class AlgorithmSelectorCache(PersistentCache):
                             "select_algorithm_num_precompilation_exceptions"
                         ] += 1
                         exceptions.append((futures[future], e))
-                        log.debug(
-                            "Precompilation failed for benchmark choice %s: %s",
-                            futures[future],
+                        log.exception(
+                            "Exception %s for benchmark choice %s",
                             e,
+                            futures[future],
                             exc_info=e,
                         )
                         futures[future].mark_failed()
@@ -5055,7 +5055,8 @@ class AlgorithmSelectorCache(PersistentCache):
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
-        current_out_size = out_base.storage().size()
+        # untyped_storage() counts bytes, unlike the deprecated TypedStorage.size().
+        current_out_size = out_base.untyped_storage().size() // out_base.element_size()
 
         if needed_out_size > current_out_size:
             # Create a new base tensor with sufficient storage
@@ -6279,10 +6280,7 @@ def _log_autotune_choices_stats(
     get_chromium_event_logger().add_event_data(
         event_name, autotune_choices_stats=payload
     )
-    console_metadata = {
-        name: value for name, value in metadata.items() if not name.endswith("_desc")
-    }
-    sys.stderr.write(f"Autotune Choices Stats:\n{json.dumps(console_metadata)}\n")
+    sys.stderr.write(f"Autotune Choices Stats:\n{payload}\n")
 
 
 def _log_autotune_exceptions(
