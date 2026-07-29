@@ -353,7 +353,6 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   )
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  torch_cuda_suppress_if_clang(flash_attention deprecated-literal-operator)
 endif()
 
 if(USE_FLASH_ATTENTION)

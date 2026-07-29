@@ -1195,6 +1195,10 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
+if(USE_CUDA AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-deprecated-literal-operator")
+endif()
+
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")

@@ -1086,7 +1086,6 @@ elseif(USE_CUDA)
     target_link_libraries(torch_nvshmem PRIVATE torch_cpu torch::cudart)
     set_target_properties(torch_nvshmem PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
-    torch_cuda_suppress_if_clang(torch_nvshmem deprecated-literal-operator)
     target_compile_options(torch_nvshmem PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
     target_link_libraries(torch_nvshmem PRIVATE
         ${NVSHMEM_HOST_LIB}
