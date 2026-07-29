@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/AccumulateType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -41,8 +40,6 @@ void run_normal_distribution_shards(
     double stddev,
     std::optional<Generator> generator);
 
-} // anonymous namespace
-
 void philox_distribution_shards_cuda(
     Tensor& self,
     IntArrayRef global_shape,
@@ -51,8 +48,7 @@ void philox_distribution_shards_cuda(
     IntArrayRef local_sizes,
     int64_t chunk_count,
     PhiloxDistributionKind distribution,
-    double param0,
-    double param1,
+    ArrayRef<Scalar> params,
     std::optional<Generator> generator) {
   switch (distribution) {
     case PhiloxDistributionKind::Normal:
@@ -63,14 +59,12 @@ void philox_distribution_shards_cuda(
           local_offsets,
           local_sizes,
           chunk_count,
-          param0,
-          param1,
+          params[0].toDouble(),
+          params[1].toDouble(),
           generator);
       break;
   }
 }
-
-namespace {
 
 using at::cuda::philox_4x32;
 
@@ -78,24 +72,6 @@ using at::cuda::philox_4x32;
 // Note that we use a full float for each generated half/bfloat16 for better numerics.
 template <typename scalar_t>
 constexpr int elems_per_call = std::is_same_v<scalar_t, double> ? 2 : 4;
-
-struct CurandNormalFloat4 {
-  __device__ float4 operator()(curandStatePhilox4_32_10_t* state) const {
-    return curand_normal4(state);
-  }
-};
-
-struct CurandNormalDouble2 {
-  __device__ double2 operator()(curandStatePhilox4_32_10_t* state) const {
-    return curand_normal2_double(state);
-  }
-};
-
-template <typename scalar_t>
-using CurandNormalSampler = std::conditional_t<
-    std::is_same_v<scalar_t, double>,
-    CurandNormalDouble2,
-    CurandNormalFloat4>;
 
 // Box-Muller: convert 4 uniform uint32 values into 4 standard normal floats.
 __device__ __forceinline__ float4 box_muller_float(uint4 r) {
@@ -159,6 +135,7 @@ struct DistributionShardLaunch {
   int64_t numel;
   int64_t global_base;
   int64_t local_base;
+  bool is_contiguous;
   DistributionShardOffsetCalculator offset_calculator;
 };
 
@@ -260,9 +237,65 @@ std::vector<DistributionShardLaunch> build_shard_launches(
           global_strides[logical_dim],
           self.stride(static_cast<int64_t>(logical_dim)));
     }
+    launch.is_contiguous = launch.offset_calculator.dims <= 1 &&
+        (launch.offset_calculator.dims == 0 ||
+         (launch.offset_calculator.global_strides[0] == 1 &&
+          launch.offset_calculator.local_strides[0] == 1));
     launches.push_back(launch);
   }
   return launches;
+}
+
+template <typename scalar_t, typename sample_t, typename param_t>
+__global__ void distribution_contiguous_shard_kernel(
+    scalar_t* __restrict__ output,
+    PhiloxCudaState philox_args,
+    int64_t local_numel,
+    int64_t global_base,
+    int64_t local_base,
+    int64_t total_grid,
+    sample_t sample_func,
+    param_t param_func) {
+  constexpr int unroll_factor = elems_per_call<scalar_t>;
+  const int64_t thread_index =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t total_stride = blockDim.x * total_grid;
+  const int64_t global_end = global_base + local_numel;
+  if (thread_index >= global_end) {
+    return;
+  }
+
+  const int64_t first_q = global_base <= thread_index
+      ? 0
+      : (global_base - thread_index + total_stride - 1) / total_stride;
+  const int64_t last_q = (global_end - 1 - thread_index) / total_stride;
+  if (first_q > last_q) {
+    return;
+  }
+  const int64_t first_call = first_q / unroll_factor;
+  const int64_t last_call = last_q / unroll_factor;
+
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  curandStatePhilox4_32_10_t state;
+  curand_init(
+      seed,
+      static_cast<uint64_t>(thread_index),
+      offset + static_cast<uint64_t>(first_call) *
+          max_generator_offsets_per_curand_call,
+      &state);
+  for (int64_t call = first_call; call <= last_call; ++call) {
+    auto sample = sample_func(&state);
+#pragma unroll
+    for (int lane = 0; lane < unroll_factor; ++lane) {
+      const int64_t logical_index =
+          thread_index +
+          total_stride * (call * unroll_factor + static_cast<int64_t>(lane));
+      if (logical_index >= global_base && logical_index < global_end) {
+        output[local_base + logical_index - global_base] =
+            param_func((&sample.x)[lane]);
+      }
+    }
+  }
 }
 
 template <typename scalar_t, typename sample_t, typename param_t>
@@ -306,33 +339,11 @@ __global__ void distribution_shard_kernel(
 template <typename scalar_t, typename sample_t, typename param_t>
 void distribution_shards(
     Tensor& self,
-    IntArrayRef global_shape,
-    IntArrayRef global_offsets,
-    IntArrayRef local_offsets,
-    IntArrayRef local_sizes,
-    int64_t chunk_count,
+    const detail::ValidatedPhiloxShardMetadata& metadata,
+    const std::vector<DistributionShardLaunch>& launches,
     std::optional<Generator> generator,
     const sample_t& sample_func,
     const param_t& param_func) {
-  auto metadata = detail::validate_philox_shard_metadata(
-      self,
-      global_shape,
-      global_offsets,
-      local_offsets,
-      local_sizes,
-      chunk_count);
-  auto launches = build_shard_launches(
-      self,
-      global_shape,
-      global_offsets,
-      local_offsets,
-      local_sizes,
-      chunk_count,
-      metadata);
-  if (metadata.global_numel == 0) {
-    return;
-  }
-
   constexpr int unroll_factor = elems_per_call<scalar_t>;
   auto [counter_offset, total_grid, block] =
       calc_execution_policy(metadata.global_numel, unroll_factor);
@@ -349,6 +360,20 @@ void distribution_shards(
 
   auto* output = self.mutable_data_ptr<scalar_t>();
   for (const auto& launch : launches) {
+    const int64_t total_stride = block.x * total_grid.x;
+    if (launch.is_contiguous && launch.numel >= total_stride) {
+      distribution_contiguous_shard_kernel<scalar_t>
+          <<<total_grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+              output,
+              rng_engine_inputs,
+              launch.numel,
+              launch.global_base,
+              launch.local_base,
+              total_grid.x,
+              sample_func,
+              param_func);
+      continue;
+    }
     const uint32_t local_grid =
         static_cast<uint32_t>((launch.numel + block.x - 1) / block.x);
     distribution_shard_kernel<scalar_t>
@@ -376,29 +401,47 @@ void run_normal_distribution_shards(
     double mean,
     double stddev,
     std::optional<Generator> generator) {
+  auto metadata = detail::validate_philox_shard_metadata(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count);
+  auto launches = build_shard_launches(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count,
+      metadata);
+  if (metadata.global_numel == 0) {
+    return;
+  }
+  if (launches.size() == 1 &&
+      launches[0].numel == metadata.global_numel &&
+      launches[0].global_base == 0 && launches[0].local_base == 0 &&
+      self.numel() == metadata.global_numel && self.is_contiguous()) {
+    auto gen = get_generator_or_default<CUDAGeneratorImpl>(
+        generator, cuda::detail::getDefaultCUDAGenerator());
+    templates::cuda::normal_kernel(self, mean, stddev, gen);
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,
       self.scalar_type(),
       "_philox_distribution_shards_",
       [&] {
-        using accscalar_t = at::acc_type<scalar_t, true>;
-        auto mu = static_cast<accscalar_t>(mean);
-        auto sigma = static_cast<accscalar_t>(stddev);
-        auto param_func = [mu, sigma] __device__(accscalar_t rand) {
-          return static_cast<scalar_t>(
-              at::transformation::normal<accscalar_t>(rand, mu, sigma));
-        };
         distribution_shards<scalar_t>(
             self,
-            global_shape,
-            global_offsets,
-            local_offsets,
-            local_sizes,
-            chunk_count,
+            metadata,
+            launches,
             generator,
-            CurandNormalSampler<scalar_t>{},
-            param_func);
+            templates::cuda::NormalDistributionSampler<scalar_t>{},
+            templates::cuda::NormalDistributionTransform<scalar_t>(
+                mean, stddev));
       });
 }
 
