@@ -79,7 +79,7 @@ from .ir import (
     MultiOutputLayout,
     NoneLayout,
 )
-from .loop_body import LoopBody
+from .loop_body import LoopBody, MASKED_EXPANSION_BANNED_OPS
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
@@ -2423,25 +2423,19 @@ class SchedulerNode(BaseSchedulerNode):
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> None:
-        if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
-            raise AssertionError(
-                "expected self.node to be a ComputedBuffer or TemplateBuffer"
-            )
-
-        self._body = self._body.expand_dimension_for_pointwise_node(
-            dimension, new_range
+        self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=False
         )
-        self._sizes = self._body.sizes
-
-        device = self.node.get_device_or_error()
-        group_fn = self.scheduler.get_backend(device).group_fn
-        self.group = (device, group_fn(self._sizes))
-
-        # Need normalize the prefix name to facilitate finding common dependencies
-        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
 
     def expand_dimension_for_pointwise_node_with_masked_stores(
         self, dimension: int, new_range: int
+    ) -> None:
+        self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=True
+        )
+
+    def _expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int, *, mask_stores: bool
     ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
@@ -2449,17 +2443,23 @@ class SchedulerNode(BaseSchedulerNode):
             )
 
         self._before_loop_state_mutation()
-        self._body = (
-            self._body.expand_dimension_for_pointwise_node_with_masked_stores(
+        if mask_stores:
+            self._body = (
+                self._body.expand_dimension_for_pointwise_node_with_masked_stores(
+                    dimension, new_range
+                )
+            )
+        else:
+            self._body = self._body.expand_dimension_for_pointwise_node(
                 dimension, new_range
             )
-        )
         self._sizes = self._body.sizes
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
         self.group = (device, group_fn(self._sizes))
 
+        # Need normalize the prefix name to facilitate finding common dependencies
         self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
 
     def merge_loops(self) -> None:
@@ -2624,6 +2624,10 @@ class SchedulerNode(BaseSchedulerNode):
         if self.is_template():
             return False
         if any(out.get_aliases() for out in self.get_outputs()):
+            return False
+        # A masked store only partially defines its buffer, so reusing the input
+        # would leave the input's values in the masked-off region.
+        if isinstance(self._body, LoopBody) and self._body.has_op("masked_store"):
             return False
         if len(self.read_writes.writes) == 1 and isinstance(
             read_dep, dependencies.MemoryDep
@@ -7551,7 +7555,12 @@ class Scheduler:
         )
         pw_rnumel = red_rnumel
         masked_expansion_bytes = 0
+        pw_access_bytes = 0
         if needs_expansion:
+            max_ratio = config.masked_expansion_max_ratio
+            if max_ratio <= 0:
+                return False
+
             # Only a narrower consumer can be safely masked. Expanding a producer
             # would leave values required by the reduction undefined.
             if (
@@ -7562,21 +7571,15 @@ class Scheduler:
             ):
                 return False
 
-            pw_numel_hint = V.graph.sizevars.optimization_hint(pw_numel, fallback=0)
-            target_numel_hint = V.graph.sizevars.optimization_hint(
-                target_numel, fallback=0
-            )
-            pw_access_bytes = pw_node.get_read_write_buffers_sizes()
-            if (
-                not pw_numel_hint
-                or target_numel_hint <= pw_numel_hint
-                or not pw_access_bytes
-            ):
+            # Screen the body before mutating anything: _MaskStoresHandler only
+            # rewrites plain stores, and the ops below would either write the
+            # tail unmasked or evaluate an assert on discarded tail values.
+            if any(
+                sn._body.has_op(op)
+                for sn in snodes
+                for op in MASKED_EXPANSION_BANNED_OPS
+            ) or any(sn._get_atomic_add_buffers() for sn in snodes):
                 return False
-            extra_numel = target_numel_hint - pw_numel_hint
-            masked_expansion_bytes = (
-                pw_access_bytes * extra_numel + pw_numel_hint - 1
-            ) // pw_numel_hint
 
             pw_rnumel = FloorDiv(pw_numel, red_numel)
             if (
@@ -7584,12 +7587,45 @@ class Scheduler:
                     red_numel * pw_rnumel, pw_numel
                 )
                 or not V.graph.sizevars.statically_known_lt(pw_rnumel, red_rnumel)
-                # Bound masked work to 10% of the original pointwise domain.
+                # Bound the masked work as a fraction of the original domain.
+                # Additive expansions of a dynamic dim (8*s0 vs 8*s0+8) are not
+                # provable and so never fire; that is the safe direction.
                 or not V.graph.sizevars.statically_known_leq(
-                    target_numel * 10, pw_numel * 11
+                    target_numel,
+                    pw_numel * sympy.Rational(1 + max_ratio).limit_denominator(10**6),
                 )
             ):
                 return False
+
+            pw_numel_hint = V.graph.sizevars.optimization_hint(pw_numel, fallback=0)
+            target_numel_hint = V.graph.sizevars.optimization_hint(
+                target_numel, fallback=0
+            )
+            # Deliberately the uncached impl: get_read_write_buffers_sizes() is
+            # @cache_on_self and is not invalidated by the expansion below, so
+            # calling it here would leave a pre-expansion byte count on a node
+            # that estimate_runtime() later reads -- including on candidate
+            # pairs this speculative can_fuse() goes on to reject.
+            pw_access_bytes = pw_node.get_read_write_buffers_sizes_impl(
+                include_reads=True, include_writes=True
+            )
+            if (
+                not pw_numel_hint
+                or target_numel_hint <= pw_numel_hint
+                or not pw_access_bytes
+            ):
+                return False
+            extra_numel = target_numel_hint - pw_numel_hint
+            # Upper bound, not an estimate: this scales *all* pointwise traffic
+            # by the added fraction, including the writes we mask off and reads
+            # that do not vary along the expanded dim. Over-estimating is the
+            # conservative direction for the rejection below.
+            # TODO: on a persistent reduction the tail lanes are often already
+            # present as padding (next_power_of_2(1001) == 2048), so the true
+            # cost can be zero and these checks are far too strict.
+            masked_expansion_bytes = (
+                pw_access_bytes * extra_numel + pw_numel_hint - 1
+            ) // pw_numel_hint
 
         if not all(
             SIMDKernel.is_compatible((red_numel, pw_rnumel), sn.get_ranges())
@@ -7637,19 +7673,42 @@ class Scheduler:
             refresh_group_node_dependencies(pw_node)
 
         if needs_expansion:
+            # LOAD-SIDE LEGALITY PROOF for the whole transform. Only the stores
+            # are masked: the masked path in
+            # expand_dimension_for_pointwise_node_with_masked_stores drops the
+            # `Mod` that the unmasked path relies on, so the tail iterations
+            # issue raw, unclamped loads at indices past the original pointwise
+            # extent. Each such read is legal iff its address still lands inside
+            # the buffer over the *expanded* iteration domain, so prove exactly
+            # that on the post-expansion deps and require every read to either
+            #   (a) be provably in bounds over the expanded domain, or
+            #   (b) match a read the reduction itself performs -- the reduction
+            #       then executes the same address and is the witness.
+            # Both directions fail closed on dynamic shapes. Weakening this
+            # silently produces out-of-bounds loads.
             reduction_reads: dict[str, list[Dep]] = defaultdict(list)
             for dep in reduction_node.read_writes.reads:
                 reduction_reads[dep.name].append(dep)
-            reduction_outputs = reduction_node.get_buffer_names()
+
+            def read_is_in_bounds(read: Dep) -> bool:
+                if not isinstance(read, MemoryDep) or read.is_indirect():
+                    return False
+                ranges = {
+                    var: sympy.Integer(size - 1)
+                    for var, size in zip(read.var_names, read.size)
+                }
+                max_index = sympy_subs(read.index, ranges)
+                return V.graph.sizevars.statically_known_lt(
+                    max_index, V.graph.get_numel(read.name)
+                )
+
             unmatched_reads = [
                 read
                 for read in pw_node.read_writes.reads
-                if (
-                    read.name not in reduction_outputs
-                    and not any(
-                        self.deps_match_normalized(read, reduction_read)
-                        for reduction_read in reduction_reads[read.name]
-                    )
+                if not read_is_in_bounds(read)
+                and not any(
+                    self.deps_match_normalized(read, reduction_read)
+                    for reduction_read in reduction_reads[read.name]
                 )
             ]
             if unmatched_reads:
@@ -7663,23 +7722,48 @@ class Scheduler:
         common_names = (
             node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
         )
-        n1_deps = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
-        n2_deps = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+        # Keyed by name only, so a node accessing one buffer at several indices
+        # keeps just one dep. Tolerable for the boolean has_benefit below; for
+        # the quantitative check the masked path adds, take the best-matching
+        # pair per buffer rather than whichever happened to be last.
+        n1_deps: dict[str, list[Dep]] = defaultdict(list)
+        n2_deps: dict[str, list[Dep]] = defaultdict(list)
+        for dep in node1.read_writes.reads_and_writes():
+            n1_deps[dep.name].append(dep)
+        for dep in node2.read_writes.reads_and_writes():
+            n2_deps[dep.name].append(dep)
         matched_deps = [
-            (n1_deps[name], n2_deps[name])
+            max(
+                (
+                    (dep1, dep2)
+                    for dep1 in n1_deps[name]
+                    for dep2 in n2_deps[name]
+                    if self.deps_match_normalized(dep1, dep2)
+                ),
+                key=lambda pair: max(
+                    self.dep_size_hint(pair[0]), self.dep_size_hint(pair[1])
+                ),
+                default=None,
+            )
             for name in common_names
-            if self.deps_match_normalized(n1_deps[name], n2_deps[name])
         ]
+        matched_deps = [pair for pair in matched_deps if pair is not None]
         has_benefit = bool(matched_deps)
         if needs_expansion:
+            # dep_size_hint on the consumer's deps reflects the post-expansion
+            # extent, while pw_access_bytes was captured pre-expansion; both
+            # error toward accepting, and masked_expansion_bytes (an upper
+            # bound) errors toward rejecting.
             shared_bytes = sum(
                 max(self.dep_size_hint(dep1), self.dep_size_hint(dep2))
                 for dep1, dep2 in matched_deps
             )
             # Avoid small-read fusions and leave margin for masked compute.
             if (
-                masked_expansion_bytes * 4 > shared_bytes
-                or pw_access_bytes > shared_bytes * 10
+                masked_expansion_bytes * config.masked_expansion_shared_bytes_multiple
+                > shared_bytes
+                or pw_access_bytes * config.masked_expansion_min_shared_fraction
+                > shared_bytes
             ):
                 loop_ordering_log.debug(
                     "masked expansion costs %s bytes for %s shared bytes and %s pointwise bytes",
@@ -7704,6 +7788,8 @@ class Scheduler:
             if isinstance(pw_node, FusedSchedulerNode):
                 refresh_group_node_dependencies(pw_node)
 
+        if needs_expansion:
+            counters["inductor"]["masked_expansion_reindex"] += 1
         return True
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:

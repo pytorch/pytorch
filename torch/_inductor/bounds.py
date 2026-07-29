@@ -156,6 +156,12 @@ class BoundVars:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
+    """
+    OpsHandler that evaluates a loop body over ValueRanges instead of values.
+    Ops without an explicit implementation return an unknown range, so the
+    analysis is always an over-approximation.
+    """
+
     def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
@@ -183,6 +189,9 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
     def store(
         self, name: str, index: sympy.Expr, value: Any, mode: StoreMode = None
     ) -> None:
+        return
+
+    def masked_store(self, name: str, index: sympy.Expr, value: Any, mask: Any) -> None:
         return
 
     def reduction(

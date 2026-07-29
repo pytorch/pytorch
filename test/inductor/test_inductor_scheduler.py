@@ -1002,9 +1002,7 @@ class TestScheduler(TestCase):
     ):
         def fn(x, bias, extra, residual):
             scores = x[None] * 0.125 + bias
-            appended = extra.view(1, 8, 1, extra_cols).expand(
-                1, 8, 32, extra_cols
-            )
+            appended = extra.view(1, 8, 1, extra_cols).expand(1, 8, 32, extra_cols)
             values = torch.cat((scores, appended), dim=-1)
             shifted = (values - values.max(dim=-1, keepdim=True).values).float()
             shifted = shifted - shifted.amax(dim=-1, keepdim=True)
@@ -1034,9 +1032,7 @@ class TestScheduler(TestCase):
             self.assertEqual(source.count("libdevice.exp("), 1)
             load_lines = [line for line in source.splitlines() if "tl.load(" in line]
             data_loads = [
-                line
-                for line in load_lines
-                if "in_ptr0" in line or "in_ptr1" in line
+                line for line in load_lines if "in_ptr0" in line or "in_ptr1" in line
             ]
             self.assertEqual(len(data_loads), 2)
             self.assertTrue(all("r0_mask" not in line for line in data_loads))
@@ -1053,11 +1049,128 @@ class TestScheduler(TestCase):
 
         torch._dynamo.reset()
         metrics.reset()
+        counters.clear()
         with fresh_inductor_cache():
             actual = torch.compile(fn, fullgraph=True)(x)
 
         self.assertEqual(expected, actual)
         self.assertEqual(metrics.generated_kernel_count, 2)
+        # Pin the mechanism, not just the kernel count: the byte gate must be
+        # what rejects this, so the expansion must never have been committed.
+        self.assertEqual(counters["inductor"]["masked_expansion_reindex"], 0)
+
+    def _masked_expansion_fn(self, extra_cols):
+        def fn(x, bias, extra):
+            scores = x[None] * 0.125 + bias
+            appended = extra.view(1, 8, 1, extra_cols).expand(1, 8, 32, extra_cols)
+            values = torch.cat((scores, appended), dim=-1)
+            shifted = (values - values.max(dim=-1, keepdim=True).values).float()
+            shifted = shifted - shifted.amax(dim=-1, keepdim=True)
+            exp = shifted.exp()
+            probs = exp / exp.sum(dim=-1, keepdim=True)
+            return probs.bfloat16()[..., :32].clone().view(8, 32, 32)
+
+        x = torch.randn(8, 32, 32, device="cuda", dtype=torch.bfloat16)
+        bias = torch.randn(1, 1, 32, 32, device="cuda", dtype=torch.bfloat16)
+        extra = torch.randn(8, extra_cols, device="cuda", dtype=torch.bfloat16)
+        return fn, (x, bias, extra)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_masked_expansion_stores_are_masked(self):
+        """
+        The whole transform is only sound because the expanded tail iterations
+        do not write. Assert the emitted store actually carries a tail mask
+        rather than inferring it from the kernel count.
+        """
+        fn, args = self._masked_expansion_fn(1)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with fresh_inductor_cache():
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertTrue(counters["inductor"]["masked_expansion_reindex"])
+
+        source = "\n".join(code)
+        store_lines = [ln for ln in source.splitlines() if "tl.store(" in ln]
+        self.assertTrue(store_lines)
+        # Every store in the fused kernel must carry a predicate beyond the
+        # plain range mask: an unmasked store would write the expanded tail and
+        # silently corrupt the output. tl.store's mask is positional, so look
+        # for an extra ANDed term rather than a mask= kwarg.
+        for line in store_lines:
+            predicate = line.rsplit(",", 1)[-1].rstrip(")\n ")
+            self.assertIn("&", predicate, msg=f"unpredicated store: {line}")
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @parametrize("max_ratio,expect_fusion", ((0.0, False), (0.5, True)))
+    def test_masked_expansion_ratio_cap(self, max_ratio, expect_fusion):
+        fn, args = self._masked_expansion_fn(1)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(masked_expansion_max_ratio=max_ratio),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        fired = counters["inductor"]["masked_expansion_reindex"]
+        self.assertEqual(bool(fired), expect_fusion)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_masked_expansion_skipped_for_dynamic_shapes(self):
+        """
+        The ratio cap compares an expanded extent against the original, which is
+        unprovable when the reduction extent is dynamic (8*s0 vs 8*s0+8).
+        Rejecting is the safe direction.
+        """
+
+        def fn(x):
+            row_sum = x.sum(dim=-1, keepdim=True)
+            return (row_sum.expand(8, x.shape[-1] - 1) + 1).clone()
+
+        x = torch.randn(8, 1001, device="cuda")
+        torch._dynamo.mark_dynamic(x, 1)
+        expected = fn(x)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["inductor"]["masked_expansion_reindex"], 0)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_masked_expansion_degenerate_range_is_noop(self):
+        """
+        When the pointwise already spans the reduction's extent there is no tail,
+        so the masked path must not run and no _load_mask penalty is paid.
+        """
+        fn, args = self._masked_expansion_fn(32)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with fresh_inductor_cache():
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(counters["inductor"]["masked_expansion_reindex"], 0)
+        self.assertNotIn("_load_mask", "\n".join(code))
 
 
 class TestScoreFusionMemory(TestCase):

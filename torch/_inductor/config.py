@@ -974,6 +974,20 @@ loop_reindexing_after_fusion: bool = (
     os.environ.get("TORCHINDUCTOR_LOOP_REINDEXING_AFTER_FUSION", "1") == "1"
 )
 
+# Reindexing a narrower pointwise consumer onto a reduction's iteration space
+# computes some lanes whose stores are masked off. These three knobs bound that
+# wasted work; set the ratio to 0 to disable the masked path entirely. The
+# defaults are conservative and were chosen so the transform fires on
+# near-sized epilogues (e.g. a 1001-wide reduction sliced to 1000) without
+# reaching small shared reads. Sizes only known symbolically fail closed.
+#
+# Max expansion of the pointwise iteration domain, as a fraction.
+masked_expansion_max_ratio: float = 0.1
+# Require shared bytes to exceed the estimated expansion cost by this factor.
+masked_expansion_shared_bytes_multiple: int = 4
+# Require shared bytes to be at least this fraction of pointwise traffic.
+masked_expansion_min_shared_fraction: float = 0.1
+
 
 # When trying to fuse two nodes, one with:
 # a[contiguous_writes] = fn(...)
