@@ -14,6 +14,7 @@ import os
 import pprint
 import sys
 import textwrap
+import threading
 import time
 import traceback
 import typing
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
     from .codegen.wrapper import PythonWrapperCodegen
+    from .graph import FuseOrErrGroup
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
@@ -2089,14 +2091,23 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
     return ms
 
 
+# Thread-local hook used by fuse_or_err to capture fusion-rejection reasons
+# during the fusion pass. None unless a fuse_or_err region is present.
+_fuse_or_err_capture = threading.local()
+
+
 @dataclasses.dataclass(slots=True)
 class WhyNoFuse:
+    node1: BaseSchedulerNode
+    node2: BaseSchedulerNode
     name1: str
     name2: str
     reason: str
     args: tuple[Any, ...]
 
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+        self.node1 = node1
+        self.node2 = node2
         self.name1 = node1.get_name()
         self.name2 = node2.get_name()
 
@@ -2104,6 +2115,11 @@ class WhyNoFuse:
         self.reason = reason
         self.args = args
         fusion_log.debug(self)
+        # fuse_or_err captures rejection reasons during the real fusion pass so
+        # it can surface an accurate explanation if a required region splits.
+        hook = getattr(_fuse_or_err_capture, "hook", None)
+        if hook is not None:
+            hook(self.node1, self.node2, str(self))
 
     def __str__(self) -> str:
         return f"cannot fuse {self.name1} with {self.name2}: " + (
@@ -4282,7 +4298,24 @@ class Scheduler:
         self._populate_stream_assignments()
         self._populate_mempool_assignments()
 
-        self.nodes = self.fuse_nodes(self.nodes)
+        # When a fuse_or_err region is present, capture fusion-rejection reasons
+        # during the fusion pass so a required region that splits can be
+        # explained accurately (see _verify_fuse_or_err_groups).
+        self._fuse_or_err_region_ops: OrderedSet[str] = OrderedSet()
+        self._fuse_or_err_region_groups: list[OrderedSet[str]] = []
+        for group in V.graph.fuse_or_err_groups:
+            self._fuse_or_err_region_ops |= group.op_names
+            self._fuse_or_err_region_groups.append(group.op_names)
+        self._fuse_or_err_no_fuse_reasons: list[
+            tuple[OrderedSet[str], OrderedSet[str], str]
+        ] = []
+        previous_fuse_or_err_hook = getattr(_fuse_or_err_capture, "hook", None)
+        if self._fuse_or_err_region_ops:
+            _fuse_or_err_capture.hook = self._record_no_fuse_reason
+        try:
+            self.nodes = self.fuse_nodes(self.nodes)
+        finally:
+            _fuse_or_err_capture.hook = previous_fuse_or_err_hook
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
@@ -4309,6 +4342,10 @@ class Scheduler:
                 log_waitcounter=True,
             ):
                 self.create_combo_kernel_nodes(num_ck_nodes=None)
+
+        # Run after all kernel-boundary-forming passes (fusion, merge_loops,
+        # combo kernels) so the "single kernel" check reflects the final schedule.
+        self._verify_fuse_or_err_groups()
 
         # torch.cond and torch.switch can contain arbitrary subgraphs with collectives;
         # reordering them can cause an nccl hang.
@@ -6133,6 +6170,164 @@ class Scheduler:
     def get_fused_node(self, node: BaseSchedulerNode) -> BaseSchedulerNode:
         "Look up the node in Scheduler name_to_fused_node"
         return self.name_to_fused_node[node.get_first_name()]
+
+    def _verify_fuse_or_err_groups(self) -> None:
+        """
+        Enforce the fuse_or_err contract: every region recorded in
+        V.graph.fuse_or_err_groups must have compiled into a single kernel.
+        Raises with the exact reason otherwise.
+        """
+        final_mapping = {
+            op_name: node
+            for node in self.nodes
+            for op_name in node.get_operation_names()
+        }
+        for group in V.graph.fuse_or_err_groups:
+            missing_ops = group.op_names - final_mapping.keys()
+            missing_ops -= V.graph.removed_operations
+            if missing_ops:
+                raise RuntimeError(
+                    "fuse_or_err: internal error: recorded operations lost their "
+                    f"final scheduler mapping: {sorted(missing_ops)}"
+                )
+            fused_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
+            for op_name in group.op_names:
+                fnode = final_mapping.get(op_name)
+                if fnode is not None and self.count_kernel_nodes(fnode.get_nodes()):
+                    fused_nodes.add(fnode)
+            if len(fused_nodes) > 1:
+                self._report_fuse_or_err_failure(group, fused_nodes, final_mapping)
+
+    def _report_fuse_or_err_failure(
+        self,
+        group: FuseOrErrGroup,
+        fused_nodes: OrderedSet[BaseSchedulerNode],
+        final_mapping: dict[str, BaseSchedulerNode],
+    ) -> None:
+        from torch._logging import trace_structured
+
+        lines = [
+            f"fuse_or_err: region did not fuse into a single kernel; it "
+            f"produced {len(fused_nodes)} separate kernels."
+        ]
+        hop_stack = group.hop_node.meta.get("stack_trace")
+        if hop_stack:
+            lines.append(f"Region call site:\n{hop_stack}")
+
+        fused_list = list(fused_nodes)
+        for i, fnode in enumerate(fused_list):
+            region_ops = sorted(
+                op for op in group.op_names if final_mapping.get(op) is fnode
+            )
+            lines.append(f"  kernel #{i}: region ops {region_ops}")
+            targets = self._fuse_or_err_fx_targets(fnode)
+            if targets:
+                lines.append(f"    from ops: {targets}")
+            if any(
+                isinstance(sub, ExternKernelSchedulerNode) for sub in fnode.get_nodes()
+            ):
+                lines.append(
+                    "    -> this is an extern / non-Triton fallback (e.g. a "
+                    "matmul or an op with no Triton lowering); it can never be "
+                    "fused with other ops into one kernel."
+                )
+
+        for a, b in itertools.pairwise(fused_list):
+            lines.append(
+                f"  why {a.get_name()} and {b.get_name()} did not fuse: "
+                f"{self._fuse_or_err_reason(a, b)}"
+            )
+
+        msg = "\n".join(lines)
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fuse_or_err_failure",
+                "encoding": "string",
+            },
+            payload_fn=lambda: msg,
+        )
+        raise RuntimeError(msg)
+
+    def _fuse_or_err_fx_targets(self, node: BaseSchedulerNode) -> list[str]:
+        targets: OrderedSet[str] = OrderedSet()
+        for sub in node.get_nodes():
+            if sub.node is None:
+                continue
+            for origin in sub.node.get_origins():
+                if origin.op == "call_function":
+                    targets.add(str(origin.target))
+        return list(targets)
+
+    def _record_no_fuse_reason(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, message: str
+    ) -> None:
+        # Called from WhyNoFuse during the fusion pass. Only pairs containing
+        # operations from the same region can explain a region split.
+        ops1 = node1.get_operation_names()
+        ops2 = node2.get_operation_names()
+        if not any(
+            not group.isdisjoint(ops1) and not group.isdisjoint(ops2)
+            for group in self._fuse_or_err_region_groups
+        ):
+            return
+        self._fuse_or_err_no_fuse_reasons.append((ops1, ops2, message))
+
+    def _fuse_or_err_reason(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> str:
+        # Prefer the exact reason(s) captured from the real fusion pass: find
+        # recorded rejections between an op of node1 and an op of node2 (the
+        # candidate nodes at rejection time are subsets of these final nodes).
+        a_ops = node1.get_operation_names()
+        b_ops = node2.get_operation_names()
+
+        def subset(xs: OrderedSet[str], ys: OrderedSet[str]) -> bool:
+            return all(x in ys for x in xs)
+
+        captured = [
+            msg
+            for ops1, ops2, msg in self._fuse_or_err_no_fuse_reasons
+            if (subset(ops1, a_ops) and subset(ops2, b_ops))
+            or (subset(ops1, b_ops) and subset(ops2, a_ops))
+        ]
+        if captured:
+            return "; ".join(OrderedSet(captured))
+        return self._fuse_or_err_reason_heuristic(node1, node2)
+
+    def _fuse_or_err_reason_heuristic(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> str:
+        # Fallback when no reason was captured (e.g. a benchmark-based decline,
+        # which does not go through WhyNoFuse). Read-only, best-effort. We
+        # deliberately do NOT re-run can_fuse here: it can commit speculative
+        # loop mutations (kept when it returns True), which would corrupt the
+        # finalized schedule while producing the diagnostic.
+        def is_extern(n: BaseSchedulerNode) -> bool:
+            return any(
+                isinstance(sub, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+                for sub in n.get_nodes()
+            )
+
+        if is_extern(node1) or is_extern(node2):
+            return "one side is an extern / non-Triton kernel and cannot be fused"
+        if node1.get_device() != node2.get_device():
+            return f"different devices ({node1.get_device()} vs {node2.get_device()})"
+        if node1.group != node2.group:
+            return (
+                f"incompatible iteration domains {node1.group} vs {node2.group} "
+                "(e.g. different shapes, or pointwise vs reduction)"
+            )
+        writes1 = OrderedSet(d.name for d in node1.read_writes.writes)
+        writes2 = OrderedSet(d.name for d in node2.read_writes.writes)
+        reads1 = OrderedSet(d.name for d in node1.read_writes.reads)
+        reads2 = OrderedSet(d.name for d in node2.read_writes.reads)
+        if not ((writes1 & reads2) or (writes2 & reads1) or (reads1 & reads2)):
+            return "no shared data to fuse over (independent kernels)"
+        return (
+            "fusion legal but declined by Inductor heuristics/benchmarking; "
+            "run with TORCH_LOGS=fusion for details"
+        )
 
     def fuse_two_nodes(
         self,

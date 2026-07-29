@@ -332,6 +332,7 @@ def _extract_subgraphs_and_args(
         torch.ops.higher_order.foreach_map,
         torch.ops.higher_order.invoke_quant_packed,
         torch.ops.higher_order.invoke_quant,
+        torch.ops.higher_order.fuse_or_err,
     ):
         yield args[0], tuple(args[1:])
     elif node.target is torch.ops.higher_order.invoke_subgraph:
