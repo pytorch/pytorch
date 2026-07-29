@@ -287,6 +287,54 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         mark_flex_gemm_body_gemm_node(graph_module, torch.ops.aten.mm.default)
         self.assertFalse(is_valid_addmm_fusion(match))
 
+    @parametrize(
+        "case",
+        (
+            (
+                "addmm",
+                torch.ops.aten.addmm.default,
+                ((4, 16), (4, 8), (8, 16)),
+            ),
+            (
+                "baddbmm",
+                torch.ops.aten.baddbmm.default,
+                ((2, 4, 16), (2, 4, 8), (2, 8, 16)),
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_post_grad_unfuse_preserves_flex_gemm_body_gemm(self, case):
+        from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
+        from torch._inductor.fx_passes.post_grad import (
+            should_prefer_unfused_addmm,
+            should_prefer_unfused_baddbmm,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, gemm_op, input_shapes = case
+        check = {
+            torch.ops.aten.addmm.default: should_prefer_unfused_addmm,
+            torch.ops.aten.baddbmm.default: should_prefer_unfused_baddbmm,
+        }[gemm_op]
+        with FakeTensorMode():
+            input_values = [torch.empty(shape, device="cuda") for shape in input_shapes]
+        graph_module = make_fx(
+            lambda inp, mat1, mat2: gemm_op(inp, mat1, mat2).relu(),
+            tracing_mode="fake",
+        )(*input_values)
+        inputs = [node for node in graph_module.graph.nodes if node.op == "placeholder"]
+        gemm = next(node for node in graph_module.graph.nodes if node.target is gemm_op)
+        match = SimpleNamespace(
+            args=tuple(inputs[1:]),
+            kwargs={"inp": inputs[0]},
+            output_node=lambda: gemm,
+        )
+        self.assertTrue(check(match))
+
+        mark_flex_gemm_body_gemm_node(graph_module, gemm_op)
+        self.assertFalse(check(match))
+
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,

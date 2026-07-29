@@ -1831,6 +1831,8 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
     mat1, mat2 = match.args
     inp_val = inp.meta["val"]
     mat1_val = mat1.meta["val"]
@@ -1854,6 +1856,8 @@ def should_prefer_unfused_addmm(match):
 def should_prefer_unfused_baddbmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
+        return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
         return False
 
     output = match.output_node()
