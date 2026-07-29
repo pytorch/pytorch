@@ -526,11 +526,11 @@ class StreamVariable(StreamContextVariable):
         )
 
     tp_methods = {
-        "wait_event": Method(wait_event, "wait_event"),
-        "wait_stream": Method(wait_stream, "wait_stream"),
-        "synchronize": Method(synchronize, "synchronize"),
-        "query": Method(query, "query"),
-        "record_event": Method(record_event, "record_event"),
+        "wait_event": Method(wait_event),
+        "wait_stream": Method(wait_stream),
+        "synchronize": Method(synchronize),
+        "query": Method(query),
+        "record_event": Method(record_event),
     }
 
     def richcompare_impl(self, tx, other, op):
@@ -740,10 +740,10 @@ class EventVariable(VariableTracker):
         )
 
     tp_methods = {
-        "wait": Method(wait, "wait"),
-        "record": Method(record, "record"),
-        "synchronize": Method(synchronize, "synchronize"),
-        "query": Method(query, "query"),
+        "wait": Method(wait),
+        "record": Method(record),
+        "synchronize": Method(synchronize),
+        "query": Method(query),
     }
 
     def call_method(
