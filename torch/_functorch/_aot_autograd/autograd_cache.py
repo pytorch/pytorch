@@ -255,6 +255,26 @@ def check_node_safe(node: Node) -> None:
             raise BypassAOTAutogradCache(
                 f"Unsupported call_function target {node.target}. \n Function module: {module}, \nFunction name: {name}"
             )
+        # torch.autocast(device) with no explicit dtype traces to
+        # _enter_autocast(device, None, ...): the effective dtype is resolved at
+        # runtime from ambient torch.get_autocast_dtype(device). That ambient
+        # default is only folded into the cache key when autocast is already
+        # enabled (see #181564), which it is not when the autocast region is
+        # entered inside the compiled function. A non-constant dtype (a Node) is
+        # likewise not pinned in the key. Refuse to cache either form so we
+        # don't reuse an artifact compiled under a different effective dtype.
+        if (
+            getattr(node.target, "__module__", None) == "torch.amp.autocast_mode"
+            and getattr(node.target, "__name__", None) == "_enter_autocast"
+        ):
+            # _enter_autocast args: (device_type, dtype, enabled, cache_enabled)
+            dtype_arg = node.args[1] if len(node.args) > 1 else None
+            if dtype_arg is None or isinstance(dtype_arg, Node):
+                raise BypassAOTAutogradCache(
+                    "_enter_autocast with a non-constant dtype (dtype=None resolves "
+                    "from ambient torch.get_autocast_dtype, which is not in the cache "
+                    "key unless autocast is already enabled)"
+                )
     elif node.op == "call_method":
         method_name = node.target
         method_target = node.args[0]

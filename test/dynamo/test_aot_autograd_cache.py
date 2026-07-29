@@ -3759,6 +3759,23 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Should not raise BypassAOTAutogradCache
         self.gen_cache_key(fn, config, inputs=[torch.randn(4, 4)])
 
+    def test_autocast_no_dtype_in_graph_bypasses(self):
+        # torch.autocast(device) with no explicit dtype traces to
+        # _enter_autocast(device, None, ...): the effective dtype is resolved
+        # at runtime from ambient torch.get_autocast_dtype, which is not part
+        # of the cache key when autocast is entered inside the graph. Caching
+        # this form would collide artifacts compiled under different ambient
+        # defaults, so it must bypass. See #191106.
+        def fn(x):
+            with torch.autocast("cpu"):
+                return (x @ x).relu().sum()
+
+        config = self.default_config()
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "_enter_autocast with a non-constant dtype"
+        ):
+            self.gen_cache_key(fn, config, inputs=[torch.randn(4, 4)])
+
     def test_inference_mode_in_graph_is_cacheable(self):
         # torch.inference_mode used *inside* a compiled region traces
         # _enter_inference_mode/_exit_inference_mode nodes into the graph. Same
