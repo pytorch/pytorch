@@ -1895,6 +1895,18 @@ namespace xpu_ipc {
 using SyclIpcHandle =
     sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
 
+struct IpcCacheAliveGuard {
+  IpcCacheAliveGuard() {
+    alive = true;
+  }
+  ~IpcCacheAliveGuard() {
+    alive = false;
+  }
+  static bool alive;
+};
+bool IpcCacheAliveGuard::alive = false;
+IpcCacheAliveGuard ipc_cache_alive_guard;
+
 struct IpcMemoryCache {
   struct CacheEntry {
     c10::DeviceIndex device{-1};
@@ -1948,13 +1960,12 @@ struct IpcMemoryCache {
         } catch (const std::exception& second_error) {
           TORCH_CHECK(
               false,
-              "XPU IPC open failed after enabling PR_SET_PTRACER_ANY: ",
+              "XPU IPC open failed: ",
+              first_error.what(),
+              ". Retry after enabling PR_SET_PTRACER_ANY also failed: ",
               second_error.what());
         }
-      }
-
-      if (ptracer_status.state == PtracerAnyState::EnableFailed &&
-          ptracer_status.error_code != 0) {
+      } else if (ptracer_status.state == PtracerAnyState::EnableFailed) {
         TORCH_CHECK(
             false,
             "XPU IPC open failed: ",
@@ -1962,22 +1973,23 @@ struct IpcMemoryCache {
             ". Failed to enable PR_SET_PTRACER_ANY (errno=",
             ptracer_status.error_code,
             ")");
-      }
-
-      if (ptracer_status.state == PtracerAnyState::DisabledByEnv) {
+      } else if (ptracer_status.state == PtracerAnyState::DisabledByEnv) {
         TORCH_CHECK(
             false,
             "XPU IPC open failed: ",
             first_error.what(),
             ". Retry with PR_SET_PTRACER_ANY is disabled by default. "
             "To opt in, set PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY=1.");
+      } else {
+        TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
       }
-
-      TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
     }
 
     auto shared_ptr = std::shared_ptr<void>(
         raw_ptr, [this, device, handle_key](void* ptr) {
+          if (!IpcCacheAliveGuard::alive) {
+            return;
+          }
           {
             std::lock_guard<std::mutex> deleter_lock(cache_mutex);
             auto it = handle_to_ptr.find(handle_key);
@@ -2310,6 +2322,8 @@ class NativeCachingAllocator : public XPUAllocator {
   std::shared_ptr<void> getIpcDevPtr(
       std::string handle_str,
       c10::DeviceIndex device) {
+    TORCH_CHECK(!handle_str.empty(), "Empty XPU IPC handle");
+
     xpu_ipc::SyclIpcHandle handle_data(
         reinterpret_cast<const std::byte*>(handle_str.data()),
         reinterpret_cast<const std::byte*>(handle_str.data()) +

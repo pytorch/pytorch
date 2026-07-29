@@ -15,6 +15,7 @@
 #include <sycl/sycl.hpp>
 
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -103,6 +104,10 @@ class XpuIPCSentData final {
 
   uint64_t offset() const {
     return offset_;
+  }
+
+  at::Device device() const {
+    return device_;
   }
 
   void set_original_ptr(at::DataPtr data_ptr) {
@@ -252,7 +257,7 @@ at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
 
   auto& file_ref = xpu_ipc_global_entities.next_available_ref_counters_file_;
   file_ref->set_counter(1);
-  auto sent_data = new XpuIPCSentData(
+  auto sent_data = std::make_unique<XpuIPCSentData>(
       file_ref->handle(),
       file_ref->get_offset(),
       file_ref->counter_ptr(),
@@ -262,7 +267,7 @@ at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
   if (!file_ref->have_offsets()) {
     file_ref.reset();
   }
-  return at::DataPtr(data, sent_data, XpuIPCSentDataDelete, device);
+  return at::DataPtr(data, sent_data.release(), XpuIPCSentDataDelete, device);
 }
 
 class XpuIpcEvent {
@@ -378,40 +383,52 @@ class XpuIpcEvent {
     auto l0_context =
         sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_context);
 
-    if (open_from_ipc) {
-      TORCH_CHECK(ipc_pool_handle.has_value(), "Missing XPU IPC pool handle");
-      TORCH_CHECK(
-          ipc_pool_handle->size() == sizeof(ze_ipc_event_pool_handle_t),
-          "Invalid XPU IPC event pool handle size");
-      ze_ipc_event_pool_handle_t ipc_handle{};
-      std::memcpy(
-          &ipc_handle,
-          ipc_pool_handle->data(),
-          sizeof(ze_ipc_event_pool_handle_t));
-      TORCH_CHECK(
-          ze.zeEventPoolOpenIpcHandle(l0_context, ipc_handle, &pool_) ==
-              ZE_RESULT_SUCCESS,
-          "Failed to open XPU IPC event pool handle");
-      opened_ipc_pool_ = true;
-    } else {
-      ze_event_pool_desc_t pool_desc{};
-      pool_desc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
-      pool_desc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC;
-      pool_desc.count = 1;
-      TORCH_CHECK(
-          ze.zeEventPoolCreate(l0_context, &pool_desc, 1, &l0_device, &pool_) ==
-              ZE_RESULT_SUCCESS,
-          "Failed to create XPU IPC event pool");
-    }
+    try {
+      if (open_from_ipc) {
+        TORCH_CHECK(ipc_pool_handle.has_value(), "Missing XPU IPC pool handle");
+        TORCH_CHECK(
+            ipc_pool_handle->size() == sizeof(ze_ipc_event_pool_handle_t),
+            "Invalid XPU IPC event pool handle size");
+        ze_ipc_event_pool_handle_t ipc_handle{};
+        std::memcpy(
+            &ipc_handle,
+            ipc_pool_handle->data(),
+            sizeof(ze_ipc_event_pool_handle_t));
+        TORCH_CHECK(
+            ze.zeEventPoolOpenIpcHandle(l0_context, ipc_handle, &pool_) ==
+                ZE_RESULT_SUCCESS,
+            "Failed to open XPU IPC event pool handle");
+        opened_ipc_pool_ = true;
+      } else {
+        ze_event_pool_desc_t pool_desc{};
+        pool_desc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+        pool_desc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC;
+        pool_desc.count = 1;
+        TORCH_CHECK(
+            ze.zeEventPoolCreate(l0_context, &pool_desc, 1, &l0_device, &pool_) ==
+                ZE_RESULT_SUCCESS,
+            "Failed to create XPU IPC event pool");
+      }
 
-    ze_event_desc_t event_desc{};
-    event_desc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
-    event_desc.index = 0;
-    event_desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
-    event_desc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
-    TORCH_CHECK(
-        ze.zeEventCreate(pool_, &event_desc, &event_) == ZE_RESULT_SUCCESS,
-        "Failed to create XPU IPC event");
+      ze_event_desc_t event_desc{};
+      event_desc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+      event_desc.index = 0;
+      event_desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+      event_desc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+      TORCH_CHECK(
+          ze.zeEventCreate(pool_, &event_desc, &event_) == ZE_RESULT_SUCCESS,
+          "Failed to create XPU IPC event");
+    } catch (...) {
+      if (pool_) {
+        if (opened_ipc_pool_) {
+          ze.zeEventPoolCloseIpcHandle(pool_);
+        } else {
+          ze.zeEventPoolDestroy(pool_);
+        }
+        pool_ = nullptr;
+      }
+      throw;
+    }
 #else
     (void)device;
     (void)open_from_ipc;
