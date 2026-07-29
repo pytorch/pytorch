@@ -2000,6 +2000,122 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = opt_fn()
         self.assertEqual(result, ((1, 2), (3, 4)))
 
+    def test_min_max_key_and_default(self):
+        # Items are non-constant (tensors), so the fully-constant fold path is
+        # skipped; the key maps each to a compile-time-constant (ndim), which is
+        # what the key comparison requires. Comparison is on key(item) but the
+        # original tensor is returned.
+        def fn(x, y, z):
+            tensors = [x, y, z]
+            return (
+                max(tensors, key=lambda t: t.ndim).sum(),
+                min(tensors, key=lambda t: t.ndim).sum(),
+                max(tensors, key=lambda t: t.ndim, default=x).sum(),
+                max([], default=y).sum(),
+                min([x + 1], default=z).sum(),
+                max(x, z, key=lambda t: t.ndim).sum(),
+                min(x, z, key=lambda t: t.ndim).sum(),
+            )
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x, y, z = torch.randn(2), torch.randn(2, 2), torch.randn(2, 2, 2)
+        self.assertEqual(opt(x, y, z), fn(x, y, z))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_min_max_key_none(self):
+        # key=None behaves like no key argument at all.
+        def fn(x):
+            return x + max([4, 1, 7], key=None) + min([4, 1, 7], key=None)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_min_max_default_none_sentinel(self):
+        # A real default=None must be honored for empty iterables and not be
+        # confused with the internal "omitted" sentinel (which raises).
+        def fn(x):
+            return (
+                max((), default=None),
+                min((), default=None),
+                max((), default=0),
+                x + 1,
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(opt(x)[:3], (None, None, 0))
+
+    def test_min_max_default_varargs_type_error(self):
+        def fn(a, b):
+            return max(a, b, default=0)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(1, 2)
+        with self.assertRaises(TypeError):
+            opt(1, 2)
+
+    def test_min_max_empty_no_default_value_error(self):
+        def fn(xs):
+            return max(xs)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_indexable(self):
+        # int(x, base) resolves base via __index__ (PyNumber_AsSsize_t), so a
+        # non-constant __index__-able base must be accepted. Previously this
+        # raised an "invalid call to builtin op handler" graph break because
+        # call_int ignored the base argument entirely.
+        class MyIndexable:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn(x):
+            a = int("101", base=MyIndexable(2))
+            b = int("101", MyIndexable(36))
+            c = int(b"ff", base=MyIndexable(16))
+            return x + a + b + c
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_int_base_out_of_range_value_error(self):
+        class MyIndexable:
+            def __index__(self):
+                return 37
+
+        def fn(xs):
+            return int("43", base=MyIndexable())
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_non_string_type_error(self):
+        def fn(n):
+            return int(n, base=16)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(5)
+        with self.assertRaises(TypeError):
+            opt(5)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
