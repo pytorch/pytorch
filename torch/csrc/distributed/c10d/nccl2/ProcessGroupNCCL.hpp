@@ -55,6 +55,13 @@ constexpr size_t kDefaultMaxEventPoolSize = 1000;
 // destroyed. Copy the string as well so each config owns its own.
 TORCH_API ncclConfig_t cloneNcclConfig(const ncclConfig_t& config);
 
+TORCH_API void waitForNcclCompletion(
+    NcclApi& nccl_api,
+    ncclComm_t comm,
+    ncclResult_t status,
+    std::chrono::milliseconds timeout,
+    std::string_view operation);
+
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
  public:
@@ -78,6 +85,14 @@ class NCCLException : public std::exception {
     if (status != ncclSuccess) {                                  \
       throw NCCLException(*nccl_api, err_str, status, nccl_comm); \
     }                                                             \
+  } while (0)
+
+#define NCCL_CHECK_NONBLOCKING(nccl_api, nccl_comm, call, err_str) \
+  do {                                                             \
+    ncclResult_t status = call;                                    \
+    if (status != ncclSuccess && status != ncclInProgress) {       \
+      throw NCCLException(*nccl_api, err_str, status, nccl_comm);  \
+    }                                                              \
   } while (0)
 
 // Ignore variant for use in destructors - logs errors instead of throwing
@@ -297,6 +312,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void returnEvent(
       std::unique_ptr<at::cuda::CUDAEvent> event,
       bool timing_enabled);
+  void waitForNcclOperation(
+      ncclResult_t status,
+      std::chrono::milliseconds timeout,
+      std::string_view operation);
   void abortNcclComm();
   void revokeNcclComm();
 

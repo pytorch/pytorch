@@ -174,6 +174,39 @@ class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
+class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.config.blocking = 0
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collectives_with_nonblocking_communicator(self) -> None:
+        self._check_all_reduce()
+
+        tensor = torch.full((4,), float(self.rank), device=self.device)
+        gathered = (
+            [torch.empty_like(tensor) for _ in range(self.world_size)]
+            if self.rank == 0
+            else None
+        )
+        dist.gather(tensor, gathered, dst=0)
+        if self.rank == 0:
+            for rank, output in enumerate(gathered):
+                self.assertEqual(output, torch.full_like(output, rank))
+
+        output = torch.empty_like(tensor)
+        scatter_list = (
+            [torch.full_like(tensor, float(rank)) for rank in range(self.world_size)]
+            if self.rank == 0
+            else None
+        )
+        dist.scatter(output, scatter_list, src=0)
+        self.assertEqual(output, tensor)
+
+
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -313,6 +346,12 @@ class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
 
         expected = 1 if nxt == prev else 2
         self.assertGreaterEqual(backend._num_active_channels(), expected)
+
+
+class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
 
 
 class ProcessGroupNCCLLazyWorkTimeoutTest(ProcessGroupNCCL2WorkTimeoutTest):

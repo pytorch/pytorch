@@ -292,7 +292,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
             nccl_comm_,
             nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
             "failed to get async error");
-        if (asyncErr != ncclSuccess) {
+        if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
           comm_state_ = CommState::ERROR;
           if (!options_c10d_->enable_reconfigure) {
             TC_LOG(ERROR, this)

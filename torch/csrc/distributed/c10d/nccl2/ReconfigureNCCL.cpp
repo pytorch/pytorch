@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <unordered_set>
 #include <variant>
 
@@ -182,9 +183,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     workq_.finalize();
 
     if (nccl_comm_) {
-      NCCL_CHECK_IGNORE(
-          nccl_api_,
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm_,
           nccl_api_->commAbort(nccl_comm_),
+          timeout,
           "NCCL commAbort failed during reconfigure");
       nccl_comm_ = nullptr;
     }
@@ -249,12 +252,32 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   populateNcclConfigFromHints(config, opts.hints, name_);
 
   ncclComm_t new_comm = nullptr;
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->commInitRankConfig(
-          &new_comm, newSize, uniqueId, newRank, &config),
-      "NCCL commInitRankConfig failed during reconfigure");
+  auto init_status = nccl_api_->commInitRankConfig(
+      &new_comm, newSize, uniqueId, newRank, &config);
+  TORCH_CHECK(
+      new_comm,
+      "NCCL commInitRankConfig failed during reconfigure: ",
+      nccl_api_->getErrorString(init_status));
+  try {
+    waitForNcclCompletion(
+        *nccl_api_,
+        new_comm,
+        init_status,
+        timeout,
+        "NCCL commInitRankConfig failed during reconfigure");
+  } catch (...) {
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          new_comm,
+          nccl_api_->commAbort(new_comm),
+          timeout,
+          "NCCL commAbort failed after reconfigure initialization failure");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << e.what();
+    }
+    throw;
+  }
   nccl_comm_ = new_comm;
 
   initNcclResources();
