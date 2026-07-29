@@ -1,30 +1,18 @@
 import functools
-import importlib.machinery
 import importlib.util
 import logging
 import platform
 import subprocess
 from pathlib import Path
 
-from torch.backends import cuda as _cuda
-
 
 log = logging.getLogger(__name__)
 
 
-def _flydsl_runtime_unavailable_reason() -> str | None:
+def _shared_library_unavailable_reason() -> str | None:
     flydsl_spec = importlib.util.find_spec("flydsl")
     if flydsl_spec is None or flydsl_spec.submodule_search_locations is None:
         return "missing optional dependency `flydsl`"
-
-    # Query the package paths directly so this availability check does not
-    # import flydsl as a side effect during regular torch imports.
-    mlir_spec = importlib.machinery.PathFinder.find_spec(
-        "_mlir",
-        list(flydsl_spec.submodule_search_locations),
-    )
-    if mlir_spec is None:
-        return "missing optional dependency `flydsl._mlir`"
 
     runtime_so = (
         Path(next(iter(flydsl_spec.submodule_search_locations)))
@@ -62,15 +50,14 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
 
 @functools.cache
 def runtime_available() -> bool:
-    import torch
+    # Shared with the eager gate, which runs during `import torch` and stays cheap.
+    from torch._native.flydsl_utils import runtime_available as _runtime_installed
 
-    if torch.version.hip is None:
+    if not _runtime_installed():
         return False
 
-    if not _cuda.is_built():
-        return False
-
-    reason = _flydsl_runtime_unavailable_reason()
+    # Inductor-only: codegen must know the runtime links before picking a template.
+    reason = _shared_library_unavailable_reason()
     if reason is not None:
         log.debug("FlyDSL Inductor templates are unavailable: %s", reason)
         return False

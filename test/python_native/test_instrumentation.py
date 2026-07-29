@@ -565,6 +565,16 @@ _DSL_INSTRUMENTATION_RULES = (
         "instrument_cutedsl_compile",
         "instrumented_cutedsl_cache",
     ),
+    # FlyDSL's cache decorator is also named jit_cache, so a compile site that
+    # stacks it manually is indistinguishable from a CuTeDSL one by name alone
+    # and would be reported against the rule above. Only the combined
+    # decorator is listed here; FlyDSL kernels are expected to use it.
+    (
+        "flydsl",
+        "instrumented_flydsl_cache",
+        "instrument_flydsl_compile",
+        "instrumented_flydsl_cache",
+    ),
     (
         "helion",
         ("helion.kernel", "helion.jit", "helion.experimental.aot_kernel"),
