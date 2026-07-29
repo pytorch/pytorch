@@ -141,6 +141,9 @@ jobs:
         set -eux
         python3 torch/testing/_internal/check_kernel_launches.py |& tee cuda_kernel_launch_checks.txt
 
+        # PEP 639 license-files audit (recursive submodules via setup-linux)
+        python3 tools/linter/license_files_audit.py
+
   pr-sanity-checks:
     name: pr-sanity-checks
     runs-on: linux.24_04.4x

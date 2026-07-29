@@ -2,7 +2,9 @@
 # (https://github.com/pytorch/pytorch/issues/183434, PR #185813 review).
 #
 # Included paths: [project].license-files in pyproject.toml (only explicit list).
-# Excluded paths + SPDX expressions per shipped file: license_audit_manifest.toml next to this file.
+# Excluded paths + SPDX expressions per shipped file: license_audit_manifest.toml
+# next to this file. Discovery needs populated third_party/ (recursive submodules);
+# authoritative in CI via quick-checks (_lint.yml / setup-linux).
 
 from __future__ import annotations
 
@@ -26,6 +28,9 @@ LICENSE_GLOBS = (
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "license_audit_manifest.toml"
 SPDX_OMIT_FROM_PROJECT_LICENSE = frozenset({"LicenseRef-NvidiaProprietary"})
+_SKIP_REASON = (
+    "third_party/ has no discoverable license files (submodules not checked out)"
+)
 
 
 def _skip_discovery_path(path: str) -> bool:
@@ -59,9 +64,6 @@ def _load_license_audit_tables() -> tuple[frozenset[str], dict[str, str]]:
     return frozenset(ex), spdx
 
 
-EXCLUDED_LICENSE_FILES, LICENSE_FILE_SPDX = _load_license_audit_tables()
-
-
 def load_project(repo_root: Path) -> dict:
     return tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))[
         "project"
@@ -80,47 +82,55 @@ def discover_license_files(repo_root: Path) -> set[str]:
     return found
 
 
-def expected_project_license_expression() -> str:
+def expected_project_license_expression(spdx: dict[str, str]) -> str:
     expressions = {
         expression
-        for expression in LICENSE_FILE_SPDX.values()
+        for expression in spdx.values()
         if expression not in SPDX_OMIT_FROM_PROJECT_LICENSE
     }
     return " AND ".join(sorted(expressions))
 
 
-def audit_repo_license_files(repo_root: Path) -> list[str]:
-    """Return human-readable errors; empty means the tree matches policy."""
+def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
+    """Return (errors, skip_reason). skip_reason is set when discovery is skipped."""
     pyproject = repo_root / "pyproject.toml"
     if not pyproject.is_file():
-        return [f"Missing {pyproject}"]
+        return ([f"Missing {pyproject}"], None)
+
+    try:
+        excluded, spdx = _load_license_audit_tables()
+    except (ValueError, tomllib.TOMLDecodeError, OSError) as e:
+        return ([f"Could not load {_MANIFEST_PATH.name}: {e}"], None)
 
     try:
         project = load_project(repo_root)
     except (tomllib.TOMLDecodeError, OSError, KeyError) as e:
-        return [f"Could not read [project] from pyproject.toml: {e}"]
+        return ([f"Could not read [project] from pyproject.toml: {e}"], None)
 
     included = project.get("license-files")
     if not isinstance(included, list) or not all(isinstance(p, str) for p in included):
-        return ["[project].license-files must be a list of strings."]
+        return (["[project].license-files must be a list of strings."], None)
+
+    discovered = discover_license_files(repo_root)
+    if not any(p.startswith("third_party/") for p in discovered):
+        return ([], _SKIP_REASON)
 
     err: list[str] = []
     inc = set(included)
-    if bad := inc & EXCLUDED_LICENSE_FILES:
+    if bad := inc & excluded:
         err.append(
             "license-files must not list paths that are in manifest excluded list: "
             + ", ".join(sorted(bad))
         )
 
-    unknown = discover_license_files(repo_root) - inc - EXCLUDED_LICENSE_FILES
-    if unknown:
+    if unknown := discovered - inc - excluded:
         err.append(
             "New license file(s) under audit globs; add each to pyproject license-files or "
             f"manifest excluded list ({_MANIFEST_PATH.name}): "
             + ", ".join(sorted(unknown))
         )
 
-    spdx_keys = set(LICENSE_FILE_SPDX)
+    spdx_keys = set(spdx)
     if spdx_keys != inc:
         if missing := sorted(inc - spdx_keys):
             err.append(
@@ -137,7 +147,7 @@ def audit_repo_license_files(repo_root: Path) -> list[str]:
     if not isinstance(lic, str):
         err.append("[project].license must be a string.")
     elif spdx_keys == inc:
-        if lic != (exp := expected_project_license_expression()):
+        if lic != (exp := expected_project_license_expression(spdx)):
             err.append(
                 "[project].license does not match SPDX manifest (expected):\n"
                 f"  expected: {exp!r}\n  actual:   {lic!r}"
@@ -147,4 +157,16 @@ def audit_repo_license_files(repo_root: Path) -> list[str]:
         except Exception as e:
             err.append(f"[project].license is not a valid SPDX expression: {e}")
 
-    return err
+    return (err, None)
+
+
+def main() -> None:
+    errors, skip_reason = audit_repo_license_files(Path("."))
+    if skip_reason:
+        raise SystemExit(f"license-files audit skipped: {skip_reason}")
+    if errors:
+        raise SystemExit("license-files audit failed:\n" + "\n".join(errors))
+
+
+if __name__ == "__main__":
+    main()

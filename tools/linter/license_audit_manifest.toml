@@ -1,41 +1,39 @@
 # SPDX expressions grouped by license (issue #183434, PR #185813).
+# excluded: under discovery globs but not shipped in wheels (grouped by reason).
 excluded = [
+  # NVTX bindings / docs / tools (not compiled into torch)
   'third_party/NVTX/docs/LICENSE.txt',
   'third_party/NVTX/python/LICENSE.txt',
   'third_party/NVTX/rust/LICENSE',
-  'third_party/NVTX/tools/docs/github-markdown-css/LICENSE',
   'third_party/NVTX/tools/docs/github-markdown-css/license',
-  'third_party/aiter/3rdparty/composable_kernel/docs/LICENSE.rst',
+  # docs/ trees (not compiled)
   'third_party/aiter/3rdparty/composable_kernel/docs/license.rst',
   'third_party/benchmark/LICENSE',
-  'third_party/composable_kernel/docs/LICENSE.rst',
   'third_party/composable_kernel/docs/license.rst',
-  'third_party/concurrentqueue/moodycamel/LICENSE.md',
+  'third_party/fbgemm/external/composable_kernel/docs/license.rst',
+  'third_party/flash-attention/csrc/composable_kernel/docs/license.rst',
+  'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/docs/license.rst',
+  'third_party/mslk/external/composable_kernel/docs/license.rst',
+  # nested vendoring / test / docs inside shipped deps (not linked)
   'third_party/cudnn_frontend/include/cudnn_frontend/thirdparty/nlohmann/LICENSE.MIT',
   'third_party/cutlass/python/LICENSE.txt',
   'third_party/fbgemm/external/asmjit/LICENSE.md',
   'third_party/fbgemm/external/asmjit/db/LICENSE.md',
-  'third_party/fbgemm/external/composable_kernel/docs/LICENSE.rst',
-  'third_party/fbgemm/external/composable_kernel/docs/license.rst',
   'third_party/fbgemm/external/cutlass/python/LICENSE.txt',
   'third_party/fbgemm/external/googletest/LICENSE',
   'third_party/fbgemm/external/hipify_torch/LICENSE.txt',
   'third_party/fbgemm/external/json/LICENSE.MIT',
   'third_party/fbgemm/external/json/docs/mkdocs/docs/home/license.md',
-  'third_party/fbgemm/fbgemm_gpu/docs/src/general/LICENSE.rst',
   'third_party/fbgemm/fbgemm_gpu/docs/src/general/License.rst',
   'third_party/fbgemm/fbgemm_gpu/test/quantize/mx/LICENSE',
-  'third_party/flash-attention/csrc/composable_kernel/docs/LICENSE.rst',
-  'third_party/flash-attention/csrc/composable_kernel/docs/license.rst',
   'third_party/flash-attention/csrc/cutlass/python/LICENSE.txt',
-  'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/docs/LICENSE.rst',
-  'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/docs/license.rst',
   'third_party/flatbuffers/dart/LICENSE',
   'third_party/flatbuffers/swift/LICENSE',
   'third_party/gloo/gloo/transport/uv/LICENSE.uvw',
   'third_party/googletest/LICENSE',
   'third_party/ideep/mkl-dnn/third_party/gtest/LICENSE',
   'third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD',
+  # kineto -> dynolog transitive deps (not compiled into torch)
   'third_party/kineto/libkineto/third_party/dynolog/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog_headers/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/LICENSE',
@@ -48,6 +46,7 @@ excluded = [
   'third_party/kineto/libkineto/third_party/dynolog/third_party/googletest/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/json/LICENSE.MIT',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/json/doc/mkdocs/docs/home/license.md',
+  # codespell:ignore thirdparty
   'third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest/LICENSE.txt',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/fifo_map/LICENSE.MIT',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/amalgamate/LICENSE.md',
@@ -65,13 +64,13 @@ excluded = [
   'third_party/kineto/libkineto/third_party/fmt/LICENSE',
   'third_party/kineto/libkineto/third_party/googletest/LICENSE',
   'third_party/kineto/libkineto/third_party/json/LICENSE.MIT',
-  'third_party/mslk/external/composable_kernel/docs/LICENSE.rst',
-  'third_party/mslk/external/composable_kernel/docs/license.rst',
+  'third_party/kineto/libkineto/third_party/json/docs/mkdocs/docs/home/license.md',
   'third_party/mslk/external/cutlass/python/LICENSE.txt',
   'third_party/mslk/external/googletest/LICENSE',
   'third_party/mslk/external/hipify_torch/LICENSE.txt',
-  'third_party/nccl/LICENSE.txt',
+  # NCCL Python bindings only (NCCL itself is in license-files)
   'third_party/nccl/bindings/nccl4py/LICENSE.txt',
+  # docs / test / nested googletest trees
   'third_party/nlohmann/docs/mkdocs/docs/home/license.md',
   'third_party/onnx/third_party/pybind11/LICENSE',
   'third_party/protobuf/third_party/benchmark/LICENSE',
@@ -89,7 +88,6 @@ excluded = [
   'third_party/tensorpipe/third_party/libuv/LICENSE-extra',
   'third_party/tensorpipe/third_party/pybind11/LICENSE',
   'third_party/tensorpipe/third_party/pybind11/tools/clang/LICENSE.TXT',
-  'third_party/tensorpipe/third_party/pybind11/tools/clang/LICENSE.txt',
 ]
 
 [[spdx]]
@@ -123,6 +121,12 @@ paths = [
 ]
 
 [[spdx]]
+expression = 'BSD-2-Clause AND Zlib'
+paths = [
+  'third_party/concurrentqueue/moodycamel/LICENSE.md',
+]
+
+[[spdx]]
 expression = 'BSD-3-Clause'
 paths = [
   'LICENSE',
@@ -138,6 +142,7 @@ paths = [
   'third_party/mslk/LICENSE',
   'third_party/mslk/external/cutlass/LICENSE.txt',
   'third_party/mslk/mslk/attention/flash_attn/LICENSE',
+  'third_party/nccl/LICENSE.txt',
   'third_party/pocketfft/LICENSE.md',
   'third_party/protobuf/LICENSE',
   'third_party/pybind11/LICENSE',

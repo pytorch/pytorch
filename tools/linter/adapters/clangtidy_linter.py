@@ -193,11 +193,11 @@ def check_file(
             )
         ]
     lint_messages = []
-    saved_cwd = os.getcwd()
     try:
-        # Lint CI jobs may not have a configured build tree.
-        if build_dir.is_dir():
-            os.chdir(build_dir)
+        # Change the current working directory to the build directory, since
+        # clang-tidy will report files relative to the build directory.
+        saved_cwd = os.getcwd()
+        os.chdir(build_dir)
 
         for match in RESULTS_RE.finditer(proc.stdout.decode()):
             # Convert the reported path to an absolute path.
