@@ -68,6 +68,8 @@ class WorkNCCL : public c10d::Work {
   void synchronize() override;
   std::vector<at::Tensor> result() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+  float getDuration() const override;
+  uint64_t getSequencenumber() const override;
 
   std::chrono::milliseconds getTimeout() const {
     return timeout_ms_;
@@ -83,6 +85,11 @@ class WorkNCCL : public c10d::Work {
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
     children_ = std::move(children);
+  }
+  // Per-process-group collective counter of the op this work tracks; set by
+  // the backend's createWork().
+  void setSequenceNumber(uint64_t seq) {
+    seq_ = seq;
   }
 
  protected:
@@ -115,6 +122,10 @@ class WorkNCCL : public c10d::Work {
   at::cuda::CUDAStream stream_;
 
   std::chrono::milliseconds timeout_ms_;
+  // Whether the events above were created with CUDA timing enabled, i.e.
+  // whether getDuration() can be served for this work.
+  bool timing_enabled_{false};
+  uint64_t seq_{0};
 
   std::atomic<WorkStatus> status_{WorkStatus::NOT_STARTED};
   std::optional<std::chrono::steady_clock::time_point> start_completed_time_;
