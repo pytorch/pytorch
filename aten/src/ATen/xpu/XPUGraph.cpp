@@ -1,5 +1,6 @@
 #include <ATen/Functions.h>
 #include <ATen/core/CachingHostAllocator.h>
+#include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGraph.h>
 #include <c10/xpu/XPUFunctions.h>
 
@@ -8,6 +9,11 @@
 namespace at::xpu {
 
 using namespace sycl::ext::oneapi::experimental;
+
+#define XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture) \
+  ((device_architecture) == architecture::intel_gpu_pvc ||  \
+   (device_architecture) == architecture::intel_gpu_pvc_vg)
+
 static bool _xpu_graphs_debug = false;
 
 MempoolId_t graph_pool_handle() {
@@ -101,16 +107,21 @@ void XPUGraphImpl::capture_begin(
         return filter(XPUStream(XPUStream::UNCHECKED, stream));
       });
 
-// Enable sycl graph native recording mode for sycl compiler version >=
-// 2026.1.0.
-#if SYCL_COMPILER_VERSION >= 20260100
-  auto sycl_property =
-      sycl::property_list{property::graph::enable_native_recording{}};
-#else
-  TORCH_CHECK(
-      false,
-      "XPU Graphs in this PyTorch build require oneAPI 2026.1.0 or later.");
+  // Enable sycl graph native recording mode for sycl compiler version >=
+  // 2026.1.0, except on PVC.
   auto sycl_property = sycl::property_list{};
+  const auto device_architecture =
+      at::xpu::getCurrentDeviceProperties()->architecture;
+#if SYCL_COMPILER_VERSION >= 20260100
+  if (!XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture)) {
+    sycl_property =
+        sycl::property_list{property::graph::enable_native_recording{}};
+  }
+#else
+  if (!XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture)) {
+    TORCH_WARN_ONCE(
+        "XPUGraph: Please use a PyTorch build compiled with oneAPI 2026.1.0 or newer for latest runtime support.");
+  }
 #endif
 
   auto graph_impl = xpuGraph_t(capture_stream_.queue(), sycl_property);
