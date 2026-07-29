@@ -142,10 +142,10 @@ class TestIndexingSimplification(InductorTestCase):
 
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-        r3 = sympy.Symbol("r3", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
+        i2 = sympy.Symbol("i2", integer=True, nonnegative=True)
+        r3 = sympy.Symbol("r3", integer=True, nonnegative=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -1076,8 +1076,8 @@ class TestWideExpressionThresholds(InductorTestCase):
         self.assertEqual(result, FloorDiv(128 * i1, 8192))
 
     def test_modular_indexing_simplification_small(self):
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
         self.assertEqual(
             ModularIndexing(i0 + i1 * 10, 1, 10),
             ModularIndexing(i0, 1, 10),

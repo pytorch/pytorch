@@ -6,6 +6,11 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG PIP_EXTRA_INDEX_URL
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ARG PIP_PREFER_BINARY
+ENV PIP_PREFER_BINARY=${PIP_PREFER_BINARY}
+
 ARG CLANG_VERSION
 
 # Allow APT to run as root
@@ -149,6 +154,13 @@ COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
 
+ARG TVM
+# Install apache-tvm for the dynamo tvm backend tests
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/tvm.txt tvm.txt
+RUN if [ -n "${TVM}" ]; then bash -c 'source ./common_utils.sh && pip_install apache-tvm==$(get_pinned_commit tvm) && python -c "import tvm"'; fi
+RUN rm common_utils.sh tvm.txt
+
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
 ARG CLANG_VERSION
@@ -173,6 +185,14 @@ COPY ./common/install_openblas.sh install_openblas.sh
 RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
 RUN rm install_openblas.sh
 ENV INSTALLED_OPENBLAS=${OPENBLAS}
+
+# Install Rust toolchain (needed to build the torch._rust extension).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
