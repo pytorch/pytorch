@@ -1095,7 +1095,6 @@ def break_graph_if_unsupported(
             self.current_instruction_push = push
             speculation = self.speculate()
             if speculation.failed(self):
-                # no need to restore current_instruction_push if speculation failed
                 if speculation.reason is None:
                     raise AssertionError(
                         "expected speculation.reason is not None to be true"
@@ -2942,7 +2941,6 @@ class InstructionTranslatorBase(
                 block_stack_entry = self.block_stack.pop()
 
                 while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
-                    # TODO(anijain2305) - This is not tested .. unable to create a testcase
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
                     self.exn_vt_stack.pop()
@@ -2951,14 +2949,7 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            unimplemented(
-                                gb_type="Observed exception (EXCEPT_HANDLER)",
-                                context=str(raised_exception),
-                                explanation=observed_exn_gb_explanation
-                                + " This graph break is unexpected.",
-                                hints=[*graph_break_hints.DYNAMO_BUG],
-                                from_exc=raised_exception,
-                            )
+                            bubble_exception_to_interpreter()
 
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
@@ -3327,6 +3318,10 @@ class InstructionTranslatorBase(
             )
         self.push(result)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace LOAD_ATTR: loading an object's attribute, e.g. x.attr",
+    )
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
             assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
