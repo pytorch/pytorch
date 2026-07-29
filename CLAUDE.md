@@ -88,6 +88,10 @@ default branch:
   create a new branch; commit directly onto the current detached HEAD.
 - If you are on an actual branch (including `main`), follow the default
   guidance and branch first before committing.
+- **Pulling CI status.** A PR has hundreds of check-runs, so a single
+  `check-runs?per_page=100` call silently truncates and makes red look green.
+  Use `gh pr checks <PR> --json name,state,workflow,link,bucket,completedAt`
+  (already head-only, no paging).
 
 # Commit messages
 
@@ -151,10 +155,6 @@ Rules for working with ghstack:
 - **Finding the PR.** If the user asks to pull CI results or code review for a
   ghstack commit, get the PR URL from the `Pull-Request` trailer in the commit
   message. Use `gh` CLI to fetch status/comments from there.
-- **Pulling CI status.** A PR has hundreds of check-runs, so a single
-  `check-runs?per_page=100` call silently truncates and makes red look green.
-  Use `gh pr checks <PR> --json name,state,workflow,link,bucket,completedAt`
-  (already head-only, no paging).
 - **Editing earlier commits / splitting.** Treat it like a normal stack of
   commits (use `git rebase`, etc.). Commits that keep their metadata trailers
   stay associated with their existing PRs; commits without trailers will get a
