@@ -16,6 +16,7 @@ from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
+from ..runtime.runtime_utils import next_power_of_2
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
@@ -25,6 +26,34 @@ if typing.TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from torch._inductor.tiling_utils import CoalesceVarAnalysis
+
+
+_INNER_REDUCTION_RATIO = 32
+_SMALL_INNER_REDUCTION_RATIO = 16
+_SMALL_INNER_REDUCTION_MAX_RBLOCK = 512
+
+
+def tiling_scores_suggest_inner_reduction(
+    tiling_scores: dict[str, sympy.Expr], reduction_numel: sympy.Expr
+) -> bool:
+    """Return whether tiling scores justify treating a reduction as inner."""
+    sizevars = V.graph.sizevars
+    non_reduction_score = sum(
+        sizevars.optimization_hint(tiling_scores.get(dim, 0), fallback=0)
+        for dim in ("x", "y", "z")
+    )
+    non_reduction_score = max(non_reduction_score, 1)
+    r_score = sizevars.optimization_hint(tiling_scores["r0_"], fallback=0)
+    if r_score >= _INNER_REDUCTION_RATIO * non_reduction_score:
+        return True
+    if r_score < _SMALL_INNER_REDUCTION_RATIO * non_reduction_score:
+        return False
+
+    # Moderate score ratios are useful while persistent configs can keep XBLOCK=8.
+    rblock_hint = next_power_of_2(
+        max(sizevars.optimization_hint(reduction_numel, fallback=1), 1)
+    )
+    return rblock_hint <= _SMALL_INNER_REDUCTION_MAX_RBLOCK
 
 
 class NodeScheduleMarker:
@@ -83,6 +112,7 @@ class SIMDKernelFeatures:
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
         coalesce_analysis: CoalesceVarAnalysis | None = None,
+        tiling_scores: dict[str, sympy.Expr] | None = None,
     ):
         self.node_schedule = node_schedule
         # numel excludes reduction_numel
@@ -90,6 +120,18 @@ class SIMDKernelFeatures:
         self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
         self._stats_cache: dict[tuple[sympy.Expr, ...], MemoryStats] = {}
         self.coalesce_analysis = coalesce_analysis
+        self.tiling_scores = tiling_scores
+
+    def with_tiling_scores(
+        self, tiling_scores: dict[str, sympy.Expr] | None
+    ) -> SIMDKernelFeatures:
+        return SIMDKernelFeatures(
+            self.node_schedule,
+            self.numel,
+            self.reduction_numel,
+            self.coalesce_analysis,
+            tiling_scores,
+        )
 
     @cache_on_self
     def is_reduction(self) -> bool:
@@ -146,17 +188,36 @@ class SIMDKernelFeatures:
         from .simd import SIMDScheduling
 
         if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
-            # Fused address expressions may carry a constant term that
-            # overflows int32 even when numel/storage_size are within range.
-            if self.any_index_expr_const_overflows_int32():
+            # Fused address expressions can overflow int32 even when
+            # numel/storage_size are within range, so check them directly.
+            if self.any_index_expr_overflows_int32():
                 return torch.int64
             return torch.int32
         return torch.int64
 
     @cache_on_self
-    def any_index_expr_const_overflows_int32(self) -> bool:
-        """Return True if any MemoryDep index has a constant term outside
-        [-2**31, 2**31 - 1]."""
+    def any_index_expr_overflows_int32(self) -> bool:
+        """Return True if any MemoryDep addressing expression can overflow int32.
+
+        Two complementary checks are applied to each index:
+
+        - Constant offset: the index evaluated at the origin (every loop
+          variable set to 0) must lie within [-2**31, 2**31 - 1]. This is cheap
+          and independent of loop-var ranges, so it also covers deps whose sizes
+          are symbolic.
+        - Variable-scaled bound: the index bounded over the actual iteration
+          range of every loop variable must not exceed 2**31 - 1. This catches
+          overflow such as the `V * x0` synthesized when unrolled chunked-loop
+          slices are stitched into one pointwise kernel (`V` a per-chunk stride,
+          `x0` spanning the fused numel); unlike a `numel * max_stride` proxy it
+          is exact, since a stride on a size-1 dim multiplies an empty range and
+          drops out. Deps with a symbolic loop-var size, or whose bound is
+          unknown/indirect (infinite), are skipped here and left to the
+          constant-offset and per-buffer storage-size checks.
+        """
+        from torch.utils._sympy.numbers import int_oo
+        from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))
         for node in self.scheduler_nodes():
@@ -166,21 +227,46 @@ class SIMDKernelFeatures:
                 index = dep.index
                 if not isinstance(index, sympy.Expr):
                     continue
+
+                # Constant offset (index at the origin).
                 try:
                     const_part = index.subs(
                         {s: sympy.Integer(0) for s in index.free_symbols}
                     )
-                    if not isinstance(const_part, sympy.Expr):
-                        continue
-                    if const_part > int32_max or const_part < int32_min:
+                    if isinstance(const_part, sympy.Expr) and (
+                        const_part > int32_max or const_part < int32_min
+                    ):
+                        return True
+                except (ZeroDivisionError, TypeError, ValueError):
+                    pass
+
+                # Variable-scaled bound over concrete loop-var ranges. A
+                # ValueRanges bound must be concrete, so skip a dep with any
+                # symbolic loop-var size.
+                sizes = dep.size
+                if any(getattr(s, "free_symbols", None) for s in sizes):
+                    continue
+                try:
+                    var_ranges = {
+                        var: ValueRanges(0, max(int(size) - 1, 0))
+                        for var, size in zip(dep.var_names, sizes)
+                    }
+                    upper = bound_sympy(index, var_ranges).upper
+                    if (
+                        isinstance(upper, sympy.Expr)
+                        and not upper.has(int_oo, sympy.oo)
+                        and upper > int32_max
+                    ):
                         return True
                 except (ZeroDivisionError, TypeError, ValueError):
                     continue
         return False
 
     def get_reduction_hint(
-        self, tiling_scores: dict[str, int] | None = None
+        self, tiling_scores: dict[str, sympy.Expr] | None = None
     ) -> ReductionHint:
+        if tiling_scores is None:
+            tiling_scores = self.tiling_scores
         reductions = self.reduction_nodes()
         if len(reductions) > 0:
             hints = [self.reduction_hint(n) for n in reductions]
@@ -202,13 +288,9 @@ class SIMDKernelFeatures:
                 and "x" in tiling_scores
                 and "r0_" in tiling_scores
             ):
-                # If reduction dimension has much better coalescing than non-reduction dimensions,
-                # this is an inner reduction
-                from ..codegen.triton import INNER_REDUCTION_RATIO_THRESHOLD
-
-                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
-                if contiguous_red:
+                if tiling_scores_suggest_inner_reduction(
+                    tiling_scores, self.reduction_numel
+                ):
                     reduction_hint_val = ReductionHint.INNER
         else:
             reduction_hint_val = ReductionHint.DEFAULT

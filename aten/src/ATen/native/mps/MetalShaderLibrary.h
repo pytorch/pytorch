@@ -166,7 +166,7 @@ class MetalShaderLibrary {
   // (copy_identity, copy_conj, copy_neg, copy_conj_neg). offsets are in bytes;
   // numel is the element count to process.
   void exec_unary_kernel_raw(
-      const std::string& name,
+      std::string_view name,
       MTLBuffer_t src_buf,
       uint32_t src_offs_bytes,
       c10::ScalarType src_dtype,
@@ -199,7 +199,8 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       T params,
-      const std::string& params_type_name);
+      const std::string& params_type_name,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
   template <typename T>
   void exec_binary_kernel_with_params(
       TensorIteratorBase& iter,

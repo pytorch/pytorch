@@ -107,6 +107,8 @@ void XPUGraphImpl::capture_begin(
 
   TORCH_INTERNAL_ASSERT(
       capture_stream_.queue().ext_oneapi_get_state() == queue_state::recording);
+
+  c10::xpu::XPUCachingAllocator::markCaptureBegin(capture_dev_);
 }
 
 void XPUGraphImpl::capture_end() {
@@ -117,6 +119,8 @@ void XPUGraphImpl::capture_end() {
       "Capture must end on the same stream it began on.");
 
   graph_->end_recording();
+
+  c10::xpu::XPUCachingAllocator::markCaptureEnd(capture_dev_);
 
   c10::xpu::XPUCachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kXPU)->end_allocate_to_pool(mempool_id_);

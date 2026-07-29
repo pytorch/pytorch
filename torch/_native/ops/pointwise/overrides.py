@@ -470,6 +470,8 @@ def register_pointwise_overrides() -> None:
     # variant_aten_name returning None.
     for row in POINTWISE_DEF_TABLE:
         for variant in POINTWISE_VARIANTS:
+            if row.skip_out_variant and variant.out_from == "out_kw":
+                continue  # aten redispatches a wrapped number here; see the field doc
             aten_name = variant_aten_name(row.aten, variant)
             if aten_name is None:
                 continue

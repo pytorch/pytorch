@@ -1515,7 +1515,7 @@ class _TestContainerSpecBase(TestCase):
                 self.assertIsInstance(
                     slot_spec,
                     T,
-                    msg=f"slot {i} is {slot_spec!r} (expected TensorSpec) "
+                    msg=lambda msg: f"{msg}\nslot {i} is {slot_spec!r} (expected TensorSpec) "
                     f"for case {arg_value!r}",
                 )
                 expected = f"t{id(leaf)}"
