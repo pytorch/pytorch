@@ -59,6 +59,15 @@ RUN yum install -y openssl-devel && \
     yum clean all && \
     rm install_cpython.sh
 
+# Install Rust toolchain (needed to build the torch._rust extension when building
+# the Python wheels).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
+
 
 FROM base as final
 
@@ -89,6 +98,12 @@ RUN python3.9 -m pip install scons==4.7.0
 RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
 COPY ./common/install_acl.sh install_acl.sh
 RUN bash ./install_acl.sh && rm install_acl.sh
+
+# Build and install llvm-bolt from source
+FROM base as llvm
+COPY ./common/install_llvm_tools.sh install_llvm_tools.sh
+RUN bash ./install_llvm_tools.sh && rm install_llvm_tools.sh
+
 FROM base as final
 
 FROM final as cuda_final
@@ -101,6 +116,7 @@ COPY --from=cuda     /usr/local/cupti-headers-13.3         /usr/local/cupti-head
 COPY --from=nvpl /opt/nvpl/lib/  /usr/local/lib/
 COPY --from=nvpl /opt/nvpl/include/  /usr/local/include/
 COPY --from=arm_compute /acl /acl
+COPY --from=llvm /llvm/install/ /usr/local/
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/acl/build/:$LD_LIBRARY_PATH

@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import ast
+import math
 import os
 from unittest.mock import patch
 
@@ -8,6 +10,7 @@ import torch._dynamo
 import torch._dynamo.config
 from torch._dynamo import debug_utils
 from torch._dynamo.debug_utils import (
+    _serialize_storage_nbytes,
     aot_graph_input_parser,
     generate_env_vars_string,
     NNModuleToString,
@@ -23,6 +26,64 @@ i32 = torch.int32
 
 
 class TestDebugUtils(TestCase):
+    def test_serialize_symbolic_storage_nbytes(self):
+        from sympy import floor
+
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.functions import Max
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(4, ConstantSource("storage_size"))
+        expr = 4 * symbol + 18428 * Max(1, symbol)
+        nbytes = torch.SymInt(SymNode(expr, shape_env, int, hint=73728))
+        source = _serialize_storage_nbytes(nbytes)
+
+        self.assertNotIn("Max", source)
+        for value in (0, 1, 4):
+            self.assertEqual(
+                eval(source, {"max": max}, {str(symbol): value}),
+                int(expr.subs(symbol, value)),
+            )
+
+        floor_expr = floor(symbol / 2)
+        floor_nbytes = torch.SymInt(SymNode(floor_expr, shape_env, int, hint=2))
+        floor_source = _serialize_storage_nbytes(floor_nbytes)
+        self.assertIn("math.floor", floor_source)
+        self.assertEqual(
+            eval(floor_source, {"math": math}, {str(symbol): 4}),
+            2,
+        )
+
+    def test_repro_templates_import_symexpr_dependencies(self):
+        from torch._dynamo.repro.after_aot import generate_compiler_repro_string
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        args = [torch.ones(1)]
+
+        repros = {
+            "after_aot": generate_compiler_repro_string(gm, args),
+            "after_dynamo": generate_dynamo_fx_repro_string(
+                gm, args, compiler_name="eager"
+            ),
+        }
+        for name, source in repros.items():
+            with self.subTest(name=name):
+                tree = ast.parse(source)
+                imports = ast.Module(
+                    body=[
+                        node
+                        for node in tree.body
+                        if isinstance(node, (ast.Import, ast.ImportFrom))
+                    ],
+                    type_ignores=[],
+                )
+                namespace = {}
+                exec(compile(imports, f"<{name}>", "exec"), namespace)
+                self.assertEqual(eval("math.floor(3 / 2)", namespace), 1)
+
     def test_cast_model_to_fp64_dtype_args(self):
         # Test that dtype arguments are converted to fp64
 
