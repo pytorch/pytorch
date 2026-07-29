@@ -999,15 +999,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # straight from the side-effects table instead of materializing a
             # DunderDictVariable proxy over it.
             dict_vt = se.load_attr(self, "__dict__")
-            return dict_vt.maybe_getitem_const(variables.ConstantVariable.create(name))
+            if isinstance(dict_vt, variables.ConstDictVariable):
+                key = variables.ConstantVariable.create(name)
+                return dict_vt.maybe_getitem_const(key)
+            return None
 
         value = self.get_real_python_backed_value()
         if value is not NO_SUCH_SUBOBJ:
             instance_dict = object.__getattribute__(value, "__dict__")
             if name in instance_dict:
+                source = self._wrap_instance_dict_source(tx, name, source)
                 return VariableTracker.build(tx, instance_dict[name], source)
 
         return None
+
+    def _wrap_instance_dict_source(
+        self, tx: InstructionTranslatorBase, name: str, source: Source | None
+    ) -> Source | None:
+        """Adjust the source of an instance-dict attribute (step 3 hook).
+
+        Default is identity; UserDefinedObjectVariable overrides to wrap the
+        source for nn.Module parameter/buffer access.
+        """
+        return source
 
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str
