@@ -6,13 +6,18 @@ import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from typing import Any
 from uuid import uuid4
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.distributed import PrefixStore, TCPStore
-from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
+from torch.distributed.checkpoint._async_executor import (
+    _AsyncCheckpointExecutor,
+    _OwnedStateDictFuture,
+    _STAGING_INPUT,
+)
 from torch.distributed.checkpoint.logger import _dcp_method_logger, _init_logger
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlanner
@@ -360,7 +365,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     def _execute_save_impl(
         *,
         pg_init_info: _ProcessGroupInitInfo | None,
-        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
+        staging_future_or_state_dict: _STAGING_INPUT,
         checkpoint_id: str | os.PathLike | None = None,
         storage_writer: StorageWriter | None = None,
         planner: SavePlanner | None = None,
@@ -407,7 +412,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
 
     def execute_save(
         self,
-        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
+        staging_future_or_state_dict: _STAGING_INPUT,
         *,
         checkpoint_id: str | os.PathLike | None = None,
         storage_writer: StorageWriter | None = None,
@@ -438,16 +443,23 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             # to all ranks.
             pg_init_info = _ProcessGroupInitInfo(process_group)
 
-        f: Future = self._executor.submit(
+        save_fn = partial(
             self._execute_save_impl,
             pg_init_info=pg_init_info,
-            staging_future_or_state_dict=staging_future_or_state_dict,
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
             no_dist=no_dist,
             use_collectives=use_collectives,
         )
-        f.add_done_callback(lambda f: self._executor.shutdown(wait=False))
-
-        return f
+        if isinstance(staging_future_or_state_dict, _OwnedStateDictFuture):
+            future = staging_future_or_state_dict
+            work = self._executor.submit(future.run, save_fn)
+        else:
+            future = self._executor.submit(
+                save_fn,
+                staging_future_or_state_dict=staging_future_or_state_dict,
+            )
+            work = future
+        work.add_done_callback(lambda _: self._executor.shutdown(wait=False))
+        return future
