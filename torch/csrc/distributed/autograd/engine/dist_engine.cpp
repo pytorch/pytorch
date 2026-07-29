@@ -348,7 +348,6 @@ void DistEngine::computeDependencies(
 void DistEngine::execute_graph_task_until_ready_queue_empty(
     NodeTask&& node_task,
     bool incrementOutstandingTasks) {
-  engine_.initialize_device_threads_pool();
   // Create a ready queue per call to traverse the graph_task from
   // root_to_execute This allow concurrent execution of the same GraphTask from
   // different threads
