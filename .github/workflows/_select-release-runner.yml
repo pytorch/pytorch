@@ -1,0 +1,44 @@
+# Owner(s): ["oncall: releng"]
+name: Select release runner
+
+# Single source of truth for the OSDC build-runner labels used by the docker
+# image / wheel build workflows: release-isolated (rel-l-*) runners on protected
+# refs, regular (l-*) runners otherwise. Callers reference the outputs in runs-on.
+on:
+  workflow_call:
+    inputs:
+      include-nightly:
+        description: "Treat refs/heads/nightly as a protected ref (use release runners)"
+        type: boolean
+        default: true
+    outputs:
+      x86:
+        description: "x86_64 build runner label"
+        value: ${{ jobs.select.outputs.x86 }}
+      arm64:
+        description: "aarch64 build runner label"
+        value: ${{ jobs.select.outputs.arm64 }}
+
+jobs:
+  select:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    outputs:
+      x86: ${{ steps.pick.outputs.x86 }}
+      arm64: ${{ steps.pick.outputs.arm64 }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          protected=false
+          case "${GITHUB_REF}" in
+            refs/heads/main|refs/heads/release/*|refs/tags/v*) protected=true ;;
+            refs/heads/nightly) [[ "${{ inputs.include-nightly }}" == "true" ]] && protected=true ;;
+          esac
+          if [[ "${protected}" == "true" ]]; then
+            echo "x86=mt-rel-l-x86iavx512-44-340" >> "${GITHUB_OUTPUT}"
+            echo "arm64=mt-rel-l-arm64g3-44-340" >> "${GITHUB_OUTPUT}"
+          else
+            echo "x86=mt-l-x86iavx512-48-384" >> "${GITHUB_OUTPUT}"
+            echo "arm64=mt-l-arm64g3-61-463" >> "${GITHUB_OUTPUT}"
+          fi
