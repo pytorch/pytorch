@@ -587,7 +587,7 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_contains_guard(tx, args)
             if len(args) == 1:
                 # if default is not given, raise KeyError
-                raise_observed_exception(KeyError, tx)
+                raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
@@ -920,23 +920,6 @@ class OrderedDictVariable(ConstDictVariable):
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # Consult tp_methods before ConstDictVariable's own dispatch, whose
-        # bare-dict popitem() branch would otherwise shadow the OrderedDict
-        # popitem(last=) handler.
-        method = self.lookup_tp_method(name)
-        if method is not None:
-            result = method.invoke(self, tx, name, args, kwargs)
-            if result is not None:
-                return result
-        return super().call_method(tx, name, args, kwargs)
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
