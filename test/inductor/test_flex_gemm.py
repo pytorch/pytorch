@@ -351,15 +351,15 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
         from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueGraph
         from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-            FlexGemmNormalizedGetItem,
-            FlexGemmNormalizedNVFP4Pack,
-            FlexGemmNormalizedReduction,
-            FlexGemmNormalizedSelect,
-            FlexGemmNormalizedSplit,
-            FlexGemmNormalizedSqueeze,
-            FlexGemmNormalizedToBlocked,
-            FlexGemmNormalizedUnsupportedReduction,
-            FlexGemmNormalizedView,
+            NormalizedGetItem,
+            NormalizedNVFP4Pack,
+            NormalizedReduction,
+            NormalizedSelect,
+            NormalizedSplit,
+            NormalizedSqueeze,
+            NormalizedToBlocked,
+            NormalizedUnsupportedReduction,
+            NormalizedView,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -403,31 +403,25 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             if node.target is torch.ops.aten.squeeze.dim and node.args[0] is reduction
         )
         unsupported = nodes[torch.ops.aten.var.correction]
-        self.assertEqual(
-            normalized_nodes[view], FlexGemmNormalizedView(placeholder, (4, 4, 2))
-        )
+        self.assertEqual(normalized_nodes[view], NormalizedView(placeholder, (4, 4, 2)))
         self.assertEqual(
             normalized_nodes[reduction],
-            FlexGemmNormalizedReduction(view, [-1], True, None, "sum"),
+            NormalizedReduction(view, [-1], True, None, "sum"),
         )
-        self.assertEqual(
-            normalized_nodes[squeeze], FlexGemmNormalizedSqueeze(reduction)
-        )
-        self.assertEqual(
-            normalized_nodes[getitem], FlexGemmNormalizedGetItem(maximum, 0)
-        )
+        self.assertEqual(normalized_nodes[squeeze], NormalizedSqueeze(reduction))
+        self.assertEqual(normalized_nodes[getitem], NormalizedGetItem(maximum, 0))
         self.assertEqual(
             normalized_nodes[unsupported],
-            FlexGemmNormalizedUnsupportedReduction(
+            NormalizedUnsupportedReduction(
                 view,
                 str(torch.ops.aten.var.correction),
             ),
         )
         expected = {
-            torch.ops.aten.split.Tensor: FlexGemmNormalizedSplit,
-            torch.ops.aten.select.int: FlexGemmNormalizedSelect,
-            torch.ops.flex_gemm.nvfp4_pack.default: FlexGemmNormalizedNVFP4Pack,
-            torch.ops.flex_gemm.to_blocked.default: FlexGemmNormalizedToBlocked,
+            torch.ops.aten.split.Tensor: NormalizedSplit,
+            torch.ops.aten.select.int: NormalizedSelect,
+            torch.ops.flex_gemm.nvfp4_pack.default: NormalizedNVFP4Pack,
+            torch.ops.flex_gemm.to_blocked.default: NormalizedToBlocked,
         }
         for target, normalized_type in expected.items():
             self.assertIsInstance(normalized_nodes[nodes[target]], normalized_type)
@@ -3512,10 +3506,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("config_constraints:\n  axis=N, group=32", analysis_report)
         self.assertNotIn("recognized_dataflow:", analysis_report)
         self.assertNotIn("normalized_nodes:", analysis_report)
-        self.assertIn(
-            "normalized_nodes:\n  view: FlexGemmNormalizedView", analysis_details
-        )
-        self.assertIn("sum_1: FlexGemmNormalizedReduction", analysis_details)
+        self.assertIn("normalized_nodes:\n  view: NormalizedView", analysis_details)
+        self.assertIn("sum_1: NormalizedReduction", analysis_details)
         self.assertIn("grouped_layouts:\n  view:", analysis_details)
         self.assertIn("local_reduce_matches:\n  sum_1:", analysis_details)
         self.assertIn("grouped_select_indices:\n  (none)", analysis_details)
@@ -3565,7 +3557,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             format_flex_gemm_analysis(analysis),
         )
         details = format_flex_gemm_analysis_details(analysis)
-        self.assertIn("FlexGemmNormalizedSelect", details)
+        self.assertIn("NormalizedSelect", details)
         self.assertIn("grouped_select_indices:", details)
         self.assertNotIn("grouped_select_indices:\n  (none)", details)
 
@@ -3588,7 +3580,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertIn(
-            "FlexGemmNormalizedNVFP4Pack",
+            "NormalizedNVFP4Pack",
             format_flex_gemm_analysis_details(analysis),
         )
 
@@ -3621,7 +3613,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "output_layout: blocked_128x4", format_flex_gemm_analysis(analysis)
         )
         self.assertIn(
-            "FlexGemmNormalizedToBlocked",
+            "NormalizedToBlocked",
             format_flex_gemm_analysis_details(analysis),
         )
         lowering_plan = format_flex_gemm_lowering_plan(

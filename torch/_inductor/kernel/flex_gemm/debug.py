@@ -14,16 +14,16 @@ import torch
 from torch._logging import LazyString, trace_structured
 
 from .epilogue_nodes import (
-    FlexGemmNormalizedGetItem,
-    FlexGemmNormalizedNVFP4Pack,
-    FlexGemmNormalizedPrepareSoftmax,
-    FlexGemmNormalizedReduction,
-    FlexGemmNormalizedSelect,
-    FlexGemmNormalizedSplit,
-    FlexGemmNormalizedSqueeze,
-    FlexGemmNormalizedToBlocked,
-    FlexGemmNormalizedUnsupportedReduction,
-    FlexGemmNormalizedView,
+    NormalizedGetItem,
+    NormalizedNVFP4Pack,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSelect,
+    NormalizedSplit,
+    NormalizedSqueeze,
+    NormalizedToBlocked,
+    NormalizedUnsupportedReduction,
+    NormalizedView,
 )
 
 
@@ -168,29 +168,29 @@ def _format_main_transform(transform: Any | None) -> str:
 def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
     """Render one normalized FX operation as compact dataflow."""
     match normalized:
-        case FlexGemmNormalizedView(shape=shape):
+        case NormalizedView(shape=shape):
             operation = f"view(shape={shape})"
-        case FlexGemmNormalizedReduction(
+        case NormalizedReduction(
             dim=dim,
             keepdim=keepdim,
             reduction_type=reduction_type,
         ):
             operation = f"{reduction_type}(dim={dim}, keepdim={keepdim})"
-        case FlexGemmNormalizedPrepareSoftmax(dim=dim):
+        case NormalizedPrepareSoftmax(dim=dim):
             operation = f"prepare_softmax(dim={dim})"
-        case FlexGemmNormalizedSqueeze():
+        case NormalizedSqueeze():
             operation = "squeeze"
-        case FlexGemmNormalizedGetItem(index=index):
+        case NormalizedGetItem(index=index):
             operation = f"getitem(index={index})"
-        case FlexGemmNormalizedSplit(split_size=split_size, dim=dim):
+        case NormalizedSplit(split_size=split_size, dim=dim):
             operation = f"split(size={split_size}, dim={dim})"
-        case FlexGemmNormalizedSelect(dim=dim, index=index):
+        case NormalizedSelect(dim=dim, index=index):
             operation = f"select(dim={dim}, index={index})"
-        case FlexGemmNormalizedNVFP4Pack():
+        case NormalizedNVFP4Pack():
             operation = "nvfp4_pack"
-        case FlexGemmNormalizedToBlocked():
+        case NormalizedToBlocked():
             operation = "to_blocked"
-        case FlexGemmNormalizedUnsupportedReduction():
+        case NormalizedUnsupportedReduction():
             operation = f"unsupported_reduction({node.target})"
         case _:
             return repr(normalized)
