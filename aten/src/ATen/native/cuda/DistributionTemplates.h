@@ -439,19 +439,49 @@ void uniform_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transf
   }
 }
 
+template <typename scalar_t>
+struct NormalDistributionSampler {
+  using result_type =
+      std::conditional_t<std::is_same_v<scalar_t, double>, double2, float4>;
+
+  __device__ result_type operator()(
+      curandStatePhilox4_32_10_t* state) const {
+    if constexpr (std::is_same_v<scalar_t, double>) {
+      return curand_normal2_double(state);
+    } else {
+      return curand_normal4(state);
+    }
+  }
+};
+
+template <typename scalar_t>
+struct NormalDistributionTransform {
+  using accscalar_t = at::acc_type<scalar_t, true>;
+
+  NormalDistributionTransform(double mean, double stddev)
+      : mean(static_cast<accscalar_t>(mean)),
+        stddev(static_cast<accscalar_t>(stddev)) {}
+
+  __device__ scalar_t operator()(accscalar_t rand) const {
+    return static_cast<scalar_t>(
+        transformation::normal<accscalar_t>(rand, mean, stddev));
+  }
+
+  accscalar_t mean;
+  accscalar_t stddev;
+};
+
 template<typename scalar_t, typename accscalar_t, typename RNG, typename transform_t>
 void normal_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
-  if (std::is_same_v<scalar_t, double>) {
-    distribution_nullary_kernel<scalar_t, accscalar_t, double2>(iter,
+  using sampler_t = NormalDistributionSampler<scalar_t>;
+  distribution_nullary_kernel<
+      scalar_t,
+      accscalar_t,
+      typename sampler_t::result_type>(
+      iter,
       gen,
-      [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 { return curand_normal2_double(state); },
+      sampler_t{},
       transform);
-  } else {
-    distribution_nullary_kernel<scalar_t, accscalar_t, float4>(iter,
-      gen,
-      [] __device__ (curandStatePhilox4_32_10_t* state) -> float4 { return curand_normal4(state); },
-      transform);
-  }
 }
 
 // ==================================================== Normal ========================================================
@@ -461,13 +491,8 @@ void normal_kernel(const TensorBase &self, double mean_, double std_, RNG gen) {
   auto iter = TensorIterator::borrowing_nullary_op(self);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    auto mean = static_cast<accscalar_t>(mean_);
-    auto std = static_cast<accscalar_t>(std_);
-    // define lambda to multiply std and add mean
-    auto normal_func = [mean, std] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(transformation::normal<accscalar_t>(rand, mean, std));
-    };
-    normal_and_transform<scalar_t, accscalar_t>(iter, gen, normal_func);
+    normal_and_transform<scalar_t, accscalar_t>(
+        iter, gen, NormalDistributionTransform<scalar_t>(mean_, std_));
    });
 }
 
