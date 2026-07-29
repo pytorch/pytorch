@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import threading
 import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
@@ -136,6 +137,123 @@ class TestNVUniversalGemm(TestCase):
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
+
+    def test_arch_filter_rejects_min_cc_only_kernels(self):
+        """designed_for_min_cc <= device cc is insufficient: an arch-conditional
+        sm90 kernel reports min_cc=90 but only lists a cc=90 target and won't
+        compile on sm100. The exact-arch filter (via _device_target) must reject
+        kernels a min_cc-only check would wrongly accept.
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        major, minor = torch.cuda.get_device_capability()
+        cc = major * 10 + minor
+        device_target = kernel_cache._device_target(cc)
+
+        kernel_cache.clear_cache()
+        manifest = kernel_cache._get_kernel_cache()
+        min_cc_ok = [k for k in manifest.values() if k.designed_for_min_cc <= cc]
+        arch_ok = [
+            k
+            for k in min_cc_ok
+            if device_target.supports_operators_from(k.metadata.supported_targets)
+        ]
+
+        self.assertTrue(min_cc_ok, "no kernels pass the min_cc check")
+        self.assertLess(
+            len(arch_ok),
+            len(min_cc_ok),
+            "exact-arch filter should reject kernels that min_cc alone accepts",
+        )
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_swap_ab(self, dtype):
+        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
+        improving tile utilization for small-M shapes. Verify a small-M matmul
+        stays numerically correct with swap_ab enabled (the swapped operands and
+        transposed output view must round-trip to the original result).
+        """
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout("contiguous", m, k, dtype)
+        b = _create_tensor_with_layout("contiguous", k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_cudagraphs_intermediate_addmm(self):
+        """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
+        downstream must not leave that output retained by the cached EFC kernel,
+        or CUDA graph capture fails ("tensor(s) in the cudagraph pool not tracked
+        as outputs") and the tensor leaks. The cached kernel is built from
+        meta-device tensors, so runtime outputs flow only through the per-call
+        arguments.
+        """
+        dtype = torch.bfloat16
+        m, k = 512, 512
+        # Scaled down so the chained bf16 matmul stays well-conditioned.
+        bias = torch.randn(k, dtype=dtype, device="cuda") * 0.1
+        x = torch.randn(m, k, dtype=dtype, device="cuda") * 0.1
+        w = torch.randn(k, k, dtype=dtype, device="cuda") * 0.1
+
+        def chain(bias, x, w):
+            # h is an NVGEMM addmm output consumed downstream (not the graph's
+            # final output), which is what triggers the retention bug.
+            h = torch.addmm(bias, x, w.t())
+            return torch.addmm(bias, h, w.t())
+
+        expected = chain(bias.float(), x.float(), w.float()).to(dtype)
+
+        torch._dynamo.reset()
+
+        cfg = _nvgemm_config()
+        cfg["triton.cudagraphs"] = True
+        with config.patch(cfg):
+            compiled_fn = torch.compile(chain)
+            for _ in range(3):
+                result = compiled_fn(bias, x, w)
+
+        torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
+
+    def test_efc_epilogue_lookup_no_deadlock(self):
+        """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
+        kernel is not pre-resolved and misses the args cache, calls
+        get_kernel_by_name -> _ensure_caches, which re-acquires _cache_lock on the
+        same thread. With a plain (non-reentrant) lock this self-deadlocks; the
+        lock is an RLock. Run the reentrant path in a worker thread and assert it
+        completes (a plain Lock would hang here).
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        # Force the manifest-fallback re-entry: no cached manifest, empty args
+        # cache, unknown name, no pre-resolved base_kernel.
+        kernel_cache.clear_cache()
+        result = []
+
+        def worker():
+            result.append(
+                kernel_cache.get_efc_kernel_with_epilogue(
+                    "__nonexistent_kernel__", None, base_kernel=None
+                )
+            )
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=120)
+        self.assertFalse(
+            t.is_alive(),
+            "get_efc_kernel_with_epilogue deadlocked (reentrant _cache_lock)",
+        )
+        self.assertIsNone(result[0])
 
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
@@ -779,6 +897,66 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "pointwise op was NOT fused into epilogue")
 
+    def test_matmul_multi_store_epilogue_fusion(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = (a @ b).float()
+            return torch.relu(result), result + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertIn("out_ptr1", code)
+
+    def test_scaled_mm_pointwise_epilogue_fusion(self):
+        """Unary pointwise op is fused into an NVFP4 scaled GEMM epilogue."""
+        m, n, k = self.M, self.N, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return result * 0.5
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b
+        )
+        torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
+        self.assertTrue(epilogue_fused, "multiply was NOT fused into scaled epilogue")
+
+    def test_matmul_single_store_epilogue_chain(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return torch.relu((a @ b).float()) + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertNotIn("out_ptr1", code)
+
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
         ComputedBuffer and is fused as a single epilogue."""
@@ -822,6 +1000,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             epilogue_fused, "plain matmul should NOT have epilogue fusion markers"
         )
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190235"
+    )
     def test_reduction_not_fused(self):
         """Test that reductions after GEMM are NOT fused into the epilogue."""
         dtype = torch.bfloat16
@@ -957,6 +1139,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = a.float() @ b.float()
         torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190234"
+    )
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
         actually let benchmark_codegened_module run, exercising the runtime

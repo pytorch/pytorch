@@ -63,9 +63,9 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
+    generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
-    vt_getitem,
 )
 
 
@@ -664,7 +664,7 @@ class ConstDictVariable(VariableTracker):
                 ):
                     keys = other.call_method(tx, "keys", [], {})
                     for key in unpack_iterable(tx, keys):
-                        self.items[Hashable(key)] = vt_getitem(tx, other, key)
+                        self.items[Hashable(key)] = generic_getitem(tx, other, key)
                 else:
                     for idx, item in enumerate(unpack_iterable(tx, other)):
                         pair = unpack_iterable(tx, item)
@@ -1099,15 +1099,14 @@ class DictViewVariable(VariableTracker):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
             items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-            return VariableTracker.build(tx, f"dict_keys([{items}])")
-        if self.kv == "values":
+        elif self.kv == "values":
             items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-            return VariableTracker.build(tx, f"dict_values([{items}])")
-        items = ", ".join(
-            f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-            for key, value in self.view_items
-        )
-        return VariableTracker.build(tx, f"dict_items([{items}])")
+        else:  # items
+            items = ", ".join(
+                f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+                for key, value in self.view_items
+            )
+        return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def call_method(
         self,
