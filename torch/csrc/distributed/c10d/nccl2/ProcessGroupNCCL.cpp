@@ -16,6 +16,7 @@
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/distributed/c10d/NCCLCommRegistrationHook.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -78,6 +79,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     // Note: We don't call the full abortNcclComm() to avoid potential abort()
     // calls from options_.abort_process_on_timeout_or_error
     if (nccl_comm_) {
+      // Drop our symmetric-memory registration while nccl_comm_ is still valid
+      // (it is nulled below, before detachMemoryHook runs).
+      retireComm();
       // Best effort to abort the communicator - ignore errors since we're
       // in the destructor
       if (nccl_api_) {
@@ -172,6 +176,7 @@ void ProcessGroupNCCL::initNcclResources() {
   }
 
   attachMemoryHook();
+  publishComm();
 }
 
 void ProcessGroupNCCL::abort() {
@@ -302,6 +307,7 @@ void ProcessGroupNCCL::finalize() {
   // is skipped. We must not call commDestroy after commAbort per NCCL docs.
   if (nccl_comm_) {
     detachMemoryHook();
+    retireComm();
     // Deregister comm from the CachingAllocator
     NCCL_CHECK(
         nccl_api_,
@@ -314,6 +320,7 @@ void ProcessGroupNCCL::finalize() {
 
 void ProcessGroupNCCL::abortNcclComm() {
   detachMemoryHook();
+  retireComm();
   if (nccl_comm_) {
     NCCL_CHECK(
         nccl_api_,
@@ -343,6 +350,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   TC_LOG(INFO, this) << "Calling abort hooks before commRevoke.";
   runAbortHooks();
   detachMemoryHook();
+  retireComm();
   if (nccl_comm_) {
     // Best-effort: this may run on the timeout watchdog thread, so log instead
     // of throwing on failure (the communicator is already being torn down).
@@ -353,6 +361,16 @@ void ProcessGroupNCCL::revokeNcclComm() {
 
 int64_t ProcessGroupNCCL::getCommPtr() const {
   return reinterpret_cast<int64_t>(nccl_comm_);
+}
+
+void ProcessGroupNCCL::publishComm() {
+  ::c10d::publishNCCLComm(
+      getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
+}
+
+void ProcessGroupNCCL::retireComm() {
+  ::c10d::retireNCCLComm(
+      getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
 }
 
 // Point-to-Point Operations
@@ -375,17 +393,35 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
   // Record start event before NCCL operation
   work->recordStart("send");
 
+  // Wrap in ncclGroupStart/End so the kernel is enqueued on the stream before
+  // we record the end event. Without the group wrapper, a non-blocking NCCL
+  // comm may defer the kernel launch past the end-event record, so the event
+  // can fire before the transfer completes and work.wait() returns with
+  // stale/partial data. Matches batch_op_issue and stock
+  // ProcessGroupNCCL::pointToPoint. (TorchComms fix D109625550.)
   NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->send(
-          tensor.data_ptr(),
-          tensor.numel(),
-          getNcclDataType(tensor),
-          dst,
-          nccl_comm_,
-          stream),
-      "NCCL Send failed");
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->send(
+            tensor.data_ptr(),
+            tensor.numel(),
+            getNcclDataType(tensor),
+            dst,
+            nccl_comm_,
+            stream),
+        "NCCL Send failed");
+  } catch (...) {
+    // Close the group even on failure so the comm is not left mid-group for
+    // subsequent operations on this thread. groupEnd's own error is only logged
+    // since we are already propagating the original error.
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -414,17 +450,31 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   // Record start event before NCCL operation
   work->recordStart("recv");
 
+  // Wrap in ncclGroupStart/End -- see sendImpl comment for rationale.
+  // (TorchComms fix D109625550.)
   NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->recv(
-          tensor.data_ptr(),
-          tensor.numel(),
-          getNcclDataType(tensor),
-          src,
-          nccl_comm_,
-          stream),
-      "NCCL Recv failed");
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->recv(
+            tensor.data_ptr(),
+            tensor.numel(),
+            getNcclDataType(tensor),
+            src,
+            nccl_comm_,
+            stream),
+        "NCCL Recv failed");
+  } catch (...) {
+    // Close the group even on failure so the comm is not left mid-group for
+    // subsequent operations on this thread. groupEnd's own error is only logged
+    // since we are already propagating the original error.
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -1232,6 +1282,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   TracingGuard tracingGuard(name_, comm_size_, "barrier", rank_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout);
+
+  // A synchronous barrier host-blocks the CPU thread in synchronizeInternal(),
+  // matching stock ProcessGroupNCCL; async barriers stay stream-ordered.
+  work->hostBlocking_ = !async_op;
 
   // Record start event before NCCL operation
   work->recordStart("barrier");

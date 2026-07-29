@@ -673,6 +673,15 @@ class SetExcludeDispatchKeyGuard {
   bool old;
 };
 
+// Thread-local stack used to save/restore the local dispatch key set around a
+// torch.compile'd call (see compile_wrapper in eval_frame.py). Keeping the
+// saved keyset in C++ avoids materializing it as a (registered) pybind11
+// instance on every compiled call, and a stack supports nested compiled calls.
+static std::vector<c10::impl::LocalDispatchKeySet>& dynamoDispatchKeySetStack() {
+  static thread_local std::vector<c10::impl::LocalDispatchKeySet> stack;
+  return stack;
+}
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -1319,6 +1328,22 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_keys", [](const at::Tensor& tensor) {
     auto* impl = tensor.unsafeGetTensorImpl();
     return impl->key_set();
+  });
+  // Save the current local dispatch key set onto a C++ thread-local stack, to
+  // be restored by _dynamo_restore_local_dispatch_key_set. Used by
+  // torch.compile's per-call wrapper to preserve dispatch state across the
+  // compiled call without constructing pybind11 DispatchKeySet instances.
+  m.def("_dynamo_save_local_dispatch_key_set", []() {
+    dynamoDispatchKeySetStack().push_back(
+        c10::impl::tls_local_dispatch_key_set());
+  });
+  m.def("_dynamo_restore_local_dispatch_key_set", []() {
+    auto& stack = dynamoDispatchKeySetStack();
+    TORCH_CHECK(
+        !stack.empty(),
+        "_dynamo_restore_local_dispatch_key_set called with an empty stack");
+    c10::impl::_force_tls_local_dispatch_key_set(stack.back());
+    stack.pop_back();
   });
   m.def("_dispatch_tls_local_include_set", []() {
     return c10::impl::tls_local_dispatch_key_set().included_;
