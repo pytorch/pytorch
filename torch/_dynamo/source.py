@@ -1327,15 +1327,6 @@ def is_from_closure_source(source: Source) -> bool:
 
 
 @functools.lru_cache
-def is_from_source(source: Source, target: Source) -> bool:
-    if source == target:
-        return True
-    if isinstance(source, ChainedSource):
-        return is_from_source(source.base, target)
-    return False
-
-
-@functools.lru_cache
 def is_from_unspecialized_nn_module_source(source: Source) -> bool:
     if isinstance(source, UnspecializedNNModuleSource):
         return True
