@@ -2274,9 +2274,8 @@ torch.cuda.synchronize()
 class TestPoolingNNCUDA(NNTestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @largeTensorTest("10GB", device="cuda")
-    def test_adaptive_avg_pool2d_backward_large_index_offsets(self):
-        device = "cuda"
+    @largeTensorTest("10GB")
+    def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
         height = 32769
         width = 65536
         channels = 2
@@ -2304,6 +2303,7 @@ class TestPoolingNNCUDA(NNTestCase):
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(TestPoolingNNCUDA, globals(), only_for=["cuda"])
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":
