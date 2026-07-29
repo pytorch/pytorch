@@ -2521,6 +2521,79 @@ class <lambda>(torch.nn.Module):
         self.assertNotIn(getitem_out, set(graph.nodes))
         self.assertIn(new_gi, add_node.all_input_nodes)
 
+    def test_event_stream_subclass_preserved_across_graph_break(self):
+        """Regression test for GitHub issue #188536: when a user subclasses
+        torch.Stream or torch.Event, constructs an instance inside a
+        torch.compile region, and hits a graph break between construction
+        and subsequent use, Dynamo must reconstruct the object with the
+        user subclass rather than demoting it to the base torch._C.Stream /
+        torch._C.Event.
+
+        The bug manifests when the resumed trace inspects the type of the
+        reconstructed object: before the fix, ``isinstance(ev, MyEvent)``
+        returned False and ``type(ev)`` was ``torch.Event`` because the
+        reconstruction path hard-coded the base class.
+
+        The bug is purely in Python-level reconstruction, so it reproduces
+        on CPU; we do not exercise record()/wait() because those require a
+        real accelerator stream stack.
+        """
+
+        class MyEvent(torch.Event):
+            pass
+
+        class MyStream(torch.Stream):
+            pass
+
+        # Event subclass: isinstance check must hold across graph break.
+        @torch.compile(backend="eager")
+        def fn_event(x):
+            ev = MyEvent()
+            torch._dynamo.graph_break()
+            return x + 1, isinstance(ev, MyEvent), type(ev).__name__
+
+        y, ok, name = fn_event(torch.ones(3))
+        self.assertEqual(y, torch.tensor([2.0, 2.0, 2.0]))
+        self.assertTrue(ok, f"isinstance(ev, MyEvent) was False; type(ev)={name}")
+        self.assertEqual(name, "MyEvent")
+
+        # Stream subclass: isinstance check must hold across graph break.
+        @torch.compile(backend="eager")
+        def fn_stream(x):
+            s = MyStream()
+            torch._dynamo.graph_break()
+            return x + 1, isinstance(s, MyStream), type(s).__name__
+
+        y, ok, name = fn_stream(torch.ones(3))
+        self.assertEqual(y, torch.tensor([2.0, 2.0, 2.0]))
+        self.assertTrue(ok, f"isinstance(s, MyStream) was False; type(s)={name}")
+        self.assertEqual(name, "MyStream")
+
+        # Multiple instances must each retain their subclass, and identity
+        # must be preserved across the graph break.
+        @torch.compile(backend="eager")
+        def fn_multi(x):
+            e1 = MyEvent()
+            e2 = MyEvent()
+            s = MyStream()
+            torch._dynamo.graph_break()
+            return (
+                x + 1,
+                isinstance(e1, MyEvent),
+                isinstance(e2, MyEvent),
+                isinstance(s, MyStream),
+                type(e1).__name__,
+                e1 is not e2,
+            )
+
+        y, ok1, ok2, oks, n1, ne = fn_multi(torch.ones(3))
+        self.assertEqual(y, torch.tensor([2.0, 2.0, 2.0]))
+        self.assertTrue(ok1)
+        self.assertTrue(ok2)
+        self.assertTrue(oks)
+        self.assertEqual(n1, "MyEvent")
+        self.assertTrue(ne)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

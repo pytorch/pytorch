@@ -40,7 +40,7 @@ def new_event(*args: Any, **kwargs: Any) -> int:
     return register_graph_created_object(
         event,
         EventVariable.make_construct_in_graph_event_fn(
-            TupleVariable([]), ConstDictVariable({})
+            torch.Event, TupleVariable([]), ConstDictVariable({})
         ),
     )
 
@@ -50,7 +50,7 @@ def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
     return register_graph_created_object(
         stream,
         StreamVariable.make_construct_in_graph_stream_fn(
-            TupleVariable([]), ConstDictVariable({})
+            torch.Stream, TupleVariable([]), ConstDictVariable({})
         ),
     )
 
@@ -400,7 +400,7 @@ class StreamVariable(StreamContextVariable):
         super().__init__(None, **kwargs)
 
     def python_type(self) -> type:
-        return self._cpython_type
+        return type(self.value)
 
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -488,7 +488,7 @@ class StreamVariable(StreamContextVariable):
                 event_index = register_graph_created_object(
                     event,
                     EventVariable.make_construct_in_graph_event_fn(
-                        TupleVariable([]), ConstDictVariable({})
+                        type(event), TupleVariable([]), ConstDictVariable({})
                     ),
                 )
             tx.output.create_proxy(
@@ -561,7 +561,9 @@ class StreamVariable(StreamContextVariable):
 
     @staticmethod
     def make_construct_in_graph_stream_fn(
-        args: TupleVariable, kwargs: ConstDictVariable
+        stream_cls: type,
+        args: TupleVariable,
+        kwargs: ConstDictVariable,
     ) -> Callable[[int, "PyCodegen"], None]:
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
@@ -575,9 +577,14 @@ class StreamVariable(StreamContextVariable):
                     torch._dynamo.utils.__name__, "build_stream"
                 )
             )
+            # Load the stream class (preserves subclass identity across graph breaks)
+            cls_name = codegen.tx.output.install_global_by_id(
+                "_stream_cls", stream_cls
+            )
+            codegen.append_output(codegen.create_load_global(cls_name, add=True))
             codegen(args)
             codegen(kwargs)
-            codegen.extend_output(create_call_function(2, False))
+            codegen.extend_output(create_call_function(3, False))
             codegen.extend_output(create_call_function(1, False))
 
         return fn
@@ -733,7 +740,9 @@ class EventVariable(VariableTracker):
 
     @staticmethod
     def make_construct_in_graph_event_fn(
-        args: TupleVariable, kwargs: ConstDictVariable
+        event_cls: type,
+        args: TupleVariable,
+        kwargs: ConstDictVariable,
     ) -> Callable[[int, "PyCodegen"], None]:
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
@@ -747,9 +756,14 @@ class EventVariable(VariableTracker):
                     torch._dynamo.utils.__name__, "build_event"
                 )
             )
+            # Load the event class (preserves subclass identity across graph breaks)
+            cls_name = codegen.tx.output.install_global_by_id(
+                "_event_cls", event_cls
+            )
+            codegen.append_output(codegen.create_load_global(cls_name, add=True))
             codegen(args)
             codegen(kwargs)
-            codegen.extend_output(create_call_function(2, False))
+            codegen.extend_output(create_call_function(3, False))
             codegen.extend_output(create_call_function(1, False))
 
         return fn
