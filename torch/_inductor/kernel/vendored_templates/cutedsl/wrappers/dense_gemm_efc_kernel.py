@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from types import FunctionType
 from typing import Any
 
 from cutlass.operators.arch import TargetSm  # noqa: TC002
@@ -37,6 +38,15 @@ from torch.utils._ordered_set import OrderedSet
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
 
 
+class _EFCOpScope:
+    def __init__(self, efc_config):
+        self.efc_config = efc_config
+        self.math = self
+
+    def __getattr__(self, name):
+        return getattr(self.efc_config, name)
+
+
 def _direct_cutedsl_epilogue(metadata):
     import cutlass.cute as cute
 
@@ -59,16 +69,16 @@ def _direct_cutedsl_epilogue(metadata):
         shape = tuple(tensors[name].shape)
         if shape == output_shape:
             return parameter.load()
-        if not shape or len(shape) > 2:
+        if not shape or len(shape) > 3:
             raise NotImplementedError(f"unsupported dense EFC broadcast shape: {shape}")
         stride: Any = tensors[name].stride
         if callable(stride):
             stride = stride()
         assert isinstance(stride, Iterable)  # noqa: S101
         stride = tuple(stride)
-        padded_shape = (1,) * (2 - len(shape)) + shape
-        padded_stride = (0,) * (2 - len(stride)) + stride
-        propagated_stride = (0,) + tuple(
+        padded_shape = (1,) * (3 - len(shape)) + shape
+        padded_stride = (0,) * (3 - len(stride)) + stride
+        propagated_stride = tuple(
             0 if size == 1 else step for size, step in zip(padded_shape, padded_stride)
         )
         source_mode_map = _build_source_mode_map(propagated_stride, len(shape))
@@ -76,29 +86,24 @@ def _direct_cutedsl_epilogue(metadata):
         return parameter.remap_modes[source_mode_map].load()
 
     def epilogue(efc_config, *parameters):
-        class EFCOpScope:
-            math = None
-
-            def __init__(self):
-                self.math = self
-
-            def __getattr__(self, name):
-                return getattr(efc_config, name)
-
         by_name = dict(zip(parameter_names, parameters))
         values = [
             efc_config.accum() if name == "accum" else load(name, by_name[name])
             for name in inputs
         ]
-        op_scope = EFCOpScope()
-        direct_fn.__globals__.update(
-            {
-                name: getattr(efc_config, name)
-                for name in ("erf", "exp", "gelu", "relu", "sigmoid", "silu", "tanh")
-            }
-            | {"cute": op_scope, "mlir_math": op_scope}
+        op_scope = _EFCOpScope(efc_config)
+        call_scope = direct_fn.__globals__.copy()
+        call_scope.update(gemm_epilogue_op_scope(op_scope))
+        call_scope["mlir_math"] = op_scope
+        call_fn = FunctionType(
+            direct_fn.__code__,
+            call_scope,
+            direct_fn.__name__,
+            direct_fn.__defaults__,
+            direct_fn.__closure__,
         )
-        results = direct_fn(*values)
+        call_fn.__kwdefaults__ = direct_fn.__kwdefaults__
+        results = call_fn(*values)
         if len(outputs) == 1:
             result_values = (results,)
         else:
@@ -152,7 +157,12 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
     def _supports(
         self, args: GemmArguments, target_sm: TargetSm | None = None
     ) -> Status:
-        status = super()._supports(args, target_sm)
+        epilogue = args.epilogue
+        status = (
+            Status.success()
+            if epilogue is not None and getattr(epilogue, "_is_direct_cutedsl", False)
+            else super()._supports(args, target_sm)
+        )
         if not status:
             return status
         reduction = GemmReductionArguments.from_operator_args(args)
