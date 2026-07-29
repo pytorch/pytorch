@@ -788,11 +788,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
         t.device().is_cuda(),
         "Expected all_gather output tensor on CUDA but found tensor on ",
         t.device());
-    if (t.numel() != tensor.numel()) {
-      throw std::runtime_error(
-          "All tensors in tensor_list must have same size as input tensor");
-    }
   }
+  TORCH_CHECK(
+      tensor_list[rank_].numel() == tensor.numel(),
+      "Input tensor must have the same size as the output tensor for its rank");
 
   checkTensorDevice(tensor);
   checkSameDtype(tensor, tensor_list);
@@ -831,13 +830,14 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
 
   try {
     for (int i = 0; i < comm_size_; ++i) {
+      const auto& input = i == rank_ ? tensor : local_outputs[i];
       NCCL_CHECK_NONBLOCKING(
           nccl_api_,
           nccl_comm_,
           nccl_api_->broadcast(
-              tensor.data_ptr(),
+              input.data_ptr(),
               local_outputs[i].data_ptr(),
-              tensor.numel(),
+              local_outputs[i].numel(),
               getNcclDataType(local_outputs[i]),
               i,
               nccl_comm_,
@@ -930,14 +930,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
         "input_list size must equal comm_size for reduce_scatter");
   }
 
-  // Check that all input tensors are contiguous and have correct size
+  // Check that all input tensors are contiguous.
   for (const auto& t : input_list) {
     ensureTensorContiguous(t);
-    if (t.numel() != output.numel()) {
-      throw std::runtime_error(
-          "All input tensors must have same size as output tensor");
-    }
   }
+  TORCH_CHECK(
+      input_list[rank_].numel() == output.numel(),
+      "Output tensor must have the same size as the input tensor for its rank");
 
   checkTensorsDevice(input_list);
   checkTensorDevice(output);
