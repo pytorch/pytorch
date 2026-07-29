@@ -5400,6 +5400,17 @@
       ]
     }
   ],
+  "GB5687": [
+    {
+      "Gb_type": "min/max with non-constant key",
+      "Context": "str(keyval)",
+      "Explanation": "Cannot compute {self.fn.__name__}() whose key comparison is not a compile-time constant. Key type: {keyval.python_type()}. Most notably, Tensor or SymInt keys are unsupported, but ints work.",
+      "Hints": [
+        "Use something else as the key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9203": [
     {
       "Gb_type": "torch.switch: differing branch outputs",
