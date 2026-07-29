@@ -903,7 +903,7 @@ class TestFP8Matmul(TestCase):
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
-        block_size = 32
+        block_size = 16 if format == "nvfp4" else 32
         total_M = M  # Alias for clarity that M dim contains groups.
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device=device) * 0.01
