@@ -181,6 +181,12 @@ def {{kernel_name}}_kernel():
                 )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        # ROCm images ship the CuTeDSL wheel (x86_64 pip marker) but
+        # cuInit fails without an NVIDIA driver: cudaErrorInsufficientDriver.
+        torch.version.hip is not None,
+        "CuTeDSL requires an NVIDIA driver",
+    )
     def test_cutedsl_add_e2e(self):
         """End-to-end test with CuteDSL template including code generation verification."""
         from torch._inductor.ir import TensorBox
