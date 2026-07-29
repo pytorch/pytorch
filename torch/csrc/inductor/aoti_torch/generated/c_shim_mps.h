@@ -68,6 +68,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_cumsum(AtenTensorHandle self, in
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_exponential(AtenTensorHandle self, double lambd, AtenGeneratorHandle* generator, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_fill__Scalar(AtenTensorHandle self, double value);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_gcd(AtenTensorHandle self, AtenTensorHandle other, AtenTensorHandle* ret0);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_geqrf(AtenTensorHandle self, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_grid_sampler_2d_backward(AtenTensorHandle grad_output, AtenTensorHandle input, AtenTensorHandle grid, int64_t interpolation_mode, int64_t padding_mode, int32_t align_corners, const int32_t* output_mask, int64_t output_mask_len_, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_grid_sampler_3d(AtenTensorHandle input, AtenTensorHandle grid, int64_t interpolation_mode, int64_t padding_mode, int32_t align_corners, AtenTensorHandle* ret0);

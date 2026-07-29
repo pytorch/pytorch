@@ -21,6 +21,10 @@ if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
     # python tools/download_mnist.py --quiet -d test/cpp/api/mnist
     # OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
     time python test/run_test.py --verbose -i distributed/test_c10d_common
+    time python test/run_test.py --verbose -i distributed/test_c10d_collectives
+    time python test/run_test.py --verbose -i distributed/test_c10d_cuda_graphs
+    time python test/run_test.py --verbose -i distributed/test_c10d_p2p
+    time python test/run_test.py --verbose -i distributed/test_c10d_process_group
     time python test/run_test.py --verbose -i distributed/test_c10d_gloo
     time python test/run_test.py --verbose -i distributed/test_c10d_nccl
     time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
