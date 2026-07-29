@@ -3741,36 +3741,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source=descriptor_get_source,
         ).call_function(tx, [self, owner_var], {})
 
-    def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker | None:
-        source: Source | None = AttrSource(self.source, name) if self.source else None
-
-        if tx.output.side_effects.has_pending_mutation_of_attr(
-            self,
-            name,
-            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-        ):
-            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-            if not isinstance(result, variables.DeletedVariable):
-                return result
-            return None
-
-        if tx.output.side_effects.has_pending_mutation_of_attr(
-            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-        ):
-            dict_vt = self.get_dict_vt(tx)
-            if dict_vt.contains(name):
-                return dict_vt.getitem(name)
-            return None
-
-        if hasattr(self.value, "__dict__") and name in self.value.__dict__:
-            subobj = self.value.__dict__[name]
-            source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
-            return VariableTracker.build(tx, subobj, source)
-
-        return None
-
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
