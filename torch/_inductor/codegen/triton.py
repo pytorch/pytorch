@@ -1266,8 +1266,13 @@ class TritonCSEVariable(CSEVariable):
         elif name == "constant":
             self.scalar_value = args[0]
         elif name == "to_dtype" and isinstance(args[0], TritonCSEVariable):
-            self.index_expr = args[0].index_expr
-            self.scalar_value = args[0].scalar_value
+            # Only integral casts preserve the value exactly, and the `lt` proof
+            # below reasons about exact integer comparisons. A float cast can
+            # round (e.g. int32 -> fp16), so forwarding through it would let
+            # `idx_as_float < k` claim to imply the integer root mask.
+            if not self.dtype.is_floating_point:
+                self.index_expr = args[0].index_expr
+                self.scalar_value = args[0].scalar_value
         elif name == "lt":
             lhs, rhs = args
             if (

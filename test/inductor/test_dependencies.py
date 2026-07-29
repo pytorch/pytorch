@@ -121,6 +121,29 @@ class TestDependencies(InductorTestCase):
         reads = {dep.name for dep in extern.get_read_writes().reads}
         self.assertEqual(reads, {"data", "index", "value"})
 
+    def test_masked_store_records_full_write(self):
+        """
+        A masked store is deliberately recorded as a full write over the
+        expanded domain. That over-approximation is what keeps WAW/WAR ordering
+        edges intact; the resulting imprecision is handled by refusing in-place
+        reuse (see SchedulerNode.can_inplace).
+        """
+        from torch._inductor.dependencies import extract_read_writes
+
+        def fn(index):
+            (x,) = index
+            mask = ops.lt(ops.index_expr(x, torch.int32), ops.constant(48, torch.int32))
+            ops.masked_store("out", x, ops.constant(1.0, torch.float32), mask)
+
+        rw = extract_read_writes(fn, [64])
+        writes = [dep for dep in rw.writes if isinstance(dep, MemoryDep)]
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0].name, "out")
+        # Recorded over the whole 64-element range even though the mask may
+        # exclude a tail, and with no store mode (no atomic masked store).
+        self.assertEqual(writes[0].get_numel(), 64)
+        self.assertEqual(writes[0].mode, None)
+
     def test_get_offset(self):
         x = sympy_index_symbol("x")
         y = sympy_index_symbol("y")

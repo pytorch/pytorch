@@ -1297,6 +1297,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         value: CSEVariableType,
         mask: CSEVariableType,
     ) -> None:
+        """
+        Subclasses must consult self._load_mask in store() to honor the mask.
+        A backend whose store() ignores _load_mask would silently write the
+        masked-off elements, so it must override this to refuse instead.
+        """
+        # `value` here is the store operand; mask_loads' value= is the `other`
+        # for loads and is meaningless for a store, hence the unused 0.
         with self.mask_loads(mask, value=0):
             self.store(name, index, value)
 

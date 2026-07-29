@@ -263,7 +263,16 @@ class OpsHandler(Generic[T]):
         value: T,
         mask: T,
     ) -> None:
-        """Store ``value`` only where ``mask`` is true."""
+        """
+        Store 'value' to 'name' offset by 'index', but only where 'mask' is
+        true. Elements where 'mask' is false are left *unmodified*, so this op
+        only partially initializes 'name': whatever those elements held before
+        is what they still hold. Analyses must not assume a masked store
+        defines the full extent of 'index'.
+
+        Unlike 'store' there is no 'mode' -- an atomic masked store is not
+        supported, so backends never need to combine a mask with atomic_add.
+        """
         raise NotImplementedError
 
     # TODO: Better explain how the "collective" semantics of these ops;
@@ -1222,7 +1231,7 @@ class SimpleCSEHandler(WrapperHandler):
         raise NotImplementedError("store not implemented")
 
     def masked_store(self, *args, **kwargs) -> None:
-        raise NotImplementedError("store not implemented")
+        raise NotImplementedError("masked_store not implemented")
 
     def store_reduction(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")
