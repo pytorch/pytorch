@@ -18,7 +18,7 @@ std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t d
   }
   thrust::stable_sort_by_key(
     thrust::host, strides.data(), strides.data() + ndim, original_dim.data(),
-    cuda::std::greater<int64_t>()
+    ::cuda::std::greater<int64_t>()
   );
   // generate contiguous strides on permuted dims
   std::vector<int64_t> new_strides(ndim);

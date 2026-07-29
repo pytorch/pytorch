@@ -51,8 +51,8 @@ struct ModeImpl {
                     iter_end - 1,
                     iter_begin + 1,
                     0,
-                    cuda::std::plus<int>(),
-                    cuda::std::not_equal_to<scalar_t>());
+                    ::cuda::std::plus<int>(),
+                    ::cuda::std::not_equal_to<scalar_t>());
 
     // Count frequency of each element
     auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
