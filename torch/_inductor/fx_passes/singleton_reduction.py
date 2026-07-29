@@ -15,7 +15,6 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config
 from ..utils import is_view
 
 
@@ -500,7 +499,6 @@ def eliminate_singleton_reductions(graph: torch.fx.Graph) -> int:
             or dim != 1
             or not isinstance(dense_val.shape[dim], int)
             or dense_val.shape[dim] <= 1
-            or config.force_shape_pad
         ):
             continue
 

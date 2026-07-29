@@ -82,10 +82,13 @@ class SingletonReductionTests(TestCase):
             scale = torch.randn(2, 1, device=device)
             return make_fx(fn, tracing_mode="fake")(target, scale).graph
 
-    @parametrize("force_shape_pad,expected_fold", ((False, True), (True, False)))
+    @parametrize("force_shape_pad", (False, True))
     @parametrize("bf16_roundtrip", (False, True))
     def test_cross_entropy_row_sum(
-        self, device, force_shape_pad, expected_fold, bf16_roundtrip
+        self,
+        device,
+        force_shape_pad,
+        bf16_roundtrip,
     ):
         def fn(target, scale):
             iota = torch.arange(LIVE_VOCAB, device=target.device).view(1, LIVE_VOCAB)
@@ -114,7 +117,7 @@ class SingletonReductionTests(TestCase):
         actual, expected = self._run_and_check(
             fn,
             (target, scale),
-            expected_fold and bf16_roundtrip,
+            bf16_roundtrip,
             {"force_shape_pad": force_shape_pad},
         )
         self.assertEqual(torch.signbit(actual[1]), torch.signbit(expected[1]))
