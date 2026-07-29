@@ -2479,7 +2479,10 @@ class CleanupHook:
         # Make sure we're not shutting down
         if CleanupManager is not None:
             CleanupManager.count -= 1
-        del self.scope[self.name]
+        # During interpreter shutdown the scope's module __dict__ may already
+        # have been cleared, so the name can be gone. Use pop to avoid a
+        # KeyError surfacing as an "Exception ignored in weakref callback".
+        self.scope.pop(self.name, None)
 
     @staticmethod
     def create(scope: dict[str, Any], name: str, val: Any) -> CleanupHook:
