@@ -1,10 +1,14 @@
 # Owner(s): ["module: rocm"]
 name: linux-binary-test-rocm
 
-# Reusable workflow that runs the ROCm binary test (setup-rocm, GPU device
-# passthrough, ECR docker pull, test-pytorch-binary, teardown-rocm). Called
-# from the matrix-driven manywheel-test-rocm job in
-# generated-linux-binary-manywheel-nightly.yml.
+# Reusable workflow that runs the ROCm binary test (GPU device passthrough,
+# test-pytorch-binary). Called from the matrix-driven manywheel-test-rocm job
+# in generated-linux-binary-manywheel-nightly.yml.
+#
+# Uses the official python:${{ inputs.DESIRED_PYTHON }} image instead of the
+# manylinux builder image so unbundled library dependencies are visible. The
+# manylinux test image ships the same system libraries as the build image and
+# can mask missing RPATH entries in shipped wheels.
 
 on:
   workflow_call:
@@ -57,7 +61,7 @@ jobs:
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     container:
-      image: pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+      image: python:${{ inputs.DESIRED_PYTHON }}
       options: --device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -105,7 +109,7 @@ jobs:
             echo "DESIRED_CUDA=${DESIRED_CUDA}"
             echo "GPU_ARCH_VERSION=${GPU_ARCH_VERSION}"
             echo "GPU_ARCH_TYPE=${GPU_ARCH_TYPE}"
-            echo "DOCKER_IMAGE=pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}"
+            echo "DOCKER_IMAGE=python:${{ inputs.DESIRED_PYTHON }}"
             echo "SKIP_ALL_TESTS=${SKIP_ALL_TESTS}"
             echo "DESIRED_PYTHON=${DESIRED_PYTHON}"
             echo "ALPINE_IMAGE=${ALPINE_IMAGE}"
