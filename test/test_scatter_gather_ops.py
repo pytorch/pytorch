@@ -713,10 +713,15 @@ def _build_alignment_case(case):
 
 
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@unittest.skipUnless(SM90OrLater, "both scatter_add kernels gate on sm_90+")
 @skipIfNoCuteDSL
 class TestScatterAddOverrideConds(TestCase):
     """Unit tests for the dispatch predicates in
-    torch._native.ops.scatter_add.cutedsl_impl."""
+    torch._native.ops.scatter_add.cutedsl_impl. The accepts-cases assert
+    the predicates fire, which the leading _has_sm90_plus() gate makes
+    arch-dependent; below sm_90 every predicate is uniformly False and
+    the class tests nothing (correctness-on-fallback is covered by
+    TestScatterAddOverrideCorrectness, which is not arch-gated)."""
 
     @classmethod
     def setUpClass(cls):
