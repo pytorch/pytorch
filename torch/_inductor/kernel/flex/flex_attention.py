@@ -482,6 +482,7 @@ def flex_attention(
 
         # Intel GPU enables TMA by default
         cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        # TDM is not user-selectable; derive it only from the eligibility gate below.
         cur_kernel_options["USE_TDM"] = False
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
