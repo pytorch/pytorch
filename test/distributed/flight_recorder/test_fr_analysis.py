@@ -4,7 +4,11 @@ import copy
 import math
 from typing import Any
 
-from torch.distributed.flight_recorder.components.builder import build_db
+from torch.distributed.flight_recorder.components.builder import (
+    build_db,
+    build_groups_memberships,
+    transform_ft,
+)
 from torch.distributed.flight_recorder.components.config_manager import JobConfig
 from torch.distributed.flight_recorder.components.types import (
     COLLECTIVES,
@@ -424,6 +428,63 @@ class FlightRecorderE2ETest(TestCase):
         self.assertEqual(db.collectives[1].collective_name, "nccl:_reduce_oop")
         self.assertEqual(db.collectives[1].record_id, 1)
         self.assertEqual(db.collectives[1].pass_check, True)
+
+
+class FlightRecorderRankParsingTest(TestCase):
+    def test_build_groups_memberships_parses_rank_lists(self):
+        for value in ("[0, 1]", "'[0, 1]'"):
+            with self.subTest(value=value):
+                pg_config = {0: {"0": {"desc": "default_pg", "ranks": value}}}
+
+                groups, _, memberships, member_sets, _ = build_groups_memberships(
+                    pg_config
+                )
+
+                self.assertEqual(groups[0].size, 2)
+                self.assertEqual(
+                    [membership.global_rank for membership in memberships], [0, 1]
+                )
+                self.assertEqual(next(iter(member_sets.values())), {0, 1})
+
+    def test_transform_ft_parses_rank_lists(self):
+        for value in ("[0, 1]", "'[0, 1]'"):
+            with self.subTest(value=value):
+                details = {
+                    "rank_2": {
+                        "rank": 2,
+                        "pg_config": {
+                            "0": {"desc": "default_pg", "ranks": value}
+                        },
+                    }
+                }
+
+                transformed = transform_ft(details, group_world_size=2)
+
+                self.assertEqual(
+                    transformed["rank_2"]["pg_config"]["0"]["ranks"], "[2, 3]"
+                )
+
+    def test_build_groups_memberships_rejects_invalid_rank_lists(self):
+        for value in ("__import__('os').system('echo unsafe')", "[0, '1']"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                build_groups_memberships(
+                    {0: {"0": {"desc": "default_pg", "ranks": value}}}
+                )
+
+    def test_transform_ft_rejects_invalid_rank_lists(self):
+        for value in ("__import__('os').system('echo unsafe')", "[0, '1']"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                transform_ft(
+                    {
+                        "rank_0": {
+                            "rank": 0,
+                            "pg_config": {
+                                "0": {"desc": "default_pg", "ranks": value}
+                            },
+                        }
+                    },
+                    group_world_size=2,
+                )
 
 
 if __name__ == "__main__":
