@@ -372,9 +372,11 @@ def _has_expanding_pointwise_consumer(
 def _shape_expands(user_shape: torch.Size, source_shape: torch.Size) -> bool:
     if len(user_shape) < len(source_shape):
         return False
-    source_shape = (1,) * (len(user_shape) - len(source_shape)) + tuple(source_shape)
+    aligned_source_shape = (1,) * (len(user_shape) - len(source_shape)) + tuple(
+        source_shape
+    )
     expanded = False
-    for user_size, source_size in zip(user_shape, source_shape):
+    for user_size, source_size in zip(user_shape, aligned_source_shape):
         if statically_known_true(sym_eq(user_size, source_size)):
             continue
         if not (
