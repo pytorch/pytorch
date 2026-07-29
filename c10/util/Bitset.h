@@ -26,7 +26,7 @@ struct bitset final {
   using bitset_type = long long int;
 #endif
  public:
-  static constexpr size_t NUM_BITS() {
+  [[nodiscard]] static constexpr size_t NUM_BITS() {
     return 8 * sizeof(bitset_type);
   }
 
@@ -47,11 +47,11 @@ struct bitset final {
     bitset_ &= ~(static_cast<long long int>(1) << index);
   }
 
-  constexpr bool get(size_t index) const noexcept {
+  [[nodiscard]] constexpr bool get(size_t index) const noexcept {
     return bitset_ & (static_cast<long long int>(1) << index);
   }
 
-  constexpr bool is_entirely_unset() const noexcept {
+  [[nodiscard]] constexpr bool is_entirely_unset() const noexcept {
     return 0 == bitset_;
   }
 
@@ -104,14 +104,14 @@ struct bitset final {
 #endif
   }
 
-  friend bool operator==(bitset lhs, bitset rhs) noexcept {
+  [[nodiscard]] friend bool operator==(bitset lhs, bitset rhs) noexcept {
     return lhs.bitset_ == rhs.bitset_;
   }
 
   bitset_type bitset_{0};
 };
 
-inline bool operator!=(bitset lhs, bitset rhs) noexcept {
+[[nodiscard]] inline bool operator!=(bitset lhs, bitset rhs) noexcept {
   return !(lhs == rhs);
 }
 

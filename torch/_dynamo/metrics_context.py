@@ -147,7 +147,7 @@ class MetricsContext:
 
     def set_key_value(self, metric: str, key: str, value: Any) -> None:
         """
-        Treats a give metric as a dictionary and set the k and value within it.
+        Treats a given metric as a dictionary and set the k and value within it.
         Note that the metric must be a dictionary or not present.
 
         We allow this to be called multiple times (i.e. for features, it's not uncommon

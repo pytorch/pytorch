@@ -50,10 +50,24 @@ _NVMATH_DEPS = [
     ("nvmath-python", "nvmath.bindings"),
 ]
 
+# cublasLtGroupedMatrixLayoutCreate, used by the nvmath grouped GEMM path, was
+# introduced in cuBLAS 13.2.0 (CUDA 13.1) and is experimental as of that release.
+# cublasLtGetVersion() encodes the version as 10000*major + 100*minor + patch.
+# This is the cuBLAS library version, not the CUDA toolkit version.
+_MIN_CUBLASLT_GROUPED_GEMM_VERSION = 130200
 
+
+# Cached: availability is a process-global property of the loaded cuBLASLt.
 @cache
 def _check_nvmath_cublaslt() -> bool:
-    return _unavailable_reason(_NVMATH_DEPS) is None
+    if _unavailable_reason(_NVMATH_DEPS) is not None:
+        return False
+    try:
+        from nvmath.bindings import cublasLt  # pyrefly: ignore[missing-import]
+
+        return cublasLt.get_version() >= _MIN_CUBLASLT_GROUPED_GEMM_VERSION
+    except Exception:
+        return False
 
 
 def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bool:
@@ -218,7 +232,10 @@ def _warn_nvmath_unavailable_once() -> None:
     if _nvmath_warned:
         return
     _nvmath_warned = True
-    reason = _unavailable_reason(_NVMATH_DEPS)
+    reason = (
+        _unavailable_reason(_NVMATH_DEPS)
+        or "cuBLASLt lacks cublasLtGroupedMatrixLayoutCreate"
+    )
     warnings.warn(
         f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
         f"using slower fallback.",

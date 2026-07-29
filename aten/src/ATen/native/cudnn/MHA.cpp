@@ -152,6 +152,31 @@ namespace fe = cudnn_frontend;
 
 constexpr uint8_t MAX_MHA_DIM = 4;
 
+static void check_cudnn_sdpa_execution(fe::error_t err) {
+  if (C10_LIKELY(err.is_good())) {
+    return;
+  }
+
+  const auto error_message = err.get_message();
+  const bool is_cuda_oom =
+      error_message.find("err 2 != CUDA_SUCCESS") != std::string::npos ||
+      error_message.find("CUDA_ERROR_OUT_OF_MEMORY") != std::string::npos ||
+      error_message.find("cudaErrorMemoryAllocation") != std::string::npos;
+  TORCH_CHECK(
+      false,
+      "cuDNN SDPA execution failed with error code ",
+      err.get_code(),
+      ": ",
+      error_message,
+      is_cuda_oom
+          ? "\nCUDA ran out of memory outside PyTorch's allocator. If this "
+            "workload uses many dynamic shapes, cuDNN may need additional "
+            "device memory to JIT-compile shape-specialized kernels. Consider "
+            "calling torch.cuda.memory.set_per_process_memory_fraction(fraction) "
+            "early in the process to leave memory available for cuDNN."
+          : "");
+}
+
 // Whether we will use ragged offsets in the dense (non-nested) path
 // to avoid recompilation
 bool use_ragged_in_dense(
@@ -1493,8 +1518,8 @@ void run_cudnn_SDP_fprop(
   auto workspace_size = mha_graph.get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
-  TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
+  check_cudnn_sdpa_execution(std::move(err));
 }
 
 void run_cudnn_SDP_fprop_nestedtensor(
@@ -1624,8 +1649,8 @@ void run_cudnn_SDP_fprop_nestedtensor(
   auto workspace_size = mha_graph.get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
-  TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
+  check_cudnn_sdpa_execution(std::move(err));
 }
 
 void run_cudnn_SDP_bprop(
@@ -1785,8 +1810,8 @@ void run_cudnn_SDP_bprop(
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(!workspace_size || workspace_ptr.get());
-  TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
+  check_cudnn_sdpa_execution(std::move(err));
 }
 
 void run_cudnn_SDP_bprop_nestedtensor(
@@ -1942,8 +1967,8 @@ void run_cudnn_SDP_bprop_nestedtensor(
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(!workspace_size || workspace_ptr.get());
-  TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
+  check_cudnn_sdpa_execution(std::move(err));
 }
 
 } // namespace at::native

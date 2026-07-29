@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyMPS,
+    onlyNativeDeviceTypes,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -44,7 +45,6 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
-    skipIfTorchDynamo,
     slowTest,
     subtest,
     TEST_WITH_UBSAN,
@@ -874,7 +874,7 @@ torch.cuda.synchronize()
                 )
                 self.assertTrue(
                     has_cuda_assert or has_hip_error,
-                    f"Expected device assert error, got: {output[-500:]}",
+                    lambda msg: f"{msg}\nExpected device assert error, got: {output[-500:]}",
                 )
             else:
                 self.assertNotIn("Error", output, "Should not have produced an error")
@@ -1316,7 +1316,6 @@ torch.cuda.synchronize()
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
-    @skipIfTorchDynamo("OOMs https://github.com/pytorch/pytorch/issues/111320")
     def test_max_pool1d(self, device, dtype):
         # FIXME For now compare against max_pool1d with indices
         def check(x, *args, **kwargs):
@@ -2067,6 +2066,20 @@ torch.cuda.synchronize()
             torch.ops.aten.fractional_max_pool2d_backward(
                 grad_output, input, kernel_size, output_size, indices
             )
+
+    @onlyNativeDeviceTypes
+    def test_fractional_max_pool_invalid_kernel_size(self, device):
+        x = torch.randn(1, 2, 7, 7, device=device)
+        samples = x.new(1, 2, 2).uniform_()
+        for kernel_size in [(-1, 2), (0, 2)]:
+            with self.assertRaisesRegex(RuntimeError, "greater than zero"):
+                torch.ops.aten.fractional_max_pool2d(x, kernel_size, (3, 3), samples)
+
+        x = torch.randn(1, 2, 7, 7, 7, device=device)
+        samples = x.new(1, 2, 3).uniform_()
+        for kernel_size in [(-1, 2, 2), (0, 2, 2)]:
+            with self.assertRaisesRegex(RuntimeError, "greater than zero"):
+                torch.ops.aten.fractional_max_pool3d(x, kernel_size, (3, 3, 3), samples)
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta

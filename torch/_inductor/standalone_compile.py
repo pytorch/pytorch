@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import itertools
 import logging
 import os
 import pickle
@@ -147,8 +148,8 @@ class CacheCompiledArtifact(CompiledArtifact):
         # (we only expect one)
         return len(cache_info.aot_autograd_artifacts) == 1
 
-    def _validate_and_unpack(self) -> tuple[bytes, CacheInfo, str]:
-        """Validate the cached artifact, returning ``(artifact_bytes, cache_info, key)``.
+    def _validate_and_unpack(self) -> tuple[bytes, str]:
+        """Validate the cached artifact, returning ``(artifact_bytes, key)``.
 
         Single source of the None / empty / multiple aot_autograd_artifacts checks,
         shared by ``_to_binary_bytes`` and ``save``'s unpacked branch. Messages are
@@ -170,7 +171,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                 f"CompiledArtifact has more than one aot_autograd artifact but we only "
                 f"expected one. {cache_info}"
             )
-        return artifact_bytes, cache_info, cache_info.aot_autograd_artifacts[0]
+        return artifact_bytes, cache_info.aot_autograd_artifacts[0]
 
     def _to_binary_bytes(self) -> bytes:
         """Serialize this artifact to the in-memory ``binary`` byte format.
@@ -181,7 +182,7 @@ class CacheCompiledArtifact(CompiledArtifact):
         ``load(format="binary")`` reads back: header, ``torch_key``, the autograd-cache
         ``key`` string, then the opaque ``artifact_bytes``.
         """
-        artifact_bytes, _cache_info, key = self._validate_and_unpack()
+        artifact_bytes, key = self._validate_and_unpack()
 
         from torch.utils._appending_byte_serializer import BytesWriter
 
@@ -214,7 +215,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                     raise AssertionError(f"expected format == 'unpacked', got {format}")
                 # Same None / empty / multiple validation as the binary branch, shared via
                 # _validate_and_unpack; the unpacked branch needs only artifact_bytes.
-                artifact_bytes, _cache_info, _key = self._validate_and_unpack()
+                artifact_bytes, _key = self._validate_and_unpack()
                 if os.path.exists(path):
                     if not os.path.isdir(path):
                         raise AssertionError(f"expected path to be a dir: {path}")
@@ -494,10 +495,20 @@ def _resolve_fake_mode(
             if isinstance(last_node.args[0], torch.fx.Node)
             else last_node.args[0]
         )
-        for node in nodes:
-            if "example_value" in node.meta:
-                maybe_tensor = node.meta["example_value"]
-                maybe_fake_mode = maybe_get_fake_mode(maybe_tensor)
+        # Find a FakeTensor to recover its FakeTensorMode. This resolver was written when
+        # standalone_compile was only ever fed Dynamo/AOT graphs, which return a flat list
+        # of real Tensor outputs and stash the fake under "example_value". precompile now
+        # feeds make_fx graphs too, and those break both assumptions: make_fx stashes the
+        # fake under "val" (not "example_value"), and the traced fn's own return value is
+        # kept as an output leaf -- so when fn calls .backward() (which returns None) that
+        # None sits in the output list as a plain non-Node entry. So skip non-Node output
+        # entries (the old code called .meta on the None and crashed), check both metadata
+        # keys, and fall back to scanning every node since a make_fx fake may live only on
+        # an interior node. maybe_get_fake_mode also unwraps a traceable wrapper subclass.
+        output_nodes = [n for n in nodes if isinstance(n, torch.fx.Node)]
+        for node in itertools.chain(output_nodes, gm.graph.nodes):
+            for key in ("example_value", "val"):
+                maybe_fake_mode = maybe_get_fake_mode(node.meta.get(key))
                 if maybe_fake_mode is not None:
                     return maybe_fake_mode
 
