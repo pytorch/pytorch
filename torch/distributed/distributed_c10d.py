@@ -7803,6 +7803,9 @@ def _supports_reconfigure(group: ProcessGroup | None = None) -> bool:
     """
     Return whether ``group`` supports the reconfigure-based fault tolerance API.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
             the default process group is used.
@@ -7817,6 +7820,9 @@ def _get_reconfigure_handle(group: ProcessGroup | None = None) -> str:
 
     The handle encodes the information peers exchange out-of-band to
     (re)initialize the communicator via :func:`_reconfigure`.
+
+    .. warning::
+        This API is experimental and subject to change or removal.
 
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
@@ -7836,6 +7842,9 @@ def _reconfigure(
     """
     Reconfigure ``group`` with a new set of peers for fault tolerance.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         uuid (int): Uniquely identifies this instance of the communicator. Pass
             a fresh value on every (re)initialization.
@@ -7850,6 +7859,13 @@ def _reconfigure(
 
     Returns:
         Work: An async work handle for the reconfigure operation.
+
+    Example::
+        >>> # xdoctest: +SKIP("requires out-of-band rendezvous")
+        >>> dist.init_process_group("gloo", enable_reconfigure=True)
+        >>> # Every peer receives the same fresh UUID and rank-ordered handles.
+        >>> uuid, handles = rendezvous_reconfigure(dist._get_reconfigure_handle())
+        >>> dist._reconfigure(uuid=uuid, handles=handles).wait()
     """
     pg = group or _get_default_group()
     opts = ReconfigureOptions()

@@ -213,6 +213,8 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    mp_length = sq_length
+
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
@@ -709,6 +711,9 @@ class RangeVariable(BaseListVariable):
         if length > sys.maxsize:
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
+
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.sq_length(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
@@ -2177,7 +2182,7 @@ class SliceVariable(VariableTracker):
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(member.nb_index_impl(tx).as_python_constant())
+            members.append(pynumber_index(tx, member).as_python_constant())
         return slice(*members)
 
     def is_hashable(self) -> bool:
