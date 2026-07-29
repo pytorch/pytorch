@@ -992,7 +992,8 @@ class TestFP8Matmul(TestCase):
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
 
         if TEST_XPU:
-            # XPU OneDNN GroupedMM use [E,K,N] instead of [E,N,K] hence require transpose here.
+            # XPU OneDNN GroupedMM expects weight scales in [G, K/blocks, N] layout;
+            # the helper above returns them as [G, N, K/blocks], so transpose them here.
             w_blocked_scales = w_blocked_scales.transpose(-2, -1)
 
         if format in ["mxfp8", "mxfp4"]:
