@@ -45,6 +45,14 @@ class GenericCtxMgr:
         pass
 
 
+class WarningOnceLogger(logging.Logger):
+    def warning_once(self, msg):
+        self.warning(msg)
+
+
+warning_once_logger = WarningOnceLogger("warning_once_logger")
+
+
 class ErrorMessagesTest(LoggingTestCase):
     def test_inplace_view_on_graph_input_hint(self):
         def fn(x):
@@ -485,6 +493,45 @@ Attempted to call function marked as skipped
 from user code:
    File "test_error_messages.py", line N, in fn
     warnings.warn("test")""",
+        )
+
+    def test_logger_method_message(self):
+        def fn():
+            warning_once_logger.warning_once("test")
+
+        def post_munge(s):
+            s = re.sub(
+                r"method: <WarningOnceLogger .*?>\.warning_once",
+                "method: <WarningOnceLogger>.warning_once",
+                s,
+            )
+            logger_method_name = (
+                f"{WarningOnceLogger.__module__}."
+                f"{WarningOnceLogger.__qualname__}.warning_once"
+            )
+            return s.replace(
+                f"`{logger_method_name}`", "`WarningOnceLogger.warning_once`"
+            )
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+logging.Logger method not supported for non-export cases
+  Explanation: For non-export cases, logging.Logger methods are only supported if the logger has a source and the method is registered as reorderable.
+  Hint: If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.
+  Hint: For example, for `logger.warning_once(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.warning_once)`. If `warning_once` is defined on the logger class, add the class method `WarningOnceLogger.warning_once` to ignore this method for all instances of that class.
+  Hint: Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`warning_once`) is checked against the ignore set. Ignoring a method that `warning_once` calls internally has no effect.
+  Hint: If you need the log side effect to run, then you can try one of (1) create the logger outside the compiled region and add the method to `torch._dynamo.config.reorderable_logging_functions` (e.g. `torch._dynamo.config.reorderable_logging_functions.add(logger.warning_once)`) so that it runs after the compiled region, as long as it is called without kwargs and its arguments are tensors, constants, or string formatters, (2) `torch._higher_order_ops.print(...)`, (3) wrap the logging call in a custom op (marked as mutable), or (4) preserve the logging contents and move the logging call outside the compiled region.
+
+  Developer debug context: method: <WarningOnceLogger>.warning_once, args: [ConstantVariable(str: 'test')], kwargs: {}
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0291.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    warning_once_logger.warning_once("test")""",
+            post_munge=post_munge,
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")

@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/xpu/Sleep.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/XPUGraphsUtils.h>
@@ -464,6 +465,7 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
         return at::xpu::canDeviceAccessPeer(device, peer);
       });
+  m.def("_xpu_sleep", [](uint64_t cycles) { at::xpu::sleep(cycles); });
   m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
     return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
   });
