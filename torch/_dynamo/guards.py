@@ -1264,6 +1264,12 @@ def unsupported_guard_check_spec(fn):
     return fn
 
 
+def sorts_last(fn):
+    """Mark a guard method to sort after all others in Guard.sort_key."""
+    fn._guard_sorts_last = True
+    return fn
+
+
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
@@ -3142,6 +3148,7 @@ class GuardBuilder(GuardBuilderBase):
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @skip_guard_check_spec
+    @sorts_last
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
