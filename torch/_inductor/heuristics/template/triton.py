@@ -3272,10 +3272,10 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
                 "ROCmPersistentTDMTemplateConfigHeuristic requires MMKernelInputs"
             )
         mat1, mat2 = kernel_inputs.mat1mat2()
-        a_row_major = tdm_descriptor_row_major(mat1)
-        b_row_major = tdm_descriptor_row_major(mat2)
+        a_row_major = tdm_descriptor_row_major(mat1, add_guards=True)
+        b_row_major = tdm_descriptor_row_major(mat2, add_guards=True)
         if a_row_major is None or b_row_major is None:
-            raise AssertionError("TDM operand orientation must be unambiguous")
+            return
 
         kwargs = {
             **kwargs,
@@ -3322,10 +3322,10 @@ class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         mat_a, mat_b = kernel_inputs.mat1mat2()
-        a_row_major = tdm_descriptor_row_major(mat_a)
-        b_row_major = tdm_descriptor_row_major(mat_b)
+        a_row_major = tdm_descriptor_row_major(mat_a, add_guards=True)
+        b_row_major = tdm_descriptor_row_major(mat_b, add_guards=True)
         if a_row_major is None or b_row_major is None:
-            raise AssertionError("TDM operand orientation must be unambiguous")
+            return
         kwargs = {
             **kwargs,
             "tdm_a_row_major": a_row_major,
