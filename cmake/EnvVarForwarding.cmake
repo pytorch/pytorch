@@ -1,8 +1,116 @@
 # Forward environment variables to CMake variables.
 #
-# This replicates the behavior of setup.py / tools/setup_helpers/cmake.py which
-# passes all BUILD_*, USE_*, and CMAKE_* environment variables as -D flags, plus
-# a set of additional variables that don't follow the prefix convention.
+# Forwarding rule: an environment variable reaches CMake (as a cache variable of
+# the same name) if it (a) starts with BUILD_, USE_, or CMAKE_, (b) ends with
+# EXITCODE or EXITCODE__TRYRUN_OUTPUT, or (c) appears in the _ENV_ALIASES /
+# _ENV_PASSTHROUGH / _LOW_PRIORITY_ALIASES lists below. Anything else is not
+# forwarded -- set it as a CMake option with -D / cmake.define instead.
+#
+# ============================================================================
+# Build environment variable reference. Vars below that match the forwarding
+# rule are passed through by this module; the rest are handled where noted.
+# See CONTRIBUTING.md for the recommended developer setup.
+# ============================================================================
+#
+# Everyday knobs:
+#   DEBUG=1                  build with -O0 -g; mapped to the CMake build type
+#                            by [[tool.scikit-build.overrides]] in pyproject.toml
+#   REL_WITH_DEB_INFO=1      optimized build with -g, same mechanism as DEBUG
+#   MAX_JOBS                 compile parallelism; aliased to
+#                            CMAKE_BUILD_PARALLEL_LEVEL by [tool.scikit-build.env]
+#                            in pyproject.toml
+#   CC / CXX / CFLAGS        compiler and flags; read by CMake / scikit-build-core
+#                            directly (CFLAGS also applies to C++ unless CXXFLAGS
+#                            is set)
+#   USE_CUDA=0, BUILD_TEST=0, ...   feature toggles, next section
+#   TORCH_CUDA_ARCH_LIST     CUDA arches to build for, e.g. "8.0;9.0"
+#
+# Feature toggles (USE_*/BUILD_*, forwarded by prefix):
+#   USE_CUDA=0                disables CUDA build
+#   USE_CUDNN=0               disables the cuDNN build
+#   USE_CUSPARSELT=0          disables the cuSPARSELt build
+#   USE_CUDSS=0               disables the cuDSS build
+#   USE_CUFILE=0              disables the cuFile build
+#   USE_FBGEMM=0              disables the FBGEMM build
+#   USE_MSLK=0                disables the MSLK build
+#   USE_KINETO=0              disables libkineto profiling
+#   USE_NUMPY=0               disables the NumPy build
+#   USE_ITT=0                 disables Intel(R) VTune ITT functionality
+#   USE_NNPACK=0              disables NNPACK build
+#   USE_DISTRIBUTED=0         disables distributed (c10d, gloo, mpi, etc.) build
+#   USE_TENSORPIPE=0          disables the Tensorpipe backend
+#   USE_GLOO=0                disables the gloo backend
+#   USE_MPI=0                 disables the MPI backend
+#   USE_SYSTEM_NCCL=0         use the submoduled nccl instead of system nccl
+#   USE_OPENMP=0              disables OpenMP parallelization
+#   USE_MKLDNN=0              disables MKLDNN
+#   USE_MKLDNN_ACL           enables Compute Library backend for MKLDNN on Arm
+#                            (USE_MKLDNN must be explicitly enabled)
+#   USE_STATIC_MKL           prefer to link MKL statically (Unix only)
+#   USE_FLASH_ATTENTION=0    disables flash attention for scaled dot product attn
+#   USE_MEM_EFF_ATTENTION=0  disables memory efficient attention for SDPA
+#   USE_ROCM_KERNEL_ASSERT=1 enables kernel assert on ROCm
+#   USE_ROCM_CK_GEMM=1       builds the CK GEMM backend on ROCm
+#   USE_ROCM_CK_SDPA=1       builds the CK SDPA backend on ROCm
+#   USE_LAYERNORM_FAST_RECIPROCAL  fast reciprocals for layer norm (default on)
+#   USE_MIMALLOC             static-link mimalloc into c10 (default: Windows/AArch64)
+#   USE_CUSTOM_DEBINFO="a.cpp;b.cpp"  build debug info only for the listed files
+#   USE_SYSTEM_LIBS          use system-provided third-party libraries; expands
+#                            to the individual USE_SYSTEM_* toggles in CMake
+#   BUILD_TEST=0             disables the test build
+#   BUILD_BINARY             enables the extra binaries/ build
+#   BUILD_LIBTORCH_WHL       builds libtorch.so and deps as a wheel
+#   BUILD_PYTHON_ONLY        builds the python wheel against a separate libtorch.so
+#
+# Architecture selection (forwarded by prefix or read from the environment):
+#   TORCH_CUDA_ARCH_LIST     CUDA arches to build for, e.g. "6.0;7.0" (passthrough)
+#   TORCH_XPU_ARCH_LIST      XPU arches, e.g. "ats-m150,lnl-m" (passthrough)
+#   PYTORCH_ROCM_ARCH        AMD GPU targets, e.g. "gfx900;gfx906" (read from env
+#                            in cmake/public/utils.cmake)
+#
+# Library/backend selection (passthrough or read from the environment):
+#   BLAS                     MKL, Eigen, ATLAS, FlexiBLAS, or OpenBLAS; fails the
+#                            build if the requested BLAS is not found (passthrough)
+#   MKL_THREADING            MKL threading mode: SEQ, TBB, or OMP (default)
+#   MKLDNN_CPU_RUNTIME       MKL-DNN threading mode: TBB or OMP (default)
+#   ATEN_THREADING           OMP or NATIVE intra-/inter-op parallel backend
+#   ONNX_NAMESPACE           namespace for the ONNX built here
+#   ATEN_AVX512_256=TRUE     let ATen AVX2 kernels use 32 ymm registers (read from
+#                            the environment in cmake/Codegen.cmake)
+#
+# Library location hints (passthrough, alias, read from env, or CMake-native):
+#   CUDA_HOME (Linux/macOS) / CUDA_PATH (Windows)  CUDA install location
+#   CUDAHOSTCXX              host compiler for nvcc (alias)
+#   CUDA_NVCC_EXECUTABLE     nvcc to use (passthrough; CI points this at a cache)
+#   CUDNN_LIBRARY / CUDNN_INCLUDE_DIR / CUDNN_LIB_DIR   cuDNN location (CUDNN_LIB_DIR
+#                            is an alias for CUDNN_LIBRARY)
+#   MIOPEN_PATH              MIOpen install root (read from env in LoadHIP.cmake).
+#                            NOTE: the old MIOPEN_LIB_DIR/INCLUDE_DIR/LIBRARY env
+#                            vars are no longer used.
+#   NCCL_ROOT / NCCL_LIB_DIR / NCCL_INCLUDE_DIR   nccl location (read from env in
+#                            cmake/Modules/FindNCCL.cmake)
+#   ACL_ROOT_DIR             Arm Compute Library location (read from env in
+#                            cmake/Modules/FindACL.cmake)
+#   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
+#
+# Handled outside this module (NOT forwarded here; see also the everyday knobs
+# above, which are all handled via pyproject.toml or natively):
+#   PYTORCH_BUILD_VERSION / PYTORCH_BUILD_NUMBER   wheel version; consumed by the
+#                            version metadata provider (tools/metadata)
+#
+# CMake options, set with -D / cmake.define (NOT environment variables):
+#   DEBUG_CUDA               when compiling DEBUG, also build CUDA kernels with
+#                            debug flags (may OOM nvcc). This was always a CMake
+#                            option; the setup.py comment that listed it as an env
+#                            var was inaccurate -- it was never forwarded.
+#
+# Removed with setup.py (no longer available):
+#   CMAKE_FRESH              force a fresh configure. Delete the build/ directory
+#                            to reconfigure from scratch instead.
+#   CMAKE_ONLY               configure without building; no equivalent (this was a
+#                            setup.py-only debugging aid).
+#   USE_NINJA                select the generator via CMAKE_GENERATOR=Ninja instead
+#                            (ninja is the default when available).
 
 # Additional env vars that are forwarded with a different CMake variable name.
 set(_ENV_ALIASES

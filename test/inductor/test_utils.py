@@ -2,6 +2,8 @@
 
 import builtins
 import importlib.util
+import os
+import sys
 import tempfile
 import unittest
 from collections.abc import Callable, Iterator
@@ -24,6 +26,7 @@ from torch._inductor.fx_utils import (
 from torch._inductor.utils import (
     get_device_tflops,
     load_template,
+    python_subprocess_env,
     sympy_str,
     sympy_subs,
 )
@@ -43,6 +46,22 @@ from torch.utils._sympy.functions import Identity
 
 
 class TestUtils(TestCase):
+    def test_python_subprocess_env_prioritizes_loaded_torch(self):
+        torch_package_root = os.path.dirname(
+            os.path.dirname(os.path.abspath(torch.__file__))
+        )
+        with tempfile.TemporaryDirectory() as shadow_path:
+            with mock.patch.object(sys, "path", [shadow_path, *sys.path]):
+                env = python_subprocess_env()
+        self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[0], torch_package_root)
+
+    def test_python_subprocess_env_respects_override(self):
+        with mock.patch.dict(
+            os.environ, {"TORCH_CUSTOM_PYTHONPATH": "custom_python_path"}
+        ):
+            env = python_subprocess_env()
+        self.assertEqual(env["PYTHONPATH"], "custom_python_path")
+
     def test_zip_schema(self):
         def foo(x: torch.Tensor) -> None:
             pass

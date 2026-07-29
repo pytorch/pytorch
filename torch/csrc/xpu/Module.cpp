@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/xpu/Sleep.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/XPUGraphsUtils.h>
@@ -464,6 +465,7 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
         return at::xpu::canDeviceAccessPeer(device, peer);
       });
+  m.def("_xpu_sleep", [](uint64_t cycles) { at::xpu::sleep(cycles); });
   m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
     return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
   });
@@ -567,6 +569,7 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str segment_unmap_s = "segment_unmap";
     py::str snapshot_s = "snapshot";
     py::str oom_s = "oom";
+    py::str annotate_s = "annotate";
     py::str device_free_s = "device_free";
 
     using c10::CachingDeviceAllocator::TraceEntry;
@@ -581,6 +584,7 @@ static void initXpuMethodBindings(PyObject* module) {
         {TraceEntry::SEGMENT_UNMAP, segment_unmap_s},
         {TraceEntry::SNAPSHOT, snapshot_s},
         {TraceEntry::OOM, oom_s},
+        {TraceEntry::ANNOTATE, annotate_s},
     };
 
     auto action_to_str = [&](TraceEntry::Action action) {
