@@ -350,8 +350,10 @@ def _has_expanding_pointwise_consumer(
     if reduction_val is None:
         return False
     for user in reduction.users:
-        if user not in live or user.op != "call_function" or not isinstance(
-            user.target, torch._ops.OpOverload
+        if (
+            user not in live
+            or user.op != "call_function"
+            or not isinstance(user.target, torch._ops.OpOverload)
         ):
             continue
         user_val = _tensor_val(user)
