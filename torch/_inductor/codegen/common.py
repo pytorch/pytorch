@@ -3006,6 +3006,7 @@ class CSEProxy(DefaultHandler):
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
         self._update_store_cache(name, value)
+        self.kernel.record_op_trace("store_reduction", (name, index, value), {})
 
         if name not in V.graph.removed_buffers:
             self.kernel.num_store += 1
@@ -3019,7 +3020,11 @@ class CSEProxy(DefaultHandler):
         value: CSEVariable | tuple[CSEVariable, ...],
     ) -> CSEVariable | tuple[CSEVariable, ...]:
         self.kernel.num_reduction += 1
-        return self.kernel.reduction(dtype, src_dtype, reduction_type, value)
+        result = self.kernel.reduction(dtype, src_dtype, reduction_type, value)
+        self.kernel.record_op_trace(
+            "reduction", (dtype, src_dtype, reduction_type, value), {}, result
+        )
+        return result
 
     def scan(
         self,
