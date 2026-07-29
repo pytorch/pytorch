@@ -27,6 +27,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -46,6 +47,44 @@
 #endif
 
 namespace at::cuda::tunable {
+
+namespace {
+
+// Matches a tunableop params signature against a wildcard pattern. Both
+// strings are split on '_' and compared token-by-token; '*' in the pattern
+// matches any single token. Returns true iff every pattern token equals
+// the corresponding concrete token (or is '*').
+bool matches_wildcard_pattern(
+    const std::string& pattern,
+    const std::string& concrete) {
+  if (pattern.find('*') == std::string::npos) {
+    // Pattern has no wildcard token -> only exact match counts.
+    return pattern == concrete;
+  }
+  size_t p_i = 0, c_i = 0;
+  while (p_i < pattern.size() && c_i < concrete.size()) {
+    // Find next token boundary in each string.
+    size_t p_end = pattern.find('_', p_i);
+    if (p_end == std::string::npos) {
+      p_end = pattern.size();
+    }
+    size_t c_end = concrete.find('_', c_i);
+    if (c_end == std::string::npos) {
+      c_end = concrete.size();
+    }
+    const auto p_tok = std::string_view(pattern).substr(p_i, p_end - p_i);
+    const auto c_tok = std::string_view(concrete).substr(c_i, c_end - c_i);
+    if (p_tok != "*" && p_tok != c_tok) {
+      return false;
+    }
+    p_i = (p_end == pattern.size()) ? pattern.size() : p_end + 1;
+    c_i = (c_end == concrete.size()) ? concrete.size() : c_end + 1;
+  }
+  // Both must be fully consumed (same token count).
+  return p_i >= pattern.size() && c_i >= concrete.size();
+}
+
+} // namespace
 
 TuningContext* getTuningContext() {
   static TuningContext tuning_context;
@@ -83,12 +122,55 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
-  if (it == km.cend()) {
-    TUNABLE_LOG3("missing params_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
+  if (it != km.cend()) {
+    TUNABLE_LOG3(
+        "ResultEntry found for ",
+        op_signature,
+        ",",
+        params_signature);
+    return it->second;
+  }
+  // Exact-match-only Lookup. Callers that want to look up a wildcard key
+  // (e.g. operator() in TunableOp.h, or try_dispatch in Blas.cpp) must pass
+  // the already-formed wildcard signature; this Lookup will neither expand
+  // wildcards in the request nor match a wildcard request against concrete
+  // candidates. The previous "fuzzy fallback" scan was removed because it
+  // conflicted with the case-4 "is the wildcard KEY persisted?" check
+  // performed by operator() (the scan would spuriously return a concrete
+  // result for a wildcard request).
+  TUNABLE_LOG3(
+      "missing params_signature, returning null ResultEntry for ",
+      op_signature,
+      ",",
+      params_signature);
+  return ResultEntry::Null();
+}
+
+ResultEntry TuningResultsManager::LookupWildcardFallback(
+    const std::string& op_signature,
+    const std::string& concrete_params_signature) {
+  std::scoped_lock l{lock_};
+  auto kernel_map_it = results_.find(op_signature);
+  if (kernel_map_it == results_.cend()) {
     return ResultEntry::Null();
   }
-  TUNABLE_LOG3("ResultEntry found for ", op_signature, ",", params_signature);
-  return it->second;
+  const auto& km = kernel_map_it->second;
+  for (const auto& [key, entry] : km) {
+    if (key.find('*') == std::string::npos) {
+      continue; // skip concrete entries
+    }
+    if (matches_wildcard_pattern(key, concrete_params_signature)) {
+      TUNABLE_LOG3(
+          "wildcard fallback hit for ",
+          op_signature,
+          ",",
+          concrete_params_signature,
+          " via wildcard ",
+          key);
+      return entry;
+    }
+  }
+  return ResultEntry::Null();
 }
 
 void TuningResultsManager::AddImpl(const std::string& op_signature,
@@ -516,8 +598,7 @@ TuningContext::TuningContext() :
     rotating_buffer_size_{-1},
     results_count_from_input_file_{0},
     is_shutting_down_{false}
-{
-}
+{}
 
 TuningContext::~TuningContext() {
   is_shutting_down_ = true;
@@ -934,6 +1015,43 @@ bool TuningContext::GetLogOkay() const {
 std::ostream& TuningContext::GetLog() const {
   static auto streamptr = get_stream(GetLogFilename());
   return *streamptr;
+}
+
+namespace {
+
+// Per-thread stack of dynamic-dims masks. Producers in Blas.cpp /
+// CUDABlas.cpp / ScaledBlas.cpp read the top via GetCurrentDynamicDimsMask()
+// and stamp it onto the constructed Gemm*Params before calling the
+// TunableOp. The stack semantics let nested wrappers compose naturally:
+// e.g. an outer torch.cuda.tunable.dynamic_dims_mask(...) ctx-mgr around a
+// benchmark loop, with inner per-choice or per-call wrappers; each
+// TunableDynamicDimsGuard pushes on construction and pops on destruction.
+std::vector<DynamicDimsMask>& dynamic_dims_stack() {
+  // Function-local TLS: avoids a static-init dependency on std::vector's
+  // ctor running before any TunableDynamicDimsGuard is constructed.
+  thread_local std::vector<DynamicDimsMask> stack;
+  return stack;
+}
+
+} // namespace
+
+DynamicDimsMask GetCurrentDynamicDimsMask() {
+  const auto& stack = dynamic_dims_stack();
+  if (stack.empty()) {
+    return DynamicDimsMask{};
+  }
+  return stack.back();
+}
+
+TunableDynamicDimsGuard::TunableDynamicDimsGuard(DynamicDimsMask mask) {
+  dynamic_dims_stack().push_back(mask);
+}
+
+TunableDynamicDimsGuard::~TunableDynamicDimsGuard() {
+  auto& stack = dynamic_dims_stack();
+  if (!stack.empty()) {
+    stack.pop_back();
+  }
 }
 
 } // namespace at::cuda::tunable

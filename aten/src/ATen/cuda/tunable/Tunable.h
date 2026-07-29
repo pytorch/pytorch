@@ -77,6 +77,16 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     ResultEntry Lookup(const std::string& op_signature, const std::string& params_signature);
 
+    // Scans persisted wildcard entries (keys containing '*') under
+    // `op_signature` and returns the first whose token-by-token pattern
+    // matches `concrete_params_signature`. Used as a runtime fallback
+    // when a concrete miss happens without an active TunableDynamicDimsGuard
+    // (e.g., AOTI cpp_wrapper that wasn't compiled with guard emission).
+    // Returns ResultEntry::Null() if no wildcard matches.
+    ResultEntry LookupWildcardFallback(
+        const std::string& op_signature,
+        const std::string& concrete_params_signature);
+
     void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best,
@@ -158,6 +168,64 @@ struct NumericalCheckConfig {
   NumericalCheckConfig(bool e, double a, double r) : enabled(e), atol(a), rtol(r) {}
 };
 
+enum class TORCH_CUDA_CPP_API DynamicGemmDim {
+  M = 0,
+  N = 1,
+  K = 2,
+  BATCH = 3,
+};
+
+// Per-call dynamic-dims mask. POD, trivially copyable so it composes with
+// the existing OpParams DeepCopy(*this) paths without any custom copy logic.
+// The four bits select which logical GEMM dim (M/N/K/BATCH) is wildcarded
+// when computing DynamicSignature() for that specific op invocation.
+struct TORCH_CUDA_CPP_API DynamicDimsMask {
+  static constexpr uint8_t M_BIT = 1u << 0;
+  static constexpr uint8_t N_BIT = 1u << 1;
+  static constexpr uint8_t K_BIT = 1u << 2;
+  static constexpr uint8_t BATCH_BIT = 1u << 3;
+
+  uint8_t bits{0};
+
+  constexpr DynamicDimsMask() = default;
+  constexpr DynamicDimsMask(bool m, bool n, bool k, bool batch)
+      : bits(
+            static_cast<uint8_t>(
+                (m ? M_BIT : 0) | (n ? N_BIT : 0) | (k ? K_BIT : 0) |
+                (batch ? BATCH_BIT : 0))) {}
+  explicit constexpr DynamicDimsMask(uint8_t b) : bits(b) {}
+
+  constexpr bool m() const { return (bits & M_BIT) != 0; }
+  constexpr bool n() const { return (bits & N_BIT) != 0; }
+  constexpr bool k() const { return (bits & K_BIT) != 0; }
+  constexpr bool batch() const { return (bits & BATCH_BIT) != 0; }
+  constexpr bool any() const { return bits != 0; }
+  constexpr bool empty() const { return bits == 0; }
+
+  // Human-readable form, e.g. "M|N" or "" when empty.
+  std::string ToString() const {
+    std::string s;
+    auto add = [&s](const char* tok) {
+      if (!s.empty()) {
+        s.push_back('|');
+      }
+      s.append(tok);
+    };
+    if (m()) {
+      add("M");
+    }
+    if (n()) {
+      add("N");
+    }
+    if (k()) {
+      add("K");
+    }
+    if (batch()) {
+      add("B");
+    }
+    return s;
+  }
+};
 
 class TORCH_CUDA_CPP_API TuningContext {
   public:
@@ -254,6 +322,34 @@ class TORCH_CUDA_CPP_API TuningContext {
 };
 
 TORCH_CUDA_CPP_API TuningContext* getTuningContext();
+
+// Returns the current top-of-stack DynamicDimsMask for this thread, or an
+// all-zero mask when no TunableDynamicDimsGuard is active. Producers in
+// Blas.cpp / CUDABlas.cpp / ScaledBlas.cpp call this once per Gemm*Params
+// construction and stamp the result onto the params before invoking the
+// TunableOp, so DynamicSignature() can read the mask off *this rather than
+// from a global TuningContext setting.
+TORCH_CUDA_CPP_API DynamicDimsMask GetCurrentDynamicDimsMask();
+
+// RAII guard that pushes a DynamicDimsMask onto the thread-local stack on
+// construction and pops on destruction. Use to wrap a single GEMM call (or a
+// scope containing GEMM calls) with the mask that applies to that op.
+//
+// Lives in at::cuda::tunable so it is reachable from both ATen Blas.cpp
+// callers (eager mode) and the AOTI cpp_wrapper-emitted code in compiled .so
+// shared libraries (which include this header).
+class TORCH_CUDA_CPP_API TunableDynamicDimsGuard {
+ public:
+  explicit TunableDynamicDimsGuard(DynamicDimsMask mask);
+  TunableDynamicDimsGuard(bool dyn_m, bool dyn_n, bool dyn_k, bool dyn_batch)
+      : TunableDynamicDimsGuard(DynamicDimsMask(dyn_m, dyn_n, dyn_k, dyn_batch)) {}
+  ~TunableDynamicDimsGuard();
+
+  TunableDynamicDimsGuard(const TunableDynamicDimsGuard&) = delete;
+  TunableDynamicDimsGuard& operator=(const TunableDynamicDimsGuard&) = delete;
+  TunableDynamicDimsGuard(TunableDynamicDimsGuard&&) = delete;
+  TunableDynamicDimsGuard& operator=(TunableDynamicDimsGuard&&) = delete;
+};
 
 class ITimer {
   public:

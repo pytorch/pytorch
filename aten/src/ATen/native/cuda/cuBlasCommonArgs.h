@@ -142,6 +142,13 @@ struct cublasCommonArgs {
     transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
     transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
 
+    // Record whether PyTorch's BLAS dispatch swapped inductor's
+    // (M, N) -> (n, m) when computing C^T = B^T @ A^T in column-major
+    // cuBLAS. Consumers that need to translate an inductor-frame
+    // dynamic-dims mask (e.g. TunableOp wildcard signatures) into the
+    // BLAS frame read this flag and swap the M and N bits when set.
+    swapped_mn = transpose_result;
+
     // cuBLAS expects unpacked values of `k`, `lda` and `ldb`, adjust for 4x2 packing
     // if the gemm operands are in packed float4
     if (mat1.dtype() == at::kFloat4_e2m1fn_x2 && mat2.dtype() == at::kFloat4_e2m1fn_x2) {
@@ -156,6 +163,11 @@ struct cublasCommonArgs {
   int64_t m, n, k;
   int64_t lda, ldb, result_ld;
   c10::MaybeOwned<Tensor> mata, matb, result;
+  // True iff PyTorch's BLAS dispatch swapped inductor's (M, N) into
+  // BLAS's (n, m). Used by TunableOp consumers to translate a dynamic
+  // -dims mask captured in inductor frame into the BLAS frame stamped
+  // onto `params.dynamic_dims_mask`.
+  bool swapped_mn = false;
 
   // Scale members
   void* scale_mata_ptr = nullptr;
