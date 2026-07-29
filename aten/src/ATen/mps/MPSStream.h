@@ -139,14 +139,29 @@ class TORCH_API MPSStream {
 };
 
 /**
- * Get the current MPS stream
+ * Get the current MPS stream for this thread. Returns the default stream if no
+ * other stream has been set with `setCurrentMPSStream()`.
  */
 TORCH_API MPSStream* getCurrentMPSStream();
+
+/**
+ * Set the current MPS stream for this thread. Kernels that call
+ * `getCurrentMPSStream()` will enqueue their work onto this stream. Passing
+ * nullptr sets to the default stream.
+ */
+TORCH_API void setCurrentMPSStream(MPSStream* stream);
 
 /**
  * Get the default MPS stream
  */
 TORCH_API MPSStream* getDefaultMPSStream();
+
+/**
+ * Get a stream from the pool. There are 32 streams in the pool which live for
+ * the lifetime of a process. The stream returned by this function is chosen
+ * in round-robin order. Note: The default stream is not in the pool.
+ */
+TORCH_API MPSStream* getStreamFromPool();
 
 //-----------------------------------------------------------------
 //  MPSStreamImpl
