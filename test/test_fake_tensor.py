@@ -1580,19 +1580,36 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
-    @parametrize("bias", [False, True])
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cuda_gru_cell(self, bias):
-        with FakeTensorMode(allow_fallback_kernels=False):
-            batch_size = 2
-            hidden_size = 4
-            cell = torch.nn.GRUCell(hidden_size, hidden_size, bias=bias, device="cuda")
-            hidden = torch.randn(batch_size, hidden_size, device="cuda")
-            inp = torch.randn(batch_size, hidden_size, device="cuda")
-            output = cell(inp, hidden)
-            output.sum().backward()
+    def test_cuda_gru(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
 
-            self.assertEqual(output.shape, hidden.shape)
+                gru = torch.nn.GRU(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                output, h_n = gru(inp, h_0)
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * hidden_size))
+                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
 
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):

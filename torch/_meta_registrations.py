@@ -7564,9 +7564,6 @@ def _thnn_fused_lstm_cell_meta(
     return (hy, cy, workspace)
 
 
-GRU_WORKSPACE_MULTIPLIER = 5
-
-
 @register_meta(aten._thnn_fused_gru_cell.default)
 def _thnn_fused_gru_cell_meta(
     input_gates,
@@ -7576,7 +7573,7 @@ def _thnn_fused_gru_cell_meta(
     hidden_bias=None,
 ):
     rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 3, hx)
-    workspace = hx.new_empty((hx.size(0), hx.size(1) * GRU_WORKSPACE_MULTIPLIER))
+    workspace = hx.new_empty((hx.size(0), hx.size(1) * 5))
     hy = torch.empty_like(hx, memory_format=torch.contiguous_format)
     return (hy, workspace)
 
@@ -7851,20 +7848,35 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
 
 
 def checkGRUBackwardSizes(grad_hy, workspace):
-    torch._check(grad_hy.dim() == 2, lambda: "")
-    torch._check(workspace.dim() == 2, lambda: "")
-    torch._check(workspace.size(0) == grad_hy.size(0), lambda: "")
     torch._check(
-        workspace.size(1) == grad_hy.size(1) * GRU_WORKSPACE_MULTIPLIER,
-        lambda: "",
+        grad_hy.dim() == 2,
+        lambda: f"Expected grad_hy to be 2-D, but got {grad_hy.dim()}-D",
+    )
+    torch._check(
+        workspace.dim() == 2,
+        lambda: f"Expected workspace to be 2-D, but got {workspace.dim()}-D",
+    )
+    torch._check(
+        workspace.size(0) == grad_hy.size(0),
+        lambda: (
+            f"Expected workspace batch size ({workspace.size(0)}) to match "
+            f"grad_hy batch size ({grad_hy.size(0)})"
+        ),
+    )
+    torch._check(
+        workspace.size(1) == grad_hy.size(1) * 5,
+        lambda: (
+            "Expected workspace.size(1) to equal grad_hy.size(1) * 5, but got "
+            f"workspace.size(1)={workspace.size(1)} and "
+            f"grad_hy.size(1)={grad_hy.size(1)}"
+        ),
     )
 
 
 @register_meta(aten._thnn_fused_gru_cell_backward.default)
 def _thnn_fused_gru_cell_backward(grad_hy, workspace, has_bias):
     checkGRUBackwardSizes(grad_hy, workspace)
-    hidden_size = workspace.size(1) // GRU_WORKSPACE_MULTIPLIER
-    gates_shape = (workspace.size(0), hidden_size * 3)
+    gates_shape = (grad_hy.size(0), grad_hy.size(1) * 3)
     grad_input_gates = workspace.new_empty(gates_shape)
     grad_hidden_gates = workspace.new_empty(gates_shape)
     grad_hx = torch.empty_like(grad_hy, memory_format=legacy_contiguous_memory_format)
