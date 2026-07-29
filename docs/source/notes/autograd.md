@@ -97,6 +97,8 @@ To try and reduce the impact of functions that are non-differentiable, we define
 5. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
 6. If the function is not a deterministic mapping (i.e. it is not a [mathematical function](https://en.wikipedia.org/wiki/Function_%28mathematics%29)), it will be marked as non-differentiable. This will make it error out in the backward if used on tensors that require grad outside of a ``no_grad`` environment.
 
+In particular, a ``NaN`` input is outside the mathematical input domain used by these rules, even when the operator has specified floating-point behavior for ``NaN``. An autograd formula may return any gradient at such an input and does not need to propagate the ``NaN`` input into the gradient. This is distinct from a ``NaN`` incoming gradient or tangent: formulas must propagate it when that contribution is used, without allowing an inactive contribution to contaminate the result.
+
 For these rules, the function and its input space are defined by the selected dispatcher overload and its schema signature.
 This applies to built-in operators and user-defined operators, including Python ``custom_op`` definitions.
 Overload resolution occurs before autograd applies these rules; Python-level syntax does not redefine the function's input space.

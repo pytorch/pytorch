@@ -2674,6 +2674,22 @@ class TestBinaryUfuncsDevice(TestCase):
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
         )
+
+        for op, expected in (
+            (lambda x: torch.clamp_min(x, 0.0), [0.0, 0.0, float("nan")]),
+            (lambda x: torch.clamp_max(x, 0.0), [float("nan"), 0.0, 0.0]),
+        ):
+            x = torch.tensor(
+                [-1.0, 0.0, 1.0], device=device, dtype=dtype, requires_grad=True
+            )
+            op(x).backward(torch.full_like(x, float("nan")))
+            self.assertEqual(x.grad, expected)
+
+            with fwAD.dual_level():
+                tangent = fwAD.unpack_dual(
+                    op(fwAD.make_dual(x.detach(), torch.full_like(x, float("nan"))))
+                ).tangent
+            self.assertEqual(tangent, expected)
         run_test(
             lambda x: torch.clamp(x, min=1.0, max=0.0),
             [0.0, 0.0, 0.0],
@@ -2727,25 +2743,6 @@ class TestBinaryUfuncsDevice(TestCase):
                 [20.0] * 3,
             )
 
-        for op in (torch.clamp_min, torch.clamp_max):
-            nan_self = torch.tensor(
-                [float("nan")], device=device, dtype=dtype, requires_grad=True
-            )
-            bound = torch.zeros(1, device=device, dtype=dtype, requires_grad=True)
-            op(nan_self, bound).sum().backward()
-            self.assertEqual(nan_self.grad, [0.0])
-            self.assertEqual(bound.grad, [0.0])
-
-        nan_self = torch.tensor(
-            [float("nan")], device=device, dtype=dtype, requires_grad=True
-        )
-        nan_min = torch.tensor([-1.0], device=device, dtype=dtype, requires_grad=True)
-        nan_max = torch.tensor([1.0], device=device, dtype=dtype, requires_grad=True)
-        torch.clamp(nan_self, min=nan_min, max=nan_max).sum().backward()
-        self.assertEqual(nan_self.grad, [0.0])
-        self.assertEqual(nan_min.grad, [0.0])
-        self.assertEqual(nan_max.grad, [0.0])
-
         x = torch.tensor(
             [[0.0, 1.0, 2.0], [1.0, 1.0, 0.0]],
             device=device,
@@ -2795,68 +2792,76 @@ class TestBinaryUfuncsDevice(TestCase):
             tangent = fwAD.unpack_dual(torch.clamp(x_dual, max=max_dual)).tangent
         self.assertEqual(tangent, [[2.0, 17.0, 40.0], [14.0, 20.0, 12.0]])
 
-    @dtypes(torch.float, torch.double)
-    def test_fmin_fmax_nan_subgradient(self, device, dtype):
-        for op in (torch.fmin, torch.fmax):
-            a = torch.tensor(
-                [float("nan"), 1.0], device=device, dtype=dtype, requires_grad=True
-            )
-            b = torch.tensor(
-                [2.0, float("nan")], device=device, dtype=dtype, requires_grad=True
-            )
-            op(a, b).sum().backward()
-            self.assertEqual(a.grad, [0.0, 1.0])
-            self.assertEqual(b.grad, [1.0, 0.0])
-
-            with fwAD.dual_level():
-                a_dual = fwAD.make_dual(
-                    a.detach(), torch.tensor([3.0, 4.0], device=device, dtype=dtype)
-                )
-                b_dual = fwAD.make_dual(
-                    b.detach(), torch.tensor([5.0, 6.0], device=device, dtype=dtype)
-                )
-                tangent = fwAD.unpack_dual(op(a_dual, b_dual)).tangent
-            self.assertEqual(tangent, [5.0, 4.0])
-
-            both_nan_a = torch.tensor(
-                [float("nan")], device=device, dtype=dtype, requires_grad=True
-            )
-            both_nan_b = both_nan_a.detach().clone().requires_grad_()
-            op(both_nan_a, both_nan_b).sum().backward()
-            self.assertEqual(both_nan_a.grad, [1.0])
-            self.assertEqual(both_nan_b.grad, [0.0])
-
-            with fwAD.dual_level():
-                a_dual = fwAD.make_dual(
-                    both_nan_a.detach(), torch.tensor([7.0], device=device, dtype=dtype)
-                )
-                b_dual = fwAD.make_dual(
-                    both_nan_b.detach(), torch.tensor([9.0], device=device, dtype=dtype)
-                )
-                tangent = fwAD.unpack_dual(op(a_dual, b_dual)).tangent
-            self.assertEqual(tangent, [7.0])
-
-        for op, a, b in (
-            (torch.maximum, 0.0, 1.0),
-            (torch.fmax, 0.0, 1.0),
-            (torch.minimum, 1.0, 0.0),
-            (torch.fmin, 1.0, 0.0),
+        for op, values in (
+            (torch.clamp_min, [2.0, 1.0, 0.0]),
+            (torch.clamp_max, [0.0, 1.0, 2.0]),
         ):
+            x = torch.tensor(values, device=device, dtype=dtype, requires_grad=True)
+            bound = torch.ones(3, device=device, dtype=dtype, requires_grad=True)
+            op(x, bound).backward(torch.full_like(x, float("nan")))
+            self.assertEqual(x.grad, [float("nan"), float("nan"), 0.0])
+            self.assertEqual(bound.grad, [0.0, float("nan"), float("nan")])
+
             with fwAD.dual_level():
-                inf_tangent = torch.tensor([float("inf")], device=device, dtype=dtype)
-                finite_tangent = torch.ones(1, device=device, dtype=dtype)
                 tangent = fwAD.unpack_dual(
                     op(
-                        fwAD.make_dual(
-                            torch.tensor([a], device=device, dtype=dtype), inf_tangent
-                        ),
-                        fwAD.make_dual(
-                            torch.tensor([b], device=device, dtype=dtype),
-                            finite_tangent,
-                        ),
+                        fwAD.make_dual(x.detach(), torch.full_like(x, float("nan"))),
+                        fwAD.make_dual(bound.detach(), torch.ones_like(bound)),
                     )
                 ).tangent
-            self.assertEqual(tangent, [1.0])
+            self.assertEqual(tangent, [float("nan"), float("nan"), 1.0])
+
+        x = torch.tensor(
+            [0.0, 1.0, 2.0, 3.0], device=device, dtype=dtype, requires_grad=True
+        )
+        min = torch.ones(4, device=device, dtype=dtype, requires_grad=True)
+        max = torch.full((4,), 2.0, device=device, dtype=dtype, requires_grad=True)
+        torch.clamp(x, min=min, max=max).backward(torch.full_like(x, float("nan")))
+        self.assertEqual(x.grad, [0.0, float("nan"), float("nan"), 0.0])
+        self.assertEqual(min.grad, [float("nan"), float("nan"), 0.0, 0.0])
+        self.assertEqual(max.grad, [0.0, 0.0, float("nan"), float("nan")])
+
+        with fwAD.dual_level():
+            tangent = fwAD.unpack_dual(
+                torch.clamp(
+                    fwAD.make_dual(x.detach(), torch.full_like(x, float("nan"))),
+                    min=fwAD.make_dual(min.detach(), torch.ones_like(min)),
+                    max=fwAD.make_dual(max.detach(), torch.ones_like(max)),
+                )
+            ).tangent
+        self.assertEqual(tangent, [1.0, float("nan"), float("nan"), 1.0])
+
+    @dtypes(torch.float, torch.double)
+    def test_min_max_nan_gradients(self, device, dtype):
+        for op, a_values in (
+            (torch.maximum, [2.0, 1.0, 0.0]),
+            (torch.fmax, [2.0, 1.0, 0.0]),
+            (torch.minimum, [0.0, 1.0, 2.0]),
+            (torch.fmin, [0.0, 1.0, 2.0]),
+        ):
+            a = torch.tensor(a_values, device=device, dtype=dtype, requires_grad=True)
+            b = torch.ones(3, device=device, dtype=dtype, requires_grad=True)
+            op(a, b).backward(torch.full_like(a, float("nan")))
+            self.assertEqual(a.grad, [float("nan"), float("nan"), 0.0])
+            self.assertEqual(b.grad, [0.0, float("nan"), float("nan")])
+
+            with fwAD.dual_level():
+                tangent = fwAD.unpack_dual(
+                    op(
+                        fwAD.make_dual(a.detach(), torch.full_like(a, float("nan"))),
+                        fwAD.make_dual(b.detach(), torch.ones_like(b)),
+                    )
+                ).tangent
+            self.assertEqual(tangent, [float("nan"), float("nan"), 1.0])
+
+            with fwAD.dual_level():
+                tangent = fwAD.unpack_dual(
+                    op(
+                        fwAD.make_dual(a.detach(), torch.ones_like(a)),
+                        fwAD.make_dual(b.detach(), torch.full_like(b, float("nan"))),
+                    )
+                ).tangent
+            self.assertEqual(tangent, [1.0, float("nan"), float("nan")])
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)

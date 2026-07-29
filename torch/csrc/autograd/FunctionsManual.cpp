@@ -1469,22 +1469,18 @@ Tensor clamp_backward(
     const Tensor& max) {
   if (max.defined() && min.defined()) {
     const auto min_lt_max = min < max;
-    const auto min_eq_max = min == max;
     const auto tie =
         ((self == min).logical_or(self == max)).logical_and(min_lt_max);
-    const auto active = min_lt_max.logical_and(self >= min)
-                            .logical_and(self <= max)
-                            .logical_or(min_eq_max.logical_and(self == min));
-    // Reuse the tie-split output when zeroing inactive entries. The explicit
-    // active mask also makes NaNs inactive and handles equal/reversed bounds.
-    return masked_fill_inplace_if_safe(
-        where(tie, grad / 2, grad), active.logical_not(), 0);
+    const auto inactive = (self < min).logical_or(self > max);
+    // The same strict losing-side mask handles ordered, equal, and reversed
+    // finite bounds.
+    return masked_fill_inplace_if_safe(where(tie, grad / 2, grad), inactive, 0);
   } else if (min.defined()) {
     return masked_fill_inplace_if_safe(
-        where(self == min, grad / 2, grad), (self >= min).logical_not_(), 0);
+        where(self == min, grad / 2, grad), self < min, 0);
   } else if (max.defined()) {
     return masked_fill_inplace_if_safe(
-        where(self == max, grad / 2, grad), (self <= max).logical_not_(), 0);
+        where(self == max, grad / 2, grad), self > max, 0);
   } else {
     return grad;
   }
@@ -1527,10 +1523,10 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     }
   } else if (min.defined() && grad_input_mask[0]) {
     std::get<0>(ret) = masked_fill_inplace_if_safe(
-        where(self == min, grad / 2, grad), (self <= min).logical_not_(), 0);
+        where(self == min, grad / 2, grad), self > min, 0);
   } else if (max.defined() && grad_input_mask[1]) {
     std::get<1>(ret) = masked_fill_inplace_if_safe(
-        where(self == max, grad / 2, grad), (self >= max).logical_not_(), 0);
+        where(self == max, grad / 2, grad), self < max, 0);
   }
   return ret;
 }
