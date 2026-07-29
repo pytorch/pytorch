@@ -121,15 +121,6 @@ def binop_type_error(
     )
 
 
-def _get_type_slots(obj_type: type) -> tuple[int, int, int, int]:
-    """Get all type slots for a type.
-
-    Not memoized: a type-keyed cache would keep locally-defined classes (and
-    whatever their methods close over) alive. get_type_slots is a cheap C call.
-    """
-    return get_type_slots(obj_type)
-
-
 # Py_TPFLAGS_MANAGED_DICT (CPython 3.11+). On older interpreters the managed
 # dict does not exist and instances rely solely on tp_dictoffset, so leave the
 # bit at 0 there rather than misreading an unrelated flag bit.
@@ -158,13 +149,13 @@ def type_has_dict(obj_type: type) -> bool:
 
 def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given sq slot."""
-    seq_slots, _, _, _ = _get_type_slots(obj_type)
+    seq_slots, _, _, _ = get_type_slots(obj_type)
     return has_slot(seq_slots, slot)
 
 
 def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given mp slot."""
-    _, map_slots, _, _ = _get_type_slots(obj_type)
+    _, map_slots, _, _ = get_type_slots(obj_type)
     return has_slot(map_slots, slot)
 
 
@@ -210,7 +201,7 @@ type_implements_mp_length = partial(
 
 def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the nb slot."""
-    _, _, number_slots, _ = _get_type_slots(obj_type)
+    _, _, number_slots, _ = get_type_slots(obj_type)
     return has_slot(number_slots, slot)
 
 
@@ -301,30 +292,30 @@ type_implements_nb_inplace_matrix_multiply = partial(
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
-    _, _, _, type_slot = _get_type_slots(obj_type)
+    _, _, _, type_slot = get_type_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
 
 
 def type_implements_tp_iternext(obj_type: type) -> bool:
-    _, _, _, type_slot = _get_type_slots(obj_type)
+    _, _, _, type_slot = get_type_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
 
 
 def type_implements_tp_repr(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_repr slot."""
-    _, _, _, type_slot = _get_type_slots(obj_type)
+    _, _, _, type_slot = get_type_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
 
 
 def type_implements_tp_str(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_str slot."""
-    _, _, _, type_slot = _get_type_slots(obj_type)
+    _, _, _, type_slot = get_type_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_STR)
 
 
 def type_implements_tp_call(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_call slot."""
-    _, _, _, type_slot = _get_type_slots(obj_type)
+    _, _, _, type_slot = get_type_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_CALL)
 
 
