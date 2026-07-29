@@ -46,21 +46,18 @@ Tensor& _philox_distribution_shards_symint(
       distribution_kind == PhiloxDistributionKind::Normal,
       "_philox_distribution_shards_: unsupported distribution kind ",
       distribution);
-  TORCH_CHECK(
-      params.size() == 2,
-      "_philox_distribution_shards_: distribution kind ",
-      distribution,
-      " expects 2 parameters, got ",
-      params.size());
-  TORCH_CHECK(
-      !params[0].isComplex() && !params[1].isComplex(),
-      "_philox_distribution_shards_: parameters must be real");
-
-  const double param0 = params[0].toDouble();
-  const double param1 = params[1].toDouble();
   switch (distribution_kind) {
     case PhiloxDistributionKind::Normal:
-      validate_normal_std(param1);
+      TORCH_CHECK(
+          params.size() == 2,
+          "_philox_distribution_shards_: distribution kind ",
+          distribution,
+          " expects 2 parameters, got ",
+          params.size());
+      TORCH_CHECK(
+          !params[0].isComplex() && !params[1].isComplex(),
+          "_philox_distribution_shards_: parameters must be real");
+      validate_normal_std(params[1].toDouble());
       break;
   }
   philox_distribution_shards_stub(
@@ -72,8 +69,7 @@ Tensor& _philox_distribution_shards_symint(
       local_sizes_int,
       chunk_count,
       distribution_kind,
-      param0,
-      param1,
+      params,
       generator);
   return self;
 }
@@ -158,7 +154,6 @@ ValidatedPhiloxShardMetadata validate_philox_shard_metadata(
   }
   int64_t global_numel = has_zero_global_dim ? 0 : 1;
   if (!has_zero_global_dim) {
-    // The API is 64-bit capable; INT_MAX is an implementation limit here.
     for (const auto size : global_shape) {
       TORCH_CHECK(
           size <= std::numeric_limits<int32_t>::max() / global_numel,
@@ -166,6 +161,14 @@ ValidatedPhiloxShardMetadata validate_philox_shard_metadata(
           ": global_shape has more than INT_MAX elements");
       global_numel *= size;
     }
+    // Dense CUDA normal changes launch policy when TensorIterator splits here.
+    const auto max_32bit_offset = std::numeric_limits<int32_t>::max();
+    TORCH_CHECK(
+        global_numel - 1 <=
+            (max_32bit_offset - 1) /
+                static_cast<int64_t>(self.element_size()),
+        op_name,
+        ": the logical global tensor requires 64-bit indexing, which is not supported");
   }
 
   std::vector<int64_t> chunk_numels(static_cast<size_t>(chunk_count));
@@ -216,15 +219,6 @@ ValidatedPhiloxShardMetadata validate_philox_shard_metadata(
     mapped_numel += chunk_numel;
     chunk_numels[chunk] = chunk_numel;
   }
-  TORCH_CHECK(
-      mapped_numel == self.numel(),
-      op_name,
-      ": local shard metadata must cover the entire tensor: described ",
-      mapped_numel,
-      " of ",
-      self.numel(),
-      " elements");
-
   for (size_t first = 0; first < static_cast<size_t>(chunk_count); ++first) {
     if (chunk_numels[first] == 0) {
       continue;
