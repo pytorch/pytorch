@@ -713,7 +713,10 @@ def _build_alignment_case(case):
 
 
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")
-@unittest.skipUnless(SM90OrLater, "both scatter_add kernels gate on sm_90+")
+@unittest.skipUnless(
+    torch.version.hip is None and SM90OrLater,
+    "both scatter_add kernels gate on NVIDIA sm_90+",
+)
 @skipIfNoCuteDSL
 class TestScatterAddOverrideConds(TestCase):
     """Unit tests for the dispatch predicates in
@@ -722,9 +725,11 @@ class TestScatterAddOverrideConds(TestCase):
     The accepts-cases assert the predicates FIRE, which the leading
     _has_sm90_plus() gate makes arch-dependent; below sm_90 (e.g. the L4
     runners in trunk CI) every predicate is uniformly False and the class
-    tests nothing. Correctness-on-fallback is covered by
-    TestScatterAddOverrideCorrectness, which is deliberately not
-    arch-gated."""
+    tests nothing. ROCm is excluded explicitly: SM90OrLater is a raw
+    capability compare, and gfx942/gfx950 report (9, 4)/(9, 5), but the
+    predicates also reject ROCm outright. Correctness-on-fallback is
+    covered by TestScatterAddOverrideCorrectness, which is deliberately
+    not arch-gated."""
 
     @classmethod
     def setUpClass(cls):
