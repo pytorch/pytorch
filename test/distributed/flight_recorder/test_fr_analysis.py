@@ -452,9 +452,7 @@ class FlightRecorderRankParsingTest(TestCase):
                 details = {
                     "rank_2": {
                         "rank": 2,
-                        "pg_config": {
-                            "0": {"desc": "default_pg", "ranks": value}
-                        },
+                        "pg_config": {"0": {"desc": "default_pg", "ranks": value}},
                     }
                 }
 
