@@ -664,16 +664,21 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
   return argmax_vec_impl(a, next_value, next_index, tail_size);
 }
 
+// For dtypes narrower than the vector lane width, only the first `len` value
+// lanes are active and the index vector has fewer lanes than the value vector,
+// so reducing the full width would read inactive values and uninitialized
+// indices.
 template <typename T, int NV, int NI>
 inline IndexValue<T> argmin_vec_reduce_all(
-    const IndexValueVec<T, NV, NI>& vec) {
-  constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ T tmpval[len];
-  __at_align__ int64_t tmpidx[len];
+    const IndexValueVec<T, NV, NI>& vec,
+    int64_t len = at::vec::VectorizedN<T, NV>::size()) {
+  constexpr int max_len = at::vec::VectorizedN<T, NV>::size();
+  __at_align__ T tmpval[max_len];
+  __at_align__ int64_t tmpidx[max_len];
   vec.value.store(tmpval);
   vec.index.store(tmpidx);
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
-  for (int i = 1; i < len; i++) {
+  for (int64_t i = 1; i < len; i++) {
     res = argmin_combine(res, tmpval[i], tmpidx[i]);
   }
   return res;
@@ -681,14 +686,15 @@ inline IndexValue<T> argmin_vec_reduce_all(
 
 template <typename T, int NV, int NI>
 inline IndexValue<T> argmax_vec_reduce_all(
-    const IndexValueVec<T, NV, NI>& vec) {
-  constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ T tmpval[len];
-  __at_align__ int64_t tmpidx[len];
+    const IndexValueVec<T, NV, NI>& vec,
+    int64_t len = at::vec::VectorizedN<T, NV>::size()) {
+  constexpr int max_len = at::vec::VectorizedN<T, NV>::size();
+  __at_align__ T tmpval[max_len];
+  __at_align__ int64_t tmpidx[max_len];
   vec.value.store(tmpval);
   vec.index.store(tmpidx);
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
-  for (int i = 1; i < len; i++) {
+  for (int64_t i = 1; i < len; i++) {
     res = argmax_combine(res, tmpval[i], tmpidx[i]);
   }
   return res;

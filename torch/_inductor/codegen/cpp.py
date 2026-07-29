@@ -3451,7 +3451,19 @@ class CppVecKernel(CppKernel):
                     f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
                 )
             elif argmax_or_argmin:
-                next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
+                # bool argmin/argmax values are computed in float
+                val_dtype = (
+                    torch.float
+                    if src_dtype == torch.bool
+                    else DTYPE_TO_COMPUTATION_DTYPE[src_dtype]
+                )
+                if self._get_raw_num_vectors(val_dtype) < 1:
+                    # Partial loads leave the lanes past num_elems inactive; keep
+                    # them out of the horizontal reduction (see the min/max
+                    # branch below).
+                    next_value = f"{reduction_type}_vec_reduce_all({acc_vec}, {cexpr_index(self.num_elems)})"
+                else:
+                    next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
             elif is_bool:
                 if reduction_type in (
                     "any",
@@ -3479,6 +3491,15 @@ class CppVecKernel(CppKernel):
                     if reduction_type != "sum":
                         raise AssertionError('expected reduction_type == "sum"')
                     result_vec = f"{acc_vec} + {masked_acc_vec}"
+                if self._get_raw_num_vectors(vec_dtype) < 1:
+                    # Partial loads fill only num_elems lanes and zero the rest,
+                    # while vec_reduce_all reduces all lanes, so reset the
+                    # inactive lanes to the reduction identity first.
+                    result_vec = (
+                        f"{acc_type_vec}::set("
+                        f"{self.reduction_init_vec(reduction_type, dtype)}, "
+                        f"{result_vec}, {cexpr_index(self.num_elems)})"
+                    )
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {result_vec})"
 
             self.reduction_suffix.writeline(
