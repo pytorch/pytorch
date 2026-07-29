@@ -1429,6 +1429,22 @@ class _NestedReductionBase:
         self.check_no_fusion()
         self.assertGreater(metrics.generated_kernel_count, 1)
 
+    def test_standalone_sub_parent_mixed_factors(self):
+        B, D, G = 32, 1024, 16
+
+        def f(x):
+            xg = x.view(B, D // G, G)
+            amax = xg.float().abs().amax(dim=-1)
+            scale = (amax / 6.0).clamp(min=1e-12, max=448.0)
+            scale_f = scale.unsqueeze(-1)
+            half = xg[..., : G // 2].float() / scale_f
+            quarter = xg[..., : G // 4].float() / scale_f
+            return half, quarter, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion(expected_kernels=2)
+
     def test_standalone_sub_parent_rejects_ambiguous_source_load(self):
         B, D, G = 32, 1024, 16
 
@@ -2289,7 +2305,7 @@ class _InternalsBase:
 
     def test_nested_kernel_disables_cooperative_reduction(self):
         if self.force_persistent_outer_reduction is False:
-            return
+            self.skipTest("cooperative reduction only applies to persistent kernels")
 
         class _CooperativeChoices(InductorChoices):
             @staticmethod
@@ -2535,7 +2551,7 @@ class _InternalsBase:
 
     def test_rmsnorm_chunk_swiglu_default_kernel_form_large_d(self):
         if self.force_persistent_outer_reduction is False:
-            return
+            self.skipTest("default heuristic kernel form is covered once")
         self.assert_default_rmsnorm_chunk_kernel_form(
             "swiglu",
             looped_input_counts={0: 3, 1: 3, 2: 2},
@@ -2548,7 +2564,7 @@ class _InternalsBase:
 
     def test_rmsnorm_chunk4_gating_default_kernel_form_large_d(self):
         if self.force_persistent_outer_reduction is False:
-            return
+            self.skipTest("default heuristic kernel form is covered once")
         self.assert_default_rmsnorm_chunk_kernel_form(
             "gating",
             looped_input_counts={0: 5, 1: 5, 2: 4},
