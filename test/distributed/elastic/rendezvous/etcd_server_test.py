@@ -58,6 +58,7 @@ class EtcdServerTest(unittest.TestCase):
             find_free_port()
 
         self.assertEqual(2, mock_socket.call_count)
+
     def test_etcd_server_start_stop(self):
         server = EtcdServer()
         server.start()
