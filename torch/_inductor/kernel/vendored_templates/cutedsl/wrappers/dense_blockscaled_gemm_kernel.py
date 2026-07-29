@@ -175,9 +175,13 @@ def _epilogue_op_scope(cute):
     def sigmoid(x):
         return 1.0 / (1.0 + cute.math.exp(-x))
 
+    def gelu(x):
+        return 0.5 * x * (1.0 + cute.math.erf(x * 0.7071067811865476))
+
     return {
         "erf": cute.math.erf,
         "exp": cute.math.exp,
+        "gelu": gelu,
         "relu": relu,
         "sigmoid": sigmoid,
         "silu": lambda x: x * sigmoid(x),
@@ -350,7 +354,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = _ones_alpha()
-        epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
+        with torch.cuda.stream(stream):
+            epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
 
         local_reduce_out = getattr(args, "local_reduce_out", None)
         local_reduce_feeds_main = getattr(args, "local_reduce_feeds_main", False)
