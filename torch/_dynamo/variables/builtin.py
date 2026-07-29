@@ -48,6 +48,7 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
+    raise_value_error,
     unimplemented,
     Unsupported,
     UserError,
@@ -112,6 +113,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pylong_from_base,
     pynumber_absolute,
     pynumber_add,
     pynumber_float,
@@ -1847,9 +1849,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        arg: VariableTracker,
+        base: VariableTracker | None = None,
     ) -> VariableTracker | None:
-        return pynumber_int(tx, arg)
+        if base is None:
+            return pynumber_int(tx, arg)
+        return pylong_from_base(tx, arg, base)
 
     def call_float(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -1907,16 +1914,37 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
     def _call_min_max(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        key: VariableTracker | None = None,
+        default: VariableTracker | None = None,
     ) -> VariableTracker | None:
-        if len(args) == 1:
-            items = unpack_iterable(tx, args[0])
+        name = self.fn.__name__
+        if len(args) == 0:
+            raise_type_error(tx, f"{name} expected at least 1 argument, got 0")
+
+        # `default` is keyword-only and only valid with a single iterable arg.
+        positional = len(args) > 1
+        if positional and default is not None:
+            raise_type_error(
+                tx,
+                f"Cannot specify a default for {name}() with multiple positional arguments",
+            )
+
+        if key is not None and key.is_constant_none():
+            key = None
+
+        items = list(args) if positional else unpack_iterable(tx, args[0])
+
+        if len(items) == 0:
+            if default is not None:
+                return default
+            raise_value_error(tx, f"{name}() iterable argument is empty")
+
+        if key is None:
             return self._call_min_max_seq(tx, items)
-        elif len(args) == 2:
-            return self._call_min_max_binary(tx, args[0], args[1])
-        elif len(args) > 2:
-            return self._call_min_max_seq(tx, list(args))
-        return None
+        return self._call_min_max_seq_with_key(tx, items, key)
 
     def _call_min_max_seq(
         self, tx: "InstructionTranslatorBase", items: list[VariableTracker]
@@ -1927,6 +1955,40 @@ class BuiltinVariable(BaseBuiltinVariable):
             return items[0]
 
         return functools.reduce(functools.partial(self._call_min_max_binary, tx), items)  # type: ignore[arg-type,return-value]
+
+    def _call_min_max_seq_with_key(
+        self,
+        tx: "InstructionTranslatorBase",
+        items: list[VariableTracker],
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # Mirror CPython builtin_min_max: compare on key(item) but return the
+        # original element, keeping the first extremal element on ties (only
+        # replace on a strict comparison). Like list.sort, comparisons are done
+        # through Dynamo and must fold to a compile-time constant, so Tensor and
+        # SymInt keys graph break.
+        keyvals = [key.call_function(tx, [item], {}) for item in items]
+        best_item, best_key = items[0], keyvals[0]
+        for item, keyval in zip(items[1:], keyvals[1:]):
+            left, right = (best_key, keyval) if self.fn is max else (keyval, best_key)
+            cmp = BuiltinVariable(operator.lt).call_function(tx, [left, right], {})
+            if not cmp.is_python_constant():
+                unimplemented(
+                    gb_type="min/max with non-constant key",
+                    context=str(keyval),
+                    explanation=(
+                        f"Cannot compute {self.fn.__name__}() whose key comparison is "
+                        f"not a compile-time constant. Key type: {keyval.python_type()}. "
+                        f"Most notably, Tensor or SymInt keys are unsupported, but ints work."
+                    ),
+                    hints=[
+                        "Use something else as the key.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            if cmp.as_python_constant():
+                best_item, best_key = item, keyval
+        return best_item
 
     def _call_min_max_binary(
         self,

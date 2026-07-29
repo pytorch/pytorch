@@ -701,6 +701,47 @@ def pynumber_int(
     )
 
 
+def pylong_from_base(
+    tx: "InstructionTranslatorBase", x: VariableTracker, obase: VariableTracker
+) -> VariableTracker | None:
+    """Mirrors the explicit-base path of long_new_impl (int(x, base)).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5879-L5922
+
+    The base is resolved via PyNumber_AsSsize_t, which consults __index__, so
+    any __index__-able object is accepted. Returns None (graph break) when the
+    inputs cannot be resolved to Python constants.
+    """
+    # base = PyNumber_AsSsize_t(obase, NULL) -> nb_index.
+    if obase.is_python_constant() and isinstance(obase.as_python_constant(), int):
+        base_vt = obase
+    elif obase.tp_as_number.nb_index is not None:
+        base_vt = obase.nb_index_impl(tx)
+    else:
+        raise_type_error(
+            tx,
+            f"'{obase.python_type_name()}' object cannot be interpreted as an integer",
+        )
+    if not (
+        base_vt.is_python_constant() and isinstance(base_vt.as_python_constant(), int)
+    ):
+        return None
+    base = base_vt.as_python_constant()
+    if (base != 0 and base < 2) or base > 36:
+        raise_observed_exception(
+            ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
+        )
+    if not x.is_python_constant():
+        return None
+    xval = x.as_python_constant()
+    if not isinstance(xval, (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
+    try:
+        return ConstantVariable.create(int(xval, base))
+    except ValueError as e:
+        raise_observed_exception(ValueError, tx, args=[str(e)])
+
+
 def pynumber_float(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
