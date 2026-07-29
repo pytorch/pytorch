@@ -128,22 +128,12 @@ endif()
 
 # ---[ CUDA libraries wrapper
 
-# find lbnvrtc.so
+# find libnvrtc.so
 set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
-  find_package(Python COMPONENTS Interpreter)
-  execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c
-    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
-    RESULT_VARIABLE _retval
-    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
-  if(NOT _retval EQUAL 0)
-    message(WARNING "Failed to compute shorthash for libnvrtc.so")
-    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
-  else()
-    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
-    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
-  endif()
+  file(SHA256 "${CUDA_NVRTC_LIB}" _cuda_nvrtc_sha256)
+  string(SUBSTRING "${_cuda_nvrtc_sha256}" 0 8 CUDA_NVRTC_SHORTHASH)
+  message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
 endif()
 
 # Create new style imported libraries.

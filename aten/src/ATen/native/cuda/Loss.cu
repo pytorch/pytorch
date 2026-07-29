@@ -33,9 +33,9 @@ using namespace at;
 void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target) {
   at::TensorIterator iter = TensorIteratorConfig()
       .add_output(grad_input)
-      .add_input(grad)
-      .add_input(input)
-      .add_input(target)
+      .add_const_input(grad)
+      .add_const_input(input)
+      .add_const_input(target)
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_backward_out_cuda", [&]() {
     at::native::gpu_kernel(iter, [] GPU_LAMBDA (
@@ -76,8 +76,8 @@ Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target,
 
   TensorIterator iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_owned_input(at::squeeze(input))
-      .add_owned_input(at::squeeze(target))
+      .add_owned_const_input(at::squeeze(input))
+      .add_owned_const_input(at::squeeze(target))
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_out_cuda", [&]() {
     gpu_kernel(iter,
