@@ -502,7 +502,7 @@ def run_git_object_command(
         raise RuntimeError(
             f"Git command failed first attempt with no lazy fetching: {local_error}. "
             f"Second, slower, attempt while allowing fetching over the network also "
-            "failed, even with retries: {e}"
+            f"failed, even with retries: {e}"
         ) from e
 
 
