@@ -30,17 +30,15 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import (
-    GemmReductionConfig,
-    GemmReductionGeometry,
-    GemmReductionPlan,
-)
 from ...kernel.gemm_epilogue_codegen import GemmEpilogueIRCodegen
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_ir,
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
     GemmEpilogueIRStore,
+    GemmReductionConfig,
+    GemmReductionGeometry,
+    GemmReductionPlan,
     grouped_reduction_ir,
     is_absmax_normalize_ir,
     is_absmax_scale_finalizer_ir,
@@ -96,7 +94,9 @@ class NVGemmFeedOutputs:
 
 
 @dataclasses.dataclass(frozen=True)
-class NVGemmEpiloguePlan:
+class NVGemmEpilogueAnalysis:
+    """Scheduler-owned fusion analysis before producing a shared reduction plan."""
+
     nodes: tuple[BaseSchedulerNode, ...]
     reductions: tuple[GemmReductionConfig, ...]
     reduction_nodes: tuple[BaseSchedulerNode, ...]
@@ -1282,7 +1282,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         gemm_node: Buffer,
         epilogue_nodes: Sequence[BaseSchedulerNode],
         analysis: GemmEpilogueIRAnalysis | None = None,
-    ) -> NVGemmEpiloguePlan:
+    ) -> NVGemmEpilogueAnalysis:
         nodes = tuple(
             child
             for epilogue_node in epilogue_nodes
@@ -1305,7 +1305,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         reduction_plan = cls._static_reduction_plan(
             gemm_node, tuple(reductions), feed_main, feed_outputs
         )
-        return NVGemmEpiloguePlan(
+        return NVGemmEpilogueAnalysis(
             nodes,
             tuple(reductions),
             tuple(reduction_nodes),
@@ -1464,7 +1464,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     @staticmethod
     def _finalize_reduction_plan(
-        gemm_node: Buffer, plan: NVGemmEpiloguePlan
+        gemm_node: Buffer, plan: NVGemmEpilogueAnalysis
     ) -> GemmReductionPlan | None:
         if len(plan.reductions) > 1:
             raise NotImplementedError("NVGEMM supports one grouped local reduction")

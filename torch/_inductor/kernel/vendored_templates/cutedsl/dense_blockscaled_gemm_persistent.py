@@ -44,7 +44,7 @@ from cutlass.cute.runtime import from_dlpack
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 import torch
-from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
+from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionDescriptor
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -439,16 +439,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         primary_epilogue_output: cutlass.Constexpr = 0,
         local_reduce_tensor: cute.Tensor = None,
         local_reduce_feed_tensor: cute.Tensor = None,
-        local_reduce_group: cutlass.Constexpr = 0,
-        local_reduce_axis: cutlass.Constexpr = 1,
-        local_reduce_type: cutlass.Constexpr = "sum",
-        local_reduce_source: cutlass.Constexpr = "identity",
-        local_reduce_feeds_main: cutlass.Constexpr = False,
-        local_reduce_op: cutlass.Constexpr = cute.ReductionOp.ADD,
-        local_reduce_init: cutlass.Constexpr = 0.0,
-        local_reduce_combine: cutlass.Constexpr = lambda lhs, rhs: lhs + rhs,
-        local_reduce_source_op: cutlass.Constexpr = lambda value: value,
-        local_reduce_finalize: cutlass.Constexpr = lambda value, group: value,
+        local_reduce_config: cutlass.Constexpr = None,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -476,6 +467,31 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         :raises TypeError: If input data types are incompatible with the MMA instruction.
         """
 
+        if cutlass.const_expr(local_reduce_config is None):
+            local_reduce_group = 0
+            local_reduce_axis = 1
+            local_reduce_type = "sum"
+            local_reduce_source = "identity"
+            local_reduce_feeds_main = False
+            local_reduce_op = cute.ReductionOp.ADD
+            local_reduce_init = 0.0
+            local_reduce_combine = lambda lhs, rhs: lhs + rhs
+            local_reduce_source_op = lambda value: value
+            local_reduce_finalize = lambda value, group: value
+        else:
+            (
+                local_reduce_group,
+                local_reduce_axis,
+                local_reduce_type,
+                local_reduce_source,
+                local_reduce_feeds_main,
+                local_reduce_op,
+                local_reduce_init,
+                local_reduce_combine,
+                local_reduce_source_op,
+                local_reduce_finalize,
+            ) = local_reduce_config
+
         # Convert from torch convention to CuTe convention.
         # CUTLASS API passes tensors as A:(L,M,K) B:(L,K,N) C:(L,M,N)
         # but CuTe DSL kernels expect A:(M,K,L) B:(N,K,L) C:(M,N,L).
@@ -500,7 +516,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_affine_bias = 0.0
         self.local_reduce_denominator_scale = 1.0
         self.local_reduce_denominator_bias = 0.0
-        reduction_expression = GemmReductionExpression.parse(local_reduce_type)
+        reduction_expression = GemmReductionDescriptor.parse(local_reduce_type)
         local_reduce_type = reduction_expression.kind
         if cutlass.const_expr(local_reduce_type == "mean_linear"):
             input_coefficient, result_coefficient, bias = (

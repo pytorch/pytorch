@@ -43,7 +43,7 @@ from torch._inductor.virtualized import V
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import GemmVariant
-    from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+    from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionPlan
 
 
 log = logging.getLogger(__name__)
