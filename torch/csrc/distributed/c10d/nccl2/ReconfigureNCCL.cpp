@@ -242,11 +242,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     std::memcpy(&uniqueId, vec.data(), sizeof(ncclUniqueId));
   }
 
-  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  ncclConfig_t config = options_c10d_->config;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name_.c_str();
 #endif
-  populateNcclConfigFromHints(config, options_c10d_->hints, name_);
+  populateNcclConfigFromHints(config, opts.hints, name_);
 
   ncclComm_t new_comm = nullptr;
   NCCL_CHECK(
