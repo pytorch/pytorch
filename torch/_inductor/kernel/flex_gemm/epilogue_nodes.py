@@ -15,7 +15,7 @@ from torch._inductor import inductor_prims
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedView:
+class NormalizedView:
     """Canonical source and shape for a view or reshape."""
 
     source: torch.fx.Node
@@ -23,7 +23,7 @@ class FlexGemmNormalizedView:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedReduction:
+class NormalizedReduction:
     """Canonical arguments for a supported reduction."""
 
     source: torch.fx.Node
@@ -34,7 +34,7 @@ class FlexGemmNormalizedReduction:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedPrepareSoftmax:
+class NormalizedPrepareSoftmax:
     """Canonical source and dimension for online softmax preparation."""
 
     source: torch.fx.Node
@@ -42,14 +42,14 @@ class FlexGemmNormalizedPrepareSoftmax:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedSqueeze:
+class NormalizedSqueeze:
     """Canonical source for a squeeze alias."""
 
     source: torch.fx.Node
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedGetItem:
+class NormalizedGetItem:
     """Canonical aggregate source and literal getitem index."""
 
     source: torch.fx.Node
@@ -57,7 +57,7 @@ class FlexGemmNormalizedGetItem:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedSplit:
+class NormalizedSplit:
     """Canonical source, width, and dimension for a tensor split."""
 
     source: torch.fx.Node
@@ -66,7 +66,7 @@ class FlexGemmNormalizedSplit:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedSelect:
+class NormalizedSelect:
     """Canonical source, dimension, and index for a tensor select."""
 
     source: torch.fx.Node
@@ -75,22 +75,22 @@ class FlexGemmNormalizedSelect:
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmNormalizedUnsupportedReduction:
+class NormalizedUnsupportedReduction:
     """Canonical source and target for an unsupported reduction."""
 
     source: torch.fx.Node
     target: str
 
 
-FlexGemmNormalizedNode = (
-    FlexGemmNormalizedView
-    | FlexGemmNormalizedReduction
-    | FlexGemmNormalizedPrepareSoftmax
-    | FlexGemmNormalizedSqueeze
-    | FlexGemmNormalizedGetItem
-    | FlexGemmNormalizedSplit
-    | FlexGemmNormalizedSelect
-    | FlexGemmNormalizedUnsupportedReduction
+NormalizedNode = (
+    NormalizedView
+    | NormalizedReduction
+    | NormalizedPrepareSoftmax
+    | NormalizedSqueeze
+    | NormalizedGetItem
+    | NormalizedSplit
+    | NormalizedSelect
+    | NormalizedUnsupportedReduction
 )
 
 
@@ -122,7 +122,7 @@ FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
 
 def normalize_flex_gemm_epilogue_fx_node(
     node: torch.fx.Node,
-) -> FlexGemmNormalizedNode | None:
+) -> NormalizedNode | None:
     """Return canonical arguments for a selected FX node, or ``None``."""
     if node.op != "call_function":
         return None
@@ -136,7 +136,7 @@ def normalize_flex_gemm_epilogue_fx_node(
             shape, (tuple, list, torch.Size)
         ):
             raise AssertionError(f"malformed FlexGEMM view node: {node.format_node()}")
-        return FlexGemmNormalizedView(
+        return NormalizedView(
             source,
             tuple(
                 arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
@@ -155,7 +155,7 @@ def normalize_flex_gemm_epilogue_fx_node(
             node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
         )
         dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-        return FlexGemmNormalizedReduction(
+        return NormalizedReduction(
             source,
             dim,
             keepdim,
@@ -169,13 +169,13 @@ def normalize_flex_gemm_epilogue_fx_node(
                 f"malformed FlexGEMM softmax node: {node.format_node()}"
             )
         dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        return FlexGemmNormalizedPrepareSoftmax(source, dim)
+        return NormalizedPrepareSoftmax(source, dim)
     if node.target is torch.ops.aten.split.Tensor:
         source = node.args[0]
         dim = node.args[2] if len(node.args) > 2 else node.kwargs.get("dim", 0)
         if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
             raise AssertionError(f"malformed FlexGEMM split node: {node.format_node()}")
-        return FlexGemmNormalizedSplit(source, node.args[1], dim)
+        return NormalizedSplit(source, node.args[1], dim)
     if node.target is torch.ops.aten.select.int:
         source = node.args[0]
         dim = node.args[1]
@@ -183,7 +183,7 @@ def normalize_flex_gemm_epilogue_fx_node(
             raise AssertionError(
                 f"malformed FlexGEMM select node: {node.format_node()}"
             )
-        return FlexGemmNormalizedSelect(source, dim, node.args[2])
+        return NormalizedSelect(source, dim, node.args[2])
     if node.target in (
         torch.ops.aten.squeeze.dim,
         torch.ops.aten.squeeze.dims,
@@ -194,11 +194,11 @@ def normalize_flex_gemm_epilogue_fx_node(
             raise AssertionError(
                 f"malformed FlexGEMM squeeze node: {node.format_node()}"
             )
-        return FlexGemmNormalizedSqueeze(source)
+        return NormalizedSqueeze(source)
     if node.target is operator.getitem:
         source, index = node.args
         if isinstance(source, torch.fx.Node) and isinstance(index, int):
-            return FlexGemmNormalizedGetItem(source, index)
+            return NormalizedGetItem(source, index)
         return None
     if node.target in FUNCTION_UNSUPPORTED_REDUCTIONS:
         source = node.args[0]
@@ -206,5 +206,5 @@ def normalize_flex_gemm_epilogue_fx_node(
             raise AssertionError(
                 f"malformed FlexGEMM reduction node: {node.format_node()}"
             )
-        return FlexGemmNormalizedUnsupportedReduction(source, str(node.target))
+        return NormalizedUnsupportedReduction(source, str(node.target))
     return None

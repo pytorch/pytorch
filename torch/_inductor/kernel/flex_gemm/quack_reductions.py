@@ -36,13 +36,13 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     statically_known_equal,
 )
 from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-    FlexGemmNormalizedGetItem,
-    FlexGemmNormalizedPrepareSoftmax,
-    FlexGemmNormalizedReduction,
-    FlexGemmNormalizedSelect,
-    FlexGemmNormalizedSplit,
-    FlexGemmNormalizedSqueeze,
-    FlexGemmNormalizedView,
+    NormalizedGetItem,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSelect,
+    NormalizedSplit,
+    NormalizedSqueeze,
+    NormalizedView,
 )
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
@@ -384,7 +384,7 @@ def iter_fx_node_inputs(value: Any):
 
 def lower_view_or_reshape(
     node: torch.fx.Node,
-    normalized: FlexGemmNormalizedView,
+    normalized: NormalizedView,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
@@ -414,7 +414,7 @@ def lower_view_or_reshape(
 
 def lower_grouped_n_split(
     node: torch.fx.Node,
-    normalized: FlexGemmNormalizedSplit,
+    normalized: NormalizedSplit,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
@@ -438,7 +438,7 @@ def lower_grouped_n_split(
 
 
 def lower_grouped_n_select(
-    normalized: FlexGemmNormalizedSelect,
+    normalized: NormalizedSelect,
     index: int,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
@@ -464,7 +464,7 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
 
 def lower_squeeze(
     node: torch.fx.Node,
-    normalized: FlexGemmNormalizedSqueeze,
+    normalized: NormalizedSqueeze,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
@@ -479,7 +479,7 @@ def lower_squeeze(
 
 def lower_getitem(
     node: torch.fx.Node,
-    normalized: FlexGemmNormalizedGetItem,
+    normalized: NormalizedGetItem,
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
@@ -497,7 +497,7 @@ def lower_getitem(
 
 def lower_prepare_softmax_online(
     node: torch.fx.Node,
-    normalized: FlexGemmNormalizedPrepareSoftmax,
+    normalized: NormalizedPrepareSoftmax,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
@@ -539,7 +539,7 @@ def lower_prepare_softmax_online(
 
 def lower_tensorssa_reduce(
     node: torch.fx.Node,
-    normalized: FlexGemmNormalizedReduction,
+    normalized: NormalizedReduction,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
