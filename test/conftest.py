@@ -103,6 +103,19 @@ def pytest_addoption(parser: Parser) -> None:
         type=str.upper,
         help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
     )
+    parser.addoption(
+        "--multigpu-min-gpus",
+        action="store",
+        type=int,
+        default=0,
+        dest="multigpu_min_gpus",
+        metavar="N",
+        help="Among the auto-applied `multigpu` tests (see pytest_itemcollected), "
+        "keep only those whose resolved accelerator requirement is at least N "
+        "GPUs; deselect the rest. 0 (default) disables the filter, so runs "
+        "without it are unaffected. Layered on top of `-m multigpu` so a "
+        "larger-runner config can run just the >2-GPU distributed tests.",
+    )
     shard_addoptions(parser)
 
 
@@ -164,6 +177,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(
             HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
             "hw_classification_plugin",
+        )
+    if config.getoption("multigpu_min_gpus"):
+        config.pluginmanager.register(
+            MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),
+            "multigpu_min_filter_plugin",
         )
 
 
@@ -381,6 +399,121 @@ def _spawns_multiple_processes(
     return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
 
 
+@functools.cache
+def _cpu_backend_tokens() -> tuple[str, ...]:
+    """Registered backend names that drive a CPU (non-accelerator) transport,
+    derived from the backend registry so no hand-maintained list can drift."""
+    from torch.distributed.distributed_c10d import Backend
+    from torch.testing._internal.common_distributed import ACCELERATOR_DIST_BACKENDS
+
+    return tuple(
+        b
+        for b in Backend.backend_list
+        if b not in ACCELERATOR_DIST_BACKENDS
+        and b not in (Backend.UNDEFINED, Backend.FAKE)
+    )
+
+
+def _safe_obj(item: Any) -> object | None:
+    try:
+        return item.obj
+    except Exception:
+        return None
+
+
+def _decorator_gpu_requirement(func: object | None) -> int:
+    """Highest accelerator requirement stamped on ``func`` (or anything in its
+    ``__wrapped__`` chain) by ``skip_if_lt_x_gpu`` (``_min_gpus_required``) or
+    ``requires_world_size`` (``_required_world_size``). 0 when unstamped."""
+    best = 0
+    while func is not None:
+        for attr in ("_min_gpus_required", "_required_world_size"):
+            try:
+                best = max(best, int(getattr(func, attr)))  # type: ignore[arg-type]
+            except (AttributeError, TypeError, ValueError):
+                pass
+        func = getattr(func, "__wrapped__", None)
+    return best
+
+
+def _probe_world_size(cls: type | None) -> int:
+    """Read the class ``world_size`` without running ``__init__`` (which spawns
+    processes at runtime, not collection). Returns 0 when it cannot be resolved
+    to a positive value (e.g. MultiProcContinuousTest's ``-2`` sentinel)."""
+    try:
+        resolved = int(cls.__new__(cls).world_size)
+    except Exception:
+        return 0
+    return max(0, resolved)
+
+
+def _test_file_stem(item: Any) -> str:
+    """Basename (without ``.py``) of the test file that defines ``item``.
+
+    Resolved from the collected node (``path``/``fspath``/``nodeid``) rather than
+    ``item.module.__name__``: under run_test.py the module name is not the
+    test-file basename, so a module-name gate silently misses e.g.
+    test_c10d_gloo."""
+    for attr in ("path", "fspath"):
+        value = getattr(item, attr, None)
+        if value:
+            return os.path.basename(str(value)).removesuffix(".py").lower()
+    head = os.path.basename((getattr(item, "nodeid", "") or "").split("::", 1)[0])
+    return head.removesuffix(".py").lower()
+
+
+def _is_cpu_backed(item: Any) -> bool:
+    """A multi-process test whose dedicated file targets a CPU backend (e.g.
+    test_c10d_gloo) spawns ranks, not GPUs, so a high world_size does not imply
+    a high GPU count. Match whole ``_``-delimited tokens so a backend name is not
+    matched as a substring of an unrelated word (e.g. "mpi" in "compile")."""
+    stem = _test_file_stem(item)
+    if stem.endswith("_cpu"):
+        return True
+    tokens = set(stem.split("_"))
+    return any(b in tokens for b in _cpu_backend_tokens())
+
+
+def _is_local_tensor_simulation(cls: type | None) -> bool:
+    """LocalTensor test classes (e.g. *WithLocalTensor) inherit a multi-process
+    base and a >1 ``world_size`` but run single-process under LocalTensorMode on
+    one GPU, so their ``world_size`` is a simulated mesh size, not a GPU count.
+    Every such class inherits ``is_local_tensor_enabled = True`` (LocalDTensor*
+    bases; create_local_tensor_test_class always builds on one), so probing that
+    property on an uninitialized instance is a sufficient, name-independent
+    signal -- False (or absent) everywhere else."""
+    try:
+        return bool(cls.__new__(cls).is_local_tensor_enabled)  # type: ignore[union-attr]
+    except Exception:
+        return False
+
+
+# Favor coverage: a test whose GPU requirement cannot be resolved at collection
+# clears any threshold, so it is routed to the larger runner rather than dropped.
+_UNRESOLVED_GPU_REQUIREMENT = 1 << 30
+
+
+def _resolve_gpu_requirement(item: Any, cls: type | None) -> int:
+    """Number of accelerators a distributed test needs, resolved statically at
+    collection.
+
+    Combines the two GPU-count signals and takes the larger: the
+    ``skip_if_lt_x_gpu``/``requires_world_size`` decorator and the multi-process
+    base-class ``world_size`` -- so a test decorated ``skip_if_lt_x_gpu(2)``
+    whose class hardcodes ``world_size = 4`` still resolves to 4. Returns 0 for
+    tests that do not scale with GPU count (CPU-backed, which spawn ranks not
+    GPUs; single-process; LocalTensor simulations on one GPU) and a very large
+    value on unresolvable ``world_size`` to favor coverage."""
+    if not _spawns_multiple_processes(cls) or _is_local_tensor_simulation(cls):
+        return 0
+    if _is_cpu_backed(item):
+        return 0
+    world_size = _probe_world_size(cls)
+    if world_size == 0:
+        return _UNRESOLVED_GPU_REQUIREMENT
+    return max(_decorator_gpu_requirement(_safe_obj(item)), world_size)
+
+
 def pytest_itemcollected(item: Any) -> None:
     """
     Auto-apply the `multigpu` marker based on the resolved test class. Runs
@@ -390,6 +523,33 @@ def pytest_itemcollected(item: Any) -> None:
     """
     if _spawns_multiple_processes(getattr(item, "cls", None)):
         item.add_marker("multigpu")
+
+
+class MultiGpuMinFilterPlugin:
+    """Deselect auto-`multigpu`-marked tests whose resolved accelerator
+    requirement is below ``--multigpu-min-gpus`` (see _resolve_gpu_requirement),
+    so a larger-runner config can run just the >N-GPU distributed tests on top of
+    the existing `-m multigpu` selection. Only `multigpu`-marked items are
+    considered, and the plugin is registered only when the option is set, so runs
+    without it (e.g. every CUDA distributed job) are untouched."""
+
+    def __init__(self, min_gpus: int) -> None:
+        self.min_gpus = min_gpus
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        if self.min_gpus <= 0:
+            return
+        selected, deselected = [], []
+        for item in items:
+            is_multigpu = any(m.name == "multigpu" for m in item.iter_markers())
+            cls = getattr(item, "cls", None)
+            if is_multigpu and _resolve_gpu_requirement(item, cls) < self.min_gpus:
+                deselected.append(item)
+            else:
+                selected.append(item)
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
 
 
 class StepcurrentPlugin:

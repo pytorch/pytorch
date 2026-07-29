@@ -114,11 +114,13 @@ runner_mapping:
   linux.rocm.gpu.gfx942.4: linux.rocm.gpu.gfx942.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
+  linux.rocm.gpu.gfx950.4: linux.rocm.gpu.gfx950.4
   linux.rocm.gpu.gfx1100: linux.rocm.gpu.gfx1100
   # amd-do experiment routes mi350 tests to AMD's dedicated runners via this
   # prefix; kept as passthrough so the OSDC build's runner mapping preserves it.
   amd-do-linux.rocm.gpu.gfx950.1: amd-do-linux.rocm.gpu.gfx950.1
   amd-do-linux.rocm.gpu.gfx950.2: amd-do-linux.rocm.gpu.gfx950.2
+  amd-do-linux.rocm.gpu.gfx950.4: amd-do-linux.rocm.gpu.gfx950.4
 
 # Runners whose hardware exists only on the Meta fleet (no LF / no AWS EC2
 # equivalent). The mapper forces the 'mt-' prefix on these regardless of which
