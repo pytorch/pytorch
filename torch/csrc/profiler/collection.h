@@ -390,7 +390,7 @@ struct ExtraFields<EventType::Kineto> {
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   template <typename... Args>
-  [[nodiscard]] static std::shared_ptr<Result> create(Args... args) {
+  [[nodiscard]] static std::shared_ptr<Result> create(Args&&... args) {
     return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
   }
 
@@ -406,18 +406,15 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
 
   template <typename T, typename Fn>
   void visit_if_base(const Fn& fn) const {
-    visit([&](const auto& extra_fields) {
-      using extra_fields_t = typename std::remove_cv_t<
-          typename std::remove_reference_t<decltype(extra_fields)>>;
-
-      if constexpr (std::is_base_of_v<T, extra_fields_t>) {
+    visit([&]<typename EF>(const EF& extra_fields) {
+      if constexpr (std::is_base_of_v<T, EF>) {
         fn(extra_fields);
       }
     });
   }
 
   EventType tag() const {
-    return visit([](const auto& i) { return deduceTag(i); });
+    return visit([]<EventType E>(const ExtraFields<E>&) { return E; });
   }
 
   std::string name() const;
@@ -455,16 +452,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       int64_t start_time_ns,
       uint64_t start_tid,
       kineto::DeviceAndResource kineto_info,
-      ExtraFields<E>&& extra_fields)
+      ExtraFields<E> extra_fields)
       : start_time_ns_{start_time_ns},
         start_tid_{start_tid},
         kineto_info_{kineto_info},
         extra_fields_{std::move(extra_fields)} {}
-
-  template <EventType E>
-  static EventType deduceTag(const ExtraFields<E>& /*unused*/) {
-    return E;
-  }
 };
 
 struct KinetoObserverContext : public at::ObserverContext {
