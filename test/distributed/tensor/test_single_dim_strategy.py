@@ -52,7 +52,11 @@ from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Placement,
 )
-from torch.testing._internal.common_utils import HardwareClassification, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
