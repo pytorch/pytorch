@@ -11,6 +11,11 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.utils.hooks import RemovableHandle
 
 
@@ -1153,8 +1158,11 @@ def forward(self, L_x_ : torch.Tensor):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_on_intermediate_autograd_cache(self):
+
+class HooksTestsDevice(torch._dynamo.test_case.TestCase):
+    @skipIfRocm(msg="pytorch/pytorch/issues/190414")
+    @onlyAccelerator
+    def test_register_hook_on_intermediate_autograd_cache(self, device):
         from torch._dynamo.utils import counters
 
         def fn(x):
@@ -1167,21 +1175,21 @@ def forward(self, L_x_ : torch.Tensor):
             # First compile
             torch._dynamo.reset()
             counters.clear()
-            x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x).backward()
+            x = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Second compile (force recompile to test cache)
             torch._dynamo.reset()
-            x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x2).backward()
+            x2 = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             aot_counters = counters["aot_autograd"]
             self.assertEqual(aot_counters.get("autograd_cache_bypass", 0), 0)
         finally:
             torch._functorch.config.enable_autograd_cache = False
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self):
+    @onlyAccelerator
+    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self, device):
         from torch._dynamo.utils import counters
 
         def fn_a(x):
@@ -1200,21 +1208,23 @@ def forward(self, L_x_ : torch.Tensor):
             counters.clear()
 
             # Compile fn_a
-            x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_a, fullgraph=True)(x).backward()
+            x = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn_a, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Compile fn_b (different hook — must NOT cache hit from fn_a)
-            x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_b, fullgraph=True)(x2).backward()
+            x2 = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn_b, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # fn_b should give grad = 2 * 3.0 = 6.0, not 2 * 0.5 = 1.0
-            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device="cuda"))
+            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device=device))
             self.assertEqual(
                 counters["aot_autograd"].get("autograd_cache_bypass", 0), 0
             )
         finally:
             torch._functorch.config.enable_autograd_cache = False
 
+
+instantiate_device_type_tests(HooksTestsDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

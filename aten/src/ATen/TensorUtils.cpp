@@ -152,7 +152,7 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     }
     oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
         << " to be on GPU (while checking arguments for " << c << ')';
-    TORCH_CHECK(false, oss.str());
+    TORCH_CHECK(false, std::move(oss).str());
   }
   TORCH_CHECK(
     t1->get_device() == t2->get_device(),
@@ -197,7 +197,7 @@ void checkScalarTypes(CheckedFrom c, const TensorArg& t,
       }
       oss << "; but got " << t->toString()
           << " instead (while checking arguments for " << c << ')';
-      TORCH_CHECK(false, oss.str());
+      TORCH_CHECK(false, std::move(oss).str());
     }
 }
 
