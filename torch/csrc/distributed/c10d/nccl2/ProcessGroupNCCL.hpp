@@ -158,10 +158,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ::c10d::GatherOptions& opts = ::c10d::GatherOptions()) override;
-  c10::intrusive_ptr<::c10d::Work> gather_single(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const ::c10d::GatherOptions& opts = ::c10d::GatherOptions()) override;
   c10::intrusive_ptr<::c10d::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,

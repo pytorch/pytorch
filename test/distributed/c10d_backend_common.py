@@ -77,7 +77,6 @@ C10D_BACKENDS = (
         supports_dropped_p2p_work=True,
         supports_collectives_timing=True,
         supports_work_sequence_number=True,
-        supports_gather_single=True,
         float8_dtypes=FLOAT8_DTYPES,
     ),
 )
