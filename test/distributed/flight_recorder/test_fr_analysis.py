@@ -478,9 +478,7 @@ class FlightRecorderRankParsingTest(TestCase):
                     {
                         "rank_0": {
                             "rank": 0,
-                            "pg_config": {
-                                "0": {"desc": "default_pg", "ranks": value}
-                            },
+                            "pg_config": {"0": {"desc": "default_pg", "ranks": value}},
                         }
                     },
                     group_world_size=2,
