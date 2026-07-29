@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
+from torch.utils._ordered_set import OrderedSet
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -111,6 +112,18 @@ class TestFuseOrErr(TestCase):
         x = torch.randn(1024, device=GPU_TYPE, requires_grad=True)
         xr = x.detach().clone().requires_grad_(True)
         torch.compile(fn, backend="inductor", fullgraph=True)(x).backward()
+        (xr.sin().cos()).sum().backward()
+        self.assertEqual(x.grad, xr.grad)
+
+    @requires_gpu
+    def test_backward_decorator_factory(self):
+        @fuse_or_err(fuse_backward=True)
+        def region(x):
+            return x.sin().cos()
+
+        x = torch.randn(1024, device=GPU_TYPE, requires_grad=True)
+        xr = x.detach().clone().requires_grad_(True)
+        torch.compile(lambda a: region(a).sum(), fullgraph=True)(x).backward()
         (xr.sin().cos()).sum().backward()
         self.assertEqual(x.grad, xr.grad)
 
@@ -297,6 +310,42 @@ class TestFuseOrErr(TestCase):
             self.assertIs(scheduler._fuse_or_err_capture.hook, sentinel)
         finally:
             scheduler._fuse_or_err_capture.hook = previous_hook
+
+    def test_reason_capture_ignores_unrelated_candidates(self):
+        from torch._inductor.scheduler import Scheduler
+
+        class FakeNode:
+            def __init__(self, *ops):
+                self.ops = OrderedSet(ops)
+
+            def get_operation_names(self):
+                return self.ops
+
+        scheduler = object.__new__(Scheduler)
+        scheduler._fuse_or_err_region_groups = [OrderedSet(("op0", "op1"))]
+        scheduler._fuse_or_err_no_fuse_reasons = []
+        scheduler._record_no_fuse_reason(
+            FakeNode("op0"), FakeNode("unrelated"), "irrelevant"
+        )
+        self.assertEqual(scheduler._fuse_or_err_no_fuse_reasons, [])
+        scheduler._record_no_fuse_reason(FakeNode("op0"), FakeNode("op1"), "kept")
+        self.assertEqual(len(scheduler._fuse_or_err_no_fuse_reasons), 1)
+
+    @requires_gpu
+    def test_post_fusion_pass_cannot_hide_split(self):
+        from torch._inductor import config as inductor_config
+
+        def unfuse(nodes):
+            return [subnode for node in nodes for subnode in node.get_nodes()]
+
+        def fn(x):
+            return fuse_or_err(lambda a: a.sum(1, keepdim=True) + a)(x)
+
+        with inductor_config.patch(_post_fusion_custom_pass=unfuse):
+            with self.assertRaisesRegex(RuntimeError, r"produced 2 separate kernels"):
+                torch.compile(fn, backend="inductor", fullgraph=True)(
+                    torch.randn(128, 128, device=GPU_TYPE)
+                )
 
     @requires_gpu
     def test_zero_kernel_region_passes(self):

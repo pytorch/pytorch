@@ -6175,24 +6175,35 @@ class Scheduler:
         """
         Enforce the fuse_or_err contract: every region recorded in
         V.graph.fuse_or_err_groups must have compiled into a single kernel.
-        Raises with the exact reason otherwise (warns in fbcode).
+        Raises with the exact reason otherwise.
         """
+        final_mapping = {
+            op_name: node
+            for node in self.nodes
+            for op_name in node.get_operation_names()
+        }
         for group in V.graph.fuse_or_err_groups:
+            missing_ops = group.op_names - final_mapping.keys()
+            missing_ops -= V.graph.removed_operations
+            if missing_ops:
+                raise RuntimeError(
+                    "fuse_or_err: internal error: recorded operations lost their "
+                    f"final scheduler mapping: {sorted(missing_ops)}"
+                )
             fused_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
             for op_name in group.op_names:
-                fnode = self.name_to_fused_node.get(op_name)
-                if fnode is not None:
+                fnode = final_mapping.get(op_name)
+                if fnode is not None and self.count_kernel_nodes(fnode.get_nodes()):
                     fused_nodes.add(fnode)
             if len(fused_nodes) > 1:
-                self._report_fuse_or_err_failure(group, fused_nodes)
+                self._report_fuse_or_err_failure(group, fused_nodes, final_mapping)
 
     def _report_fuse_or_err_failure(
         self,
         group: FuseOrErrGroup,
         fused_nodes: OrderedSet[BaseSchedulerNode],
+        final_mapping: dict[str, BaseSchedulerNode],
     ) -> None:
-        import warnings
-
         from torch._logging import trace_structured
 
         lines = [
@@ -6206,7 +6217,7 @@ class Scheduler:
         fused_list = list(fused_nodes)
         for i, fnode in enumerate(fused_list):
             region_ops = sorted(
-                op for op in group.op_names if self.name_to_fused_node.get(op) is fnode
+                op for op in group.op_names if final_mapping.get(op) is fnode
             )
             lines.append(f"  kernel #{i}: region ops {region_ops}")
             targets = self._fuse_or_err_fx_targets(fnode)
@@ -6236,10 +6247,7 @@ class Scheduler:
             },
             payload_fn=lambda: msg,
         )
-        if config.is_fbcode():
-            warnings.warn(msg)
-        else:
-            raise RuntimeError(msg)
+        raise RuntimeError(msg)
 
     def _fuse_or_err_fx_targets(self, node: BaseSchedulerNode) -> list[str]:
         targets: OrderedSet[str] = OrderedSet()
@@ -6294,7 +6302,7 @@ class Scheduler:
         # which does not go through WhyNoFuse). Read-only, best-effort. We
         # deliberately do NOT re-run can_fuse here: it can commit speculative
         # loop mutations (kept when it returns True), which would corrupt the
-        # finalized schedule on the fbcode warn-and-continue path.
+        # finalized schedule while producing the diagnostic.
         def is_extern(n: BaseSchedulerNode) -> bool:
             return any(
                 isinstance(sub, (ExternKernelSchedulerNode, NopKernelSchedulerNode))

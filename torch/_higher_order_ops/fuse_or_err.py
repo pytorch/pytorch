@@ -15,8 +15,8 @@ class FuseOrErr(BaseHOP):
     """
     HOP wrapping a user closure that, under torch.compile/Inductor, must compile
     into a single fused kernel. If the region does not collapse into one kernel,
-    Inductor raises with the exact reason (a warning is emitted in fbcode
-    instead). See ``fuse_or_err`` for the user-facing API.
+    Inductor raises with the exact reason. See ``fuse_or_err`` for the
+    user-facing API.
 
     The ``_enforce_fusion`` kwarg gates the Inductor check: it is True for the
     forward region and equal to the user's ``fuse_backward`` for the backward
@@ -75,10 +75,10 @@ def fuse_or_err(fn: Callable | None = None, *, fuse_backward: bool = False) -> C
 
     Under ``torch.compile`` the wrapped region is inlined into the graph and, if
     Inductor does not fuse its materialized ops into a single kernel, compilation
-    raises with the reason the region split (a warning is emitted in fbcode). A
-    region that materializes no kernel (e.g. pure views / shape ops) trivially
-    passes -- the contract is "at most one kernel". Outside ``torch.compile`` the
-    closure is called directly, with no fusion check.
+    raises with the reason the region split. A region that materializes no kernel
+    (e.g. pure views / shape ops) trivially passes -- the contract is "at most one
+    kernel". Outside ``torch.compile`` the closure is called directly, with no
+    fusion check.
 
     The wrapped region takes positional operands; keyword arguments are only
     supported in eager (not under ``torch.compile``).
