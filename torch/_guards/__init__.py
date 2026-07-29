@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
-import torch
+import torch  # noqa: TC001
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -143,6 +143,17 @@ class TraceId(NamedTuple):
             return f"{self.compile_id}_{self.attempt}"
 
 
+# Dependency inversion: torch._guards must not import torch._dynamo. Dynamo
+# registers a live getter for this config flag at import time; None (the default
+# when dynamo is not loaded) keeps behavior identical to the flag being off.
+_skip_fsdp_module_guards_getter: Callable[[], bool] | None = None
+
+
+def register_skip_fsdp_module_guards_getter(fn: Callable[[], bool]) -> None:
+    global _skip_fsdp_module_guards_getter
+    _skip_fsdp_module_guards_getter = fn
+
+
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
@@ -166,9 +177,8 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
-        import torch._dynamo.config as config
-
-        if config._unsafe_skip_fsdp_module_guards:
+        getter = _skip_fsdp_module_guards_getter
+        if getter is not None and getter():
             return (
                 self
                 in (
@@ -291,10 +301,7 @@ class Guard:
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
 
-        is_duplicate_input = (
-            isinstance(self.create_fn, functools.partial)
-            and self.create_fn.func is torch._dynamo.guards.GuardBuilder.DUPLICATE_INPUT
-        )
+        is_duplicate_input = getattr(self.inner_create_fn(), "_guard_sorts_last", False)
         return (
             is_duplicate_input,
             self.source.value if self.source else -1,
@@ -699,8 +706,6 @@ class GuardsSet:
 
     def remove_guards_with_source(self, source: Source) -> None:
         """Delete all guards that contains a given source"""
-        from ._dynamo.source import is_from_source
-
         self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
         )
@@ -746,12 +751,10 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
-    def add_dynamo_installed_submodule(
-        self, fn_code: CodeType, identifier: str
-    ) -> None: ...
+    def add_installed_submodule(self, fn_code: CodeType, identifier: str) -> None: ...
 
     @abstractmethod
-    def get_dynamo_installed_submodules(self, fn_code: CodeType) -> list[str]: ...
+    def get_installed_submodules(self, fn_code: CodeType) -> list[str]: ...
 
     @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None: ...
@@ -866,12 +869,10 @@ class InvokeSubgraphCache(HopSubgraphCache):
             CodeType, dict[int, InvokeSubgraphReuseEntry]
         ] = defaultdict(dict)
 
-    def add_dynamo_installed_submodule(
-        self, fn_code: CodeType, identifier: str
-    ) -> None:
+    def add_installed_submodule(self, fn_code: CodeType, identifier: str) -> None:
         self.dynamo_installed_submodules[fn_code].append(identifier)
 
-    def get_dynamo_installed_submodules(self, fn_code: CodeType) -> list[str]:
+    def get_installed_submodules(self, fn_code: CodeType) -> list[str]:
         return self.dynamo_installed_submodules.get(fn_code, [])
 
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None:
@@ -1513,6 +1514,15 @@ class ChainedSource(Source):
         return result
 
 
+@functools.lru_cache
+def is_from_source(source: Source, target: Source) -> bool:
+    if source == target:
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_source(source.base, target)
+    return False
+
+
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
@@ -1595,3 +1605,14 @@ def active_fake_mode() -> FakeTensorMode | None:
             return m
 
     return None
+
+
+def __getattr__(name: str) -> object:
+    # Lazily expose the guard-dispatch facade so it is importable as
+    # torch._guards.Guards / torch._guards.FuncDispatch without eagerly importing
+    # the dispatch module.
+    if name in ("FuncDispatch", "Guards"):
+        from torch._guards import dispatch
+
+        return getattr(dispatch, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
