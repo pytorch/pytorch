@@ -323,6 +323,110 @@ class AbstractCollectivesTest(C10dBackendTest):
             )
             self.assertEqual(output, expected)
 
+    def test_all_to_all_single_independent_empty_split_sizes(self):
+        self._init_pg()
+
+        input_count = self.rank + 1
+        input = torch.full(
+            (self.world_size * input_count,),
+            self.rank,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        output_splits = [rank + 1 for rank in range(self.world_size)]
+        output = torch.empty(sum(output_splits), device=self.device)
+        dist.all_to_all_single(
+            output,
+            input,
+            output_split_sizes=output_splits,
+            input_split_sizes=[],
+        )
+        expected = torch.cat(
+            [
+                torch.full((count,), rank, dtype=torch.float32, device=self.device)
+                for rank, count in enumerate(output_splits)
+            ]
+        )
+        self.assertEqual(output, expected)
+
+        input_splits = [rank + 1 for rank in range(self.world_size)]
+        input = torch.cat(
+            [
+                torch.full((count,), self.rank, dtype=torch.float32, device=self.device)
+                for count in input_splits
+            ]
+        )
+        output_count = self.rank + 1
+        output = torch.empty(
+            self.world_size * output_count, dtype=torch.float32, device=self.device
+        )
+        dist.all_to_all_single(
+            output,
+            input,
+            output_split_sizes=[],
+            input_split_sizes=input_splits,
+        )
+        expected = torch.cat(
+            [
+                torch.full(
+                    (output_count,), rank, dtype=torch.float32, device=self.device
+                )
+                for rank in range(self.world_size)
+            ]
+        )
+        self.assertEqual(output, expected)
+
+    def test_all_to_all_single_invalid_split_sizes(self):
+        if self.backend_name not in ("nccl2", "nccl-lazy"):
+            self.skipTest("strict split validation is only implemented by NCCL2")
+        self._init_pg()
+        valid_splits = [2] * self.world_size
+        invalid_splits = (
+            [-1, 1],
+            [-1, 5],
+            [4],
+            [1] * self.world_size,
+            [3] * self.world_size,
+        )
+        for invalid_side in ("input", "output"):
+            for splits in invalid_splits:
+                with self.subTest(invalid_side=invalid_side, splits=splits):
+                    input_splits = splits if invalid_side == "input" else valid_splits
+                    output_splits = splits if invalid_side == "output" else valid_splits
+                    with self.assertRaisesRegex(RuntimeError, "[Ss]plit"):
+                        dist.all_to_all_single(
+                            torch.empty(4, device=self.device),
+                            torch.ones(4, device=self.device),
+                            output_split_sizes=output_splits,
+                            input_split_sizes=input_splits,
+                        )
+
+        for invalid_side in ("input", "output"):
+            with self.subTest(invalid_side=invalid_side, splits=[]):
+                input_size = 3 if invalid_side == "input" else 4
+                output_size = 3 if invalid_side == "output" else 4
+                input_splits = [] if invalid_side == "input" else valid_splits
+                output_splits = [] if invalid_side == "output" else valid_splits
+                with self.assertRaisesRegex(
+                    RuntimeError, "does not divide equally across group size"
+                ):
+                    dist.all_to_all_single(
+                        torch.empty(output_size, device=self.device),
+                        torch.ones(input_size, device=self.device),
+                        output_split_sizes=output_splits,
+                        input_split_sizes=input_splits,
+                    )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "does not divide equally across group size"
+        ):
+            dist.all_to_all_single(
+                torch.empty(3, 2, device=self.device),
+                torch.ones(3, 2, device=self.device),
+                output_split_sizes=[],
+                input_split_sizes=[],
+            )
+
     def test_all_reduce(self):
         self._init_pg()
         for count in COUNTS:
