@@ -1,6 +1,11 @@
 from typing import Any, Optional
 
 import torch
+from torch._utils import _dummy_type
+
+
+if not hasattr(torch._C, "_MPSStreamBase"):
+    torch._C.__dict__["_MPSStreamBase"] = _dummy_type("_MPSStreamBase")
 
 
 class Stream(torch._C._MPSStreamBase):

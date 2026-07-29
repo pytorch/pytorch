@@ -1406,6 +1406,9 @@ def _log_api_usage_metadata(
     metadata_map: dict[str, str],
 ) -> None: ...  # LogAPIUsageMetadataFromPython
 def _demangle(str) -> str: ...  # c10::demangle
+def _getenv(name: str) -> str | None: ...  # c10::utils::get_env
+def _setenv(name: str, value: str, overwrite: _bool = True) -> None: ...  # c10::utils::set_env
+def _unsetenv(name: str) -> None: ...  # c10::utils::unset_env
 def _fake_dispatch_register_decomp(name: str, overload: str) -> None: ...
 def _fake_dispatch_register_meta(name: str, overload: str) -> None: ...
 def _fake_dispatch_register_op_impl(name: str, overload: str) -> None: ...

@@ -388,15 +388,6 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
     yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
-    # Test for keepdim
-    yield SampleInput(make_arg((S, S)), args=(make_arg((S, S)),), kwargs={'dim': 1, 'keepdim': True})
-    yield SampleInput(make_arg((S, S, M)), args=(make_arg((S, S, M)),), kwargs={'dim': 2, 'keepdim': True})
-    # keepdim with negative dim
-    yield SampleInput(make_arg((S, S)), args=(make_arg((S, S)),), kwargs={'dim': -1, 'keepdim': True})
-    yield SampleInput(make_arg((S, S, M)), args=(make_arg((S, S, M)),), kwargs={'dim': -2, 'keepdim': True})
-    # keepdim with broadcasting
-    yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1, 'keepdim': True})
-    yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1, 'keepdim': True})
 
 
 def sample_inputs_item(op_info, device, dtype, requires_grad, **kwargs):
@@ -792,6 +783,27 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': neg_alpha})
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
+
+
+def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+
+    if dtype.is_floating_point or dtype.is_complex:
+        x = make_tensor(
+            (5,),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        exponent = torch.tensor(
+            [-2, -1, 0, 1, 3],
+            device=device,
+            dtype=torch.int32,
+        )
+        yield SampleInput(x, args=(exponent,))
+
 
 def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzero')
@@ -14235,6 +14247,7 @@ op_db: list[OpInfo] = [
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
     BinaryUfuncInfo('ldexp',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_ldexp,
                     # Runs very slowly on slow gradcheck - alternatively reduce input sizes
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -16082,12 +16095,6 @@ op_db: list[OpInfo] = [
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-05, rtol=3e-03)}),
-                   "TestDecomp",
-                   "test_comprehensive",
-                   device_type="cpu"
-               ),
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,

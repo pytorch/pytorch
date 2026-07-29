@@ -6,6 +6,11 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG PIP_EXTRA_INDEX_URL
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ARG PIP_PREFER_BINARY
+ENV PIP_PREFER_BINARY=${PIP_PREFER_BINARY}
+
 ARG CLANG_VERSION
 
 # Allow APT to run as root
@@ -148,6 +153,13 @@ ARG ONNX
 COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
+
+ARG TVM
+# Install apache-tvm for the dynamo tvm backend tests
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/tvm.txt tvm.txt
+RUN if [ -n "${TVM}" ]; then bash -c 'source ./common_utils.sh && pip_install apache-tvm==$(get_pinned_commit tvm) && python -c "import tvm"'; fi
+RUN rm common_utils.sh tvm.txt
 
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
