@@ -60,6 +60,7 @@ from torch._dynamo.utils import (
     normalize_count_iter,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -141,7 +142,6 @@ from ..source import (
     DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
-    GlobalSource,
     GradSource,
     is_constant_source,
     is_from_closure_source,
@@ -163,6 +163,7 @@ from ..source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -648,17 +649,6 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
 
 class _missing:
     pass
-
-
-def _is_torch_module_attr_source(source: Source) -> bool:
-    if not isinstance(source, ChainedSource):
-        return False
-    base_source = source.get_base()
-    return isinstance(base_source, GlobalSource) and (
-        base_source.global_name == "torch"
-        or base_source.global_name == "__import_torch"
-        or base_source.global_name.startswith("__import_torch_dot")
-    )
 
 
 @dataclasses.dataclass
@@ -1956,6 +1946,7 @@ class VariableBuilder:
                 torch.utils.hooks.BackwardHook,
                 torch.nn.Parameter,
                 torch.nn.Buffer,
+                torch.backends.cuda.SDPAParams,
             ):
                 # TODO(jansel): combine this case with the one above
                 # type: ignore[attr-defined]
@@ -2622,13 +2613,13 @@ class VariableBuilder:
                 ],
             )
 
-        if getattr(value, "_is_fsdp_managed_module", False):
+        if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            if not getattr(value, "_fsdp_use_orig_params", False):
+            if not inspect.getattr_static(value, "_fsdp_use_orig_params", False):
                 unimplemented(
                     gb_type="FSDP with use_orig_params=False",
                     context="",
@@ -2808,21 +2799,12 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
-                    frame_state_entry = process_automatic_dynamic(
+                    process_automatic_dynamic(
                         self.tx,
                         self.source.name,
                         FrameStateSizeEntry.make_scalar(value),
                         is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
                     )
-                    if (
-                        config.automatic_dynamic_shapes
-                        and frame_state_entry.scalar is auto_dynamic
-                        and not self.source.guard_source.is_unspecialized_builtin_nn_module()
-                        and not _is_torch_module_attr_source(self.source)
-                    ):
-                        return self.wrap_symint(
-                            value, frame_state_entry=frame_state_entry
-                        )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
@@ -3119,7 +3101,28 @@ class VariableBuilder:
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
         )
-        if not is_dtensor:
+
+        # An AsyncCollectiveTensor (ACT) flattens to a single inner tensor whose
+        # metadata mirrors the wrapper, and the AOTAutograd runtime wrapper
+        # unwraps ACT inputs before the compiled graph. So a graph traced on an
+        # ACT is equivalent to one traced on its resolved plain Tensor. Guard on
+        # the unwrapped inner tensor (via UnwrapCollectiveTensorSource) instead
+        # of the ACT-locked type/metadata guards, so the ACT class no longer
+        # forces a recompile when the runtime value alternates between an
+        # un-awaited ACT and an awaited Tensor. Type-introspecting code stays
+        # sound because observation sites reinstall the class guard on demand
+        # (see BuiltinVariable.call_isinstance and TensorVariable.var_getattr).
+        # Caveat: ACT-only member access (e.g. w.wait()) is not a class-observation
+        # channel and does not reinstall the guard, so such code reuses the
+        # ACT-traced graph for a resolved plain Tensor. It stays numerically
+        # correct (ACT desugars ops to the inner tensor), but a compiled region
+        # can succeed where eager would raise AttributeError on the plain Tensor;
+        # that only bites user code already broken in eager on the resolved input.
+        is_polymorphic_act = not is_dtensor and is_async_collective_tensor_type(
+            type(value)
+        )
+
+        if not is_dtensor and not is_polymorphic_act:
             # We guard on the _local_tensor and the _spec, and therefore we don't
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -3171,6 +3174,11 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+            elif is_polymorphic_act:
+                # Guard only on the unwrapped inner tensor (inner_source below).
+                # Installing no type/metadata guard on the ACT wrapper is what
+                # lets the resolved plain Tensor reuse this cache entry.
+                pass
             else:
                 self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
                 self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -3179,6 +3187,16 @@ class VariableBuilder:
                 )
 
             attrs, _ = value.__tensor_flatten__()
+            if is_polymorphic_act and attrs != ["elem"]:
+                # The unwrap accessor below assumes ACT's single inner tensor.
+                # Unreachable today (ACT always flattens to ["elem"]); if that
+                # ever changes we fail hard rather than misguard -- the wrapper's
+                # type/metadata guards were already skipped above, so there is no
+                # safe fallback left at this point.
+                raise RuntimeError(
+                    f"Expected AsyncCollectiveTensor to flatten to ['elem'], "
+                    f"got {attrs}"
+                )
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 # FakeScriptObject wraps the real opaque object during
@@ -3198,7 +3216,13 @@ class VariableBuilder:
                         "Only tensors and reference-type opaques are allowed "
                         "in tensor attrs."
                     )
-                inner_source = AttrSource(self.source, attr)
+                if is_polymorphic_act:
+                    # ACT flattens to the single attr "elem"; guard it through
+                    # an unwrap accessor so a plain Tensor at runtime (the
+                    # resolved collective) matches the same guard.
+                    inner_source = UnwrapCollectiveTensorSource(self.source)
+                else:
+                    inner_source = AttrSource(self.source, attr)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )
@@ -3314,7 +3338,6 @@ class VariableBuilder:
         value: int,
         dynamism: DimDynamic | None = None,
         context: SymIntSymbolicContext | None = None,
-        frame_state_entry: FrameStateSizeEntry | None = None,
     ) -> VariableTracker:
         if type(value) is not int:
             raise AssertionError(f"Expected exact int type, got {type(value)}")
@@ -3323,6 +3346,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         shape_env = self.tx.output.shape_env
+        frame_state_entry: FrameStateSizeEntry | None = None
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
@@ -3345,13 +3369,12 @@ class VariableBuilder:
 
             name = self.source.name
 
-            if frame_state_entry is None:
-                frame_state_entry = process_automatic_dynamic(
-                    self.tx,
-                    name,
-                    FrameStateSizeEntry.make_scalar(value),
-                    is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
-                )
+            frame_state_entry = process_automatic_dynamic(
+                self.tx,
+                name,
+                FrameStateSizeEntry.make_scalar(value),
+                is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
+            )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
