@@ -59,7 +59,7 @@ void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
 
 void WindowNCCL::tensor_deregister() {
   // Segment-level deregistration happens automatically when the mempool frees
-  // the segment (via NcclCachingAllocatorHook). Here we just forget the
+  // the segment (via NCCLCachingAllocatorHook). Here we just forget the
   // tensor; the barriers keep ranks aligned around the collective contract.
   pg_->barrier();
   TORCH_CHECK(win_ != nullptr, "WindowNCCL: double deregistration");

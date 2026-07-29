@@ -29,7 +29,7 @@ __all__: list[str] = [
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
-# This only effects users of bias subclasses
+# This only affects users of bias subclasses
 # If this is set to True, we will warn the user if they are not using the fused kernels
 # As well, it will raise warnings for all the reasons why the fused kernels can't be run.
 # To set this to True, run

@@ -858,6 +858,9 @@ def run_joint_graph_passes_on_hops(
     recursive partitioning of nested regions is left to downstream passes.
     """
     from torch._higher_order_ops import invoke_subgraph
+    from torch._higher_order_ops.invoke_subgraph import (
+        get_backward_nested_region_config,
+    )
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
         return len(mod.graph.find_nodes(op="output")[0].args[0])
@@ -1233,6 +1236,25 @@ def run_joint_graph_passes_on_hops(
             # inputs for the new partitioned backward graph. For the forward
             # graph, it was fine because the input signature remains same.
             new_bw_node.meta.pop("eager_input_vals", None)
+
+            # When the region sets backward-specific inductor config, compile the
+            # partitioned backward under it; the forward keeps its own config.
+            fw_region_config = fw_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            # get_backward_nested_region_config returns fw_config unchanged when
+            # the region has no distinct backward config, so identity tells us
+            # whether to stamp.
+            bw_region_config = get_backward_nested_region_config(fw_region_config)
+            if bw_region_config is not fw_region_config:
+                # Re-stamp on the fresh backward node's meta["custom"] (the source
+                # of truth: unlike a GraphModule's meta it survives FX transforms).
+                # Lowering picks it up via the subgraph-module mirror (_propagate_*)
+                # or the ir.py node fallback.
+                new_bw_node.meta["custom"] = {
+                    **new_bw_node.meta.get("custom", {}),
+                    "nested_region_config": bw_region_config,
+                }
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
