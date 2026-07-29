@@ -52,7 +52,7 @@ class BackendConfig:
 C10D_BACKENDS = (
     BackendConfig("gloo", "cpu", supports_bitwise_reductions=True),
     BackendConfig(
-        "nccl",
+        "nccl-legacy",
         "cuda",
         supports_coalescing=True,
         supports_dropped_p2p_work=True,
