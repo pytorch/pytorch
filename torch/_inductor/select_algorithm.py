@@ -3193,6 +3193,7 @@ class TritonTemplate(KernelTemplate):
             make_kernel_render,
             result.extra.strip("-").replace("-", ", "),
             bmreq,
+            split_k=kwargs.get("SPLIT_K", 1),
             log_info={
                 "tile_shape": str(
                     (
@@ -3363,9 +3364,14 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         workspace_arg: WorkspaceArg | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
         hint_override: int | None = None,
+        split_k: int = 1,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
+        # >1 for split-K templates whose reduction runs in a separate kernel
+        # (sum of partials + bias). Such a choice cannot host a fused epilogue,
+        # so a MultiTemplateBuffer containing one disables epilogue fusion.
+        self.split_k = split_k
         self.bmreq: TritonBenchmarkRequest = bmreq
         if log_info is None:
             log_info = {}
@@ -4195,16 +4201,26 @@ class AlgorithmSelectorCache(PersistentCache):
                     allowed_prologue_inps |= c.allowed_prologue_inps
 
             # No single winning choice yet; selection is deferred to benchmark fusion
+            multi_buf = torch._inductor.ir.MultiTemplateBuffer(
+                layout,
+                input_nodes,
+                get_timings,
+                choices,
+                allowed_prologue_inps,
+            )
+            # A split-K choice reduces in a separate kernel that only sums fp32
+            # partials + adds bias; it cannot host a fused epilogue -- store_output
+            # is bypassed, so the epilogue's output buffer ends up used-before-defined
+            # (buf### UnboundLocalError under JIT / "undeclared identifier" under AOTI).
+            # Disable epilogue fusion for this node so the epilogue runs as a separate
+            # kernel; split-K stays selectable for the raw GEMM.
+            if any(
+                isinstance(c, TritonTemplateCaller) and getattr(c, "split_k", 1) > 1
+                for c in choices
+            ):
+                multi_buf.allow_epilogue_fusion = False
             return (
-                torch._inductor.ir.TensorBox.create(
-                    torch._inductor.ir.MultiTemplateBuffer(
-                        layout,
-                        input_nodes,
-                        get_timings,
-                        choices,
-                        allowed_prologue_inps,
-                    )
-                ),
+                torch._inductor.ir.TensorBox.create(multi_buf),
                 None,
             )
 

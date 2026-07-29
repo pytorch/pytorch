@@ -3398,6 +3398,7 @@ class PythonWrapperCodegen(CodeGen):
             SizeArg,
             TensorArg,
             TMADescriptorArg,
+            WorkspaceArg,
         )
 
         original_name = kernel.__name__
@@ -3477,6 +3478,12 @@ class PythonWrapperCodegen(CodeGen):
                             dtype=dtype,
                         ),
                     )
+                elif isinstance(arg, WorkspaceArg):
+                    # A self-allocated scratch buffer (e.g. split-K partials).
+                    # Put it in the signature as a WorkspaceArg -- not a TensorArg
+                    # -- so config_of short-circuits it instead of resolving its
+                    # layout via scheduler.name_to_buf (which has no workspace).
+                    add_to_signature(idx, arg)
                 elif isinstance(arg, ir.Buffer):
                     add_arg(
                         idx,
