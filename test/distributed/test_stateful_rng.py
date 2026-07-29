@@ -17,6 +17,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 # Must match PhiloxDistributionKind::Normal.
 _NORMAL_DISTRIBUTION = 0
+# Must match PhiloxDistributionKind::Uniform.
+_UNIFORM_DISTRIBUTION = 1
 
 
 def _flatten_chunks(chunks: tuple[tuple[int, ...], ...]) -> list[int]:
@@ -179,6 +181,33 @@ class TestCheckpointableTensorRNG(TestCase):
 
 
 class TestPhiloxDistributionShardsOp(TestCase):
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_uniform_matches_dense(self, device, dtype):
+        expected_generator = torch.Generator(device=device).manual_seed(123)
+        torch.rand(11, device=device, generator=expected_generator)
+        dense = torch.empty(23, dtype=dtype, device=device).uniform_(
+            -0.2, 0.3, generator=expected_generator
+        )
+        expected_state = expected_generator.get_state()
+
+        actual_generator = torch.Generator(device=device).manual_seed(123)
+        torch.rand(11, device=device, generator=actual_generator)
+        actual = torch.empty(17, dtype=dtype, device=device)
+        torch.ops.aten._philox_distribution_shards_.default(
+            actual,
+            [23],
+            [3],
+            [0],
+            [17],
+            1,
+            _UNIFORM_DISTRIBUTION,
+            [-0.2, 0.3],
+            generator=actual_generator,
+        )
+
+        self.assertEqual(actual, dense[3:20], rtol=0, atol=0)
+        self.assertEqual(actual_generator.get_state(), expected_state)
+
     def test_invalid_calls_do_not_advance_generator(self, device):
         generator = torch.Generator(device=device).manual_seed(123)
 
@@ -203,6 +232,19 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 generator=generator,
             )
 
+        def call_uniform(params: list[float]) -> torch.Tensor:
+            return torch.ops.aten._philox_distribution_shards_.default(
+                torch.empty(1, device=device),
+                [1],
+                [0],
+                [0],
+                [1],
+                1,
+                _UNIFORM_DISTRIBUTION,
+                params,
+                generator=generator,
+            )
+
         assert_invalid_without_advancing(
             "normal expects std >= 0.0",
             lambda: call_normal([0.0, -1.0]),
@@ -220,6 +262,10 @@ class TestPhiloxDistributionShardsOp(TestCase):
                 [0.0, 1.0],
                 generator=generator,
             ),
+        )
+        assert_invalid_without_advancing(
+            "uniform_ expects to return a",
+            lambda: call_uniform([0.3, -0.2]),
         )
 
 

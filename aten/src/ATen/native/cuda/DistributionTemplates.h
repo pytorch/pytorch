@@ -424,19 +424,53 @@ struct RandomKernel {
 
 // ====================================================================================================================
 
+template <typename scalar_t>
+struct UniformDistributionSampler {
+  using result_type =
+      std::conditional_t<std::is_same_v<scalar_t, double>, double2, float4>;
+
+  __device__ result_type operator()(
+      curandStatePhilox4_32_10_t* state) const {
+    if constexpr (std::is_same_v<scalar_t, double>) {
+      return curand_uniform2_double(state);
+    } else {
+      return curand_uniform4(state);
+    }
+  }
+};
+
+template <typename scalar_t>
+struct UniformDistributionTransform {
+  using opmath_t = at::opmath_type<scalar_t>;
+
+  UniformDistributionTransform(double from, double to)
+      : from(static_cast<scalar_t>(from)),
+        to(static_cast<scalar_t>(to)),
+        range(static_cast<opmath_t>(this->to - this->from)) {}
+
+  __device__ scalar_t operator()(opmath_t rand) const {
+    auto value = static_cast<scalar_t>(rand * range + from);
+    // Preserve the legacy (0, 1] to [0, 1) endpoint reversal. See
+    // https://github.com/pytorch/pytorch/issues/16706 and #96947.
+    return value == to ? from : value;
+  }
+
+  scalar_t from;
+  scalar_t to;
+  opmath_t range;
+};
+
 template<typename scalar_t, typename accscalar_t, typename RNG, typename transform_t>
 void uniform_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
-  if (std::is_same_v<scalar_t, double>) {
-    distribution_nullary_kernel<scalar_t, accscalar_t, double2>(iter,
+  using sampler_t = UniformDistributionSampler<scalar_t>;
+  distribution_nullary_kernel<
+      scalar_t,
+      accscalar_t,
+      typename sampler_t::result_type>(
+      iter,
       gen,
-      [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 { return curand_uniform2_double(state); },
+      sampler_t{},
       transform);
-  } else {
-    distribution_nullary_kernel<scalar_t, accscalar_t, float4>(iter,
-      gen,
-      [] __device__ (curandStatePhilox4_32_10_t* state) -> float4 { return curand_uniform4(state); },
-      transform);
-  }
 }
 
 template <typename scalar_t>
@@ -508,24 +542,9 @@ struct NormalKernel {
 template<typename RNG>
 void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
-    auto from = static_cast<scalar_t>(from_);
-    auto to = static_cast<scalar_t>(to_);
     using opmath_t = at::opmath_type<scalar_t>;
-    auto range = static_cast<opmath_t>(to-from);
-    // define lambda to reverse bounds, multiply 'range' and add 'from_'
-    auto uniform_func = [range, from, to] __device__ (opmath_t rand) {
-      // Compute output value before reversing the bounds
-      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/96947
-      auto value = static_cast<scalar_t>(rand * range + from);
-      // reverse the bounds of curand4 from (0, 1] to [0, 1)
-      // Note that this method is from legacy THCTensorRandom and is likely to give
-      // you more 0-s, since, the probability of getting 1-s is higher than 0-s and
-      // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
-      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
-      auto reverse_bound_value = value == to ? from : value;
-      return reverse_bound_value;
-    };
-    uniform_and_transform<scalar_t, opmath_t>(iter, gen, uniform_func);
+    uniform_and_transform<scalar_t, opmath_t>(
+        iter, gen, UniformDistributionTransform<scalar_t>(from_, to_));
    });
 }
 

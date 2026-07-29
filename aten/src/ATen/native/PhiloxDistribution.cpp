@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/PhiloxDistribution.h>
@@ -24,6 +25,9 @@ namespace {
 
 void validate_normal_std(double stddev);
 
+template <typename scalar_t>
+void validate_uniform_bounds(const Tensor& self, double low, double high);
+
 } // anonymous namespace
 
 Tensor& _philox_distribution_shards_symint(
@@ -43,7 +47,8 @@ Tensor& _philox_distribution_shards_symint(
   const auto distribution_kind =
       static_cast<PhiloxDistributionKind>(distribution);
   TORCH_CHECK(
-      distribution_kind == PhiloxDistributionKind::Normal,
+      distribution_kind == PhiloxDistributionKind::Normal ||
+          distribution_kind == PhiloxDistributionKind::Uniform,
       "_philox_distribution_shards_: unsupported distribution kind ",
       distribution);
   switch (distribution_kind) {
@@ -59,6 +64,27 @@ Tensor& _philox_distribution_shards_symint(
           "_philox_distribution_shards_: parameters must be real");
       validate_normal_std(params[1].toDouble());
       break;
+    case PhiloxDistributionKind::Uniform: {
+      TORCH_CHECK(
+          params.size() == 2,
+          "_philox_distribution_shards_: distribution kind ",
+          distribution,
+          " expects 2 parameters, got ",
+          params.size());
+      TORCH_CHECK(
+          !params[0].isComplex() && !params[1].isComplex(),
+          "_philox_distribution_shards_: parameters must be real");
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          kHalf,
+          kBFloat16,
+          self.scalar_type(),
+          "_philox_distribution_shards_",
+          [&] {
+            validate_uniform_bounds<scalar_t>(
+                self, params[0].toDouble(), params[1].toDouble());
+          });
+      break;
+    }
   }
   philox_distribution_shards_stub(
       self.device().type(),
@@ -81,6 +107,32 @@ void validate_normal_std(double stddev) {
       stddev >= 0.0,
       "normal expects std >= 0.0, but found std ",
       stddev);
+}
+
+template <typename scalar_t>
+void validate_uniform_bounds(const Tensor& self, double low, double high) {
+  const auto min =
+      static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+  const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
+  TORCH_CHECK(
+      low >= min && low <= max, "from is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      high >= min && high <= max, "to is out of bounds for ", self.dtype());
+  TORCH_CHECK(
+      low <= high,
+      "uniform_ expects to return a [from, to) range, but found from=",
+      low,
+      " > to=",
+      high);
+  TORCH_CHECK(
+      high - low <= max,
+      "uniform_ expects to-from <= std::numeric_limits<",
+      toString(self.scalar_type()),
+      ">::max(), but found to=",
+      high,
+      " and from=",
+      low,
+      " which result in to-from to exceed the limit");
 }
 
 bool philox_shard_rectangles_overlap(
@@ -161,7 +213,7 @@ ValidatedPhiloxShardMetadata validate_philox_shard_metadata(
           ": global_shape has more than INT_MAX elements");
       global_numel *= size;
     }
-    // Dense CUDA normal changes launch policy when TensorIterator splits here.
+    // Dense CUDA distributions change launch policy when TensorIterator splits here.
     const auto max_32bit_offset = std::numeric_limits<int32_t>::max();
     TORCH_CHECK(
         global_numel - 1 <=

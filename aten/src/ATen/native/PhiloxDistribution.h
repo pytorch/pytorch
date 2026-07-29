@@ -17,6 +17,7 @@ namespace native {
 // Numeric values cross the dispatcher and must match Python callers.
 enum class PhiloxDistributionKind : int64_t {
   Normal = 0,
+  Uniform = 1,
 };
 
 using philox_distribution_shards_fn = void (*)(
