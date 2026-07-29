@@ -162,27 +162,43 @@ bool can_use_mem_efficient_attention(
   return true;
 }
 
-bool priority_order_init = false;
+// Prefer Flash for small heads where it wins on BMG A/B (esp. decode).
+// For larger heads (notably head_dim=128 decode), oneDNN overrideable is faster.
+// Symbolic head_dim: keep overrideable-first (conservative; avoids materializing).
+constexpr int64_t kXPUFlashPreferredMaxHeadDim = 64;
+
+bool prefer_flash_first(sdp::sdp_params const& params) {
+  const auto head_dim = params.query.sym_size(-1);
+  return !head_dim.is_symbolic() && head_dim.expect_int() <= kXPUFlashPreferredMaxHeadDim;
+}
 
 std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     sdp::sdp_params const& params) {
-  if (!priority_order_init) {
-    priority_order_init = true;
-    const std::vector<int64_t> priority_order = {
+  // efficient_attention is not implemented on XPU (maps to math).
+  std::vector<int64_t> order;
+  if (prefer_flash_first(params)) {
+    order = {
+        static_cast<int64_t>(at::SDPBackend::flash_attention),
+        static_cast<int64_t>(at::SDPBackend::overrideable),
+        static_cast<int64_t>(at::SDPBackend::math),
+        static_cast<int64_t>(at::SDPBackend::efficient_attention),
+        static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
+  } else {
+    order = {
         static_cast<int64_t>(at::SDPBackend::overrideable),
         static_cast<int64_t>(at::SDPBackend::flash_attention),
         static_cast<int64_t>(at::SDPBackend::math),
         static_cast<int64_t>(at::SDPBackend::efficient_attention),
         static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
-    at::globalContext().setSDPPriorityOrder(priority_order);
   }
+  // Keep Python introspection (_get_sdp_priority_order) in sync with this call.
+  at::globalContext().setSDPPriorityOrder(order);
   return at::globalContext().sDPPriorityOrder();
 }
 
 sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
-  // This function defines the priority order of the different sdp backends
-  // 1. Flash Attention
-  // 2. Math fallback
+  // Priority: Flash first when head_dim <= 64; else overrideable then Flash;
+  // then math (efficient_attention is unsupported and falls back to math).
   auto& ctx = at::globalContext();
   // use overridable linked to onednn as overridable implementation
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() &&
