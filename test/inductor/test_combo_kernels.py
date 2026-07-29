@@ -522,6 +522,104 @@ class ComboKernelTests(_ComboAutotuneCountMixin, TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
+    @torch._functorch.config.patch("cse", False)
+    @parametrize("memory_gate", [False, True])
+    @parametrize("second_consumer_copies", [1, 2])
+    def test_data_independent_cse_mixed_consumers(
+        self, memory_gate, second_consumer_copies
+    ):
+        import torch.nn.functional as F
+        from torch._inductor import ir
+        from torch._inductor.scheduler import Scheduler
+
+        def make_mask(size, dtype):
+            idx = torch.arange(size, device=GPU_TYPE)
+            causal = idx[:, None] >= idx[None, :]
+            return torch.where(causal, 0.0, -1.0).to(dtype)
+
+        def fn(q, k, v):
+            size = q.shape[-2]
+            lhs = make_mask(size, q.dtype)
+            rhs = make_mask(size, q.dtype)
+            mm = torch.mm(lhs, rhs)
+            if second_consumer_copies == 1:
+                other = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=make_mask(size, q.dtype)
+                )
+            else:
+                other = torch.mm(make_mask(size, q.dtype), make_mask(size, q.dtype))
+            return mm, other
+
+        inps = [
+            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        expected = fn(*inps)
+        observed_partitions = set()
+        cross_consumer_partitions = []
+        speedup_by_combo_kernel = Scheduler.speedup_by_combo_kernel
+
+        def cse_signature(node):
+            if node.read_writes.reads:
+                return None
+            output_signatures = []
+            for output in node.get_outputs():
+                signature = output.node.annotations.get(
+                    ir.DATA_INDEPENDENT_CSE_SIGNATURE
+                )
+                if not isinstance(signature, tuple):
+                    return None
+                output_signatures.append(
+                    (
+                        output.node.get_device(),
+                        output.node.get_dtype(),
+                        tuple(output.node.get_size()),
+                        signature,
+                    )
+                )
+            return tuple(output_signatures)
+
+        def capture_candidates(scheduler, nodes):
+            signature_groups = {}
+            for node in nodes:
+                if (signature := cse_signature(node)) is not None:
+                    signature_groups.setdefault(signature, []).append(node)
+            for equivalent_nodes in signature_groups.values():
+                if len(equivalent_nodes) < 2:
+                    continue
+                partition = frozenset(equivalent_nodes)
+                consumer_sets = {
+                    scheduler._combo_canonical_consumers(node)
+                    for node in equivalent_nodes
+                }
+                observed_partitions.add(partition)
+                if len(consumer_sets) > 1:
+                    cross_consumer_partitions.append(partition)
+            return speedup_by_combo_kernel(scheduler, nodes)
+
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "combo_kernel_peak_memory_pct_threshold": (
+                        0.05 if memory_gate else None
+                    )
+                }
+            ),
+            patch.object(Scheduler, "speedup_by_combo_kernel", capture_candidates),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), *inps)
+
+        self.assertEqual(out, expected)
+        self.assertEqual(cross_consumer_partitions, [])
+        self.assertEqual(
+            sorted(len(partition) for partition in observed_partitions),
+            [2] * second_consumer_copies,
+        )
+        self.assertIn("'num_kernels': 2", "\n".join(code))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
     @parametrize("compile_time_autotune", [False, True])
     def test_reduce_functions(self, compile_time_autotune):
         def test_reduce(a, b, c, d):
