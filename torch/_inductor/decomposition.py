@@ -5,7 +5,7 @@ import math
 import operator
 import sys
 from collections.abc import Callable
-from typing import Any, TypeAlias, TypeVar
+from typing import Any, cast, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -463,7 +463,16 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    def add_input(out: torch.Tensor) -> torch.Tensor:
+        if alpha != 1:
+            out = alpha * out
+        if beta != 1:
+            return out + beta * self
+        return out + self
+
     if mat1.device.type not in ["cpu", "mps"]:
+        if beta == 0 and mat1.device.type == "cuda":
+            return NotImplemented
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
@@ -471,7 +480,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = mat1 * mat2
-            return alpha * out + beta * self
+            return add_input(out)
 
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
@@ -913,6 +922,30 @@ def randint(
     **kwargs: Any,
 ) -> torch.Tensor:
     return aten.randint.low(0, high, size, **kwargs)
+
+
+@register_decomposition(prims.uniform)
+def uniform(
+    shape: list[int | torch.SymInt],
+    *,
+    low: torch.types.Number,
+    high: torch.types.Number,
+    dtype: torch.dtype,
+    device: torch.device,
+    stride: list[int | torch.SymInt],
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    if generator is None:
+        rand_samples = torch.rand(shape, dtype=dtype, device=device)
+    else:
+        rand_samples = torch.rand(
+            shape, generator=generator, dtype=dtype, device=device
+        )
+    res = (high - low) * rand_samples + low
+
+    if tuple(stride) != utils.make_contiguous_strides_for(cast(list[int], shape)):
+        return res.as_strided(shape, stride)
+    return res
 
 
 @register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)

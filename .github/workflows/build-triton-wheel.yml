@@ -34,68 +34,88 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: lf
+
   build-wheel:
     if: github.repository_owner == 'pytorch'
     name: "Build Triton Wheel"
+    needs: get-label-type
     runs-on: ${{ matrix.runs_on }}
+    # Run inside the manylinux builder on OSDC (ARC has no host docker daemon),
+    # instead of docker run/exec on an EC2 host.
+    container:
+      image: ${{ matrix.docker_image }}
     strategy:
       fail-fast: false
       matrix:
         py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
-        docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
             rocm_version: "7.2"
-            runs_on: "linux.4xlarge"
+            runs_on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+            docker_image: "pytorch/manylinux2_28-builder:rocm7.2"
           - device: "cuda"
             rocm_version: ""
-            runs_on: "linux.4xlarge"
+            runs_on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+            docker_image: "pytorch/manylinux2_28-builder:cpu"
           - device: "xpu"
             rocm_version: ""
-            runs_on: "linux.4xlarge"
+            runs_on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+            docker_image: "pytorch/manylinux2_28-builder:cpu"
           - device: "aarch64"
             rocm_version: ""
-            runs_on: "linux.arm64.2xlarge"
+            runs_on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
+            docker_image: "pytorch/manylinux2_28_aarch64-builder:cpu-aarch64"
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && 'pytorch/manylinux2_28_aarch64-builder:cpu-aarch64' || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
       PLATFORM: 'manylinux_2_28_x86_64'
     steps:
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add sudo shim
+        shell: bash
+        # We run as root in the manylinux builder. It ships a gcc-toolset `sudo`
+        # wrapper that exec's /usr/bin/sudo (missing) with options like -E, so
+        # setup-linux's `sudo chmod` fails. Provide /usr/bin/sudo as a passthrough
+        # that drops leading sudo options and runs the command directly.
+        run: |
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'while [ $# -gt 0 ]; do' \
+            '  case "$1" in' \
+            '    --) shift; break ;;' \
+            '    -*) shift ;;' \
+            '    *) break ;;' \
+            '  esac' \
+            'done' \
+            'exec "$@"' \
+            > /usr/bin/sudo
+          chmod +x /usr/bin/sudo
 
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           submodules: false
-
-      - name: Login to ECR
-        uses: ./.github/actions/ecr-login
-
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ env.DOCKER_IMAGE }}
+          use-arc: true
 
       - name: Build Triton wheel
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+        # Runs inside the manylinux builder container (matrix.docker_image), so the
+        # build commands run directly rather than via docker run/exec.
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          container_name=$(docker run \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}:/pytorch" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w /artifacts/ \
-            "${DOCKER_IMAGE}"      \
-          )
 
           # Determine python executable for given version
           case $PY_VERS in
@@ -129,49 +149,42 @@ jobs:
             ;;
           esac
 
+          # Put the selected interpreter's bin dir on PATH so the pip-installed
+          # cmake (and python/pip) are found by triton's setup.py. In the original
+          # docker-exec env this was on PATH; in container: mode it is not.
+          export PATH="$(dirname "${PYTHON_EXECUTABLE}"):${PATH}"
+
           RELEASE=""
           WITH_CLANG_LDD=""
           if [[ "${IS_RELEASE_TAG}" == true ]]; then
             RELEASE="--release"
           fi
 
-          docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==3.0.1 auditwheel wheel
-          set +e
-          docker exec -t "${container_name}" command -v pip
-          has_pip=$?
-          set -e
-          if [ $has_pip -eq 0 ] ; then
-              docker exec -t "${container_name}" pip install -U cmake --force-reinstall
-          else
-              docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U cmake --force-reinstall
-          fi
+          yum install -y zlib-devel zip
+          "${PYTHON_EXECUTABLE}" -m pip install -U setuptools==78.1.0 pybind11==3.0.1 auditwheel wheel
+          "${PYTHON_EXECUTABLE}" -m pip install -U cmake --force-reinstall
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm" || "${{ matrix.device }}" == "aarch64" ) ]]; then
             # With this install, it gets clang 16.0.6.
-            docker exec -t "${container_name}" dnf install clang lld -y
+            dnf install clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
 
-          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
+          cd "${RUNNER_TEMP}/artifacts"
+          "${PYTHON_EXECUTABLE}" "${GITHUB_WORKSPACE}/.github/scripts/build_triton_wheel.py" --device="${BUILD_DEVICE}" ${RELEASE} ${WITH_CLANG_LDD}
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
-            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} --exclude libtriton.so //artifacts/*.whl"
+            auditwheel repair --plat "${PLATFORM}" --exclude libtriton.so "${RUNNER_TEMP}/artifacts/"*.whl -w "${RUNNER_TEMP}/artifacts/wheelhouse"
           else
-            docker exec -t "${container_name}"  bash -c "mkdir //artifacts/wheelhouse"
-            docker exec -t "${container_name}"  bash -c "mv //artifacts/*.whl //artifacts/wheelhouse/"
+            mkdir -p "${RUNNER_TEMP}/artifacts/wheelhouse"
+            mv "${RUNNER_TEMP}/artifacts/"*.whl "${RUNNER_TEMP}/artifacts/wheelhouse/"
           fi
-          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts/wheelhouse
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheelhouse/*
-
-      - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
 
   build-wheel-win:
     if: github.repository_owner == 'pytorch'
@@ -180,7 +193,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:
