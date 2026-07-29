@@ -100,14 +100,15 @@ def check_file(filename: str) -> list[LintMessage]:
     1. All function declarations are within TORCH_FEATURE_VERSION blocks
     2. New functions added in this commit use the current version macro
 
-    For the AOTI shim (torch/csrc/inductor/aoti_torch/c/shim.h), we only
+    For the manual AOTI shims (torch/csrc/inductor/aoti_torch/c/*.h), we only
     enforce versioning on NEW function declarations, since existing functions
     are intentionally not version-guarded.
     """
     lint_messages: list[LintMessage] = []
 
-    # Check if this is the AOTI shim - only enforce versioning on new lines
-    is_aoti_shim = "torch/csrc/inductor/aoti_torch/c/shim.h" in filename
+    # Check if this is a manual AOTI shim - only enforce versioning on new lines,
+    # since existing declarations in these headers are intentionally unversioned.
+    is_aoti_shim = "torch/csrc/inductor/aoti_torch/c/" in filename
 
     # Get current version
     current_version = get_current_version()
