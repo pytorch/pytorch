@@ -254,26 +254,22 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compile_calls, 1)
         compiled.assert_called_once_with("second")
 
-    def test_compiled_cache_allows_parallel_configs(self):
-        jit_func = SimpleNamespace()
-        compile_barrier = threading.Barrier(2)
-
-        def compiler(*args):
-            compile_barrier.wait(5)
-            return mock.Mock()
-
-        def invoke(key):
-            return run_cached_flydsl(
+    def test_compiled_cache_hit_skips_lock(self):
+        compiled = mock.Mock()
+        jit_func = SimpleNamespace(_compiled_cache={("param",): compiled})
+        with mock.patch(
+            "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
+        ) as cache_lock:
+            result = run_cached_flydsl(
                 jit_func,
-                object(),
-                constexpr_param=_CacheParam(key),
-                compiler=compiler,
-                dispatch_args=(),
+                constexpr_param=_CacheParam(),
+                compiler=mock.Mock(),
+                dispatch_args=("dispatch",),
             )
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = [pool.submit(invoke, key) for key in ("first", "second")]
-            self.assertTrue(all(result.result() is not None for result in results))
+        self.assertIs(result, compiled)
+        cache_lock.__enter__.assert_not_called()
+        compiled.assert_called_once_with("dispatch")
 
     def test_compiled_cache_retries_after_failure(self):
         jit_func = SimpleNamespace()

@@ -26,27 +26,30 @@ def run_cached_flydsl(
 ) -> Any:
     """Cache a layout-dynamic FlyDSL dispatcher by constexpr param."""
     cache_key = constexpr_param.__cache_signature__()
+    compiled_cache = getattr(jit_func, "_compiled_cache", None)
+    if compiled_cache is not None:
+        compiled = compiled_cache.get(cache_key)
+        if compiled is not None:
+            compiled(*dispatch_args)
+            return compiled
+
+    dispatch_after_wait = False
     with _compiled_cache_lock:
         compiled_cache = getattr(jit_func, "_compiled_cache", None)
         if compiled_cache is None:
             compiled_cache = {}
             jit_func._compiled_cache = compiled_cache
-        compile_locks = getattr(jit_func, "_compiled_cache_locks", None)
-        if compile_locks is None:
-            compile_locks = {}
-            jit_func._compiled_cache_locks = compile_locks
-        compile_lock = compile_locks.setdefault(cache_key, threading.Lock())
 
-    with compile_lock:
         compiled = compiled_cache.get(cache_key)
         if compiled is None:
             # FlyDSL compilation executes the first invocation using compile_args.
             compiled = compiler(jit_func, *compile_args)
             compiled_cache[cache_key] = compiled
-            return compiled
+        else:
+            dispatch_after_wait = True
 
-    # Keep steady-state kernel launches outside all compilation locks.
-    compiled(*dispatch_args)
+    if dispatch_after_wait:
+        compiled(*dispatch_args)
     return compiled
 
 
