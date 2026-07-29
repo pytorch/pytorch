@@ -2082,10 +2082,6 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         if isinstance(node.node, ComputedBuffer)
                     ]
                     try:
-                        if ctb.variant.name != "SCALED_GEMM":
-                            raise NotImplementedError(
-                                "dense NVGEMM providers require an EVT DAG"
-                            )
                         reads, writes, var_renames, evt_code = (
                             GemmEpilogueIRCodegen.from_buffers(
                                 original_buffer_name,

@@ -1262,6 +1262,7 @@ class NVUniversalGemmKernel(Kernel):
                     self.epilogue_writes,
                     self.epilogue_var_renames,
                 ) = _build_bias_epilogue(bias_node.get_name(), output_node.get_name())
+                self.epilogue_is_cutedsl = True
             else:
                 (
                     self.epilogue_fn_code,

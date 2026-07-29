@@ -225,7 +225,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, matmul(a, b))
         self.assertIn("swap_ab=True", code)
-        self.assertIn("EpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
 
     @parametrize(
@@ -270,7 +270,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, matmul(a, b, scale), atol=0.7, rtol=1e-2)
         self.assertIn("swap_ab=True", code)
-        self.assertIn("EpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
 
     def test_matmul_swap_ab_dynamic_epilogue(self):
         k = 512
@@ -312,7 +312,7 @@ class TestNVUniversalGemm(TestCase):
             )
 
         self.assertIn("swap_ab=True", code)
-        self.assertIn("EpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
 
     def test_cudagraphs_intermediate_addmm(self):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
@@ -1292,8 +1292,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return torch.relu(result), result + 1.0
 
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
-        self.assertIn("EpilogueArguments", code)
-        self.assertNotIn("CuTeDSLEpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
