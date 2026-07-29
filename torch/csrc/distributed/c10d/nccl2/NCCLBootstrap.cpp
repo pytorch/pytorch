@@ -11,6 +11,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
+#include <exception>
 #include <set>
 
 namespace c10d::nccl2 {
@@ -74,9 +75,7 @@ ncclUniqueId NCCLBootstrap::exchangeUniqueId(std::string_view name) {
   return uniqueId;
 }
 
-// TorchComm-layer hint keys that are consumed by the backend init code
-// (ProcessGroupNCCL::init), not by ncclConfig.  Skip them here to avoid
-// spurious "unsupported hint" warnings.
+// TorchComm-layer hint keys that are not part of ncclConfig.
 static const std::set<std::string> kLayerHints = {
     "is_high_priority_stream",
     std::string(kHintMaxEventPoolSize),
@@ -169,7 +168,7 @@ void populateNcclConfigFromHints(
 
 ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
-    const std::unordered_map<std::string, std::string>& hints) {
+    const ncclConfig_t& base_config) {
   c10::cuda::CUDAGuard gpuGuard(device_);
   ncclUniqueId uniqueId;
   ncclComm_t nccl_comm = nullptr;
@@ -179,20 +178,37 @@ ncclComm_t NCCLBootstrap::createNcclComm(
   // TODO: add logging on failures and successes
   // TODO: use scalable init
   // TODO: get the local rank
-  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  ncclConfig_t config = base_config;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name.c_str();
 #endif
 
-  // Populate NCCL config from user-provided hints
-  populateNcclConfigFromHints(config, hints, name);
-
   ncclResult_t ncclErr = nccl_api_->commInitRankConfig(
       &nccl_comm, comm_size_, uniqueId, rank_, &config);
-  if (ncclErr != ncclSuccess || nccl_comm == nullptr) {
+  if (nccl_comm == nullptr) {
     throw std::runtime_error(
         "Failed to initialize NCCL communicator: " +
         std::string(nccl_api_->getErrorString(ncclErr)));
+  }
+  try {
+    waitForNcclCompletion(
+        *nccl_api_,
+        nccl_comm,
+        ncclErr,
+        timeout_,
+        "Failed to initialize NCCL communicator");
+  } catch (...) {
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm,
+          nccl_api_->commAbort(nccl_comm),
+          timeout_,
+          "Failed to abort NCCL communicator after initialization failure");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << e.what();
+    }
+    throw;
   }
 
   return nccl_comm;

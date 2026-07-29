@@ -3,15 +3,17 @@
 # Tests specific to the in-tree torchcomms NCCL backends.
 
 import time
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import WorkResult
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, TEST_CUDA
 
 
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
@@ -46,6 +48,163 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         torch.cuda.synchronize()
         time.sleep(2)
         dist.barrier()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_shared_options_type(self) -> None:
+        self.assertIs(dist.ProcessGroupNCCL2.Options, dist.ProcessGroupNCCL.Options)
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.config.cga_cluster_size = 2
+        opts.config.max_ctas = 4
+        self.assertEqual(opts.config.cga_cluster_size, 2)
+        self.assertEqual(opts.config.max_ctas, 4)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_restores_current_device(self) -> None:
+        tensor = torch.ones(4, device=self.device)
+        other_device = torch.device("cuda", 1 - self.rank)
+        torch.cuda.set_device(other_device)
+
+        dist.all_reduce(tensor)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_device_all_gather(self) -> None:
+        tensor = torch.full((4,), float(self.rank), device=self.device)
+        other_device = torch.device("cuda", 1 - self.rank)
+        outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
+        outputs[-1] = torch.empty(4, device=other_device)
+        torch.cuda.set_device(other_device)
+
+        work = dist.all_gather(outputs, tensor, async_op=True)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        work.wait()
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        torch.cuda.synchronize(self.device)
+        torch.cuda.synchronize(other_device)
+        for rank, output in enumerate(outputs):
+            self.assertEqual(output, torch.full_like(output, rank))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_list_collective_rejects_foreign_device(self) -> None:
+        other_device = torch.device("cuda", 1 - self.rank)
+        inputs = [
+            torch.full((1,), float(self.rank), device=self.device)
+            for _ in range(self.world_size)
+        ]
+        inputs[-1] = torch.full((1,), float(self.rank), device=other_device)
+        outputs = [torch.empty(1, device=self.device) for _ in range(self.world_size)]
+
+        with self.assertRaisesRegex(RuntimeError, "Expected tensor on"):
+            dist.all_to_all(outputs, inputs)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_default_wait_is_stream_ordered(self) -> None:
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int(250 * get_cycles_per_ms()))
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+
+        work.wait()
+
+        self.assertFalse(torch.cuda.current_stream().query())
+        torch.cuda.synchronize()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_future_result_success(self) -> None:
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+
+        result = work.get_future_result().wait()
+
+        self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
+        self.assertTrue(work.is_completed())
+
+
+class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
+    """Base for groups initialized with backend specific options."""
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.set_device(self.rank)
+
+    def _check_all_reduce(self) -> None:
+        t = torch.full((4,), float(self.rank), device=self.device)
+        dist.all_reduce(t)
+        expected = float(sum(range(self.world_size)))
+        self.assertEqual(t, torch.full((4,), expected, device=self.device))
+
+
+class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        opts.config.cga_cluster_size = 2
+        opts.config.max_ctas = 4
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_with_config(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertEqual(backend.options.config.cga_cluster_size, 2)
+        self.assertEqual(backend.options.config.max_ctas, 4)
+        self.assertTrue(backend.options.is_high_priority_stream)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.config.blocking = 0
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collectives_with_nonblocking_communicator(self) -> None:
+        self._check_all_reduce()
+
+        tensor = torch.full((4,), float(self.rank), device=self.device)
+        gathered = (
+            [torch.empty_like(tensor) for _ in range(self.world_size)]
+            if self.rank == 0
+            else None
+        )
+        dist.gather(tensor, gathered, dst=0)
+        if self.rank == 0:
+            for rank, output in enumerate(gathered):
+                self.assertEqual(output, torch.full_like(output, rank))
+
+        output = torch.empty_like(tensor)
+        scatter_list = (
+            [torch.full_like(tensor, float(rank)) for rank in range(self.world_size)]
+            if self.rank == 0
+            else None
+        )
+        dist.scatter(output, scatter_list, src=0)
+        self.assertEqual(output, tensor)
 
 
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
@@ -89,6 +248,74 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
             self.assertEqual(chunk, torch.full_like(chunk, rank))
 
 
+class _ProcessGroupNCCL2RecoverableWorkTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.enable_reconfigure = True
+        return opts
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
+        if rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
+        store = dist.FileStore(rdvz_file, world_size)
+        store.set(f"work_handle_{rank}", dist._get_reconfigure_handle())
+        handles = [
+            store.get(f"work_handle_{peer}").decode("utf-8")
+            for peer in range(world_size)
+        ]
+        dist._reconfigure(1, handles, timeout=cls.timeout).wait()
+
+
+class ProcessGroupNCCL2WorkTimeoutTest(_ProcessGroupNCCL2RecoverableWorkTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_explicit_timeout_includes_prelaunch_stall(self) -> None:
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int(500 * get_cycles_per_ms()))
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+
+        with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+            work.wait(timeout=timedelta(milliseconds=50))
+
+        self.assertFalse(torch.cuda.current_stream().query())
+        self.assertTrue(work.is_completed())
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.TIMEOUT
+        )
+        torch.cuda.synchronize()
+
+
+class ProcessGroupNCCL2WorkErrorTest(_ProcessGroupNCCL2RecoverableWorkTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_reports_communicator_error(self) -> None:
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+
+        work = None
+        if self.rank == 0:
+            work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
+            time.sleep(0.5)
+            dist.get_backend_impl(device=self.device).abort()
+            self.assertTrue(work.is_completed())
+            self.assertFalse(work.is_success())
+            self.assertIsInstance(work.exception(), dist.DistBackendError)
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()),
+                WorkResult.COMM_ERROR,
+            )
+            with self.assertRaisesRegex(dist.DistBackendError, "NCCL operation failed"):
+                work.wait()
+        else:
+            time.sleep(1)
+
+
 class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
     @classmethod
     def backend_str(cls) -> str:
@@ -119,6 +346,24 @@ class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
 
         expected = 1 if nxt == prev else 2
         self.assertGreaterEqual(backend._num_active_channels(), expected)
+
+
+class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
+class ProcessGroupNCCLLazyWorkTimeoutTest(ProcessGroupNCCL2WorkTimeoutTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
+class ProcessGroupNCCLLazyWorkErrorTest(ProcessGroupNCCL2WorkErrorTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
 
 
 if __name__ == "__main__":
