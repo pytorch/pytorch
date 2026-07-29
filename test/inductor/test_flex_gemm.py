@@ -336,16 +336,16 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         mark_flex_gemm_body_gemm_node(graph_module, gemm_op)
         self.assertFalse(check(match))
 
-    def test_epilogue_graph_normalizes_structural_nodes(self):
+    def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
 
         from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueGraph
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            FlexGemmGetItemForm,
-            FlexGemmReductionForm,
-            FlexGemmSqueezeForm,
-            FlexGemmUnsupportedReductionForm,
-            FlexGemmViewForm,
+        from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
+            FlexGemmNormalizedGetItem,
+            FlexGemmNormalizedReduction,
+            FlexGemmNormalizedSqueeze,
+            FlexGemmNormalizedUnsupportedReduction,
+            FlexGemmNormalizedView,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -356,35 +356,44 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             return reduced.squeeze(-1), maximum, grouped.var(dim=-1)
 
         graph_module = make_fx(body)(torch.randn(4, 8))
-        nodes = {node.target: node for node in graph_module.graph.nodes}
-        forms = FlexGemmEpilogueGraph.from_graph_module(graph_module).structural_forms
-        view = forms[nodes[torch.ops.aten.view.default]]
-        self.assertEqual(
-            view,
-            FlexGemmViewForm(nodes["x_1"], (4, 2, 4)),
+        normalized_nodes = FlexGemmEpilogueGraph.from_graph_module(
+            graph_module
+        ).normalized_nodes
+        nodes = {
+            node.target: node
+            for node in graph_module.graph.nodes
+            if node.target is not operator.getitem
+        }
+        placeholder = next(
+            node for node in graph_module.graph.nodes if node.op == "placeholder"
         )
-        reduction = forms[nodes[torch.ops.aten.sum.dim_IntList]]
-        self.assertEqual(
-            reduction,
-            FlexGemmReductionForm(
-                nodes[torch.ops.aten.view.default], [-1], True, None, "sum"
-            ),
+        view = nodes[torch.ops.aten.view.default]
+        reduction = nodes[torch.ops.aten.sum.dim_IntList]
+        maximum = nodes[torch.ops.aten.max.dim]
+        getitem = next(
+            node
+            for node in graph_module.graph.nodes
+            if node.target is operator.getitem and node.args == (maximum, 0)
         )
-        squeeze = forms[nodes[torch.ops.aten.squeeze.dim]]
+        squeeze = nodes[torch.ops.aten.squeeze.dim]
+        unsupported = nodes[torch.ops.aten.var.correction]
         self.assertEqual(
-            squeeze,
-            FlexGemmSqueezeForm(nodes[torch.ops.aten.sum.dim_IntList]),
+            normalized_nodes[view], FlexGemmNormalizedView(placeholder, (4, 2, 4))
         )
-        getitem = forms[nodes[operator.getitem]]
         self.assertEqual(
-            getitem,
-            FlexGemmGetItemForm(nodes[torch.ops.aten.max.dim], 1),
+            normalized_nodes[reduction],
+            FlexGemmNormalizedReduction(view, [-1], True, None, "sum"),
         )
-        unsupported = forms[nodes[torch.ops.aten.var.correction]]
         self.assertEqual(
-            unsupported,
-            FlexGemmUnsupportedReductionForm(
-                nodes[torch.ops.aten.view.default],
+            normalized_nodes[squeeze], FlexGemmNormalizedSqueeze(reduction)
+        )
+        self.assertEqual(
+            normalized_nodes[getitem], FlexGemmNormalizedGetItem(maximum, 0)
+        )
+        self.assertEqual(
+            normalized_nodes[unsupported],
+            FlexGemmNormalizedUnsupportedReduction(
+                view,
                 str(torch.ops.aten.var.correction),
             ),
         )
@@ -1480,7 +1489,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
         match = FlexGemmLocalReduceMatch(aux, geometry)
-        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}, {}))
+        analysis = FlexGemmLocalReduceAnalysis(
+            FlexGemmEpilogueGraph(dependencies={}, normalized_nodes={})
+        )
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
@@ -2983,9 +2994,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("output_layout: dense", analysis_report)
         self.assertIn("config_constraints:\n  axis=N, group=32", analysis_report)
         self.assertNotIn("recognized_dataflow:", analysis_report)
-        self.assertNotIn("structural_forms:", analysis_report)
-        self.assertIn("structural_forms:\n  view: FlexGemmViewForm", analysis_details)
-        self.assertIn("sum_1: FlexGemmReductionForm", analysis_details)
+        self.assertNotIn("normalized_nodes:", analysis_report)
+        self.assertIn(
+            "normalized_nodes:\n  view: FlexGemmNormalizedView", analysis_details
+        )
+        self.assertIn("sum_1: FlexGemmNormalizedReduction", analysis_details)
         self.assertIn("grouped_tensors:\n  view:", analysis_details)
         self.assertIn("local_reduce_matches:\n  sum_1:", analysis_details)
         self.assertIn("tile_m: 256", config_report)
@@ -3046,7 +3059,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(positions, tuple(sorted(positions)))
         self.assertIn("gemm_op: aten.mm.default", report)
         self.assertIn("outputs:\n  main: relu", report)
-        self.assertNotIn("structural_forms:", report)
+        self.assertNotIn("normalized_nodes:", report)
         self.assertNotIn("GENERATED EPILOGUE", report)
         self.assertNotIn("CONFIG CANDIDATES", report)
         self.assertIn("\x1b[", report)
@@ -3070,7 +3083,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             verbose_report.index(phase) for phase in verbose_phases
         )
         self.assertEqual(verbose_positions, tuple(sorted(verbose_positions)))
-        self.assertIn("structural_forms:", verbose_report)
+        self.assertIn("normalized_nodes:", verbose_report)
         self.assertIn("@cute.jit", verbose_report)
         self.assertIn("candidate 0:", verbose_report)
 
