@@ -40,6 +40,17 @@ void run_normal_distribution_shards(
     double stddev,
     std::optional<Generator> generator);
 
+void run_uniform_distribution_shards(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    double low,
+    double high,
+    std::optional<Generator> generator);
+
 void philox_distribution_shards_cuda(
     Tensor& self,
     IntArrayRef global_shape,
@@ -53,6 +64,18 @@ void philox_distribution_shards_cuda(
   switch (distribution) {
     case PhiloxDistributionKind::Normal:
       run_normal_distribution_shards(
+          self,
+          global_shape,
+          global_offsets,
+          local_offsets,
+          local_sizes,
+          chunk_count,
+          params[0].toDouble(),
+          params[1].toDouble(),
+          generator);
+      break;
+    case PhiloxDistributionKind::Uniform:
+      run_uniform_distribution_shards(
           self,
           global_shape,
           global_offsets,
@@ -442,6 +465,61 @@ void run_normal_distribution_shards(
             templates::cuda::NormalDistributionSampler<scalar_t>{},
             templates::cuda::NormalDistributionTransform<scalar_t>(
                 mean, stddev));
+      });
+}
+
+void run_uniform_distribution_shards(
+    Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    double low,
+    double high,
+    std::optional<Generator> generator) {
+  auto metadata = detail::validate_philox_shard_metadata(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count);
+  auto launches = build_shard_launches(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count,
+      metadata);
+  if (metadata.global_numel == 0) {
+    return;
+  }
+  if (launches.size() == 1 &&
+      launches[0].numel == metadata.global_numel &&
+      launches[0].global_base == 0 && launches[0].local_base == 0 &&
+      self.numel() == metadata.global_numel && self.is_contiguous()) {
+    auto gen = get_generator_or_default<CUDAGeneratorImpl>(
+        generator, cuda::detail::getDefaultCUDAGenerator());
+    auto iter = TensorIterator::borrowing_nullary_op(self);
+    templates::cuda::uniform_kernel(iter, low, high, gen);
+    return;
+  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_philox_distribution_shards_",
+      [&] {
+        distribution_shards<scalar_t>(
+            self,
+            metadata,
+            launches,
+            generator,
+            templates::cuda::UniformDistributionSampler<scalar_t>{},
+            templates::cuda::UniformDistributionTransform<scalar_t>(
+                low, high));
       });
 }
 
