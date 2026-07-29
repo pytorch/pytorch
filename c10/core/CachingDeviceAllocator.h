@@ -139,8 +139,10 @@ struct TraceEntry {
     SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
-    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-        // bytes reported by device memory)
+    OOM, // the allocator threw an OutOfMemoryError (addr_ is the amount of
+         // free bytes reported by device memory)
+    ANNOTATE // metadata attached post facto to a live allocation (addr_ is
+             // the allocation's base address; user_metadata_ is the payload)
   };
   TraceEntry(
       Action action,
@@ -190,6 +192,7 @@ inline TraceEntry::Action parseTraceEntryAction(std::string_view action) {
       {"segment_unmap", TraceEntry::Action::SEGMENT_UNMAP},
       {"snapshot", TraceEntry::Action::SNAPSHOT},
       {"oom", TraceEntry::Action::OOM},
+      {"annotate", TraceEntry::Action::ANNOTATE},
   };
   for (const auto& [k, v] : kActionTable) {
     if (action == k)

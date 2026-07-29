@@ -1,13 +1,13 @@
 import dataclasses
 import itertools
 from collections import Counter, defaultdict
-from collections.abc import Callable
-from typing import Literal, overload, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Literal, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
 import torch
-from torch._inductor.dependencies import index_vars_no_squeeze
+from torch._inductor.dependencies import index_vars_no_squeeze, ReadWrites
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Identity
@@ -30,7 +30,11 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 
 if TYPE_CHECKING:
-    from torch._inductor.scheduler import FusedSchedulerNode, SchedulerNode
+    from torch._inductor.scheduler import (
+        BaseSchedulerNode,
+        FusedSchedulerNode,
+        SchedulerNode,
+    )
 
 
 def solve_for_zero(expr: sympy.Expr) -> sympy.Expr | None:
@@ -242,6 +246,22 @@ class FusedNormalizedReadsWrites:
     var_ranges: dict[sympy.Symbol, int]
 
 
+@dataclasses.dataclass(frozen=True)
+class _FusedNodeView:
+    nodes: Sequence["BaseSchedulerNode"]
+    read_writes: ReadWrites
+    group: Any
+
+    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
+        return self.nodes
+
+    def get_buffer_names(self) -> OrderedSet[str]:
+        return OrderedSet.union(*(node.get_buffer_names() for node in self.nodes))
+
+    def get_operation_names(self) -> OrderedSet[str]:
+        return OrderedSet(node.get_name() for node in self.nodes)
+
+
 @overload
 def get_pw_red_splits(
     n: "SchedulerNode",
@@ -317,7 +337,7 @@ class NodeSplitGetter:
 
     def __init__(
         self,
-        node: Union["FusedSchedulerNode", "SchedulerNode"],
+        node: Union["_FusedNodeView", "FusedSchedulerNode", "SchedulerNode"],
     ):
         self.node = node
         self.pointwise_numel: sympy.Expr = node.group[1][0]
@@ -519,7 +539,7 @@ def apply_var_mapping(
 
 
 def extract_normalized_read_writes(
-    node: Union["FusedSchedulerNode", "SchedulerNode"],
+    node: Union["_FusedNodeView", "FusedSchedulerNode", "SchedulerNode"],
 ) -> FusedNormalizedReadsWrites | None:
     """Extracts index variables, reduce variables, read/write expressions, and variable ranges from a fused node."""
     reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
@@ -690,7 +710,7 @@ class VarTiling:
 class CoalesceVarAnalysis:
     # Var -> Memory Score - not strictly the amount of memory
     # because we multiply writes x2
-    # TODO: separate into dataclass that olds mem, dtype, is_write
+    # TODO: separate into dataclass that holds mem, dtype, is_write
     coalesced_by_var: dict[sympy.Expr, int]
 
     uncoalesced_addrs: dict[sympy.Expr, int]
@@ -701,7 +721,7 @@ class CoalesceVarAnalysis:
 
 
 def _analyze_memory_coalescing(
-    fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
+    fused_node: Union["_FusedNodeView", "FusedSchedulerNode", "SchedulerNode"],
 ) -> CoalesceVarAnalysis | None:
     """
     Implementation for BaseSchedulerNode.get_coalesce_analysis().
@@ -889,4 +909,38 @@ def _analyze_memory_coalescing(
         uncoalesced_addrs=uncoalesced_addrs,
         norm_read_writes=norm_read_writes,
         suggested_split=VarTiling(best_tiling[0], best_tiling[1], best_tiling_score),
+    )
+
+
+def analyze_memory_coalescing_for_nodes(
+    nodes: Sequence["BaseSchedulerNode"],
+) -> CoalesceVarAnalysis | None:
+    if not nodes:
+        return None
+
+    from torch._inductor import scheduler
+
+    node_types = (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
+    if not all(isinstance(node, node_types) for node in nodes):
+        return None
+
+    if len(nodes) == 1:
+        return nodes[0].get_coalesce_analysis()
+
+    graph_scheduler = getattr(V.graph, "scheduler", None)
+    if graph_scheduler is not None:
+        fused_node = graph_scheduler.name_to_fused_node.get(nodes[0].get_first_name())
+        if fused_node is not None:
+            fused_nodes = list(fused_node.get_nodes())
+            if len(fused_nodes) == len(nodes) and all(
+                fused is node for fused, node in zip(fused_nodes, nodes, strict=True)
+            ):
+                return fused_node.get_coalesce_analysis()
+
+    return _analyze_memory_coalescing(
+        _FusedNodeView(
+            nodes=nodes,
+            read_writes=ReadWrites.merge_list([node.read_writes for node in nodes]),
+            group=max(nodes, key=lambda node: int(node.is_reduction())).group,
+        )
     )

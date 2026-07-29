@@ -71,6 +71,18 @@ TORCH_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 
 IMPSAllocator* getIMPSAllocator();
 
+// Returns an allocator suitable for backing CPU `pin_memory=True` storages.
+// Allocations are unified-memory MTLBuffers from the MPS allocator, but the
+// returned DataPtrs are tagged with the CPU device and point at the host-
+// visible alias of the buffer.
+c10::Allocator* getMPSPinnedAllocator();
+
 bool isMPSPinnedPtr(const void* data);
+
+// If host_ptr is the base of an MPS-pinned CPU allocation, returns the shared
+// MTLBuffer backing it (as an opaque pointer, bit-castable to id<MTLBuffer>),
+// so CPU<->MPS copies can blit from/to it directly instead of wrapping the host
+// pages with newBufferWithBytesNoCopy. Returns nullptr otherwise.
+void* getMPSPinnedMTLBuffer(const void* host_ptr);
 
 } // namespace at::mps
