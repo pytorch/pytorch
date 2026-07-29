@@ -20,10 +20,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 aten__weight_int8pack_mm = ExternKernelChoice(
-    torch._weight_int8pack_mm,
-    "at::_weight_int8pack_mm",
-    has_out_variant=False,
-    op_overload=torch.ops.aten._weight_int8pack_mm.default,
+    torch._weight_int8pack_mm, "at::_weight_int8pack_mm", has_out_variant=False
 )
 
 aten__weight_int4pack_mm_cpu = ExternKernelChoice(
@@ -31,7 +28,6 @@ aten__weight_int4pack_mm_cpu = ExternKernelChoice(
     "at::native::_weight_int4pack_mm_cpu_tensor",
     has_out_variant=False,
     kernel_creator=WeightInt4PackMatmul.create,
-    op_overload=torch.ops.aten._weight_int4pack_mm_for_cpu.default,
 )
 
 quantized = torch.ops.quantized
