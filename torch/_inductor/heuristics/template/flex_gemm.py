@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 from functools import cache
-from typing import Any, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import sympy
 
@@ -11,6 +11,9 @@ import torch
 import torch._vendor.quack.gemm_config as quack_gemm_config
 from torch.utils._ordered_set import OrderedSet
 
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
 
@@ -26,6 +29,49 @@ def gemm_config_key(config: quack_gemm_config.GemmConfig) -> GemmConfigKey:
 def gemm_config_from_key(config_key: GemmConfigKey) -> quack_gemm_config.GemmConfig:
     """Reconstruct a QuACK GEMM config from its generated-code cache key."""
     return quack_gemm_config.GemmConfig(**dict(config_key))
+
+
+def explicit_gemm_configs_for_device(
+    config: dict[str, Any], device: torch.device
+) -> tuple[quack_gemm_config.GemmConfig, ...]:
+    """Return device configs matching every explicitly pinned field.
+
+    Exact type matching prevents bool/int aliases from selecting a different key.
+    """
+    field_names = tuple(field.name for field in fields(quack_gemm_config.GemmConfig))
+    unexpected = [name for name in config if name not in field_names]
+    if unexpected:
+        raise NotImplementedError(
+            "FlexGEMM explicit QUACK config contains unexpected GemmConfig fields: "
+            f"{unexpected}"
+        )
+
+    candidates = candidate_gemm_configs_for_device(device)
+    expected_device_capacity = candidates[0].device_capacity
+    requested_device_capacity = config.get("device_capacity")
+    if (
+        type(requested_device_capacity) is type(expected_device_capacity)
+        and requested_device_capacity != expected_device_capacity
+    ):
+        raise NotImplementedError(
+            f"FlexGEMM explicit QUACK config targets SM{requested_device_capacity}0, "
+            f"but {device} uses SM{expected_device_capacity}0 configs"
+        )
+    matches = tuple(
+        candidate
+        for candidate in candidates
+        if all(
+            type(value) is type(getattr(candidate, name))
+            and value == getattr(candidate, name)
+            for name, value in config.items()
+        )
+    )
+    if matches:
+        return matches
+    raise NotImplementedError(
+        f"FlexGEMM explicit QUACK config constraints are not supported on {device}: "
+        f"{config}"
+    )
 
 
 @cache
@@ -164,9 +210,14 @@ def candidate_gemm_configs_for_device(device: torch.device):
     return configs
 
 
-def default_gemm_config_key(device: torch.device, m, n) -> GemmConfigKey:
+def default_gemm_config_key(
+    device: torch.device,
+    m,
+    n,
+    configs: Sequence[quack_gemm_config.GemmConfig] | None = None,
+) -> GemmConfigKey:
     """Return the untuned default QuACK config key for generated code."""
-    configs = candidate_gemm_configs_for_device(device)
+    configs = candidate_gemm_configs_for_device(device) if configs is None else configs
     config_keys = OrderedSet([gemm_config_key(config) for config in configs])
     default_key, skinny_key, large_rect_key, large_key = (
         dense_gemm_config_priority_keys()[:4]
