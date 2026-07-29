@@ -850,6 +850,46 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
         ):
             full_fn(x)
 
+    def test_locals_snapshot_colliding_cell(self):
+        # `i` is both a fast local and a free var, so it is registered in
+        # symbolic_cellvars; `unused` is never read, so it is pruned from
+        # symbolic_locals and must be rebuilt from f_locals on demand. Both
+        # paths of _call_frame_locals_snapshot run in one frame here.
+        for snapshot in (locals, vars):
+            with self.subTest(snapshot=snapshot.__name__):
+                i = 0
+
+                def fn(x, unused):
+                    nonlocal i
+                    i = [i + 1 for i in range(2)]
+                    return sorted(snapshot().items(), key=str), x + 1
+
+                x = torch.randn(3, 3)
+                res = fn(x, 7)
+                i = 0
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                self.assertEqual(res, opt_fn(x, 7))
+                self.assertEqual(i, [1, 2])
+
+    def test_locals_snapshot_cell_shadowed_by_itervar(self):
+        # Inside the comprehension the fast local `i` holds the iteration
+        # value while the cell still holds 100. They share a name but not a
+        # localsplus slot, and CPython reports the fast local, so the
+        # snapshot must let it shadow the cell.
+        i = 100
+
+        def fn(x):
+            nonlocal i
+            return [locals()["i"] for i in range(2)], x + 1
+
+        x = torch.randn(3, 3)
+        res = fn(x)
+        self.assertEqual(res[0], [0, 1])
+        i = 100
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(res, opt_fn(x))
+
     def test_store_global(self):
         global _comprehension_global
 
