@@ -21,6 +21,8 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from torch.utils.hooks import RemovableHandle
+
 
 # graph_node_id -> annotation name (or None). The graph naming mechanism shared by
 # observers: map a CUDA-graph node id to its registered region name (survives graph
@@ -103,9 +105,9 @@ class CuptiMonitorObserver:
     # Both graph resolvers are keyed on graph_node_id: a node's annotation and lane are stable
     # once its graph is baked, so each resolves once for this observer's lifetime (reused across
     # every buffer delivery). Both take the int graph_node_id and are wrapped in functools.cache
-    # on assignment.
-    # TODO: the caches grow with distinct graph_node_ids (each recapture mints new ids); we
-    # could evict a graph's entries on its shutdown/recapture to bound growth in long runs.
+    # on assignment. The caches grow with distinct graph_node_ids (each recapture mints new ids);
+    # the per-resolver graph-destroy hooks (_register_graph_destroy_hooks) invalidate them
+    # when a graph is destroyed, bounding growth in long runs.
     @property
     def _annotation_resolver(self) -> GraphAnnotationResolver | None:
         return self._annotation_resolver_cached
@@ -192,6 +194,14 @@ class CuptiMonitorObserver:
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
+        # Register a graph-destroy hook per installed graph-node resolver so a
+        # destroyed CUDA graph purges that resolver's registry and invalidates
+        # its cache. Registering any hook is also the "monitor active" gate
+        # torch.cuda.graphs checks before arming its destroy callback. Handles are
+        # removed in close() so nothing leaks this observer.
+        self._destroy_hook_handles: list[RemovableHandle] = []
+        if self.available:
+            self._register_graph_destroy_hooks()
 
     def _make_dependency_resolver(self) -> GraphDependencyResolver:
         """A resolver over the shared graph dependency map: graph_node_id -> predecessor
@@ -210,6 +220,43 @@ class CuptiMonitorObserver:
     def available(self) -> bool:
         """True when the monitor was available and this observer registered."""
         return self._obs is not None
+
+    def _register_graph_destroy_hooks(self) -> None:
+        """Register a graph-destroy hook per installed graph-node resolver. Each hook
+        purges its backing store (the annotation module registry, or this observer's own
+        dependency map) and clears its resolver cache (cache_clear is global per resolver
+        -- it drops every graph's cached lookups, not just the destroyed graph's --
+        acceptable on the infrequent destroy path and what bounds cache growth over a
+        long run). Hooks capture only the cache wrapper + purge fn (never self, so they
+        cannot pin this observer -- the dependency purge closes over the map dict, not the
+        observer); run_graph_destroy_hooks also swallows any error they raise
+        (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The lane
+        resolver is externally backed (nothing to purge), so its hook only clears the
+        cache."""
+        from torch.cuda._graph_annotations import remove_kernel_annotations
+        from torch.cuda.graphs import register_graph_destroy_hook
+
+        handles = self._destroy_hook_handles
+        deps = self._graph_dependencies
+
+        def purge_deps(ids: set[int]) -> None:
+            for key in [k for k in deps if k >> 32 in ids]:
+                del deps[key]
+
+        def add(cache: Any, purge: Any) -> None:
+            def hook(ids: set[int]) -> None:
+                if purge is not None:
+                    purge(ids)
+                cache.cache_clear()
+
+            handles.append(register_graph_destroy_hook(hook))
+
+        if self._annotation_resolver_cached is not None:
+            add(self._annotation_resolver_cached, remove_kernel_annotations)
+        if self._dependency_resolver_cached is not None:
+            add(self._dependency_resolver_cached, purge_deps)
+        if self._lane_resolver_cached is not None:
+            add(self._lane_resolver_cached, None)
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
         """Worker-thread hook: ``{ActivityKind: {field_id: column}}`` demuxed by the
@@ -316,6 +363,9 @@ class CuptiMonitorObserver:
 
     def close(self) -> None:
         """Unregister from the monitor. Idempotent."""
+        for handle in self._destroy_hook_handles:
+            handle.remove()
+        self._destroy_hook_handles = []
         if self._obs is not None and self._monitor is not None:
             self._monitor.unregister(self._obs)
             self._obs = None

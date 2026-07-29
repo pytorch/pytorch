@@ -51,13 +51,17 @@ class _GraphDependencyRecorder:
             nodes = torch_cuda_graph.get_graph_data()["nodes"]
         except (RuntimeError, AttributeError, KeyError):
             return
-        self.deps.update(
-            {
-                n["tools_id"]: [nodes[i]["tools_id"] for i in n["dependencies"]]
-                for n in nodes
-                if n["dependencies"]
-            }
-        )
+        recorded = {
+            n["tools_id"]: [nodes[i]["tools_id"] for i in n["dependencies"]]
+            for n in nodes
+            if n["dependencies"]
+        }
+        if not recorded:
+            return
+        self.deps.update(recorded)
+        # Track the exec graph id (tools_id >> 32, shared by all the graph's nodes) so the
+        # observer's graph-destroy hook can purge these edges from the map on destruction.
+        torch_cuda_graph._recorded_exec_ids.add(next(iter(recorded)) >> 32)
 
 
 _recorder = _GraphDependencyRecorder()
