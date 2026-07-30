@@ -417,7 +417,7 @@ def _single_tensor_adafactor(
         update = var_estimate.clamp_(min=eps1 * eps1).rsqrt_()
         update.mul_(grad)
         denom = max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d))
-        param.add_(update, alpha=-alpha / denom)
+        param.add_(update, alpha=-alpha / denom)  # type: ignore[arg-type]
 
 
 def _group_tensors_by_device_dtype_and_is_multidim(
@@ -598,7 +598,7 @@ def _multi_tensor_adafactor(
             -a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
             for a, update in zip(alphas, updates, strict=True)
         ]
-        torch._foreach_mul_(updates, alphas)
+        torch._foreach_mul_(updates, alphas)  # type: ignore[arg-type]
         torch._foreach_add_(device_params, updates)
 
 
