@@ -2207,6 +2207,13 @@ class triton:
     # assume_aligned_inputs to also be enabled (no effect otherwise).
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
+    # Auto-TMA for fused (non-template) kernels: let the Triton
+    # PromoteLoadToTMA pass promote eligible tl.load/tl.store into
+    # hardware TMA copies.  Requires fbTriton (sm_90+).
+    enable_auto_tma_fusion = (
+        os.environ.get("INDUCTOR_ENABLE_AUTO_TMA_FUSION", "0") == "1"
+    )
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 

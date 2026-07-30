@@ -1082,6 +1082,68 @@ class TestAutoTmaE2E(TestCase):
             f"Auto-TMA is {ratio:.1%} of baseline — possible regression",
         )
 
+    def test_auto_tma_fusion_config_pointwise(self):
+        """Verify enable_auto_tma_fusion config drives auto-TMA on a pointwise kernel."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        torch._dynamo.reset()
+        with torch._inductor.config.patch({"triton.enable_auto_tma_fusion": True}):
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(1024, device="cuda")
+            y = torch.randn(1024, device="cuda")
+            result = foo(x, y)
+
+        self.assertEqual(result, x + y)
+
+    def test_auto_tma_fusion_config_reduction(self):
+        """Verify enable_auto_tma_fusion config works on a reduction kernel."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        torch._dynamo.reset()
+        with torch._inductor.config.patch({"triton.enable_auto_tma_fusion": True}):
+
+            @torch.compile
+            def foo(x):
+                return x.sum(dim=-1)
+
+            x = torch.randn(128, 512, device="cuda")
+            result = foo(x)
+
+        self.assertEqual(result, x.sum(dim=-1))
+
+    def test_auto_tma_fusion_config_large_pointwise(self):
+        """Verify enable_auto_tma_fusion on a larger pointwise chain."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        torch._dynamo.reset()
+        with torch._inductor.config.patch({"triton.enable_auto_tma_fusion": True}):
+
+            @torch.compile
+            def foo(x, y):
+                return torch.relu(x * 2 + y) * 3
+
+            x = torch.randn(4096, device="cuda", dtype=torch.float16)
+            y = torch.randn(4096, device="cuda", dtype=torch.float16)
+            result = foo(x, y)
+
+        self.assertEqual(result, torch.relu(x * 2 + y) * 3)
+
     def test_host_side_tma_gemm_perf(self):
         """Compare baseline vs auto-TMA vs enable_host_side_tma on a GEMM."""
         if not torch.cuda.is_available():

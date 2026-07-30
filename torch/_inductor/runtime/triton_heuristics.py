@@ -1329,6 +1329,8 @@ class CachingAutotuner(KernelInterface):
             )
             if compile_meta.get("disable_ftz", False):
                 options["enable_reflect_ftz"] = False
+            if compile_meta.get("auto_tma", False):
+                options["auto_tma"] = True
             for k in tlx_only_cuda_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
