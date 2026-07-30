@@ -707,13 +707,6 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
   }
 
- private:
-  // Workaround inability to use `>` operator in template argument list.
-  template <typename... Args>
-  static constexpr bool hasMoreThanThreeArgs() {
-    return sizeof...(Args) > 3;
-  }
-
  public:
   template <typename... Args>
   static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
