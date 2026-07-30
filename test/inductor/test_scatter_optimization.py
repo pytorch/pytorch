@@ -550,9 +550,12 @@ class TestPartitionedScatterOpt(TestCase):
         in isolation (this graph's ratio is 11M/10M = 1.1).
 
         Graph: out(40 MB) + idx(88 MB) + vals(44 MB) + persistent(400 MB) inputs.
-        At the index_put node, baseline live memory ≈ 440 MB.
+        The budget is sized off the peak at the index_put *allocation* point, where
+        all four inputs plus the 40 MB output are live (612 MB) — idx/vals are only
+        freed once the node completes. Headroom is derived from those sizes rather
+        than hardcoded so it tracks any change to them.
 
-        Sub-test 1: floor leaves 600 MB of headroom → available ≈ 160 MB → P=4 applied.
+        Sub-test 1: headroom fits P-1 extra output buffers → P=4 applied.
         Sub-test 2: floor = total_gpu → no headroom → pass skips.
         """
         torch.manual_seed(12)
@@ -574,9 +577,14 @@ class TestPartitionedScatterOpt(TestCase):
 
         _, total_gpu = torch.cuda.mem_get_info()
 
+        out_bytes = output_size * 4
+        baseline_peak = out_bytes + N * 8 + N * 4 + persist_n * 4 + out_bytes
+        target_p = 4
+        headroom = baseline_peak + (target_p - 1) * out_bytes
+
         saved_floor = config.partitioned_scatter_non_model_floor_bytes
         try:
-            config.partitioned_scatter_non_model_floor_bytes = total_gpu - 600_000_000
+            config.partitioned_scatter_non_model_floor_bytes = total_gpu - headroom
             with torch.no_grad():
                 actual = torch.compile(f, backend="inductor", fullgraph=True)(
                     out, idx, vals, persistent
@@ -587,7 +595,8 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertGreater(
             counters["inductor"]["partitioned_scatter_applied"],
             0,
-            "real memory pressure: pass should apply (available ≈ 160 MB fits P=4)",
+            f"real memory pressure: pass should apply (headroom {headroom} bytes "
+            f"leaves {(target_p - 1) * out_bytes} bytes for P={target_p})",
         )
         self.assertTrue(
             torch.allclose(expected, actual, atol=1e-2, rtol=1e-2),
@@ -621,6 +630,67 @@ class TestPartitionedScatterOpt(TestCase):
             torch.allclose(expected, actual_skipped, atol=1e-2, rtol=1e-2),
             "floor=total_gpu: output should still be correct (pass gracefully skips)",
         )
+
+    @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
+    @config.patch(partitioned_scatter_min_contention_ratio=1.0)
+    def test_memory_budget_shared_across_scatters(self):
+        """
+        Several scatters in one graph must share the budget, not each claim it.
+
+        The memory profile describes the untransformed graph, so a candidate
+        evaluated after an earlier rewrite has to be charged for that scatter's
+        expanded buffer — otherwise N scatters each commit the full budget.
+
+        Three 20 MB scatters here share room for one extra buffer, so exactly
+        one may be rewritten.
+        """
+        torch.manual_seed(13)
+        S = 5_000_000
+        N = 20_000_000
+
+        def f(out0, out1, out2, idx, vals):
+            a = out0.index_put([idx], vals, accumulate=True)
+            b = out1.index_put([idx], vals, accumulate=True)
+            c = out2.index_put([idx], vals, accumulate=True)
+            return a, b, c
+
+        outs = [torch.zeros(S, dtype=torch.float32, device=GPU_TYPE) for _ in range(3)]
+        idx = torch.randint(0, S, (N,), dtype=torch.int64, device=GPU_TYPE)
+        vals = torch.randn(N, dtype=torch.float32, device=GPU_TYPE)
+        args = (*outs, idx, vals)
+
+        with torch.no_grad():
+            expected = f(*args)
+
+        _, total_gpu = torch.cuda.mem_get_info()
+
+        # Each out dies right after its own scatter, so the peak at every
+        # index_put is the three inputs plus that node's 20 MB output.
+        out_bytes = S * 4
+        baseline_peak = 3 * out_bytes + N * 8 + N * 4 + out_bytes
+        # Room for a single P=2 buffer: one scatter fits, the other two must not.
+        headroom = baseline_peak + out_bytes
+
+        saved_floor = config.partitioned_scatter_non_model_floor_bytes
+        try:
+            config.partitioned_scatter_non_model_floor_bytes = total_gpu - headroom
+            with torch.no_grad():
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(*args)
+        finally:
+            config.partitioned_scatter_non_model_floor_bytes = saved_floor
+
+        applied = counters["inductor"]["partitioned_scatter_applied"]
+        self.assertEqual(
+            applied,
+            1,
+            f"budget fits one expanded buffer but {applied} scatters were "
+            f"rewritten: the per-invocation budget is not shared",
+        )
+        for i, (e, a) in enumerate(zip(expected, actual)):
+            self.assertTrue(
+                torch.allclose(e, a, atol=1e-2, rtol=1e-2),
+                f"output {i} mismatch: expected[:5]={e[:5]}\nactual[:5]={a[:5]}",
+            )
 
     @unittest.skipUnless(HAS_GPU, "requires GPU")
     def test_perf_atomic_contention(self):

@@ -1247,17 +1247,21 @@ partitioned_scatter_enabled = (
 )
 
 # Power-of-2 bounds for num_partitions (bitwise AND partition assignment requires pow2).
+# Capped at 64: contention relief saturates before that while the expanded buffer keeps
+# growing, and P=128 measured slower than P=64 at every contention level on MI308X.
 partitioned_scatter_min_partitions: int = 2
-partitioned_scatter_max_partitions: int = 128
+partitioned_scatter_max_partitions: int = 64
 
 # Skip ops with fewer writes than this — small scatters don't generate meaningful contention.
 partitioned_scatter_min_index_size: int = 4096
 
 # Skip ops where index_numel / scatter_dim_size is below this ratio.
 # Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
-# The partitioned form adds ~2P * output_numel of streaming traffic (zero-fill the
-# expanded buffer, then read it back to reduce) to relieve ratio * output_numel of
-# atomic traffic, so the trade only pays off once several writes land per slot.
+# The partitioned form pays a zero-fill and reduce over the expanded buffer plus a
+# slower scatter kernel (atomics over P copies lose cache residency), whether or not
+# contention was actually relieved. Assumes indices spread uniformly over all slots;
+# the real distribution is a runtime property, so concentrated indices are
+# under-estimated here.
 partitioned_scatter_min_contention_ratio: float = 4.0
 
 # GPU memory reserved for state invisible to the FX profile: CUDA driver context,

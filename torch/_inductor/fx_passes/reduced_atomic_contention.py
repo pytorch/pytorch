@@ -69,6 +69,13 @@ class ScatterMemoryState:
     total_gpu_bytes: int
     non_model_floor_bytes: int
 
+    # Expanded-buffer bytes already granted to scatters transformed earlier in this
+    # invocation. peak_mem_by_node profiles the *original* graph, so without this every
+    # candidate is sized against the same baseline and each claims the whole budget.
+    # A running sum rather than a per-live-range charge because scatters sharing an
+    # input fuse into one kernel, which needs all their expanded buffers live at once.
+    committed_overhead_bytes: int = 0
+
 
 @dataclass
 class ScatterPassContext:
@@ -302,7 +309,9 @@ def _compute_num_partitions(
     Return the largest power-of-2 P in [min_p, max_p] satisfying:
       1. Memory: output_size * element_bytes * (P - 1) <= available_bytes
       2. Diminishing-returns cap (skipped when force=True):
-         P * output_size <= 4 * index_size, using scatter_dim_size for tighter bound.
+         P <= 4 * writes_per_slot, where writes_per_slot = index_size / scatter_dim_size.
+         Past ~4W partitions for a slot taking W writes most partition slots are
+         never written, so the zero-fill and reduce over them buy nothing.
 
     Returns 0 if min_p doesn't fit. Power-of-2 is required by the bitwise-AND
     partition assignment.
@@ -339,10 +348,13 @@ def _check_memory(
 
     idx = state.node_to_idx.get(candidate.output_node)
     if idx is None:
-        return max_p
+        # No profile entry means we cannot bound this scatter's peak, so fail
+        # closed: granting max_p here would allocate max_p-1 extra copies of the
+        # output with no memory check at all.
+        return 0
 
     baseline = state.peak_mem_by_node[idx]
-    available = state.allowed_peak_bytes - baseline
+    available = state.allowed_peak_bytes - baseline - state.committed_overhead_bytes
 
     num_partitions = _compute_num_partitions(
         available,
@@ -361,11 +373,12 @@ def _check_memory(
         )
         _artifact_log.debug(
             "partitioned_scatter: memory check node=%s "
-            "baseline_peak=%d MB available=%d MB "
+            "baseline_peak=%d MB committed=%d MB available=%d MB "
             "expanded_buffer_cost=%d MB num_partitions=%d "
             "total_gpu=%d MB floor=%d MB allowed_peak=%d MB",
             candidate.output_node.name,
             baseline // 1_000_000,
+            state.committed_overhead_bytes // 1_000_000,
             available // 1_000_000,
             overhead // 1_000_000,
             num_partitions,
@@ -534,6 +547,15 @@ def _create_replacement(
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [input_tensor, index_node, values])
+
+    # Charge this scatter's expanded buffer so later candidates in the same
+    # invocation see a correspondingly smaller budget.
+    if ctx.memory is not None:
+        output_size: int = match._output_size  # type: ignore[attr-defined]
+        element_bytes: int = match._element_bytes  # type: ignore[attr-defined]
+        ctx.memory.committed_overhead_bytes += (
+            output_size * element_bytes * (num_partitions - 1)
+        )
 
     ctx.n_applied += 1
     ctx.applied_partitions.append(num_partitions)
