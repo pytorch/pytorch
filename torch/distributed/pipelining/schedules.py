@@ -358,6 +358,40 @@ class _PipelineSchedule(ABC):
                 (avoids redundant init on eval↔train mode switches).
         """
         if all(isinstance(stage, PipelineStage) for stage in stages):
+            # A fake process group cannot exchange real data: a cross-rank
+            # vote recv reads zeros and selects DYNAMIC, which then fails in
+            # `_recv_meta` (nothing was actually sent). Since dynamic
+            # inference can never work across ranks of a fake group, decide
+            # locally in that case: STATIC if every local stage has complete
+            # metadata, else error. Same-rank-only pipelines (e.g. a
+            # single-rank fake world) don't communicate, so the normal vote
+            # still works and DYNAMIC remains usable there.
+            pp_stages = cast(list[PipelineStage], stages)
+            has_cross_rank = any(
+                (not st.is_first and not st._is_same_rank(st.stage_index - 1))
+                or (not st.is_last and not st._is_same_rank(st.stage_index + 1))
+                for st in pp_stages
+            )
+            if has_cross_rank and any(
+                dist.get_backend(st.group) == "fake" for st in pp_stages
+            ):
+                for st in pp_stages:
+                    if InferenceMode.needs_dynamic(st._user_meta, has_backward):
+                        raise RuntimeError(
+                            f"Stage {st.stage_index} requires dynamic shape "
+                            "inference, which is not supported with a fake "
+                            "process group. Provide complete static metadata "
+                            "(inputs/outputs, plus input_grads/output_grads "
+                            "for DTensors with backward) to the PipelineStage "
+                            "constructor."
+                        )
+                    st._inference_mode = InferenceMode.STATIC
+                logger.debug(
+                    "Fake process group detected; set inference_mode=static "
+                    "for %d stage(s) without voting",
+                    len(stages),
+                )
+                return
             acc: torch.Tensor | None = None
             for stage in cast(list[PipelineStage], stages):
                 acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
