@@ -45,6 +45,7 @@ from ...utils import (
     get_tma_workspace_arg,
     rocm_gfx_arch,
     tdm_descriptor_row_major,
+    mfma_kdim,
     TMA_DESCRIPTOR_SIZE,
     tma_inner_dim,
     triton_type,
@@ -962,6 +963,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -1270,7 +1272,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             scaled_configs = self._prune_reg_spill_configs(scaled_configs)
-        return self._finalize_mm_configs(scaled_configs)
+        return self._finalize_mm_configs(scaled_configs, dtype_size=dtype_size)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -2052,6 +2054,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -2070,12 +2073,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
             kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            kdim = mfma_kdim(dtype_size, matrix_instr_nonkdim) or matrix_instr_nonkdim
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
                 or conf.block_n % matrix_instr_nonkdim != 0
+                or conf.block_k < kpack * kdim
             ):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                #  block_k must supply at least `kpack` whole MFMA K-steps
+                #  (kpack * kdim) to avoid miscompiled operand packing
                 continue
 
             # Construct key for finding duplicate configs
