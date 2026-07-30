@@ -1206,7 +1206,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def pygen_yf(self) -> VariableTracker | None:
         if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
-            return self.inline_tracer.stack[-1]
+            if sys.version_info >= (3, 15):
+                ind = -2
+            else:
+                ind = -1
+            return self.inline_tracer.stack[ind]
         return None
 
     def gen_send_ex2(
@@ -1328,7 +1332,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.python_type(), name))
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
@@ -3062,6 +3068,7 @@ class FunctoolsPartialVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
+        # functools.partial uses slots, so attributes are constant
         return VariableTracker.build(tx, hasattr(functools.partial(identity), name))
 
     def getattro_impl(
@@ -4577,6 +4584,21 @@ class MemberDescriptorVariable(VariableTracker):
         result_source = obj.source and AttrSource(obj.source, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
+        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
+        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
+        # value is None for __delete__.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
+        stored = variables.DeletedVariable() if value is None else value
+        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
+        return variables.ConstantVariable.create(None)
+
 
 class GetSetDescriptorVariable(VariableTracker):
     """C getter/setter descriptor (getset_descriptor on a type).
@@ -4795,3 +4817,15 @@ class TupleGetterVariable(VariableTracker):
         return obj.call_method(
             tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
         )
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # _tuplegetter fields are read-only; tuplegetter_descr_set always
+        # raises AttributeError for both set and delete.
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
+        msg = "can't delete attribute" if value is None else "can't set attribute"
+        raise_observed_exception(AttributeError, tx, args=[msg])

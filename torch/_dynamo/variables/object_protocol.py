@@ -746,6 +746,22 @@ def pynumber_float(
     )
 
 
+def getindex(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    arg: VariableTracker,
+) -> VariableTracker:
+    """Mirrors typeobject.c::getindex: calls PyNumber_AsSsize_t then tp_as_sequence.sq_length"""
+    obj_type = maybe_get_python_type(obj)
+
+    i = pynumber_as_ssize_t(tx, arg, err=OverflowError)
+    if i.as_python_constant() < 0:
+        if type_implements_sq_length(obj_type):
+            length = obj.sq_length(tx)
+            i = pynumber_add(tx, i, length)
+    return i
+
+
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
     """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
     values outside the Py_ssize_t range raise OverflowError.
@@ -2169,8 +2185,10 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found.
-    raise_observed_exception(AttributeError, tx)
+    # Step 7: Attribute not found -- signal to caller to fall back.
+    raise _UnhandledDescriptorError(
+        f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
+    )
 
 
 def generic_getattr(
