@@ -28,7 +28,6 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     canonical_tensorssa_reduction_type,
     materialize_tensorssa_reduction,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_op_scope
 from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionDescriptor
 from torch.utils._ordered_set import OrderedSet
@@ -163,7 +162,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         )
         if not status:
             return status
-        reduction = GemmReductionArguments.from_operator_args(args)
+        reduction = args.local_reduce
         if not reduction.enabled:
             return status
         axis = reduction.axis
@@ -255,7 +254,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             else [args.out.tensor.compile_time_tensor]
         )
         self.impl.efc.compile(*epilogue_params)
-        reduction_args = GemmReductionArguments.from_operator_args(args)
+        reduction_args = args.local_reduce
         local_reduce, local_reduce_feed, secondary_feed = reduction_args.tensors(
             "compile_time_tensor"
         )
@@ -305,7 +304,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             if isinstance(value, Operand):
                 value = value.tensor
             epilogue_params[index] = getattr(value, "runtime_tensor", value)
-        reduction = GemmReductionArguments.from_operator_args(args)
+        reduction = args.local_reduce
         local_reduce, local_reduce_feed, secondary_feed = reduction.tensors(
             "runtime_tensor"
         )
