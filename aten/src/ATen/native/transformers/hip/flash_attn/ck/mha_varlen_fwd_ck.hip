@@ -303,8 +303,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     const int head_size_8x = round_multiple(head_size_og, 8);
 
     // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{q.get_device()};
 
     auto opts = q.options();
     bool has_lse = true;
