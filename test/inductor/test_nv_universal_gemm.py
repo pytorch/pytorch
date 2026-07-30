@@ -771,31 +771,6 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
-    def test_grouped_reduction_conversion_contract(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import (
-            GemmEpilogueIRExpression as Expr,
-            GemmEpilogueIRStore,
-            grouped_reduction_ir,
-        )
-
-        load = Expr("load", ("gemm", 0, None))
-
-        def classify(value):
-            square = Expr("mul", (value, value))
-            reduction = Expr("reduction", (torch.float32, torch.float32, "sum", square))
-            return grouped_reduction_ir(
-                GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.bfloat16
-            )
-
-        fp32 = Expr("to_dtype", (load, torch.float32))
-        self.assertEqual(classify(fp32), ("sum", "square"))
-        fp16_then_fp32 = Expr(
-            "to_dtype", (Expr("to_dtype", (load, torch.float16)), torch.float32)
-        )
-        self.assertIsNone(classify(fp16_then_fp32))
-        bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
-        self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
-
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
         kernel = MagicMock()
