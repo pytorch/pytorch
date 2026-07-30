@@ -4390,6 +4390,8 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
             )
 
     def test_typed_metadata_matches_chrome_trace(self):
+        # Match events to Chrome trace records by identity (via name, cat, external/correlation id),
+        # then verify every metadata field has the same value in the matching trace record.
         target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
 
         with profile(
