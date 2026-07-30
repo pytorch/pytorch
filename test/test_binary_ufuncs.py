@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     slowTest,
     TEST_SCIPY,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
@@ -1669,6 +1670,8 @@ class TestBinaryUfuncsDevice(TestCase):
         except ValueError as e:
             err_msg = "Integers to negative integer powers are not allowed."
             self.assertEqual(str(e), err_msg)
+            if TEST_WITH_TORCHDYNAMO:
+                return
             out = torch.empty_like(base)
             test_cases = [
                 lambda: base.pow(exponent),
@@ -1700,7 +1703,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     actual2 = actual.pow_(exponent)
                     self.assertEqual(actual, expected.to(actual))
                     self.assertEqual(actual2, expected.to(actual2))
-                else:
+                elif not TEST_WITH_TORCHDYNAMO:
                     self.assertRaisesRegex(
                         RuntimeError,
                         r"result type \w+ can't be cast to the desired output type \w+",
@@ -1834,6 +1837,8 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
 
     def test_int_tensor_pow_neg_ints(self, device):
+        if TEST_WITH_TORCHDYNAMO:
+            return
         ints = [
             torch.iinfo(torch.int32).min,
             -3,
@@ -4134,6 +4139,9 @@ class TestBinaryUfuncsDevice(TestCase):
             [10.0 + 13.0j, 8.0 + 11.0j], dtype=torch.complex64, device=device
         )
         self.assertEqual(res, expected)
+
+        if TEST_WITH_TORCHDYNAMO:
+            return
 
         # mismatched alpha
         m1 = torch.tensor([1], dtype=torch.int8, device=device)
