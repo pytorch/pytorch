@@ -1140,16 +1140,11 @@ void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
     return;
   }
   auto& aliases = it->second;
-  size_t kept = 0;
-  for (size_t i = 0; i < aliases.size(); ++i) {
-    if (!aliases[i].expired()) {
-      if (kept != i) {
-        aliases[kept] = std::move(aliases[i]);
-      }
-      ++kept;
-    }
-  }
-  aliases.resize(kept);
+  // std::erase_if (not resize) since weak_intrusive_ptr is not
+  // default-constructible; drops every expired alias in one pass.
+  std::erase_if(aliases, [](const c10::weak_intrusive_ptr<c10::TensorImpl>& w) {
+    return w.expired();
+  });
   if (aliases.empty()) {
     constant_storage_mapping_.erase(it);
   }
