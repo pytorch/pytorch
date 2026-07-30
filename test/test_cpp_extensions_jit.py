@@ -82,6 +82,23 @@ with tempfile.TemporaryDirectory() as tmpdir:
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_ninja_available_in_python_environment(self):
+        script = """
+import os
+
+os.environ["PATH"] = ""
+
+from torch.utils.cpp_extension import is_ninja_available
+
+assert is_ninja_available()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest

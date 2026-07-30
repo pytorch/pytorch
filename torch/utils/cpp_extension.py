@@ -2552,10 +2552,19 @@ def _write_ninja_file_and_build_library(
         error_prefix=f"Error building extension '{name}'")
 
 
+def _get_ninja_command() -> list[str]:
+    ninja = shutil.which('ninja')
+    if ninja is None:
+        ninja = shutil.which('ninja', path=os.path.dirname(sys.executable))
+    if ninja is not None:
+        return [ninja]
+    return [sys.executable, '-m', 'ninja']
+
+
 def is_ninja_available() -> bool:
     """Return ``True`` if the `ninja <https://ninja-build.org/>`_ build system is available on the system, ``False`` otherwise."""
     try:
-        subprocess.check_output(['ninja', '--version'])
+        subprocess.check_output([*_get_ninja_command(), '--version'])
     except Exception:
         return False
     else:
@@ -2864,7 +2873,7 @@ def _get_vc_env(vc_arch: str) -> dict[str, str]:
             return msvc._get_vc_env(vc_arch)  # type: ignore[attr-defined]
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
-    command = ['ninja', '-v']
+    command = [*_get_ninja_command(), '-v']
     num_workers = _get_num_workers(verbose)
     if num_workers is not None:
         command.extend(['-j', str(num_workers)])
