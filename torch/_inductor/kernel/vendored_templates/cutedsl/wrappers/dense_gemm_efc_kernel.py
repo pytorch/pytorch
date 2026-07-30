@@ -92,6 +92,8 @@ def _direct_cutedsl_epilogue(metadata):
         call_scope = direct_fn.__globals__.copy()
         call_scope.update(gemm_epilogue_op_scope(op_scope))
         call_scope["mlir_math"] = op_scope
+        # Rebind globals because the traced function targets CuTeDSL operations,
+        # while EFC exposes the same operations through its configuration object.
         call_fn = FunctionType(
             direct_fn.__code__,
             call_scope,

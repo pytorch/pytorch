@@ -91,22 +91,6 @@ class GemmReductionDescriptor:
     kind: str
     parameters: tuple[float, ...] = ()
 
-    _PARAMETER_COUNTS: ClassVar[dict[str, int]] = {
-        "mean_linear": 3,
-        "normalize_sum_affine": 4,
-        "normalize_sum_reverse_affine": 4,
-        "sum_mul_affine": 2,
-        "variance_affine": 2,
-    }
-
-    def __post_init__(self) -> None:
-        expected = self._PARAMETER_COUNTS.get(self.kind, 0)
-        if len(self.parameters) != expected:
-            raise ValueError(
-                f"{self.kind} expects {expected} reduction parameters, "
-                f"got {len(self.parameters)}"
-            )
-
     @classmethod
     def parse(cls, value: str) -> "GemmReductionDescriptor":
         kind, *parameters = value.split(":")

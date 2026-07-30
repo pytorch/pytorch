@@ -20,11 +20,13 @@ class GemmEpilogueIRExpression:
 
     Attributes:
         op: Virtualized Inductor operation name.
-        args: Captured positional arguments and normalized keyword arguments.
+        args: Captured positional arguments.
+        kwargs: Captured keyword arguments in deterministic key order.
     """
 
     op: str
     args: tuple[Any, ...]
+    kwargs: tuple[tuple[str, Any], ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -60,9 +62,7 @@ class _GemmEpilogueIRHandler(DefaultHandler):
     def _default(
         self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> GemmEpilogueIRExpression:
-        if kwargs:
-            args = (*args, tuple(sorted(kwargs.items())))
-        return GemmEpilogueIRExpression(name, args)
+        return GemmEpilogueIRExpression(name, args, tuple(sorted(kwargs.items())))
 
     def indirect_indexing(self, x, size, check=True, wrap_neg=True):
         return sympy.Symbol(f"indirect_{len(self.stores)}", integer=True)
@@ -248,8 +248,7 @@ def grouped_reduction_ir(
     """Classify a primitive or unrolled grouped reduction loop body."""
     allowed_conversion_dtypes = frozenset((source_dtype, torch.float32))
     candidates = [expr for expr in _walk(store.value) if expr.op == "reduction"]
-    if candidates:
-        reduction = candidates[0]
+    for reduction in candidates:
         reduction_type = str(reduction.args[2])
         source_type = _source_transform(
             reduction.args[3], source_name, allowed_conversion_dtypes
