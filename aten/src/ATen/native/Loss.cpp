@@ -76,26 +76,32 @@ namespace at::meta {
 TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
-  // TODO: Reduce this extra TensorIterator construction for Reduction::Mean & Sum.
-  // We do another TensorIterator construction in the IMPL for the two cases.
+  // build_borrowing_binary_op is needed even for mean/sum to properly
+  // configure dtype promotion and dispatch for tensor subclasses.
   build_borrowing_binary_op(maybe_get_output(), input, target);
-  if (reduction == Reduction::None) {
-    return;
+  if (reduction != Reduction::None) {
+    TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+    auto& output = maybe_get_output();
+    output.resize_({});
+    // Shrink storage to match scalar output size instead of keeping
+    // the full input-sized allocation (fixes #185647).
+    auto itemsize = output.dtype().itemsize();
+    output.storage().set_nbytes(itemsize);
   }
-
-  TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  maybe_get_output().resize_({});
 }
 
 TORCH_META_FUNC(mse_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction) {
   build_borrowing_binary_op(maybe_get_output(), input, target);
-  if (reduction == Reduction::None) {
-    return;
+  if (reduction != Reduction::None) {
+    TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+    auto& output = maybe_get_output();
+    output.resize_({});
+    // Shrink storage to match scalar output size instead of keeping
+    // the full input-sized allocation (fixes #185647).
+    auto itemsize = output.dtype().itemsize();
+    output.storage().set_nbytes(itemsize);
   }
-
-  TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  maybe_get_output().resize_({});
 }
 
 } // namespace at::meta
