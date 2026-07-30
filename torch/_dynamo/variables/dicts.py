@@ -1530,6 +1530,11 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             return {}
         elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
             return SideEffectsProxyDict.get_example_value_dict(vt.vt)
+        elif istype(vt, variables.ExceptionVariable):
+            # Synthetic exceptions created during tracing have no backing
+            # Python object; their __dict__ starts empty and any custom
+            # attribute is recorded in the side effects table.
+            return {}
         else:
             value = vt.get_real_python_backed_value()
             if value is not NO_SUCH_SUBOBJ:
