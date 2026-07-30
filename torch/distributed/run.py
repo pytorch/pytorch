@@ -149,6 +149,25 @@ node in your training cluster, but ideally you should pick a node that has a hig
 .. note::
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
+Shell completion
+----------------
+
+``torchrun`` can emit a completion script for ``bash``, ``zsh`` or ``tcsh``. The
+script is generated from the argument parser, so it stays in sync with the
+options above. This requires the optional `shtab <https://tqdm.github.io/shtab>`_
+package (``pip install shtab``); torchrun only imports it when the flag is used.
+
+::
+
+    # zsh
+    torchrun --print-completion zsh > ~/.zsh/completions/_torchrun
+
+    # bash
+    torchrun --print-completion bash > ~/.local/share/bash-completion/completions/torchrun
+
+Refer to your shell's documentation for the directory it loads completions from;
+the paths above are the common defaults.
+
 Note on rendezvous backend
 --------------------------
 
@@ -414,7 +433,7 @@ utility
 import os
 import sys
 import uuid
-from argparse import ArgumentParser, REMAINDER
+from argparse import Action as _Action, ArgumentParser, REMAINDER
 from collections.abc import Callable
 from importlib import metadata
 
@@ -434,6 +453,31 @@ from torch.utils.backend_registration import _get_custom_mod_func
 
 
 logger = get_logger(__name__)
+
+
+class _PrintCompletionAction(_Action):
+    """Print a shell completion script for ``torchrun`` and exit.
+
+    ``shtab`` derives the script from this parser, so completions stay in sync
+    with the options defined below. It is an optional dependency: torchrun only
+    imports it when this flag is used.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        try:
+            import shtab
+        except ImportError:
+            parser.exit(
+                1,
+                f"{option_string} requires the 'shtab' package: pip install shtab\n",
+            )
+        else:
+            # Completions are for the `torchrun` console script. parser.prog is
+            # `__main__.py` when invoked as `python -m torch.distributed.run`,
+            # which would bind the completion to the wrong command.
+            parser.prog = "torchrun"
+            print(shtab.complete(parser, shell=values))
+            parser.exit()
 
 
 def get_args_parser() -> ArgumentParser:
@@ -745,6 +789,29 @@ def get_args_parser() -> ArgumentParser:
         help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
         "for all workers and CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
         "assigned GPU at device index 0.",
+    )
+
+    #
+    # Shell completion.
+    #
+
+    try:
+        import shtab
+    except ImportError:
+        # shtab is optional; fall back to the shells it supports today so the
+        # flag still validates its argument when shtab is not installed
+        choices = ["bash", "zsh", "tcsh"]
+    else:
+        choices = shtab.SUPPORTED_SHELLS
+
+    parser.add_argument(
+        "--print-completion",
+        "--print_completion",
+        action=_PrintCompletionAction,
+        choices=choices,
+        help="Print a shell completion script for torchrun to stdout and exit "
+        "(e.g. [--print-completion zsh > ~/.zsh/completions/_torchrun]). "
+        "Requires the optional 'shtab' package.",
     )
 
     #
