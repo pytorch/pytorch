@@ -651,47 +651,54 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
             )
 
     def test_flex_tdm_gate_preserves_dynamic_sequence_lengths(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.ir import Buffer, FixedLayout
         from torch._inductor.utils import use_flex_tdm_descriptor
         from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
 
         def make_qkv(name, seq_len):
-            qkv = mock.Mock()
-            qkv.get_device.return_value = torch.device("cuda")
-            qkv.get_dtype.return_value = torch.float16
-            qkv.get_size.return_value = [2, 4, seq_len, 64]
-            qkv.get_stride.return_value = [
-                256 * seq_len,
-                64 * seq_len,
-                64,
-                1,
-            ]
-            qkv.get_name.return_value = name
-            qkv.get_layout.return_value = mock.Mock(offset=0)
-            return qkv
+            return Buffer(
+                name=name,
+                layout=FixedLayout(
+                    torch.device("cuda"),
+                    torch.float16,
+                    size=(2, 4, seq_len, 64),
+                    stride=(256 * seq_len, 64 * seq_len, 64, 1),
+                ),
+            )
 
-        q_len = sympy.Symbol("q_len", integer=True, positive=True)
-        kv_len = sympy.Symbol("kv_len", integer=True, positive=True)
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))())
+        q_len = graph.sizevars.shape_env.create_symbol(
+            128,
+            source=ConstantSource("q_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        kv_len = graph.sizevars.shape_env.create_symbol(
+            256,
+            source=ConstantSource("kv_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
         query = make_qkv("query", q_len)
         key = make_qkv("key", kv_len)
         value = make_qkv("value", kv_len)
 
-        sizevars = mock.Mock()
-        sizevars.statically_known_true.return_value = True
-        sizevars.statically_known_equals.side_effect = lambda expr, val: expr == val
-        sizevars.statically_known_multiple_of.side_effect = (
-            lambda expr, val: expr % val == 0
-        )
-        graph = mock.Mock(sizevars=sizevars, unaligned_buffers=set())
-
+        guards_before = len(graph.sizevars.shape_env.guards)
         with (
             V.set_graph_handler(graph),
             mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
         ):
             self.assertTrue(use_flex_tdm_descriptor(query, key, value))
 
-        sizevars.guard_int.assert_not_called()
-        sizevars.guard_int_seq.assert_not_called()
-        sizevars.guard_or_false.assert_not_called()
+        new_guards = graph.sizevars.shape_env.guards[guards_before:]
+        int32_max = torch.iinfo(torch.int32).max
+        self.assertEqual(len(new_guards), 2)
+        self.assertEqual(
+            {guard[0] for guard in new_guards},
+            {sympy.Le(q_len, int32_max), sympy.Le(kv_len, int32_max)},
+        )
 
     def test_flex_templates_gate_descriptors_on_tma_or_tdm(self):
         from torch._inductor.kernel.flex.common import load_flex_template
