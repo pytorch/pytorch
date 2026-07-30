@@ -44,6 +44,7 @@ class BackendConfig:
     supports_bitwise_reductions: bool = False
     supports_cuda_graph_barrier: bool = False
     supports_dropped_p2p_work: bool = False
+    supports_sequence_numbers: bool = True
     supports_collectives_timing: bool = False
     supports_work_sequence_number: bool = False
     supports_work_result: bool = False
@@ -81,6 +82,18 @@ C10D_BACKENDS = (
         supports_work_sequence_number=True,
         supports_work_result=True,
         supports_gather_single=True,
+        float8_dtypes=FLOAT8_DTYPES,
+    ),
+    # nccl-lazy wraps a primary ProcessGroupNCCL (all collectives delegate to
+    # it) plus lazily-built per-peer P2P comms, so it matches nccl2's
+    # capabilities except that it does not implement sequence numbers.
+    BackendConfig(
+        "nccl-lazy",
+        "cuda",
+        supports_coalescing=True,
+        supports_cuda_graph_barrier=True,
+        supports_dropped_p2p_work=True,
+        supports_sequence_numbers=False,
         float8_dtypes=FLOAT8_DTYPES,
     ),
 )
@@ -142,6 +155,7 @@ def instantiate_backend_tests(namespace, suite_name, base_class, backends):
                 "supports_bitwise_reductions": backend.supports_bitwise_reductions,
                 "supports_cuda_graph_barrier": backend.supports_cuda_graph_barrier,
                 "supports_dropped_p2p_work": backend.supports_dropped_p2p_work,
+                "supports_sequence_numbers": backend.supports_sequence_numbers,
                 "supports_collectives_timing": backend.supports_collectives_timing,
                 "supports_work_sequence_number": backend.supports_work_sequence_number,
                 "supports_work_result": backend.supports_work_result,
