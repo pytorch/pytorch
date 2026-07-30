@@ -90,7 +90,7 @@ class MyShardedLinear(torch.nn.Module):
 class TestShardedOptimizer(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_sharded_optim(self):
         rowwise_spec = ChunkShardingSpec(
             dim=0,
@@ -118,7 +118,9 @@ class TestShardedOptimizer(ShardedTensorTestBase):
 
         before_update = deepcopy(sharded_optim.named_params)
 
-        inp = torch.rand([5, 10]).to(self.rank).requires_grad_()
+        inp = torch.rand(
+            [5, 10], device=torch.device(device_type, self.rank), requires_grad=True
+        )
 
         # run forward
         local_output = local_model(inp)
@@ -149,7 +151,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_named_params_with_sharded_tensor(self):
         rowwise_spec = ChunkShardingSpec(
             dim=0,
