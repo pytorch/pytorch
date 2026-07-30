@@ -16,7 +16,6 @@ from typing import Any
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
-    CuteDSLOpOverrides,
     upcast_compute_type,
     use_cutedsl_fast_math,
 )
@@ -52,6 +51,10 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     unsupported_reduction_from_node,
 )
 from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    GemmEpilogueCuteDSLKernel,
+    GemmEpilogueCuteDSLOpOverrides,
+)
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -65,82 +68,8 @@ FlexGemmOutputLocalReducePlan = _epilogue_analysis.GemmOutputLocalReducePlan
 FlexGemmOutputPlan = _epilogue_analysis.GemmOutputPlan
 
 
-class FlexGemmCuteDSLBody:
-    def __init__(self) -> None:
-        self.lines: list[str] = []
-
-    def writeline(self, line: str) -> None:
-        self.lines.append(line)
-
-
-class FlexGemmCuteDSLCSE:
-    def __init__(self) -> None:
-        self.index = 0
-
-    def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
-        name = f"tmp{self.index}"
-        self.index += 1
-        body.writeline(f"{name} = {expr}")
-        return CuteDSLCSEVariable(
-            name,
-            ValueRanges.unknown() if bounds is None else bounds,
-            dtype=dtype,
-            shape=shape,
-        )
-
-
-class FlexGemmCuteDSLKernel:
-    def __init__(self) -> None:
-        self.body = FlexGemmCuteDSLBody()
-        self.cse = FlexGemmCuteDSLCSE()
-
-
-class FlexGemmCuteDSLOpOverrides(CuteDSLOpOverrides):
-    # Aten add/sub carry alpha as schema sugar; CuTeDSL only needs the scaled RHS.
-    @staticmethod
-    def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:
-        rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
-        return CuteDSLOpOverrides.add(a, rhs)
-
-    @staticmethod
-    def sub(a: Any, b: Any, *, alpha: Any = 1) -> Any:
-        rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
-        return CuteDSLOpOverrides.sub(a, rhs)
-
-    @staticmethod
-    def _to_copy(x: Any, *, dtype: torch.dtype, **kwargs: Any) -> Any:
-        unsupported_kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if value not in (None, False, torch.preserve_format)
-        }
-        if unsupported_kwargs:
-            raise NotImplementedError(
-                "unsupported kwargs for FlexGEMM epilogue op _to_copy: "
-                f"{unsupported_kwargs}"
-            )
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
-
-    @staticmethod
-    def clamp(x: Any, min: Any = None, max: Any = None) -> Any:
-        result = x
-        if min is not None:
-            result = CuteDSLOpOverrides.maximum(result, min)
-        if max is not None:
-            result = CuteDSLOpOverrides.minimum(result, max)
-        return result
-
-    @staticmethod
-    def clamp_min(x: Any, min: Any) -> Any:
-        return CuteDSLOpOverrides.maximum(x, min)
-
-    @staticmethod
-    def clamp_max(x: Any, max: Any) -> Any:
-        return CuteDSLOpOverrides.minimum(x, max)
-
-    @staticmethod
-    def convert_element_type(x: Any, dtype: torch.dtype) -> Any:
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
+FlexGemmCuteDSLKernel = GemmEpilogueCuteDSLKernel
+FlexGemmCuteDSLOpOverrides = GemmEpilogueCuteDSLOpOverrides
 
 
 def tuple_output_plan(
