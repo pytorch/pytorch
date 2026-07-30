@@ -529,6 +529,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             epilogue_reads=None,
             epilogue_writes=None,
             epilogue_var_renames=None,
+            local_reduce=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
 
