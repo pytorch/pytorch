@@ -41,7 +41,7 @@ import cutlass.utils.blackwell_helpers as sm100_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.operators.providers.cutedsl.evt.common_efc import log
 
-from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionDescriptor
+from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
