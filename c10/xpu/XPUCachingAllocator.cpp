@@ -11,6 +11,7 @@
 #include <deque>
 #include <mutex>
 #include <set>
+#include <utility>
 #include <vector>
 
 #if defined(__linux__)
@@ -1596,6 +1597,24 @@ class DeviceCachingAllocator {
     block->stream_uses.insert(stream);
   }
 
+  std::pair<void*, ptrdiff_t> getIpcBaseInfo(Block* block) {
+    std::scoped_lock<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(
+        !block->expandable_segment,
+        "XPU IPC is not supported for expandable segments");
+
+    Block* base_block = block;
+    while (base_block->prev != nullptr) {
+      base_block = base_block->prev;
+    }
+
+    const auto storage_offset_bytes = static_cast<ptrdiff_t>(
+        reinterpret_cast<char*>(block->ptr) -
+        reinterpret_cast<char*>(base_block->ptr));
+
+    return {base_block->ptr, storage_offset_bytes};
+  }
+
   void emptyCache(MempoolId_t mempool_id) {
     // Outside mutex to avoid deadlocks.
     auto context = maybeGatherContext(RecordContext::ALL);
@@ -2334,25 +2353,16 @@ class NativeCachingAllocator : public XPUAllocator {
   ShareableHandle shareIpcHandle(void* ptr) {
     Block* block = get_allocated_block(ptr);
     TORCH_CHECK(block, "Invalid device pointer for XPU IPC: ", ptr);
-    TORCH_CHECK(
-        !block->expandable_segment,
-        "XPU IPC is not supported for expandable segments");
 
-    Block* base_block = block;
-    while (base_block->prev != nullptr) {
-      base_block = base_block->prev;
-    }
-
-    const auto storage_offset_bytes = static_cast<ptrdiff_t>(
-        reinterpret_cast<char*>(block->ptr) -
-        reinterpret_cast<char*>(base_block->ptr));
+    auto [base_ptr, storage_offset_bytes] =
+        device_allocators[block->device]->getIpcBaseInfo(block);
 
     try {
       c10::DeviceGuard guard(c10::Device(c10::kXPU, block->device));
       auto& current_queue = xpu::getCurrentXPUStream(block->device).queue();
       sycl::context ctx = current_queue.get_context();
       auto handle = sycl::ext::oneapi::experimental::ipc_memory::get(
-          base_block->ptr, ctx);
+          base_ptr, ctx);
       auto handle_data = handle.data();
 
       return {
