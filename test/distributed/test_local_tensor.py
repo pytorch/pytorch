@@ -439,6 +439,7 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
             self.assertIsInstance(result, LocalTensor)
 
 
+@instantiate_parametrized_tests
 class TestLocalTensorRankWorld3(LocalTensorRankTest):
     world_size = 3
 
@@ -577,6 +578,69 @@ class TestLocalTensorRankWorld3(LocalTensorRankTest):
             # rank 2 receives: [0,0] from rank 0, [1,1] from rank 1, [2,2] from rank 2 = [0,0,1,1,2,2]
             expected_output = torch.tensor([0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
             self.assertEqual(result._local_tensors[self.rank], expected_output)
+
+    def test_all_to_all_single_uneven_splits(self):
+        """all_to_all_single with unequal per-source sections (gh-177371)."""
+        # Rank src holds world_size sections of output_split_sizes[src] rows and
+        # sends one to each destination, so every section it sends matches the
+        # section every destination declares for src.
+        output_split_sizes = list(range(1, self.world_size + 1))
+        different_tensors = {
+            src: torch.arange(
+                self.world_size * output_split_sizes[src] * 4, dtype=torch.float
+            ).reshape(-1, 4)
+            + src * 100
+            for src in range(self.world_size)
+        }
+
+        with LocalTensorMode(self.world_size):
+            lt_output = torch.empty(sum(output_split_sizes), 4)
+            dist.all_to_all_single(
+                lt_output,
+                LocalTensor(different_tensors),
+                output_split_sizes=output_split_sizes,
+                group=torch.distributed.distributed_c10d._get_default_group(),
+            )
+
+        for dst in range(self.world_size):
+            expected = torch.cat(
+                [
+                    different_tensors[src].chunk(self.world_size)[dst]
+                    for src in range(self.world_size)
+                ]
+            )
+            self.assertEqual(lt_output._local_tensors[dst], expected)
+
+    @parametrize(
+        "input_split_sizes,output_split_sizes",
+        [
+            # Ranks 0, 1 and 2 receive 9, 6 and 3 rows but each declares 6.
+            ([3, 2, 1], [2, 2, 2]),
+            # Rows received and rows declared are both 6, but the per-source
+            # sections disagree: rank 0 sends 2 rows into a 3 row section.
+            ([2, 2, 2], [3, 2, 1]),
+        ],
+    )
+    def test_all_to_all_single_mismatched_splits_error(
+        self, input_split_sizes, output_split_sizes
+    ):
+        """Split sizes that do not describe a valid exchange raise, not reshape."""
+        with LocalTensorMode(self.world_size):
+            lt_input = LocalTensor(
+                {r: torch.zeros(6, 4) for r in range(self.world_size)}
+            )
+            lt_output = torch.zeros(6, 4)
+
+            with self.assertRaisesRegex(
+                ValueError, "input split from rank 0 to rank 0"
+            ):
+                dist.all_to_all_single(
+                    lt_output,
+                    lt_input,
+                    output_split_sizes=output_split_sizes,
+                    input_split_sizes=input_split_sizes,
+                    group=torch.distributed.distributed_c10d._get_default_group(),
+                )
 
 
 class TestLocalTensorWorld3(LocalTensorWorldTest):
