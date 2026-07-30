@@ -1995,6 +1995,50 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(got, ref)
 
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_signbit_nan_half(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/181806
+        # CUDA was losing the sign bit of negative NaN during half→float promotion
+        if dtype == torch.float16:
+            # 0xFE00 = negative NaN in fp16, 0x7E00 = positive NaN in fp16
+            neg_nan = torch.from_numpy(
+                np.array([0xFE00, 0xFE00, 0xFE00], dtype=np.uint16).view(np.float16)
+            )
+            pos_nan = torch.from_numpy(
+                np.array([0x7E00, 0x7E00, 0x7E00], dtype=np.uint16).view(np.float16)
+            )
+        else:
+            # 0xFFC0 = negative NaN in bf16, 0x7FC0 = positive NaN in bf16
+            neg_bits = torch.tensor([0xFFC0, 0xFFC0, 0xFFC0], dtype=torch.uint16)
+            neg_nan = neg_bits.view(torch.bfloat16)
+            pos_bits = torch.tensor([0x7FC0, 0x7FC0, 0x7FC0], dtype=torch.uint16)
+            pos_nan = pos_bits.view(torch.bfloat16)
+
+        # Negative NaN should have signbit=True
+        cpu_result = torch.signbit(neg_nan)
+        cuda_result = torch.signbit(neg_nan.to(device)).cpu()
+        self.assertEqual(cpu_result, cuda_result)
+        self.assertTrue(cuda_result.all())
+
+        # Positive NaN should have signbit=False
+        cpu_result = torch.signbit(pos_nan)
+        cuda_result = torch.signbit(pos_nan.to(device)).cpu()
+        self.assertEqual(cpu_result, cuda_result)
+        self.assertFalse(cuda_result.any())
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_signbit_half_basic(self, device, dtype):
+        # Regression test: ensure signbit works for normal values, zeros, and infs
+        vals = torch.tensor([-1.0, -0.5, 0.0, 0.5, 1.0, float('inf'), float('-inf')], dtype=dtype)
+        cpu_result = torch.signbit(vals)
+        cuda_result = torch.signbit(vals.to(device)).cpu()
+        self.assertEqual(cpu_result, cuda_result)
+        expected = torch.tensor([True, True, False, False, False, False, True])
+        self.assertEqual(cuda_result, expected)
+
+
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
 if __name__ == "__main__":
