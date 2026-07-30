@@ -62,6 +62,101 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         e = torch.Event()
         weakref.ref(e)
 
+    @requires_cuda
+    def test_user_object_reconstruction_elided_when_unused(self):
+        # output_graph only emits the pre-graph user-object reconstruction when a
+        # graph node actually references a user object. On an accelerator the
+        # current stream is always registered (index 0), so a stream-free graph
+        # must NOT reconstruct + store it on every call; a stream-using graph
+        # references it and still must.
+        import torch._dynamo.graph_bytecode_inputs as gbi
+
+        calls = []
+        orig = gbi.store_user_object_weakrefs
+
+        def spy(*args):
+            calls.append(len(args))
+            return orig(*args)
+
+        with patch.object(gbi, "store_user_object_weakrefs", spy):
+            x = torch.randn(8, device="cuda")
+
+            @torch.compile(backend="eager")
+            def f(a):
+                return a * 2 + 1
+
+            f(x)  # compile
+            calls.clear()
+            f(x)  # steady-state cache hit -> no reconstruction
+            self.assertEqual(
+                calls, [], "stream-free graph reconstructed user objects per call"
+            )
+
+            torch._dynamo.reset()
+            s = torch.cuda.Stream()
+
+            @torch.compile(backend="eager")
+            def g(a):
+                with torch.cuda.stream(s):
+                    return a + 1
+
+            g(x)  # compile
+            calls.clear()
+            g(x)  # stream is referenced -> reconstruction still emitted
+            self.assertTrue(calls, "stream-using graph did not reconstruct the stream")
+
+    @requires_cuda
+    def test_leaf_function_module_survives_stream_graph(self):
+        # A leaf_function reads its nn.Module argument from the user-object
+        # registry via a hidden runtime retriever (no get_external_object_by_index
+        # node), in both forward and backward. A coexisting stream-using compiled
+        # function rebuilds the shared registry on every call, so the leaf graph
+        # must still emit its own per-call reconstruction -- otherwise the
+        # interleaved stream call clobbers the module entry and the leaf fetches
+        # the wrong object.
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def lf(mod, x):
+            return (mod.linear(x),)
+
+        @lf.register_fake
+        def lf_fake(mod, x):
+            return (mod.linear(x),)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3).cuda()
+
+            def forward(self, x):
+                return lf(self, x)
+
+        m = M()
+        f = torch.compile(m, backend="aot_eager", fullgraph=True)
+
+        s = torch.cuda.Stream()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def g(a):
+            with torch.cuda.stream(s):
+                return a + 1
+
+        x_c = torch.randn(3, 3, device="cuda", requires_grad=True)
+        x_ref = x_c.detach().clone().requires_grad_(True)
+
+        # Warm up f, then let an interleaved stream graph rebuild the shared
+        # registry. f's forward is then re-invoked (must refetch the module
+        # correctly) and its backward run (must restore the module from its own
+        # per-call snapshot).
+        f(torch.randn(3, 3, device="cuda", requires_grad=True))
+        g(torch.randn(3, 3, device="cuda"))
+        out = f(x_c)[0]
+        self.assertEqual(out, m.linear(x_ref))
+        out.sum().backward()
+        m.linear(x_ref).sum().backward()  # eager reference through the same module
+        self.assertEqual(x_c.grad, x_ref.grad)
+
     def _assert_weakref_callback_fires(self, factory):
         """Backend Stream/Event tp_dealloc overrides must call
         PyObject_ClearWeakRefs so that weakrefs to destroyed instances
