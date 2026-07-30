@@ -1372,13 +1372,25 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   mkdir -p "$TEST_REPORTS_DIR"
 
   test_inductor_set_cpu_affinity
-  MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+  # This job always runs on linux.24xl.spr-metal, which ARC maps to the fixed
+  # c7i.metal-24xl instance type in .github/arc.yaml.
+  local models_perf_target=benchmarks/dynamo/expected_ci_abs_latency_inductor_torchbench_cpu_osdc.csv
 
-  grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
+  if [[ ! -r "$models_perf_target" ]]; then
+    echo "Missing CPU TorchBench smoketest target file: $models_perf_target" >&2
+    return 1
+  fi
+  echo "Using CPU TorchBench smoketest abs_latency targets from $models_perf_target"
+  local validation_status=0
+  while IFS=',' read -r -a model_cfg
   do
-    local model_name=${model_cfg[0]}
+    local model_name=${model_cfg[0]:-}
+    if [[ "$model_name" =~ ^[[:space:]]*(#|$) ]]; then
+      continue
+    fi
     local data_type=${model_cfg[2]}
-    local speedup_target=${model_cfg[5]}
+    local perf_target=${model_cfg[5]}
+    local threshold_scale=${model_cfg[6]:-0.99}
     local backend=${model_cfg[1]}
     if [[ ${model_cfg[4]} == "cpp" ]]; then
       export TORCHINDUCTOR_CPP_WRAPPER=1
@@ -1387,20 +1399,37 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     local output_name="$TEST_REPORTS_DIR/inductor_inference_${model_cfg[0]}_${model_cfg[1]}_${model_cfg[2]}_${model_cfg[3]}_cpu_smoketest.csv"
 
+    local benchmark_status=0
     if [[ ${model_cfg[3]} == "dynamic" ]]; then
       $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
-        --dynamic-batch-only --freezing --timeout 9000 --"$backend" --output "$output_name"
+        --dynamic-batch-only --freezing --timeout 9000 --"$backend" --output "$output_name" \
+        || benchmark_status=$?
     else
       $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
-        --freezing --timeout 9000 --"$backend" --output "$output_name"
+        --freezing --timeout 9000 --"$backend" --output "$output_name" \
+        || benchmark_status=$?
     fi
-    cat "$output_name"
+    if [[ "$benchmark_status" -ne 0 ]]; then
+      echo "CPU TorchBench smoketest failed for $model_name (exit $benchmark_status)" >&2
+      validation_status=$benchmark_status
+      continue
+    fi
+    if ! cat "$output_name"; then
+      echo "Missing CPU TorchBench smoketest output for $model_name: $output_name" >&2
+      validation_status=1
+      continue
+    fi
     # The threshold value needs to be actively maintained to make this check useful.
-    # Allow 1% variance for CPU perf to accommodate perf fluctuation
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s 0.99
-  done
+    # Allow 1% variance by default for CPU perf to accommodate perf fluctuation.
+    # Some models can override this in the target CSV when a tighter band is flaky.
+    # Fail on large improvements too so the baseline is updated promptly.
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$perf_target" -s "$threshold_scale" \
+      --metric abs_latency --fail-on-improvement \
+      || validation_status=$?
+  done < "$models_perf_target"
+  return "$validation_status"
 }
 
 test_torchbench_gcp_smoketest(){
