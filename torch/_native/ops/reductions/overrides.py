@@ -366,6 +366,108 @@ def _min_dim_cond(self, dim, keepdim=False):
     return _base_cond(self, dim, nouts=2, has_index=True)
 
 
+# --- Group C: single-output reductions with a parameter or a non-float output.
+# var/std (Welford + correction; std = sqrt(var)), linalg_vector_norm (ord selects
+# the trait), all/any (bool output), count_nonzero (int64 output). All accumulate in
+# the float _ACC_POLICY acc and cast the projected value to aten's output dtype. ---
+
+
+def _correction(correction, unbiased=None):
+    # aten var/std correction: explicit `correction` wins; else `unbiased` (the old
+    # bool API) maps True->1 / False->0; default unbiased -> 1.
+    if correction is not None:
+        return correction
+    if unbiased is None:
+        return 1
+    return 1 if unbiased else 0
+
+
+def _var_impl(self, dim=None, *, correction=None, keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    c = _correction(correction)
+    # `correction` is baked into the kernel as a const_expr, so it MUST be in the
+    # trait_key -- else the first-compiled correction is reused for all others.
+    return _run1(
+        lambda acc: T.WelfordOps(correction=c, acc=acc),
+        f"var{c}",
+        self,
+        red,
+        keepdim,
+        self.dtype,
+    )
+
+
+def _std_impl(self, dim=None, *, correction=None, keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    c = _correction(correction)
+    return _run1(
+        lambda acc: T.WelfordOps(correction=c, take_sqrt=True, acc=acc),
+        f"std{c}",
+        self,
+        red,
+        keepdim,
+        self.dtype,
+    )
+
+
+# linalg_vector_norm ord -> trait factory. inf/-inf are max/min |x| (AbsMax/AbsMin);
+# finite p uses NormOps(p). ord=0 (count nonzero) is NOT handled here -> falls back.
+def _norm_trait(ord_val):
+    if ord_val == float("inf"):
+        return lambda acc: T.AbsMaxOps(acc=acc)
+    if ord_val == float("-inf"):
+        return lambda acc: T.AbsMinOps(acc=acc)
+    return lambda acc: T.NormOps(float(ord_val), acc=acc)
+
+
+def _vector_norm_impl(self, ord=2, dim=None, keepdim=False, *, dtype=None):
+    red = _normalize_dims(dim, self.dim())
+    odt = _out_dtype(self, dtype)
+    return _run1(_norm_trait(ord), f"vnorm{ord}", self, red, keepdim, odt)
+
+
+def _all_impl(self, dim, keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    return _run1(lambda acc: T.AllOps(acc=acc), "all", self, red, keepdim, torch.bool)
+
+
+def _any_impl(self, dim, keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    return _run1(lambda acc: T.AnyOps(acc=acc), "any", self, red, keepdim, torch.bool)
+
+
+def _count_nonzero_impl(self, dim):
+    red = _normalize_dims(dim, self.dim())
+    return _run1(
+        lambda acc: T.CountNonzeroOps(acc=acc), "cnz", self, red, False, torch.int64
+    )
+
+
+def _var_cond(self, dim=None, *, correction=None, keepdim=False):
+    return _base_cond(self, dim)
+
+
+def _std_cond(self, dim=None, *, correction=None, keepdim=False):
+    return _base_cond(self, dim)
+
+
+def _vector_norm_cond(self, ord=2, dim=None, keepdim=False, *, dtype=None):
+    # ord=0 is a nonzero-count, not a |x|**p norm -> let aten handle it.
+    return _base_cond(self, dim) and ord != 0 and _supported_out_dtype(dtype)
+
+
+def _all_cond(self, dim, keepdim=False):
+    return _base_cond(self, dim)
+
+
+def _any_cond(self, dim, keepdim=False):
+    return _base_cond(self, dim)
+
+
+def _count_nonzero_cond(self, dim):
+    return _base_cond(self, dim)
+
+
 def register_reduction_overrides() -> None:
     # CUDA overrides; cu.register_op_override short-circuits when the CuteDSL
     # runtime is unavailable, so this is safe to call unconditionally at import.
@@ -393,4 +495,28 @@ def register_reduction_overrides() -> None:
     )
     cu.register_op_override(
         "aten", "min.dim", "CUDA", cond=_min_dim_cond, impl=_min_dim_impl
+    )
+    # Group C: var / std (correction), linalg_vector_norm (ord), all / any (bool
+    # output), count_nonzero (int64 output). Single-output, float input.
+    cu.register_op_override(
+        "aten", "var.correction", "CUDA", cond=_var_cond, impl=_var_impl
+    )
+    cu.register_op_override(
+        "aten", "std.correction", "CUDA", cond=_std_cond, impl=_std_impl
+    )
+    cu.register_op_override(
+        "aten",
+        "linalg_vector_norm",
+        "CUDA",
+        cond=_vector_norm_cond,
+        impl=_vector_norm_impl,
+    )
+    cu.register_op_override("aten", "all.dim", "CUDA", cond=_all_cond, impl=_all_impl)
+    cu.register_op_override("aten", "any.dim", "CUDA", cond=_any_cond, impl=_any_impl)
+    cu.register_op_override(
+        "aten",
+        "count_nonzero.dim_IntList",
+        "CUDA",
+        cond=_count_nonzero_cond,
+        impl=_count_nonzero_impl,
     )
