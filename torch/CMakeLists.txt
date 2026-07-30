@@ -547,7 +547,7 @@ add_dependencies(torch_python gen_torch_version)
 # via Python package collection. Install it explicitly via cmake instead.
 install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
 
-if(EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
+if(USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
   install(FILES "${TORCH_SRC_DIR}/_rocm_init.py" DESTINATION ".")
 endif()
 
