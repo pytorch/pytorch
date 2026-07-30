@@ -1411,7 +1411,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                             )
                         )
                     hooks_vt_cls = (
-                        variables.OrderedItemsDictVariable
+                        variables.OrderedDictVariable
                         if isinstance(hooks_dict, collections.OrderedDict)
                         else variables.ConstDictVariable
                     )
