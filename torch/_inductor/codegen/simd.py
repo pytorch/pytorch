@@ -4532,10 +4532,6 @@ class SIMDScheduling(BaseScheduling):
             split_scores = []
             prod = 1
             prev_var_coalesced_score = 0
-            # Absolute coalesced memory captured by this split. Unlike
-            # split_scores, this is never penalized below, because it is used to
-            # compare *different kernels* rather than to rank tilings within one.
-            coalesced_memory = 0
 
             # iterate from non-dense to dense
             for v, v_range in zip(splitting_vars, ranges):
@@ -4560,11 +4556,6 @@ class SIMDScheduling(BaseScheduling):
                     splits.append(tile)
                     split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
 
-                    # Splitting this var converts its uncoalesced accesses into
-                    # coalesced ones, so var_tiling.score counts as coalesced.
-                    coalesced_memory += var_tiling.score
-                    coalesced_memory += coalesce_analysis.coalesced_by_var.get(v, 0)
-
                     prod = 1
                     prev_var_coalesced_score = 0
 
@@ -4573,13 +4564,13 @@ class SIMDScheduling(BaseScheduling):
                 prod *= v_range
                 splits.append(prod)
                 split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
-                coalesced_memory += coalesce_analysis.coalesced_by_var.get(v, 0)
                 prod = 1
 
             if prod != 1 or (is_pointwise and len(splits) == 0):
                 splits.append(prod)
                 split_scores.append(prev_var_coalesced_score)
-                coalesced_memory += prev_var_coalesced_score
+
+            coalesced_memory = sum(split_scores)
 
             # penalize splits that leave small blocks
             # where we can't fully utilize full memory transaction
