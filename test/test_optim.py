@@ -15,6 +15,7 @@ from optim.test_swa_utils import TestSWAUtils
 import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
+from torch.optim._muon import _compute_muon_update
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
@@ -2591,6 +2592,50 @@ class TestOptimRenewed(TestCase):
 
 
 class TestMuonBatchedMatrices(TestCase):
+    def test_compute_muon_update_matches_optimizer_step(self, device):
+        torch.manual_seed(2)
+        lr = 0.03
+        weight_decay = 0.2
+        momentum = 0.8
+        ns_coefficients = (3.4445, -4.7750, 2.0315)
+        ns_steps = 3
+        eps = 1e-7
+        initial = torch.randn((2, 3, 5), device=device, dtype=torch.bfloat16)
+        grad = torch.randn_like(initial)
+        param = Parameter(initial.clone())
+        param.grad = grad.clone()
+        optimizer = torch.optim.Muon(
+            [param],
+            lr=lr,
+            weight_decay=weight_decay,
+            momentum=momentum,
+            nesterov=True,
+            ns_coefficients=ns_coefficients,
+            ns_steps=ns_steps,
+            eps=eps,
+        )
+
+        momentum_buffer = torch.zeros_like(grad)
+        momentum_buffer.lerp_(grad, 1 - momentum)
+        prepared = grad.lerp(momentum_buffer, momentum)
+        prepared_before = prepared.clone()
+        direction, adjusted_lr = _compute_muon_update(
+            prepared,
+            prepared.shape,
+            lr=lr,
+            ns_coefficients=ns_coefficients,
+            ns_steps=ns_steps,
+            eps=eps,
+            adjust_lr_fn=None,
+        )
+        expected = initial.mul(1 - lr * weight_decay)
+        expected.add_(direction, alpha=-adjusted_lr)
+
+        optimizer.step()
+
+        self.assertEqual(prepared, prepared_before)
+        self.assertEqual(param, expected)
+
     @parametrize("matrix_shape", [(2, 5), (5, 2)])
     def test_muon_batched_matrices(self, device, matrix_shape):
         torch.manual_seed(2)
