@@ -121,6 +121,17 @@ def main():
             backend="eager",
             device="cpu",
         ),
+        # cuda + eager: on an accelerator the ambient current stream is
+        # registered per call, so this catches the stream-free reconstruction
+        # elision (name: runtime_overhead_eager).
+        Benchmark(
+            requires_grad=False,
+            inference_mode=False,
+            backward=False,
+            dynamic=False,
+            backend="eager",
+            device="cuda",
+        ),
     ]
 
     for benchmark in all:

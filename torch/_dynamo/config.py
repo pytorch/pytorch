@@ -892,9 +892,12 @@ constant_fold_autograd_profiler_enabled = False
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
 
-# Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
-# and AOTAutograd runtime wrapper.
-record_runtime_overhead = True
+# Flag to record runtime overhead in profile traces ("Pregraph bytecode" marker
+# around the pre-graph bytecode, plus an AOTAutograd runtime-wrapper marker).
+# Off by default: emitting the pre-graph marker costs ~8-9k instructions per
+# compiled call (two torch._disable_dynamo hops around a context manager) even
+# when no profiler is attached. Enable it (and recompile) to get the markers.
+record_runtime_overhead = False
 
 # Flag to enable the use of torch.compile().aot_compile() API. Should be always True.
 enable_aot_compile = True
