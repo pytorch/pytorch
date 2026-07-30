@@ -1,48 +1,26 @@
 # mypy: allow-untyped-defs
-"""Backend-neutral FX graph helpers for GEMM epilogues."""
+"""Backend-neutral FX graph and runtime argument helpers for GEMM epilogues."""
 
 import dataclasses
 from collections.abc import Iterator, Sequence
 from typing import Any, ClassVar
 
-import sympy
-
 import torch
 from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import (
-    GuardOnDataDependentSymNode,
-    statically_known_true as fx_statically_known_true,
-)
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._ordered_set import OrderedSet
 
-
-def statically_known(expr: Any) -> bool:
-    """Return whether a symbolic predicate is known true without adding guards."""
-    if isinstance(expr, bool):
-        return expr
-    if isinstance(expr, sympy.Basic):
-        return V.graph.sizevars.statically_known_true(expr)
-    return fx_statically_known_true(expr)
-
-
-def statically_known_equal(lhs: Any, rhs: Any) -> bool:
-    """Return whether symbolic shape values are known equal without adding guards."""
-    return statically_known(lhs == rhs)
-
-
-def statically_known_shape_equal(
-    actual_shape: Sequence[Any], expected_shape: Sequence[Any]
-) -> bool:
-    """Compare possibly symbolic shape tuples without adding guards."""
-    return len(actual_shape) == len(expected_shape) and all(
-        statically_known_equal(actual, expected)
-        for actual, expected in zip(actual_shape, expected_shape)
-    )
+from .gemm_epilogue_utils import statically_known_shape_equal
 
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionGeometry:
-    """Describe the grouped output axis shared by GEMM reduction consumers."""
+    """Grouped M/N reduction geometry shared by frontend and backend plans.
+
+    Attributes:
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+    """
 
     group: int
     axis: int
@@ -102,14 +80,19 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True)
-class GemmReductionExpression:
-    """Typed reduction kind and compile-time scalar parameters."""
+class GemmReductionDescriptor:
+    """Backend lowering descriptor for a recognized reduction expression.
+
+    Attributes:
+        kind: Canonical reduction or normalized-consumer expression name.
+        parameters: Compile-time scalar parameters encoded by that expression.
+    """
 
     kind: str
     parameters: tuple[float, ...] = ()
 
     @classmethod
-    def parse(cls, value: str) -> "GemmReductionExpression":
+    def parse(cls, value: str) -> "GemmReductionDescriptor":
         kind, *parameters = value.split(":")
         return cls(kind, tuple(float(parameter) for parameter in parameters))
 
@@ -125,7 +108,18 @@ class GemmReductionExpression:
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionConfig:
-    """Describe a grouped reduction recognized during scheduler analysis."""
+    """Reduction recognized from frontend graph or scheduler loop IR.
+
+    This is an analysis result, before output ownership and feed-main behavior
+    are finalized into a :class:`GemmReductionPlan`.
+
+    Attributes:
+        output_name: Buffer produced by the recognized reduction.
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+        reduction_type: Reduction or normalized consumer expression to compute.
+        source_type: Transformation applied to GEMM accumulator values.
+    """
 
     output_name: str
     group: int
@@ -144,7 +138,20 @@ class GemmReductionConfig:
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionPlan:
-    """Describe grouped reduction outputs passed from lowering to codegen."""
+    """Backend-neutral reduction outputs passed from analysis to codegen.
+
+    Attributes:
+        reduction_output: Optional compressed reduction output buffer.
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+        reduction_type: Reduction or normalized consumer expression to compute.
+        source_type: Transformation applied to GEMM accumulator values.
+        primary_output: Buffer receiving the primary GEMM result.
+        feeds_main: Whether the reduction participates in the primary output.
+        feed_output: Optional full-shape output consuming the reduction.
+        secondary_feed_output: Optional second full-shape reduction consumer.
+        secondary_feed_type: Expression implemented by the secondary consumer.
+    """
 
     reduction_output: str | None
     group: int
@@ -178,40 +185,38 @@ class GemmReductionPlan:
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionArguments:
-    """Typed view of grouped-reduction fields attached to GEMM arguments."""
+    """Runtime tensors and compile-time parameters for a grouped GEMM reduction.
 
-    output: Any | None
-    feed_output: Any | None
-    secondary_feed_output: Any | None
-    secondary_feed_type: str | None
-    group: int
-    axis: int
-    reduction_type: str
-    source_type: str
-    feeds_main: bool
+    Attributes:
+        output: Optional tensor receiving the compressed reduction.
+        feed_output: Optional full-shape tensor receiving the reduction consumer.
+        secondary_feed_output: Optional second full-shape reduction consumer.
+        secondary_feed_type: Expression implemented by ``secondary_feed_output``.
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+        reduction_type: Reduction or normalized consumer expression to compute.
+        source_type: Transformation applied to GEMM accumulator values.
+        feeds_main: Whether the reduction also produces the primary GEMM output.
+    """
 
-    SPECIALIZATION_KEYS: ClassVar[tuple[str, ...]] = (
-        "local_reduce_group",
-        "local_reduce_axis",
-        "local_reduce_type",
-        "local_reduce_source",
-        "local_reduce_feeds_main",
-        "local_reduce_secondary_feed_type",
+    output: Any | None = None
+    feed_output: Any | None = None
+    secondary_feed_output: Any | None = None
+    secondary_feed_type: str | None = None
+    group: int = 0
+    axis: int = 1
+    reduction_type: str = "sum"
+    source_type: str = "identity"
+    feeds_main: bool = False
+
+    SPECIALIZATION_FIELDS: ClassVar[tuple[str, ...]] = (
+        "group",
+        "axis",
+        "reduction_type",
+        "source_type",
+        "feeds_main",
+        "secondary_feed_type",
     )
-
-    @classmethod
-    def from_operator_args(cls, args: Any) -> "GemmReductionArguments":
-        return cls(
-            getattr(args, "local_reduce_out", None),
-            getattr(args, "local_reduce_feed_out", None),
-            getattr(args, "local_reduce_secondary_feed_out", None),
-            getattr(args, "local_reduce_secondary_feed_type", None),
-            getattr(args, "local_reduce_group", 0),
-            getattr(args, "local_reduce_axis", 1),
-            getattr(args, "local_reduce_type", "sum"),
-            getattr(args, "local_reduce_source", "identity"),
-            getattr(args, "local_reduce_feeds_main", False),
-        )
 
     @property
     def enabled(self) -> bool:
@@ -230,8 +235,8 @@ class GemmReductionArguments:
         )
 
     @property
-    def expression(self) -> GemmReductionExpression:
-        return GemmReductionExpression.parse(self.reduction_type)
+    def descriptor(self) -> GemmReductionDescriptor:
+        return GemmReductionDescriptor.parse(self.reduction_type)
 
     def tensors(self, attr: str) -> tuple[Any | None, Any | None, Any | None]:
         def tensor(value: Any | None) -> Any | None:
