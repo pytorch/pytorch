@@ -270,6 +270,15 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
   pip_install_whl "$(echo dist/*.whl)"
 
+  # native-AOT stage 2: export DSL kernels, relink torch_cuda with them
+  # embedded, and patch the relinked library back into the wheel handed
+  # to test jobs. Needs the INSTALLED torch (kernel builders import it),
+  # which is why it runs post-install rather than inside the PEP 517
+  # build. Skips cleanly (printing why) when the DSL runtime is absent
+  # or no supported arch is targeted; past those checks a failure fails
+  # the build. See tools/native_aot/build_stage2.py.
+  python tools/native_aot/build_stage2.py --wheel "$(echo dist/*.whl)"
+
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
   # relink. This guards against build-system changes (e.g. a new
