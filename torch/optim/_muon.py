@@ -47,32 +47,46 @@ def _zeropower_via_newtonschulz(
         raise ValueError(
             "Number of steps must be less than 100 for computational efficiency"
         )
-    if len(grad.shape) != 2:
-        raise ValueError("Input tensor gradient must be a 2D matrix")
+    if grad.ndim < 2:
+        raise ValueError("Input tensor gradient must be a matrix or matrix batch")
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    ortho_grad = grad.bfloat16()
-    if grad.size(0) > grad.size(1):
-        ortho_grad = ortho_grad.T
-    # Ensure spectral norm is at most 1
-    ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
-    # Perform the NS iterations
-    for _ in range(ns_steps):
-        gram_matrix = ortho_grad @ ortho_grad.T
-        gram_update = torch.addmm(
-            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
-        )
-        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+    # NS normalizes in place, so never alias the momentum buffer.
+    ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
+    transposed = grad.size(-2) > grad.size(-1)
+    if transposed:
+        ortho_grad = ortho_grad.transpose(-2, -1)
+    ortho_grad.div_(ortho_grad.norm(dim=(-2, -1), keepdim=True).clamp(min=eps))
 
-    if grad.size(0) > grad.size(1):
-        ortho_grad = ortho_grad.T
+    if ortho_grad.ndim == 2:
+        for _ in range(ns_steps):
+            gram_matrix = ortho_grad @ ortho_grad.T
+            gram_update = torch.addmm(
+                gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+            )
+            ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+    else:
+        batch_shape = ortho_grad.shape
+        matrix_batch = ortho_grad.reshape(-1, *batch_shape[-2:])
+        for _ in range(ns_steps):
+            gram_matrix = matrix_batch @ matrix_batch.transpose(-2, -1)
+            gram_update = torch.baddbmm(
+                gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+            )
+            matrix_batch = torch.baddbmm(
+                matrix_batch, gram_update, matrix_batch, beta=a
+            )
+        ortho_grad = matrix_batch.reshape(batch_shape)
+
+    if transposed:
+        ortho_grad = ortho_grad.transpose(-2, -1)
     return ortho_grad
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
-    A, B = param_shape[:2]
+    A, B = param_shape[-2:]
 
     if adjust_lr_fn is None or adjust_lr_fn == "original":
         # pyrefly: ignore [no-matching-overload]
@@ -84,6 +98,29 @@ def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> 
     else:
         adjusted_ratio = 1.0
     return lr * adjusted_ratio
+
+
+def _compute_muon_update(
+    update: Tensor,
+    param_shape: torch.Size,
+    *,
+    lr: float | Tensor,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+) -> tuple[Tensor, float | Tensor]:
+    """Return the direction and adjusted LR for a prepared Muon update.
+
+    ``lr`` must already be normalized to a Python scalar or zero-dimensional
+    tensor. This internal helper does not update momentum, apply weight decay,
+    or mutate its input.
+    """
+    direction = _zeropower_via_newtonschulz(
+        update, ns_coefficients, ns_steps, eps
+    )
+    adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param_shape)
+    return direction, adjusted_lr
 
 
 class Muon(Optimizer):
@@ -128,12 +165,16 @@ class Muon(Optimizer):
         }
         super().__init__(params, defaults)
 
-        for group in self.param_groups:
-            for p in group["params"]:
-                if p.ndim != 2:
-                    raise ValueError(
-                        f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}"
-                    )
+    def add_param_group(self, param_group: dict) -> None:
+        super().add_param_group(param_group)
+        group = self.param_groups[-1]
+        for p in group["params"]:
+            if p.ndim < 2:
+                self.param_groups.pop()
+                raise ValueError(
+                    "Muon requires parameters with at least two dimensions, "
+                    f"but found a parameter with size: {p.size()}"
+                )
 
     def _init_group(
         self,
@@ -267,8 +308,10 @@ Muon.__doc__ = (
     """
     + rf"""
     Args:
-        {_params_doc}. Note that Muon is an optimizer for 2D parameters of neural network hidden layers. Other
-            parameters, such as bias, and embedding, should be optimized by a standard method such as AdamW.
+        {_params_doc}. Muon treats the last two dimensions as matrix dimensions
+            and any leading dimensions as a batch of independent matrices. Other
+            parameters, such as bias, should be optimized by a standard method
+            such as AdamW.
         lr (float, Tensor, optional): learning rate (default: 1e-3).
         weight_decay (float, optional): weight decay (L2 penalty). (default: 0.1)
         momentum (float, optional): momentum factor (default: 0.95)
@@ -280,17 +323,15 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
-
     Example:
         >>> # xdoctest: +SKIP
-        >>> # Muon only supports 2D params; use a standard optimizer
-        >>> # such as AdamW for biases, embeddings, and other non-2D
-        >>> # parameters.
+        >>> # Muon supports matrices and batches of matrices. Use a standard
+        >>> # optimizer such as AdamW for biases and other rank-1 parameters.
         >>> muon_params = [
-        ...     p for p in model.parameters() if p.ndim == 2
+        ...     p for p in model.parameters() if p.ndim >= 2
         ... ]
         >>> other_params = [
-        ...     p for p in model.parameters() if p.ndim != 2
+        ...     p for p in model.parameters() if p.ndim < 2
         ... ]
         >>> optim_muon = torch.optim.Muon(
         ...     muon_params, lr=0.02, momentum=0.95
@@ -336,19 +377,27 @@ def _single_tensor_muon(
 
     for i, param in enumerate(params):
         grad = grads[i]
-        if grad.ndim != 2:
-            raise ValueError("Param gradient must be a 2D matrix")
+        if grad.ndim < 2:
+            raise ValueError("Param gradient must be a matrix or matrix batch")
 
         buf = muon_momentum_bufs[i]
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
 
-        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
-
-        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
+        if param.numel() == 0:
+            continue
+        direction, adjusted_lr = _compute_muon_update(
+            update,
+            param.shape,
+            lr=lr,
+            ns_coefficients=ns_coefficients,
+            ns_steps=ns_steps,
+            eps=eps,
+            adjust_lr_fn=adjust_lr_fn,
+        )
 
         param.mul_(1 - lr * weight_decay)
-        param.add_(update, alpha=-adjusted_lr)
+        param.add_(direction, alpha=-adjusted_lr)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)
