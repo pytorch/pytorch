@@ -144,9 +144,7 @@ struct AddTensorboardFields : public MetadataBase {
       std::shared_ptr<Result> parent = result->parent_.lock();
       while (parent && !parent_id.has_value()) {
         parent->visit_if_base<PyExtraFieldsBase>(
-            [&](const auto& j) {
-              parent_id = static_cast<uint64_t>(j.id_);
-            });
+            [&](const auto& j) { parent_id = static_cast<uint64_t>(j.id_); });
         parent = parent->parent_.lock();
       }
       if (parent_id.has_value()) {
