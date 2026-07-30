@@ -30,15 +30,17 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
+from ...kernel.gemm_epilogue import (
+    GemmReductionConfig,
+    GemmReductionGeometry,
+    GemmReductionPlan,
+)
 from ...kernel.gemm_epilogue_codegen import GemmEpilogueIRCodegen
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_ir,
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
     GemmEpilogueIRStore,
-    GemmReductionConfig,
-    GemmReductionGeometry,
-    GemmReductionPlan,
     grouped_reduction_ir,
     is_absmax_normalize_ir,
     is_absmax_scale_finalizer_ir,
