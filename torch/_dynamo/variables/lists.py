@@ -40,6 +40,7 @@ from ..exc import (
 )
 from ..source import AttrSource
 from ..utils import (
+    check_positional,
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
@@ -55,7 +56,6 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     Method,
-    MethodFlags,
     ValueMutationNew,
     VariableTracker,
 )
@@ -218,6 +218,8 @@ class BaseListVariable(VariableTracker):
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
+
+    mp_length = sq_length
 
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
@@ -715,6 +717,9 @@ class RangeVariable(BaseListVariable):
         if length > sys.maxsize:
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
+
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.sq_length(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
@@ -1396,26 +1401,22 @@ class DequeVariable(CommonListMethodsVariable):
         # to the object protocol, matching the old is_mutable() guard.
         if not self.is_mutable():
             return None
-        # VARARGS rejects kwargs centrally; only the 0-or-1 arg bound is left.
-        if len(args) > 1:
-            raise_args_mismatch(
-                tx,
-                "rotate",
-                "at most 1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        # deque.rotate is METH_FASTCALL, so the flags derived from ml_flags
+        # reject kwargs but cannot bound the positional count; deque_rotate
+        # does that itself with _PyArg_CheckPositional.
+        check_positional(tx, "rotate", len(args), 0, 1)
         n_vt = args[0] if args else ConstantVariable.create(1)
         n = n_vt.nb_index_impl(tx).as_python_constant()
         length = len(self.items)
         if length > 1:
             tx.output.side_effects.mutation(self)
             k = n % length
-            if k:
+            if k != 0:
                 self.items[:] = self.items[-k:] + self.items[:-k]
             self.state += 1
         return ConstantVariable.create(None)
 
-    tp_methods = {"rotate": Method(_rotate, flags=MethodFlags.VARARGS)}
+    tp_methods = {"rotate": Method(_rotate)}
 
     def richcompare_impl(
         self,
@@ -2231,7 +2232,7 @@ class SliceVariable(VariableTracker):
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(member.nb_index_impl(tx).as_python_constant())
+            members.append(pynumber_index(tx, member).as_python_constant())
         return slice(*members)
 
     def is_hashable(self) -> bool:

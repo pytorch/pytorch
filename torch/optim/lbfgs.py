@@ -338,6 +338,13 @@ class LBFGS(Optimizer):
         # Make sure the closure is always called with grad enabled
         closure = torch.enable_grad()(closure)
 
+        # There is nothing to optimize, so skip the step like the other optimizers
+        # do, but still evaluate the closure so the caller gets a loss back. The
+        # rest of the step cannot run anyway: the global state below is keyed on
+        # the first parameter, and the flat gradient would be empty.
+        if len(self._params) == 0:
+            return closure()
+
         group = self.param_groups[0]
         lr = _to_scalar(group["lr"])
         max_iter = group["max_iter"]
