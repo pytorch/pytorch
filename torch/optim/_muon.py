@@ -84,7 +84,9 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
+def _adjust_lr(
+    lr: float | Tensor, adjust_lr_fn: str | None, param_shape: torch.Size
+) -> float | Tensor:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[-2:]
 
@@ -397,7 +399,11 @@ def _single_tensor_muon(
         )
 
         param.mul_(1 - lr * weight_decay)
-        param.add_(direction, alpha=-adjusted_lr)
+        if isinstance(adjusted_lr, Tensor):
+            direction.mul_(-adjusted_lr)
+            param.add_(direction)
+        else:
+            param.add_(direction, alpha=-adjusted_lr)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)

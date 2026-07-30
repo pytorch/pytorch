@@ -703,6 +703,18 @@ def synchronize(device: Device = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
+def _sleep(cycles: int) -> None:
+    r"""Spin the current XPU device for the given number of device clock cycles.
+
+    The kernel is enqueued on the current stream and returns immediately on the
+    host; the device-side spin runs asynchronously.
+
+    Args:
+        cycles (int): number of device clock cycles to spin.
+    """
+    torch._C._xpu_sleep(cycles)
+
+
 def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
     if not _is_compiled():

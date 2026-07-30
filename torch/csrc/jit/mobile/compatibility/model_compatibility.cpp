@@ -270,7 +270,7 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
   return _get_mobile_model_contained_types(bytecode_values);
 }
 
-// Get deduplicate type table given bytecode, and each string is a atomic type,
+// Get deduplicate type table given bytecode, and each string is an atomic type,
 // like str, Tensor and etc. For example,
 // input: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
 // output: {Dict, int, Tuple, Tensor}

@@ -51,6 +51,7 @@ else:
         get_process_group_ranks,
         get_rank,
         get_world_size,
+        GroupMember,
         GroupName,
         init_process_group,
         is_initialized,
@@ -603,7 +604,7 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
-                if dim_group is None:
+                if dim_group == GroupMember.NON_GROUP_MEMBER:
                     return None
                 return dim_group.group_name
 
@@ -629,6 +630,10 @@ else:
 
                 # only add to dim_groups if the current rank in the subgroup
                 if get_rank() in subgroup_ranks:
+                    if dim_group == GroupMember.NON_GROUP_MEMBER:
+                        raise AssertionError(
+                            f"Rank {get_rank()} was not included in process group {subgroup_ranks}"
+                        )
                     if pg_name is not None:
                         raise RuntimeError(
                             f"Each device mesh dimension should get only one process group, but got {get_rank()} "
