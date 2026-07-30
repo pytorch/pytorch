@@ -418,7 +418,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
         store = GemmEpilogueIRAnalysis.store_from_buffer(node)
         classified = (
             grouped_reduction_ir(
-                store, gemm_node.get_name(), group, gemm_node.get_dtype()
+                store,
+                gemm_node.get_name(),
+                group,
+                gemm_node.get_dtype(),
             )
             if store is not None
             else None
@@ -1694,13 +1697,6 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         gemm_size,
                     )
                     return False
-        if scaled_epilogue and len(epilogue_inputs) > 4:
-            log.debug(
-                "NVGEMM scaled epilogue has %d captured tensors; at most four are supported",
-                len(epilogue_inputs),
-            )
-            return False
-
         if not existing_epilogue_nodes:
             reads = OrderedSet(rd.name for rd in node_to_fuse.read_writes.reads)
             if ir_node.get_name() not in reads:
@@ -1741,8 +1737,6 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                 )
             if scaled_epilogue:
-                if len(trial_reads) > 4 or len(trial_writes) > 4:
-                    return False
                 for read_name in trial_reads:
                     read_buf = name_to_buf.get(read_name)
                     if read_buf is None:
