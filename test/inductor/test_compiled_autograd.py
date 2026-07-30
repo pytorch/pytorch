@@ -5604,6 +5604,7 @@ xfail_by_backend = {
         "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
         "test_setitem",  # CopySlices accuracy error
         "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
+        "test_node_creation_hook_checkpoint_recompute",  # checkpoint unpack_hook is in dynamo MOD_SKIPLIST
         "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
