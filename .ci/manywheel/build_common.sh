@@ -160,7 +160,6 @@ fi
 echo "Building wheel at $(date)"
 
 time CMAKE_ARGS=${CMAKE_ARGS[@]} \
-    EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
@@ -177,15 +176,10 @@ if [[ -n "$BUILD_PYTHONLESS" ]]; then
     # Note - just use whichever python we happen to be on
     python -m spin clean
 
-    if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
-        STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
-    fi
-
     mkdir -p build
     pushd build
     echo "Calling tools/build_libtorch.py at $(date)"
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
-         EXTRA_CAFFE2_CMAKE_FLAGS="${EXTRA_CAFFE2_CMAKE_FLAGS[@]} $STATIC_CMAKE_FLAG" \
          python ../tools/build_libtorch.py
     echo "Finished tools/build_libtorch.py at $(date)"
     popd
