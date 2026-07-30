@@ -70,7 +70,7 @@ Use these GitHub MCP tools for triage:
 | `ci-*`, `ci:*` | CI infrastructure controls |
 | `sev*` | Severity labels require human decision |
 | `merge blocking` | Requires human decision |
-| `actionable` | Requires human decision |
+| `actionable`, `needs design`, `needs reproduction`, `needs research` | Reserved for human reviewers after they have reviewed the issue |
 | Any label containing "deprecated" | Obsolete |
 | `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 
@@ -101,7 +101,7 @@ That issue belongs to the sub-oncall team. They own their queue.
 - If it is a question (not a bug report or feature request): close and use the `redirect_to_forum` template from `templates.json`.
 - If unclear whether it is a bug/feature vs a question: request additional information using the `request_more_info` template and stop.
 
-### 1.5) Needs Reproduction — External Files
+### 1.5) External Files
 
 Check if the issue body contains links to external files that users would need to download to reproduce.
 
@@ -113,13 +113,12 @@ Check if the issue body contains links to external files that users would need t
 **Action:**
 1. **Edit the issue body** to remove/redact the download links
    - Replace with: `[Link removed - external file downloads are not permitted for security reasons]`
-2. Add `needs reproduction` label
-3. Use the `needs_reproduction` template from `templates.json` to request a self-contained reproduction
-4. Do NOT add `triaged` — wait for the user to provide a reproducible example
+2. Use the `request_self_contained_reproduction` template from `templates.json`
+3. Do NOT add `triaged` — wait for the user to provide a reproducible example
 
-### 1.55) Needs Reproduction — Other Cases
+### 1.55) Missing Reproduction — Other Cases
 
-Also add `needs reproduction` when:
+Request a self-contained reproduction and stop when:
 - The user reports a hardware-specific issue (e.g., specific GPU model) without a self-contained repro script
 - The user references a specific model/checkpoint/dataset that is not publicly runnable in a few lines
 - The issue describes version-upgrade breakage but only provides a high-level description without a minimal script
