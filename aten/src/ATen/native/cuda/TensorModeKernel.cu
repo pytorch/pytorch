@@ -6,6 +6,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/cuda/cub.cuh>
+#include <ATen/native/cuda/thrust_compat.h>
 #include <c10/core/DeviceArray.h>
 
 #include <thrust/count.h>
@@ -17,12 +18,6 @@
 #include <thrust/inner_product.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
-#if defined(USE_ROCM)
-namespace TORCH_CUDA_STD = ::thrust;
-#else
-#include <cuda/std/functional>
-namespace TORCH_CUDA_STD = ::cuda::std;
-#endif
 
 namespace at::native {
 
@@ -56,8 +51,8 @@ struct ModeImpl {
                     iter_end - 1,
                     iter_begin + 1,
                     0,
-                    TORCH_CUDA_STD::plus<int>(),
-                    TORCH_CUDA_STD::not_equal_to<scalar_t>());
+                    TORCH_CUDA_STD_NS::plus<int>(),
+                    TORCH_CUDA_STD_NS::not_equal_to<scalar_t>());
 
     // Count frequency of each element
     auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
