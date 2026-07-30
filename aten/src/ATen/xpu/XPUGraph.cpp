@@ -11,7 +11,7 @@ namespace at::xpu {
 using namespace sycl::ext::oneapi::experimental;
 
 #define XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture) \
-  ((device_architecture) == architecture::intel_gpu_pvc ||  \
+  ((device_architecture) == architecture::intel_gpu_pvc || \
    (device_architecture) == architecture::intel_gpu_pvc_vg)
 
 static bool _xpu_graphs_debug = false;
