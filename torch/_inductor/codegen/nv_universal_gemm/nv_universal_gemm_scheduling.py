@@ -27,11 +27,7 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import (
-    GemmReductionConfig,
-    GemmReductionGeometry,
-    GemmReductionPlan,
-)
+from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
@@ -270,7 +266,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         store = GemmEpilogueIRAnalysis.store_from_buffer(node)
         classified = (
             grouped_reduction_ir(
-                store, gemm_node.get_name(), group, gemm_node.get_dtype()
+                store,
+                gemm_node.get_name(),
+                group,
             )
             if store is not None
             else None
