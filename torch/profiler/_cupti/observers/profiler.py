@@ -27,6 +27,7 @@ from torch.profiler._cupti.observers.observation_window import WindowFinalizerMi
 from torch.profiler._cupti.records import (
     Api,
     CudaEvent,
+    Environment,
     ExternalCorrelation,
     Field,
     Kernel,
@@ -169,6 +170,14 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Overhead.START,
         Overhead.END,
         Overhead.CORRELATION_ID,
+    },
+    # Periodically-sampled GPU environment (power/clock/thermal/cooling). Always on; rendered
+    # as counter tracks. DATA is the 20-byte metric union, split by ENVIRONMENT_KIND.
+    ActivityKind.ENVIRONMENT: {
+        Environment.DEVICE_ID,
+        Environment.TIMESTAMP,
+        Environment.ENVIRONMENT_KIND,
+        Environment.ENVIRONMENT_KIND_DATA,
     },
 }
 
@@ -429,7 +438,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Monitor traces are always gzipped; the writer keys gzip off the .gz suffix.
+            # Monitor traces are always gzipped (chrome JSON or .pftrace alike); the writer
+            # keys gzip + format off the suffix.
             out = os.fspath(output_path)
             w["out"] = out if out.endswith(".gz") else out + ".gz"
         self._maybe_write(window_id)
@@ -853,6 +863,19 @@ def _cuda_event_columns(cols, convert, resolver):
     }
 
 
+def _environment_columns(cols, convert, resolver):
+    del resolver
+    # DATA is the union's first 8 bytes (u64): the primary metric pair (e.g. POWER ->
+    # power | powerLimit<<32, SPEED -> smClock | memoryClock<<32). Split by environment_kind
+    # in the consumer (monitor_trace) into the counter tracks.
+    return {
+        "start_ns": convert(cols[Environment.TIMESTAMP.id]),
+        "device_id": cols[Environment.DEVICE_ID.id].astype(np.int64),
+        "environment_kind": cols[Environment.ENVIRONMENT_KIND.id].astype(np.int64),
+        "data": cols[Environment.ENVIRONMENT_KIND_DATA.id].astype(np.uint64),
+    }
+
+
 # kind -> (chrome-trace tag, column builder, is_timed). Timed kinds bucket into windows;
 # untimed kinds (external_correlation, cuda_event) are join inputs that ride along.
 _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
@@ -870,4 +893,5 @@ _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.OVERHEAD): ("overhead", _overhead_columns, True),
     int(ActivityKind.SYNCHRONIZATION): ("cuda_sync", _sync_columns, True),
     int(ActivityKind.CUDA_EVENT): ("cuda_event", _cuda_event_columns, False),
+    int(ActivityKind.ENVIRONMENT): ("environment", _environment_columns, True),
 }
