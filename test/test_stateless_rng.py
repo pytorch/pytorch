@@ -19,6 +19,7 @@ from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 all_floating_dtypes = floating_types_and(torch.half, torch.bfloat16)
+all_bits_dtypes = [torch.uint32, torch.uint64, torch.int32, torch.int64]
 
 
 class TestStatelessRNGKey(TestCase):
@@ -670,7 +671,6 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(f(key), random.uniform(key, (100,)))
 
-    @onlyCUDA  # bits() has no CPU kernel yet
     def test_bits_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -769,7 +769,7 @@ class TestStatelessRNGCompile(TestCase):
 
 
 class TestStatelessRNGBits(TestCase):
-    @parametrize("dtype", [torch.uint32, torch.uint64])
+    @parametrize("dtype", all_bits_dtypes)
     def test_basic_shape_and_dtype(self, device, dtype):
         key = random.key(42, device=device)
         result = random.bits(key, (100,), dtype=dtype)
@@ -781,20 +781,20 @@ class TestStatelessRNGBits(TestCase):
         key = random.key(42, device=device)
         self.assertEqual(random.bits(key, (10,)).dtype, torch.uint32)
 
-    @parametrize("dtype", [torch.uint32, torch.uint64])
+    @parametrize("dtype", all_bits_dtypes)
     def test_determinism(self, device, dtype):
         key = random.key(42, device=device)
         a = random.bits(key, (1000,), dtype=dtype)
         b = random.bits(key, (1000,), dtype=dtype)
         self.assertEqual(a, b)
 
-    @parametrize("dtype", [torch.uint32, torch.uint64])
+    @parametrize("dtype", all_bits_dtypes)
     def test_different_keys_produce_different_bits(self, device, dtype):
         a = random.bits(random.key(1, device=device), (1000,), dtype=dtype)
         b = random.bits(random.key(2, device=device), (1000,), dtype=dtype)
         self.assertNotEqual(a, b)
 
-    @parametrize("dtype", [torch.uint32, torch.uint64])
+    @parametrize("dtype", all_bits_dtypes)
     def test_batched_keys(self, device, dtype):
         key = random.key(42, device=device)
         keys = random.split(key, 4).unsqueeze(-2)  # (4, 1, 2)
@@ -803,13 +803,24 @@ class TestStatelessRNGBits(TestCase):
         for i in range(4):
             self.assertEqual(result[i], random.bits(keys[i], (100,), dtype=dtype))
 
-    @parametrize("dtype", [torch.uint32, torch.uint64])
+    @parametrize("dtype", all_bits_dtypes)
     def test_inplace(self, device, dtype):
         key = random.key(42, device=device)
         result = torch.empty(1000, dtype=dtype, device=device)
         out = random.bits_(key, result)
         self.assertIs(out, result)
         self.assertEqual(result, random.bits(key, (1000,), dtype=dtype))
+
+    @parametrize(
+        "signed_dtype,unsigned_dtype",
+        [(torch.int32, torch.uint32), (torch.int64, torch.uint64)],
+    )
+    def test_signed_matches_unsigned_bits(self, device, signed_dtype, unsigned_dtype):
+        # Signed dtypes reinterpret the same raw bits as the unsigned dtype.
+        key = random.key(42, device=device)
+        signed = random.bits(key, (1000,), dtype=signed_dtype)
+        unsigned = random.bits(key, (1000,), dtype=unsigned_dtype)
+        self.assertEqual(signed.view(unsigned_dtype), unsigned)
 
     def test_uint64_packs_two_uint32(self, device):
         # Each uint64 packs a consecutive pair of uint32 outputs:
@@ -819,7 +830,9 @@ class TestStatelessRNGBits(TestCase):
         n = 128
         b32 = random.bits(key, (2 * n,), dtype=torch.uint32)
         b64 = random.bits(key, (n,), dtype=torch.uint64)
-        self.assertEqual(b64.view(torch.uint32), b32.reshape(-1, 2).flip(-1).reshape(-1))
+        self.assertEqual(
+            b64.view(torch.uint32), b32.reshape(-1, 2).flip(-1).reshape(-1)
+        )
 
     @parametrize("dtype", [torch.uint32, torch.uint64])
     def test_statistically_uniform(self, device, dtype):
@@ -832,7 +845,9 @@ class TestStatelessRNGBits(TestCase):
     def test_error_wrong_self_dtype(self, device):
         key = random.key(42, device=device)
         result = torch.empty(100, dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(RuntimeError, "must have dtype uint32 or uint64"):
+        with self.assertRaisesRegex(
+            RuntimeError, "must have dtype int32, int64, uint32, or uint64"
+        ):
             random.bits_(key, result)
 
     def test_error_wrong_key_dtype(self, device):
@@ -855,7 +870,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")
 )
-instantiate_device_type_tests(TestStatelessRNGBits, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestStatelessRNGBits, globals(), only_for=("cpu", "cuda"))
 
 
 class TestUnbind(TestCase):

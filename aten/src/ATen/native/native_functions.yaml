@@ -6641,6 +6641,7 @@
 - func: _philox_bits_(Tensor(a!) self, Tensor key) -> Tensor(a!)
   variants: function, method
   dispatch:
+    CPU: _philox_bits_cpu_
     CUDA: _philox_bits_cuda_
   autogen: _philox_bits, _philox_bits.out
 
