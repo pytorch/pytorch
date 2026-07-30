@@ -131,10 +131,12 @@ def _make_suspend_resume_test_class(backend_name, device_type, create_pair_chann
     class SuspendResumeTest(AbstractSuspendResumeTest, MultiProcessTestCase):
         pass
 
+    class_name = backend_name.replace("-", " ").title().replace(" ", "")
+    class_name = f"{class_name}SuspendResumeTest"
     SuspendResumeTest.backend_name = backend_name
     SuspendResumeTest.device_type = device_type
     SuspendResumeTest.create_pair_channel = create_pair_channel
-    SuspendResumeTest.__name__ = f"{backend_name.capitalize()}SuspendResumeTest"
+    SuspendResumeTest.__name__ = class_name
     SuspendResumeTest.__qualname__ = SuspendResumeTest.__name__
     cls = unittest.skipIf(
         not dist.is_backend_available(backend_name),
@@ -149,9 +151,10 @@ def _make_suspend_resume_test_class(backend_name, device_type, create_pair_chann
 
 
 for backend_name, device_type, create_pair_channel in SUSPEND_RESUME_BACKENDS:
-    globals()[f"{backend_name.capitalize()}SuspendResumeTest"] = (
-        _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel)
+    test_class = _make_suspend_resume_test_class(
+        backend_name, device_type, create_pair_channel
     )
+    globals()[test_class.__name__] = test_class
 
 
 if __name__ == "__main__":

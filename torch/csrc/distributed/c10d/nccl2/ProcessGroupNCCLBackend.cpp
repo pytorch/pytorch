@@ -28,9 +28,6 @@ std::vector<uint64_t> normalizeSplitSizes(
     const std::vector<int64_t>& split_sizes,
     const at::Tensor& tensor,
     int group_size) {
-  for (auto split_size : split_sizes) {
-    TORCH_CHECK(split_size >= 0, "Split sizes must be non-negative");
-  }
   c10d::checkSplitSizes(split_sizes, tensor, group_size);
 
   if (split_sizes.empty()) {

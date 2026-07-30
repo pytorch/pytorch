@@ -412,6 +412,7 @@ class LazyBackend : public Backend {
     }
     for (auto& [_, channel] : dropped) {
       channel->abort();
+      channel->shutdown();
     }
   }
 
