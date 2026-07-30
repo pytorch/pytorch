@@ -3915,26 +3915,36 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_cudnn_attention_fp32_attn_mask(self, device, dtype):
-        # scaled_dot_product_attention accepts a float32 attn_mask alongside fp16/bf16 q, k, v,
-        # but the cuDNN graph used to declare the bias with the graph-wide io data type, so an
-        # fp32 mask was handed to cuDNN as half and reinterpreted -> silently wrong output and
-        # gradients.
+    @parametrize("mask_dtype", [torch.float32, None])
+    def test_cudnn_attention_attn_mask_dtype(self, device, dtype, mask_dtype):
+        # scaled_dot_product_attention accepts an attn_mask that is float32 as well as one matching
+        # query's dtype. The cuDNN graph declared the bias with the graph-wide io data type, so an
+        # fp32 mask reached cuDNN described as half and was reinterpreted element by element:
+        # silently wrong output and gradients. mask_dtype=None is the matched-dtype control.
+        #
+        # Both dtypes are issued back to back at one shape. They have identical sizes and strides,
+        # so before the bias dtype was added to the execution-plan cache key they shared one
+        # cached plan and the result depended on which dtype the process saw first.
         batch, num_heads, seq_len, head_dim = 2, 8, 128, 64
         make_tensor = partial(torch.randn, device=device, dtype=dtype, requires_grad=True)
         shape = SdpaShape(batch, num_heads, seq_len, head_dim)
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
-        # one logical mask, expressed in two dtypes with identical values
+        # one logical mask, expressed in both dtypes with identical values and strides
         mask = torch.randn(batch, 1, seq_len, seq_len, device=device, dtype=dtype)
-        mask_fp32 = mask.float()
+        other = mask.float() if mask_dtype is torch.float32 else mask
+        self.assertEqual(mask.stride(), other.stride())
 
-        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-            out = F.scaled_dot_product_attention(query, key, value, attn_mask=mask_fp32)
+        atol, rtol = (5e-3, 5e-3) if dtype == torch.float16 else (2e-2, 2e-2)
         with sdpa_kernel(SDPBackend.MATH):
             ref = F.scaled_dot_product_attention(query, key, value, attn_mask=mask)
-        atol, rtol = (5e-3, 5e-3) if dtype == torch.float16 else (2e-2, 2e-2)
-        self.assertTrue(out.isfinite().all())
-        self.assertEqual(out, ref, atol=atol, rtol=rtol)
+
+        # alternate the dtypes so the cached plan is exercised in both orders, independently of
+        # the order pytest happens to run the parametrized variants in
+        for m in (mask, other, mask, other):
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                out = F.scaled_dot_product_attention(query, key, value, attn_mask=m)
+            self.assertTrue(out.isfinite().all(), f"non-finite output for a {m.dtype} mask")
+            self.assertEqual(out, ref, atol=atol, rtol=rtol, msg=f"wrong result for a {m.dtype} mask")
 
         grad_out = torch.randn_like(out)
         grads = torch.autograd.grad(out, (query, key, value), grad_out)
@@ -3942,27 +3952,6 @@ class TestSDPACudaOnly(NNTestCase):
         for grad, grad_ref in zip(grads, grads_ref):
             self.assertTrue(grad.isfinite().all())
             self.assertEqual(grad, grad_ref, atol=4 * atol, rtol=4 * rtol)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
-    def test_cudnn_attention_attn_mask_dtype_cache_key(self, device):
-        # The graph cache is keyed on the bias sizes and strides only, so masks that differ
-        # just in dtype collide and the second call reuses a graph built for the first dtype.
-        dtype = torch.float16
-        batch, num_heads, seq_len, head_dim = 2, 8, 128, 64
-        make_tensor = partial(torch.randn, device=device, dtype=dtype)
-        shape = SdpaShape(batch, num_heads, seq_len, head_dim)
-        query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
-        mask = torch.randn(batch, 1, seq_len, seq_len, device=device, dtype=dtype)
-        mask_fp32 = mask.float()
-        self.assertEqual(mask.stride(), mask_fp32.stride())
-
-        with sdpa_kernel(SDPBackend.MATH):
-            ref = F.scaled_dot_product_attention(query, key, value, attn_mask=mask)
-        # the first dtype seen builds the cached graph, so check both orderings
-        for m in (mask, mask_fp32, mask, mask_fp32):
-            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-                out = F.scaled_dot_product_attention(query, key, value, attn_mask=m)
-            self.assertEqual(out, ref, atol=5e-3, rtol=5e-3, msg=f"wrong result for a {m.dtype} mask")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
