@@ -979,7 +979,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
 
     def test_local_reduce_plan_deduplicates_outputs(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import (
+        from torch._inductor.kernel.gemm_epilogue import (
             GemmReductionDescriptor,
             GemmReductionPlan,
         )
