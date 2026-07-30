@@ -2,7 +2,9 @@
 
 import os
 import sys
+import time
 import unittest
+from dataclasses import dataclass
 from datetime import timedelta
 
 import torch
@@ -14,14 +16,33 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch.distributed.distributed_c10d as c10d
+from torch._C._distributed_c10d import ErrorType, WorkResult
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
+    run_tests,
+    TEST_CUDA,
+    TestCase,
+)
+
+
+@dataclass(frozen=True)
+class FaultToleranceBackend:
+    name: str
+    device_type: str
+    supports_work_result: bool = False
+    has_pair_channels: bool = False
 
 
 FAULT_TOLERANCE_BACKENDS = [
-    ("gloo", "cpu"),
-    ("nccl2", "cuda"),
-    ("nccl-lazy", "cuda"),
+    FaultToleranceBackend("gloo", "cpu"),
+    FaultToleranceBackend("nccl2", "cuda", supports_work_result=True),
+    FaultToleranceBackend(
+        "nccl-lazy",
+        "cuda",
+        supports_work_result=True,
+        has_pair_channels=True,
+    ),
 ]
 
 
@@ -104,16 +125,7 @@ class AbstractFaultToleranceTest:
         expected = torch.full((4,), expected_value, dtype=tensor.dtype)
         self.assertEqual(tensor.cpu(), expected)
 
-    def test_reconfigure_basic(self):
-        self._create_reconfigured_pg("ft_basic", 100)
-
-    def test_reconfigure_then_all_reduce(self):
-        self._create_reconfigured_pg("ft_all_reduce", 200)
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
-    def test_reconfigure_then_send_recv(self):
-        self._create_reconfigured_pg("ft_send_recv", 300)
-
+    def _exchange_with_peer(self):
         rank = dist.get_rank()
         send_rank = (rank + 1) % self.world_size
         recv_rank = (rank - 1 + self.world_size) % self.world_size
@@ -129,33 +141,84 @@ class AbstractFaultToleranceTest:
 
         send_work.wait()
         recv_work.wait()
-        self.assertEqual(recv_tensor.cpu(), torch.full((4,), recv_rank + 1.0))
+        self.assertEqual(recv_tensor, torch.full_like(recv_tensor, recv_rank + 1.0))
 
-    def test_reconfigure_drops_lazy_pair_channels(self):
-        if self.backend_name != "nccl-lazy":
-            self.skipTest("pair channels are specific to nccl-lazy")
-        self._create_reconfigured_pg("ft_lazy_pair", 1300)
+    def test_reconfigure_basic(self):
+        self._create_reconfigured_pg("ft_basic", 100)
 
-        rank = dist.get_rank()
-        send_rank = (rank + 1) % self.world_size
-        recv_rank = (rank - 1 + self.world_size) % self.world_size
-        send_tensor = torch.full((1,), rank + 1.0, device=self.device)
-        recv_tensor = torch.zeros(1, device=self.device)
-        if rank % 2 == 0:
-            send_work = self.backend.send([send_tensor], send_rank, 0)
-            recv_work = self.backend.recv([recv_tensor], recv_rank, 0)
+    def test_reconfigure_then_all_reduce(self):
+        self._create_reconfigured_pg("ft_all_reduce", 200)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_then_send_recv(self):
+        self._create_reconfigured_pg("ft_send_recv", 300)
+        self._exchange_with_peer()
+
+    def test_work_explicit_timeout_includes_prelaunch_stall(self):
+        if not self.supports_work_result:
+            self.skipTest(f"{self.backend_name} does not report work results")
+        self._create_reconfigured_pg("ft_work_timeout", 1300)
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int(500 * get_cycles_per_ms()))
+        work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+
+        with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+            work.wait(timeout=timedelta(milliseconds=50))
+
+        self.assertFalse(torch.cuda.current_stream().query())
+        self.assertTrue(work.is_completed())
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.TIMEOUT
+        )
+        torch.cuda.synchronize()
+
+    def test_work_reports_communicator_error(self):
+        if not self.supports_work_result:
+            self.skipTest(f"{self.backend_name} does not report work results")
+        self._create_reconfigured_pg("ft_work_error", 1301)
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+
+        if self.rank == 0:
+            work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
+            time.sleep(0.5)
+            self.backend.abort()
+            self.assertTrue(work.is_completed())
+            self.assertFalse(work.is_success())
+            self.assertIsInstance(work.exception(), dist.DistBackendError)
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()),
+                WorkResult.COMM_ERROR,
+            )
+            with self.assertRaisesRegex(dist.DistBackendError, "NCCL operation failed"):
+                work.wait()
         else:
-            recv_work = self.backend.recv([recv_tensor], recv_rank, 0)
-            send_work = self.backend.send([send_tensor], send_rank, 0)
-        send_work.wait()
-        recv_work.wait()
-        del send_work, recv_work
+            time.sleep(1)
+
+    def test_reconfigure_drops_pair_channels(self):
+        if not self.has_pair_channels:
+            self.skipTest(f"{self.backend_name} does not use pair channels")
+        self._create_reconfigured_pg("ft_pair_reconfigure", 1302)
+        self._exchange_with_peer()
         self.assertEqual(self.backend._num_active_channels(), 2)
 
-        handles = self._collect_handles("ft_lazy_pair_post")
-        self._reconfigure(1301, handles)
+        handles = self._collect_handles("ft_pair_reconfigure_post")
+        self._reconfigure(1303, handles)
         self.assertEqual(self.backend._num_active_channels(), 0)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_pair_error_updates_backend_error(self):
+        if not self.has_pair_channels:
+            self.skipTest(f"{self.backend_name} does not use pair channels")
+        self._create_reconfigured_pg("ft_pair_error", 1304)
+        self._exchange_with_peer()
+
+        peer = (self.rank + 1) % self.world_size
+        pair = self.backend._get_peer_channel(peer)
+        self.assertIsNotNone(pair)
+        pair.abort()
+        self.assertEqual(self.backend.get_error(), ErrorType.COMM_ERROR)
 
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)
@@ -257,8 +320,6 @@ class AbstractFaultToleranceTest:
         self._create_reconfigured_pg("ft_abort", 1200)
         self.backend.abort()
         if hasattr(self.backend, "get_error"):
-            from torch._C._distributed_c10d import ErrorType
-
             self.assertEqual(self.backend.get_error(), ErrorType.COMM_ERROR)
 
         handles = self._collect_handles("ft_abort_recover")
@@ -273,19 +334,23 @@ class AbstractFaultToleranceTest:
             self._reconfigure(uuid, [dist._get_reconfigure_handle()])
 
 
-def _make_fault_tolerance_test_class(backend_name, device_type):
+def _make_fault_tolerance_test_class(backend):
     class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
         pass
 
-    FaultToleranceTest.backend_name = backend_name
-    FaultToleranceTest.device_type = device_type
-    FaultToleranceTest.__name__ = f"{backend_name.capitalize()}FaultToleranceTest"
+    class_name = backend.name.replace("-", " ").title().replace(" ", "")
+    class_name = f"{class_name}FaultToleranceTest"
+    FaultToleranceTest.backend_name = backend.name
+    FaultToleranceTest.device_type = backend.device_type
+    FaultToleranceTest.supports_work_result = backend.supports_work_result
+    FaultToleranceTest.has_pair_channels = backend.has_pair_channels
+    FaultToleranceTest.__name__ = class_name
     FaultToleranceTest.__qualname__ = FaultToleranceTest.__name__
     cls = unittest.skipIf(
-        not dist.is_backend_available(backend_name),
-        f"{backend_name} backend is not available",
+        not dist.is_backend_available(backend.name),
+        f"{backend.name} backend is not available",
     )(FaultToleranceTest)
-    if device_type == "cuda":
+    if backend.device_type == "cuda":
         cls = unittest.skipIf(
             not TEST_CUDA or torch.cuda.device_count() < 3,
             "fault tolerance CUDA tests require at least 3 GPUs",
@@ -293,10 +358,9 @@ def _make_fault_tolerance_test_class(backend_name, device_type):
     return cls
 
 
-for backend_name, device_type in FAULT_TOLERANCE_BACKENDS:
-    globals()[f"{backend_name.capitalize()}FaultToleranceTest"] = (
-        _make_fault_tolerance_test_class(backend_name, device_type)
-    )
+for backend in FAULT_TOLERANCE_BACKENDS:
+    test_class = _make_fault_tolerance_test_class(backend)
+    globals()[test_class.__name__] = test_class
 
 
 class ReconfigureContractTest(TestCase):
