@@ -961,6 +961,12 @@ instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
 class TestCppExtensionUtils(TestCase):
+    @unittest.skipIf(IS_FBCODE, "CMake package files are not available in fbcode")
+    def test_cmake_prefix_path(self):
+        expected = os.path.join(os.path.dirname(torch._C.__file__), "share", "cmake")
+        self.assertEqual(torch.utils.cmake_prefix_path, expected)
+        self.assertTrue(os.path.isdir(torch.utils.cmake_prefix_path))
+
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 

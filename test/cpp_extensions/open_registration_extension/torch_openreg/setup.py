@@ -36,7 +36,7 @@ def get_pytorch_dir():
     os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     import torch
 
-    return os.path.dirname(os.path.realpath(torch.__file__))
+    return os.path.dirname(os.path.realpath(torch._C.__file__))
 
 
 def build_deps():
