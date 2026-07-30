@@ -36,8 +36,11 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     unsupported_reduction_from_node,
     view_or_reshape_args,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmEpilogueGraph, iter_fx_node_inputs
-from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmEpilogueGraph,
+    GemmReductionGeometry,
+    iter_fx_node_inputs,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch.utils._ordered_set import OrderedSet
 
