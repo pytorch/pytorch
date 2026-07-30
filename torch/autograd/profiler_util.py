@@ -612,7 +612,7 @@ def _to_bool(v: str) -> bool:
     return v in ("1", "true")
 
 
-# Kineto key → (EventMetadata field name, converter from string)
+# Kineto key -> (EventMetadata field name, converter from string)
 _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "registers per thread": ("registers_per_thread", int),
     "shared memory": ("shared_memory", int),
@@ -652,7 +652,7 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
 }
 
 
-def _build_metadata(extra_meta):
+def _build_metadata(extra_meta: dict[str, str]) -> EventMetadata | None:
     fields: dict[str, Any] = {}
     any_populated = False
     for kineto_key, (field_name, convert) in _EVENT_METADATA_KEYS.items():
@@ -709,8 +709,12 @@ class FunctionEvent(FormattedTimesMixin):
         is_legacy (bool): Whether this is from the legacy profiler.
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
+        metadata (Dict[str, Any]): Typed Kineto metadata keyed by its original
+            field names. This may be partial for activities that have not fully
+            migrated to typed metadata.
         metadata_json (str): Deprecated. Use event_metadata instead.
-        event_metadata (EventMetadata): Additional metadata in structured format.
+        event_metadata (EventMetadata): Additional JSON-derived metadata in
+            structured format.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
             but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
             TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
@@ -779,6 +783,7 @@ class FunctionEvent(FormattedTimesMixin):
         python_id=-1,
         python_parent_id=-1,
         python_module_id=-1,
+        typed_metadata=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -828,6 +833,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.flow_start: bool | None = flow_start
         self.external_id: int = external_id
         self.linked_correlation_id: int = linked_correlation_id
+        self.metadata: dict[str, Any] | None = (
+            typed_metadata if typed_metadata else None
+        )
         self.event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )

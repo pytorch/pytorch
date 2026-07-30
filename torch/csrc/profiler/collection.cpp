@@ -14,10 +14,13 @@
 
 #ifdef USE_KINETO
 #include <MetadataFieldCatalog.h>
+#include <TypedMetadata.h>
 #include <libkineto.h>
 #endif
 
 #include <ATen/Context.h>
+#include <ATen/core/Dict.h>
+#include <ATen/core/List.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
@@ -836,6 +839,123 @@ void mark_finished(std::shared_ptr<Result>& r) {
 }
 
 #ifdef USE_KINETO
+extra_meta_t metadataFromJson(const std::string& json) {
+  if (json.empty()) {
+    return {};
+  }
+  auto parsed = nlohmann::json::parse("{" + json + "}", nullptr, false);
+  if (!parsed.is_object()) {
+    return {};
+  }
+
+  extra_meta_t metadata;
+  for (const auto& [key, value] : parsed.items()) {
+    metadata.emplace(
+        key,
+        value.is_string() ? value.get<std::string>() : value.dump());
+  }
+  return metadata;
+}
+
+template <typename T>
+using metadata_field_t = libkineto::MetadataField<T>;
+
+class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
+ public:
+  typed_metadata_t takeMetadata() {
+    return std::move(metadata_);
+  }
+
+ private:
+  struct DictFrame {
+    explicit DictFrame(std::string name)
+        : name_{std::move(name)},
+          values_{c10::impl::GenericDict(
+              at::StringType::get(), at::AnyType::get())} {}
+
+    std::string name_;
+    c10::Dict<c10::IValue, c10::IValue> values_;
+  };
+
+  void addValue(std::string_view name, c10::IValue value) {
+    if (dict_stack_.empty()) {
+      metadata_.insert_or_assign(std::string{name}, std::move(value));
+    } else {
+      dict_stack_.back().values_.insert_or_assign(
+          std::string{name}, std::move(value));
+    }
+  }
+
+  void visitValue(const metadata_field_t<int64_t>& field, int64_t value)
+      override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(const metadata_field_t<double>& field, double value)
+      override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(const metadata_field_t<bool>& field, bool value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const metadata_field_t<std::string>& field,
+      std::string_view value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const metadata_field_t<std::vector<int64_t>>& field,
+      const std::vector<int64_t>& value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const metadata_field_t<std::vector<std::string>>& field,
+      const std::vector<std::string>& value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const metadata_field_t<libkineto::RawJson>& /*field*/,
+      const libkineto::RawJson& /*value*/) override {}
+
+  void visitValue(const metadata_field_t<uint64_t>& field, uint64_t value)
+      override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const metadata_field_t<libkineto::InputShapes>& field,
+      const libkineto::InputShapes& value) override {
+    auto inputs = c10::impl::GenericList(at::AnyType::get());
+    inputs.reserve(value.size());
+    for (const auto& input : value) {
+      std::visit(
+          [&](const auto& shapes) { inputs.emplace_back(shapes); },
+          input);
+    }
+    addValue(field.name, c10::IValue(std::move(inputs)));
+  }
+
+  void visitUnsupported(std::string_view /*name*/) override {}
+
+  void beginDict(std::string_view name) override {
+    dict_stack_.emplace_back(std::string{name});
+  }
+
+  void endDict() override {
+    auto dict = std::move(dict_stack_.back());
+    dict_stack_.pop_back();
+    addValue(dict.name_, c10::IValue(std::move(dict.values_)));
+  }
+
+  typed_metadata_t metadata_;
+  std::vector<DictFrame> dict_stack_;
+};
+
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
@@ -1188,33 +1308,25 @@ class TransferEvents {
             },
             [](auto&) {}));
         if (config_.get().experimental_config.expose_kineto_event_metadata) {
+          const auto metadata_json = activity->metadataJson();
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
-                i.metadata_json_ = activity->metadataJson();
+                i.metadata_json_ = metadata_json;
               },
               [&](ExtraFields<EventType::Kineto>& i) {
-                i.metadata_json_ = activity->metadataJson();
+                i.metadata_json_ = metadata_json;
+                i.extra_meta_ = metadataFromJson(metadata_json);
               },
               [](auto&) { return; }));
-          // Parse metadataJson() into extra_meta_ so events() exposes
-          // Kineto metadata as typed fields without export_chrome_trace().
-          // Python schemas (profiler_util.py) are the single SOT for
-          // which keys to expose and how to type-convert them.
+          IValueMetadataVisitor visitor;
+          activity->visitTypedMetadata(visitor);
+          auto typed_metadata = visitor.takeMetadata();
           e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::TorchOp>& i) {
+                i.typed_metadata_ = std::move(typed_metadata);
+              },
               [&](ExtraFields<EventType::Kineto>& i) {
-                auto json_str = activity->metadataJson();
-                if (!json_str.empty()) {
-                  auto j = nlohmann::json::parse(
-                      "{" + json_str + "}", nullptr, false);
-                  if (!j.is_discarded()) {
-                    for (auto& [key, val] : j.items()) {
-                      i.extra_meta_.emplace(
-                          key,
-                          val.is_string() ? val.get<std::string>()
-                                          : val.dump());
-                    }
-                  }
-                }
+                i.typed_metadata_ = std::move(typed_metadata);
               },
               [](auto&) {}));
         }
