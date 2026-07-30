@@ -2555,7 +2555,7 @@ def _write_ninja_file_and_build_library(
 def _get_ninja_command() -> list[str]:
     ninja = shutil.which('ninja')
     if ninja is None:
-        ninja = shutil.which('ninja', path=os.path.dirname(sys.executable))
+        ninja = shutil.which('ninja', path=sysconfig.get_path('scripts'))
     if ninja is not None:
         return [ninja]
     return [sys.executable, '-m', 'ninja']

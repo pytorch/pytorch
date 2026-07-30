@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.backends.cudnn
@@ -22,6 +23,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
+    _get_ninja_command,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -82,22 +84,42 @@ with tempfile.TemporaryDirectory() as tmpdir:
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_ninja_available_in_python_environment(self):
-        script = """
-import os
+    @mock.patch("torch.utils.cpp_extension.sysconfig.get_path")
+    @mock.patch("torch.utils.cpp_extension.shutil.which")
+    def test_ninja_command_prefers_path(self, mock_which, mock_get_path):
+        mock_which.return_value = "/path/ninja"
 
-os.environ["PATH"] = ""
+        self.assertEqual(_get_ninja_command(), ["/path/ninja"])
 
-from torch.utils.cpp_extension import is_ninja_available
+        mock_which.assert_called_once_with("ninja")
+        mock_get_path.assert_not_called()
 
-assert is_ninja_available()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
+    @mock.patch("torch.utils.cpp_extension.sysconfig.get_path")
+    @mock.patch("torch.utils.cpp_extension.shutil.which")
+    def test_ninja_command_uses_python_scripts(self, mock_which, mock_get_path):
+        mock_get_path.return_value = "/python/scripts"
+        mock_which.side_effect = [None, "/python/scripts/ninja"]
+
+        self.assertEqual(_get_ninja_command(), ["/python/scripts/ninja"])
+
+        mock_which.assert_has_calls(
+            [mock.call("ninja"), mock.call("ninja", path="/python/scripts")]
         )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        mock_get_path.assert_called_once_with("scripts")
+
+    @mock.patch("torch.utils.cpp_extension.sysconfig.get_path")
+    @mock.patch("torch.utils.cpp_extension.shutil.which", return_value=None)
+    def test_ninja_command_falls_back_to_python_module(
+        self, mock_which, mock_get_path
+    ):
+        mock_get_path.return_value = "/python/scripts"
+
+        self.assertEqual(_get_ninja_command(), [sys.executable, "-m", "ninja"])
+
+        mock_which.assert_has_calls(
+            [mock.call("ninja"), mock.call("ninja", path="/python/scripts")]
+        )
+        mock_get_path.assert_called_once_with("scripts")
 
 
 # There's only one test that runs gradcheck, run slow mode manually
