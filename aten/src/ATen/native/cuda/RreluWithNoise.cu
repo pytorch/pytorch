@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/Resize.h>
@@ -157,10 +158,11 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
         });
   }
   else {
-    auto lower_tensor = lower.to<double>();
-    auto upper_tensor = upper.to<double>();
-    Scalar negative_slope = (lower_tensor + upper_tensor) / 2;
+    auto negative_slope_val = (lower.to<double>() + upper.to<double>()) / 2;
+    Scalar negative_slope(negative_slope_val);
     at::leaky_relu_out(output, self, negative_slope);
+    noise.fill_(negative_slope_val);
+    noise.masked_fill_(self > 0, 1.0);
   }
   return output;
 }

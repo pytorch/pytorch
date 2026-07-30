@@ -12894,6 +12894,33 @@ if __name__ == '__main__':
         with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than or equal to the upper bound"):
             F.rrelu(x, lower=0.5, upper=0.3)
 
+
+    def test_rrelu_eval_mode_noise_and_output(self, device):
+        """Test that RReLU in eval mode correctly fills noise tensor and produces
+        expected output using the fixed midpoint slope (lower + upper) / 2."""
+        lower, upper = 0.1, 0.3
+        midpoint = (lower + upper) / 2
+
+        x = torch.tensor(
+            [[0.4967, -0.1383, 0.6477], [1.5230, -0.2342, -0.2341]],
+            device=device,
+        )
+
+        noise = torch.empty_like(x)
+        output = torch.ops.aten.rrelu_with_noise(x, noise, lower, upper, False)
+
+        expected_output = torch.where(x > 0, x, x * midpoint)
+        self.assertEqual(output, expected_output)
+
+        expected_noise = torch.where(x > 0, torch.ones_like(x), torch.full_like(x, midpoint))
+        self.assertEqual(noise, expected_noise)
+
+        # Also verify through the nn.Module interface
+        m = torch.nn.RReLU(lower=lower, upper=upper)
+        m.eval()
+        module_output = m(x)
+        self.assertEqual(module_output, expected_output)
+
     @onlyCPU
     def test_softshrink(self, device):
         x = torch.tensor([[1.21, 0.56, 0.5001, 0.4999, 1.2357, -0.4999, -0.5001, -1.154,

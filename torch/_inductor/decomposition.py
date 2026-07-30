@@ -1458,7 +1458,11 @@ def rrelu_with_noise_functional(
         return output, noise_out
     else:
         negative_slope = (lower + upper) / 2
-        return aten.leaky_relu(self, negative_slope), torch.Tensor()
+        output = aten.leaky_relu(self, negative_slope)
+        noise_out = torch.where(
+            self <= 0, self.new_full((), negative_slope), self.new_full((), 1.0)
+        )
+        return output, noise_out
 
 
 @register_decomposition(aten.repeat_interleave.Tensor)

@@ -623,11 +623,12 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     });
     return output;
   } else {
-    auto lower_tensor = scalar_to_tensor(lower);
-    auto upper_tensor = scalar_to_tensor(upper);
-    auto negative = (lower_tensor + upper_tensor) / 2;
-    Scalar negative_slope = negative.item();
-    return at::leaky_relu_out(output, self, negative_slope);
+    auto negative_slope_val = (lower.to<double>() + upper.to<double>()) / 2;
+    Scalar negative_slope(negative_slope_val);
+    at::leaky_relu_out(output, self, negative_slope);
+    noise.fill_(negative_slope_val);
+    noise.masked_fill_(self > 0, 1.0);
+    return output;
   }
 }
 
