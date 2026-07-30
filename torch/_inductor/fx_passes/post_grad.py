@@ -6,7 +6,8 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, TypeVar
+from dataclasses import dataclass
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -962,6 +963,549 @@ def register_lowering_pattern(
 #   - later output nodes first
 #   - order patterns are defined in
 ################################################################################
+
+
+# These backends have been audited for zero batch strides. CK is excluded because
+# its generated batched wrapper hardcodes dense strides. CPP remains in the
+# configuration allowlist for mixed CUDA settings, but CPU FP16 is rejected below.
+_CAT_EXPAND_BMM_ALLOWED_BACKENDS = ("ATEN", "TRITON", "CPP", "CUTLASS")
+_CAT_EXPAND_BMM_ALLOWED_DEVICE_TYPES = ("cpu", "cuda")
+
+
+@dataclass
+class _CatExpandBmmMatchNodes:
+    """FX nodes captured by a cat-expand-BMM pattern."""
+
+    bmm_node: torch.fx.Node
+    outer_expand_node: torch.fx.Node | None
+    cat_node: torch.fx.Node
+    rhs_node: torch.fx.Node
+    expand_nodes: list[torch.fx.Node]
+    base_nodes: list[torch.fx.Node]
+
+
+@dataclass
+class _CatExpandBmmRewritePlan:
+    """Validated data needed to rewrite a cat-expand-BMM match."""
+
+    match_nodes: _CatExpandBmmMatchNodes
+    tensor_values: dict[torch.fx.Node, torch.Tensor]
+    cat_dim: int
+    expand_size: list[Any]
+
+
+def _normalize_dim(dim: Any, rank: int) -> int | None:
+    """Normalize an integer dimension, returning None when it is invalid."""
+
+    if not isinstance(dim, int) or dim < -rank or dim >= rank:
+        return None
+    return dim % rank
+
+
+def _get_tensor_value(node: Any) -> torch.Tensor | None:
+    """Return tensor-valued ``val`` metadata from an FX node."""
+
+    if not isinstance(node, torch.fx.Node):
+        return None
+    value = node.meta.get("val")
+    return value if isinstance(value, torch.Tensor) else None
+
+
+def _are_statically_equal(left: Any, right: Any) -> bool:
+    """Return whether symbolic equality can be proven statically."""
+
+    return statically_known_true(sym_eq(left, right))
+
+
+def _sequences_are_statically_equal(left: Sequence[Any], right: Sequence[Any]) -> bool:
+    """Return whether two symbolic sequences are statically equal."""
+
+    return len(left) == len(right) and all(
+        _are_statically_equal(left_value, right_value)
+        for left_value, right_value in zip(left, right, strict=True)
+    )
+
+
+def _extract_cat_expand_bmm_match(
+    match: Match,
+) -> _CatExpandBmmMatchNodes | None:
+    """Extract the direct or outer-expand cat topology from a pattern match."""
+
+    bmm_node = match.output_node()
+    lhs_node = bmm_node.args[0]
+    rhs_node = bmm_node.args[1]
+    if not isinstance(lhs_node, torch.fx.Node) or not isinstance(
+        rhs_node, torch.fx.Node
+    ):
+        return None
+    outer_expand_node: torch.fx.Node | None = None
+    cat_node = lhs_node
+    if lhs_node.target == aten.expand.default:
+        candidate = get_arg_value(lhs_node, 0, "self")
+        if not isinstance(candidate, torch.fx.Node):
+            return None
+        outer_expand_node = lhs_node
+        cat_node = candidate
+    expand_nodes = get_arg_value(cat_node, 0, "tensors")
+    if not isinstance(expand_nodes, (list, tuple)) or not expand_nodes:
+        return None
+    if not all(isinstance(expand_node, torch.fx.Node) for expand_node in expand_nodes):
+        return None
+    base_nodes = [get_arg_value(expand_node, 0, "self") for expand_node in expand_nodes]
+    if not all(isinstance(base_node, torch.fx.Node) for base_node in base_nodes):
+        return None
+    return _CatExpandBmmMatchNodes(
+        bmm_node=bmm_node,
+        outer_expand_node=outer_expand_node,
+        cat_node=cat_node,
+        rhs_node=rhs_node,
+        expand_nodes=cast(list[torch.fx.Node], list(expand_nodes)),
+        base_nodes=cast(list[torch.fx.Node], base_nodes),
+    )
+
+
+def _reject_cat_expand_bmm(predicate: str) -> bool:
+    """Record a rejection predicate and return False for ``extra_check``."""
+
+    if predicate.startswith("rank_"):
+        counters["inductor"]["cat_expand_bmm_rejected_rank"] += 1
+    counters["inductor"][f"cat_expand_bmm_rejected_{predicate}"] += 1
+    return False
+
+
+def _cat_expand_bmm_matched_nodes(
+    match_nodes: _CatExpandBmmMatchNodes,
+) -> list[torch.fx.Node]:
+    """Return every node whose tensor metadata participates in validation."""
+
+    matched_nodes = [
+        match_nodes.cat_node,
+        match_nodes.rhs_node,
+        *match_nodes.expand_nodes,
+        *match_nodes.base_nodes,
+    ]
+    if match_nodes.outer_expand_node is not None:
+        matched_nodes.append(match_nodes.outer_expand_node)
+    return matched_nodes
+
+
+def _cat_expand_bmm_rank_rejection(
+    match_nodes: _CatExpandBmmMatchNodes,
+    tensor_values: dict[torch.fx.Node, torch.Tensor],
+) -> str | None:
+    """Return the rejection for an unsupported matched tensor rank."""
+
+    if (
+        tensor_values[match_nodes.cat_node].ndim != 3
+        or tensor_values[match_nodes.rhs_node].ndim != 3
+    ):
+        return "rank_cat_rhs"
+    if any(tensor_values[node].ndim != 3 for node in match_nodes.expand_nodes):
+        return "rank_expand"
+    if any(tensor_values[node].ndim not in (2, 3) for node in match_nodes.base_nodes):
+        return "rank_base"
+    return None
+
+
+def _cat_expand_bmm_tensor_property_rejection(
+    match_nodes: _CatExpandBmmMatchNodes,
+    tensor_values: dict[torch.fx.Node, torch.Tensor],
+) -> str | None:
+    """Require a common strided layout, dtype, and device across the match."""
+
+    cat_value = tensor_values[match_nodes.cat_node]
+    if any(
+        value.layout != torch.strided
+        or value.dtype != cat_value.dtype
+        or value.device != cat_value.device
+        for value in tensor_values.values()
+    ):
+        return "dtype_device_layout"
+    return None
+
+
+def _cat_expand_bmm_tensor_values(
+    match_nodes: _CatExpandBmmMatchNodes,
+) -> tuple[dict[torch.fx.Node, torch.Tensor] | None, str | None]:
+    """Collect tensor metadata and return the first metadata rejection."""
+
+    optional_values = {
+        node: _get_tensor_value(node)
+        for node in _cat_expand_bmm_matched_nodes(match_nodes)
+    }
+    if any(value is None for value in optional_values.values()):
+        return None, "topology"
+    tensor_values = cast(dict[torch.fx.Node, torch.Tensor], optional_values)
+    rejection = _cat_expand_bmm_rank_rejection(match_nodes, tensor_values)
+    if rejection is not None:
+        return None, rejection
+    rejection = _cat_expand_bmm_tensor_property_rejection(match_nodes, tensor_values)
+    if rejection is not None:
+        return None, rejection
+    return tensor_values, None
+
+
+def _outer_expand_is_metadata_identity(
+    match_nodes: _CatExpandBmmMatchNodes,
+    tensor_values: dict[torch.fx.Node, torch.Tensor],
+) -> bool:
+    """Return whether the optional outer expand preserves shape and strides."""
+
+    if match_nodes.outer_expand_node is None:
+        return True
+    outer_value = tensor_values[match_nodes.outer_expand_node]
+    cat_value = tensor_values[match_nodes.cat_node]
+    return (
+        outer_value.ndim == cat_value.ndim
+        and _sequences_are_statically_equal(outer_value.shape, cat_value.shape)
+        and _sequences_are_statically_equal(outer_value.stride(), cat_value.stride())
+    )
+
+
+def _batch_aligned_base_shapes(
+    match_nodes: _CatExpandBmmMatchNodes,
+    tensor_values: dict[torch.fx.Node, torch.Tensor],
+) -> list[Sequence[Any]]:
+    """Return base shapes with the implicit rank-2 batch dimension restored."""
+
+    return [
+        (1, *tensor_values[node].shape)
+        if tensor_values[node].ndim == 2
+        else tensor_values[node].shape
+        for node in match_nodes.base_nodes
+    ]
+
+
+def _expanded_shape_matches_base(
+    expand_shape: Sequence[Any],
+    base_shape: Sequence[Any],
+    batch_size: Any,
+) -> bool:
+    """Return whether an expand changes only the batch-one dimension."""
+
+    return _are_statically_equal(
+        expand_shape[0], batch_size
+    ) and _sequences_are_statically_equal(expand_shape[1:], base_shape[1:])
+
+
+def _cat_expand_source_shape_rejection(
+    cat_shape: Sequence[Any],
+    expand_shapes: Sequence[Sequence[Any]],
+    base_shapes: Sequence[Sequence[Any]],
+) -> str | None:
+    """Validate that every base is batch-invariant and expanded only in batch."""
+
+    if any(not _are_statically_equal(shape[0], 1) for shape in base_shapes):
+        return "batch_one_base"
+    if any(
+        not _expanded_shape_matches_base(expand_shape, base_shape, cat_shape[0])
+        for expand_shape, base_shape in zip(expand_shapes, base_shapes, strict=True)
+    ):
+        return "shape_stride_identity"
+    return None
+
+
+def _expand_shapes_match_non_cat_dimensions(
+    expand_shapes: Sequence[Sequence[Any]], cat_dim: int
+) -> bool:
+    """Return whether all expanded inputs agree outside the cat dimension."""
+
+    reference_shape = expand_shapes[0]
+    return all(
+        _are_statically_equal(shape[dim], reference_shape[dim])
+        for shape in expand_shapes[1:]
+        for dim in range(3)
+        if dim != cat_dim
+    )
+
+
+def _cat_result_shape_rejection(
+    cat_shape: Sequence[Any],
+    expand_shapes: Sequence[Sequence[Any]],
+    cat_dim: int,
+) -> str | None:
+    """Validate the concatenated shape implied by expanded inputs."""
+
+    expected_cat_shape = list(expand_shapes[0])
+    expected_cat_shape[cat_dim] = sum(shape[cat_dim] for shape in expand_shapes)
+    if not _sequences_are_statically_equal(cat_shape, expected_cat_shape):
+        return "shape_stride_identity"
+    if not _expand_shapes_match_non_cat_dimensions(expand_shapes, cat_dim):
+        return "shape_stride_identity"
+    return None
+
+
+def _cat_expand_bmm_shape_rejection(
+    match_nodes: _CatExpandBmmMatchNodes,
+    cat_dim: int,
+    tensor_values: dict[torch.fx.Node, torch.Tensor],
+) -> str | None:
+    """Return the first rejection from the cat/expand/BMM shape algebra."""
+
+    if not _outer_expand_is_metadata_identity(match_nodes, tensor_values):
+        return "shape_stride_identity"
+    cat_shape = tensor_values[match_nodes.cat_node].shape
+    rhs_shape = tensor_values[match_nodes.rhs_node].shape
+    expand_shapes = [tensor_values[node].shape for node in match_nodes.expand_nodes]
+    base_shapes = _batch_aligned_base_shapes(match_nodes, tensor_values)
+    rejection = _cat_expand_source_shape_rejection(
+        cat_shape, expand_shapes, base_shapes
+    )
+    if rejection is not None:
+        return rejection
+    rejection = _cat_result_shape_rejection(cat_shape, expand_shapes, cat_dim)
+    if rejection is not None:
+        return rejection
+    if not _are_statically_equal(
+        cat_shape[0], rhs_shape[0]
+    ) or not _are_statically_equal(cat_shape[2], rhs_shape[1]):
+        return "bmm_compatibility"
+    return None
+
+
+def _cat_expand_bmm_admission_rejection(
+    match_nodes: _CatExpandBmmMatchNodes,
+    tensor_values: dict[torch.fx.Node, torch.Tensor],
+) -> str | None:
+    """Return the dtype, device, or backend admission rejection."""
+
+    cat_value = tensor_values[match_nodes.cat_node]
+    # Restrict admission to the measured FP16 path. BF16 ATEN may route to CK,
+    # whose batched wrapper does not preserve the input batch stride.
+    if cat_value.dtype != torch.float16:
+        return "unsupported_dtype"
+    if cat_value.device.type not in _CAT_EXPAND_BMM_ALLOWED_DEVICE_TYPES:
+        return "unsupported_device"
+
+    backends = tuple(
+        backend.strip().upper()
+        for backend in config.max_autotune_gemm_backends.split(",")
+        if backend.strip()
+    )
+    # New BMM backends must prove zero-batch-stride support before admission.
+    if not backends or any(
+        backend not in _CAT_EXPAND_BMM_ALLOWED_BACKENDS for backend in backends
+    ):
+        return "backend"
+    # CPP only admits a zero batch stride for FP32, while this pass is FP16-only.
+    if cat_value.device.type == "cpu" and "CPP" in backends:
+        return "backend"
+    return None
+
+
+def _cat_expand_bmm_user_rejection(
+    match_nodes: _CatExpandBmmMatchNodes,
+) -> str | None:
+    """Validate node ownership required for safe graph erasure."""
+
+    cat_user = (
+        match_nodes.outer_expand_node
+        if match_nodes.outer_expand_node is not None
+        else match_nodes.bmm_node
+    )
+    if (
+        len(match_nodes.cat_node.users) != 1
+        or cat_user not in match_nodes.cat_node.users
+    ):
+        return "users"
+    if match_nodes.outer_expand_node is not None:
+        if (
+            len(match_nodes.outer_expand_node.users) != 1
+            or match_nodes.bmm_node not in match_nodes.outer_expand_node.users
+        ):
+            return "users"
+
+    # Node.users counts user nodes, not use-sites. Reject duplicate expand
+    # operands and RHS aliases explicitly before erasing the original chain.
+    if len(OrderedSet(match_nodes.expand_nodes)) != len(match_nodes.expand_nodes):
+        return "users"
+    nodes_to_erase = OrderedSet([match_nodes.cat_node, *match_nodes.expand_nodes])
+    if match_nodes.outer_expand_node is not None:
+        nodes_to_erase.add(match_nodes.outer_expand_node)
+    if match_nodes.rhs_node in nodes_to_erase:
+        return "users"
+    if any(len(expand_node.users) != 1 for expand_node in match_nodes.expand_nodes):
+        return "users"
+    return None
+
+
+def _cat_expand_bmm_expand_argument_rejection(
+    match_nodes: _CatExpandBmmMatchNodes,
+) -> str | None:
+    """Validate the rank of every expand size argument in the match."""
+
+    if match_nodes.outer_expand_node is not None:
+        outer_size = get_arg_value(match_nodes.outer_expand_node, 1, "size")
+        if not isinstance(outer_size, (list, tuple)) or len(outer_size) != 3:
+            return "topology"
+    if any(
+        not isinstance(size := get_arg_value(expand_node, 1, "size"), (list, tuple))
+        or len(size) != 3
+        for expand_node in match_nodes.expand_nodes
+    ):
+        return "topology"
+    return None
+
+
+def _build_cat_expand_bmm_rewrite_plan(
+    match: Match,
+) -> tuple[_CatExpandBmmRewritePlan | None, str | None]:
+    """Build a complete rewrite plan or return its rejection predicate."""
+
+    match_nodes = _extract_cat_expand_bmm_match(match)
+    if match_nodes is None:
+        return None, "topology"
+    tensor_values, rejection = _cat_expand_bmm_tensor_values(match_nodes)
+    if tensor_values is None:
+        return None, rejection
+    rejection = _cat_expand_bmm_admission_rejection(match_nodes, tensor_values)
+    if rejection is not None:
+        return None, rejection
+    cat_dim = _normalize_dim(get_arg_value(match_nodes.cat_node, 1, "dim"), 3)
+    if cat_dim is None or cat_dim == 0:
+        return None, "cat_dimension"
+    rejection = _cat_expand_bmm_user_rejection(match_nodes)
+    if rejection is not None:
+        return None, rejection
+    rejection = _cat_expand_bmm_expand_argument_rejection(match_nodes)
+    if rejection is not None:
+        return None, rejection
+    rejection = _cat_expand_bmm_shape_rejection(match_nodes, cat_dim, tensor_values)
+    if rejection is not None:
+        return None, rejection
+    first_expand_size = get_arg_value(match_nodes.expand_nodes[0], 1, "size")
+    if not isinstance(first_expand_size, (list, tuple)) or len(first_expand_size) != 3:
+        return None, "topology"
+    return (
+        _CatExpandBmmRewritePlan(
+            match_nodes=match_nodes,
+            tensor_values=tensor_values,
+            cat_dim=cat_dim,
+            expand_size=[first_expand_size[0], -1, -1],
+        ),
+        None,
+    )
+
+
+def _is_valid_cat_expand_bmm(match: Match) -> bool:
+    """Return whether a match has a complete, admitted rewrite plan."""
+
+    if not config.cat_expand_bmm_rewrite:
+        return False
+    rewrite_plan, rejection = _build_cat_expand_bmm_rewrite_plan(match)
+    if rewrite_plan is not None:
+        return True
+    if rejection is None:
+        log.debug("Cat-expand-BMM validation failed without a rejection predicate")
+    return _reject_cat_expand_bmm(rejection or "topology")
+
+
+_batch_broadcast_cat = CallFunction(
+    aten.cat.default,
+    ListOf(
+        CallFunction(
+            aten.expand.default,
+            Ignored(),
+            Ignored(),
+        )
+    ),
+    Ignored(),
+)
+
+_identity_expand_batch_broadcast_cat = CallFunction(
+    aten.expand.default,
+    _batch_broadcast_cat,
+    Ignored(),
+)
+
+
+@register_graph_pattern(
+    CallFunction(aten.bmm.default, _identity_expand_batch_broadcast_cat, Ignored()),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=_is_valid_cat_expand_bmm,
+)
+@register_graph_pattern(
+    CallFunction(aten.bmm.default, _batch_broadcast_cat, Ignored()),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=_is_valid_cat_expand_bmm,
+)
+def cat_expand_to_batch_stride_zero(match: Match) -> None:
+    """Move batch broadcast after cat so BMM reads a zero-batch-stride LHS.
+
+    Before: ``bmm(optional_expand(cat([expand(base_i)])), rhs)``
+    After:  ``bmm(expand(cat([unsqueeze_batch(base_i)])), rhs)``
+    """
+
+    if not config.cat_expand_bmm_rewrite:
+        log.debug("Skipping cat-expand-BMM rewrite after the feature was disabled")
+        return
+    rewrite_plan, rejection = _build_cat_expand_bmm_rewrite_plan(match)
+    if rewrite_plan is None:
+        log.debug(
+            "Skipping cat-expand-BMM rewrite after validation: %s",
+            rejection or "topology",
+        )
+        # Keep callback-phase rejections observable in the same counters as the
+        # extra_check phase, in case validation diverges after another pass ran.
+        _reject_cat_expand_bmm(rejection or "topology")
+        return
+
+    match_nodes = rewrite_plan.match_nodes
+    base_values = [
+        rewrite_plan.tensor_values[base_node] for base_node in match_nodes.base_nodes
+    ]
+    with match.graph.inserting_before(match_nodes.cat_node):
+        normalized_base_nodes: list[torch.fx.Node] = []
+        normalized_base_values: list[torch.Tensor] = []
+        for base_node, base_value in zip(
+            match_nodes.base_nodes, base_values, strict=True
+        ):
+            if base_value.ndim == 2:
+                # Removing rank-2 expand also removes its implicit batch dimension.
+                source_stack_trace = base_node.meta.get(
+                    "stack_trace", match_nodes.cat_node.meta.get("stack_trace")
+                )
+                base_node = match.graph.call_function(
+                    aten.unsqueeze.default, args=(base_node, 0)
+                )
+                base_value = aten.unsqueeze.default(base_value, 0)
+                base_node.meta["val"] = base_value
+                if source_stack_trace is not None:
+                    base_node.meta["stack_trace"] = source_stack_trace
+            normalized_base_nodes.append(base_node)
+            normalized_base_values.append(base_value)
+        batch_one_cat = match.graph.call_function(
+            aten.cat.default, args=(normalized_base_nodes, rewrite_plan.cat_dim)
+        )
+        zero_batch_stride_lhs = match.graph.call_function(
+            aten.expand.default, args=(batch_one_cat, rewrite_plan.expand_size)
+        )
+
+    batch_one_cat.meta["val"] = aten.cat.default(
+        normalized_base_values, rewrite_plan.cat_dim
+    )
+    zero_batch_stride_lhs.meta["val"] = aten.expand.default(
+        batch_one_cat.meta["val"],
+        list(rewrite_plan.tensor_values[match_nodes.cat_node].shape),
+    )
+    if "stack_trace" in match_nodes.cat_node.meta:
+        for node in (
+            batch_one_cat,
+            zero_batch_stride_lhs,
+        ):
+            node.meta["stack_trace"] = match_nodes.cat_node.meta["stack_trace"]
+
+    match_nodes.bmm_node.update_arg(0, zero_batch_stride_lhs)
+    if match_nodes.outer_expand_node is not None:
+        match.graph.erase_node(match_nodes.outer_expand_node)
+    match.graph.erase_node(match_nodes.cat_node)
+    for expand_node in match_nodes.expand_nodes:
+        match.graph.erase_node(expand_node)
+    counters["inductor"]["cat_expand_to_batch_stride_zero"] += 1
+    if match_nodes.outer_expand_node is not None:
+        counters["inductor"]["cat_expand_outer_to_batch_stride_zero"] += 1
 
 
 def is_valid_mm_plus_mm(match: Match):

@@ -222,6 +222,10 @@ apply_gumbel_max_trick = (
     os.environ.get("TORCHINDUCTOR_APPLY_GUMBEL_MAX_TRICK", "1") == "1"
 )
 
+cat_expand_bmm_rewrite = (
+    os.environ.get("TORCHINDUCTOR_CAT_EXPAND_BMM_REWRITE", "1") == "1"
+)
+
 # dead code elimination
 dce = False
 
