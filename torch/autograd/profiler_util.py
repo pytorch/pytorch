@@ -612,7 +612,7 @@ def _to_bool(v: str) -> bool:
     return v in ("1", "true")
 
 
-# Kineto key -> (EventMetadata field name, converter from string)
+# Kineto key → (EventMetadata field name, converter from string)
 _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "registers per thread": ("registers_per_thread", int),
     "shared memory": ("shared_memory", int),
@@ -652,7 +652,7 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
 }
 
 
-def _build_metadata(extra_meta: dict[str, str]) -> EventMetadata | None:
+def _build_metadata(extra_meta):
     fields: dict[str, Any] = {}
     any_populated = False
     for kineto_key, (field_name, convert) in _EVENT_METADATA_KEYS.items():
@@ -712,8 +712,7 @@ class FunctionEvent(FormattedTimesMixin):
         metadata (Dict[str, Any]): Additional metadata keyed by the field names
             used in exported traces. Available fields vary by activity and backend.
         metadata_json (str): Deprecated. Use event_metadata instead.
-        event_metadata (EventMetadata): Additional JSON-derived metadata in
-            structured format.
+        event_metadata (EventMetadata): Additional metadata in structured format.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
             but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
             TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
@@ -832,9 +831,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.flow_start: bool | None = flow_start
         self.external_id: int = external_id
         self.linked_correlation_id: int = linked_correlation_id
-        self.metadata: dict[str, Any] | None = (
-            typed_metadata if typed_metadata else None
-        )
+        self.metadata: dict[str, Any] | None = typed_metadata
         self.event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )
