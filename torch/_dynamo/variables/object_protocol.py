@@ -713,7 +713,7 @@ def pylong_from_base(
     inputs cannot be resolved to Python constants.
     """
     # base = PyNumber_AsSsize_t(obase, NULL) -> nb_index.
-    if obase.is_python_constant() and isinstance(obase.as_python_constant(), int):
+    if obase.is_python_constant() and issubclass(obase.python_type(), int):
         base_vt = obase
     elif obase.tp_as_number.nb_index is not None:
         base_vt = obase.nb_index_impl(tx)
@@ -722,9 +722,7 @@ def pylong_from_base(
             tx,
             f"'{obase.python_type_name()}' object cannot be interpreted as an integer",
         )
-    if not (
-        base_vt.is_python_constant() and isinstance(base_vt.as_python_constant(), int)
-    ):
+    if not (base_vt.is_python_constant() and issubclass(base_vt.python_type(), int)):
         return None
     base = base_vt.as_python_constant()
     if (base != 0 and base < 2) or base > 36:
@@ -739,7 +737,7 @@ def pylong_from_base(
     try:
         return ConstantVariable.create(int(xval, base))
     except ValueError as e:
-        raise_observed_exception(ValueError, tx, args=[str(e)])
+        raise_observed_exception(ValueError, tx, args=list(e.args))
 
 
 def pynumber_float(
@@ -785,6 +783,22 @@ def pynumber_float(
         f"float() argument must be a string or a real number, "
         f"not '{obj.python_type_name()}'",
     )
+
+
+def getindex(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    arg: VariableTracker,
+) -> VariableTracker:
+    """Mirrors typeobject.c::getindex: calls PyNumber_AsSsize_t then tp_as_sequence.sq_length"""
+    obj_type = maybe_get_python_type(obj)
+
+    i = pynumber_as_ssize_t(tx, arg, err=OverflowError)
+    if i.as_python_constant() < 0:
+        if type_implements_sq_length(obj_type):
+            length = obj.sq_length(tx)
+            i = pynumber_add(tx, i, length)
+    return i
 
 
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
