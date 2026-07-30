@@ -573,13 +573,16 @@ class TestNVUniversalGemm(TestCase):
         )
         bias = torch.randn((1, 1), device="cuda", dtype=torch.bfloat16)
         out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
-        expected = torch._scaled_mm(
-            a,
-            b,
-            scale_a=scale_a,
-            scale_b=scale_b,
-            out_dtype=torch.bfloat16,
-        ) + bias
+        expected = (
+            torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            + bias
+        )
         epilogue = EpilogueArguments(
             epilogue_fn="def epilogue(accum, bias):\n    D = accum + bias\n    return D\n",
             bias=bias,
@@ -792,6 +795,34 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertIsNone(classify(fp16_then_fp32))
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
+
+    def test_grouped_reduction_checks_all_reductions(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        unrelated = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("x", 0, None))),
+        )
+        source = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
+        )
+        store = GemmEpilogueIRStore(0, Expr("add", (unrelated, source)))
+        self.assertEqual(
+            grouped_reduction_ir(store, "gemm", 4, torch.float32),
+            ("sum", "identity"),
+        )
+
+    def test_epilogue_ir_preserves_empty_tuple_argument(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import GemmEpilogueIRExpression
+
+        expression = GemmEpilogueIRExpression("reshape", ("value", ()))
+        self.assertEqual(expression.args, ("value", ()))
+        self.assertEqual(expression.kwargs, ())
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
@@ -1461,17 +1492,17 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
         )
-        b = torch.randint(
-            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
-        ).view(torch.float4_e2m1fn_x2)
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
         b = b.T
         padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(
-            _round_up(m, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
-        scale_b = torch.rand(
-            _round_up(n, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(

@@ -1720,8 +1720,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         ]
                                 epilogue_values.append(fragment.load())
                     if cutlass.const_expr(
-                        local_reduce_tensor is not None
-                        or self.local_reduce_feeds_main
+                        local_reduce_tensor is not None or self.local_reduce_feeds_main
                     ):
                         local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
                             self.acc_dtype
@@ -1754,9 +1753,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 rows //= 2
                             if cutlass.const_expr(self.local_reduce_type == "mean"):
                                 feed_flt[i] /= group
-                        epilogue_result = acc_vec.to(
-                            epilogue_input_dtype
-                        ) - feed_value.load()
+                        epilogue_result = (
+                            acc_vec.to(epilogue_input_dtype) - feed_value.load()
+                        )
                     else:
                         epilogue_result = epilogue_op(
                             acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
@@ -1817,14 +1816,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 cute.size(acc_vec.shape, mode=[0])
                             )
                             assert group > 1 and group <= self.cta_tile_shape_mnk[1]
-                            fragment_group = cutlass.const_expr(
-                                min(group, fragment_n)
-                            )
+                            fragment_group = cutlass.const_expr(min(group, fragment_n))
                             assert group % fragment_group == 0
                             assert fragment_n % fragment_group == 0
-                            repeats = cutlass.const_expr(
-                                fragment_n // fragment_group
-                            )
+                            repeats = cutlass.const_expr(fragment_n // fragment_group)
                             grouped = local_reduce_vec.reshape(
                                 ((1, fragment_group, repeats), 1, 1)
                             )
@@ -1849,8 +1844,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 reduction_profile=((None, 1, None), 1, 1),
                             )
                             if cutlass.const_expr(
-                                self.local_reduce_type == "mean"
-                                and group <= fragment_n
+                                self.local_reduce_type == "mean" and group <= fragment_n
                             ):
                                 reduced = reduced / group
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
@@ -1941,9 +1935,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 cute.size(lane_layout_mn, mode=[0])
                             )
                             assert group > 1 and group <= self.cta_tile_shape_mnk[0]
-                            reduction_group = cutlass.const_expr(
-                                min(group, lanes_in_m)
-                            )
+                            reduction_group = cutlass.const_expr(min(group, lanes_in_m))
                             assert group % reduction_group == 0
                             assert lanes_in_m % reduction_group == 0
                             for i in cutlass.range(
@@ -2029,7 +2021,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 group_value = reduced_flt[i]
                                 group_warp_start = group_idx * group_warps
                                 if cutlass.const_expr(group > lanes_in_m):
-                                    if row_idx % group == 0 and warp_m_idx == group_warp_start:
+                                    if (
+                                        row_idx % group == 0
+                                        and warp_m_idx == group_warp_start
+                                    ):
                                         for warp_offset in cutlass.range_constexpr(
                                             1, group_warps
                                         ):

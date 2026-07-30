@@ -371,7 +371,9 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 alpha,
                 *epilogue.inputs,
                 *epilogue.outputs,
-                local_reduce_out.runtime_tensor if local_reduce_out is not None else None,
+                local_reduce_out.runtime_tensor
+                if local_reduce_out is not None
+                else None,
             )
             return
 
