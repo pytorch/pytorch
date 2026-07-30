@@ -1,11 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
+import sys
 import types
+import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    make_dynamo_test,
+    xfailIfPy313AndEarlier,
+)
 
 
 class CustomIterable:
@@ -1508,6 +1513,280 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
     def test_len_blocked_slot_raises_type_error(self):
         with self.assertRaises(TypeError):
             len(BlockedLen())
+
+
+class IterPropAttrErrorWithGetItem:
+    def __init__(self, data):
+        self.data = data
+
+    @property
+    def __iter__(self):
+        raise AttributeError("no __iter__")
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+
+class IterPropAttrErrorNoGetItem:
+    @property
+    def __iter__(self):
+        raise AttributeError("no __iter__")
+
+
+class IterPropReturnsCallable:
+    def __init__(self, data):
+        self.data = data
+
+    @property
+    def __iter__(self):
+        return lambda: iter(self.data)
+
+
+class IterPropRaisesValueError:
+    @property
+    def __iter__(self):
+        raise ValueError("boom")
+
+
+class BlockedIterWithGetItem:
+    __iter__ = None
+
+    def __getitem__(self, index):
+        return [1, 2, 3][index]
+
+
+class _IterDescriptor:
+    def __get__(self, obj, owner):
+        return lambda: iter(obj.data)
+
+
+class _AttrErrorDescriptor:
+    def __get__(self, obj, owner):
+        raise AttributeError("no attr")
+
+
+class IterViaDescriptor:
+    __iter__ = _IterDescriptor()
+
+    def __init__(self, data):
+        self.data = data
+
+
+class IterDescriptorAttrErrorWithGetItem:
+    __iter__ = _AttrErrorDescriptor()
+
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+
+class IterNotCallable:
+    __iter__ = 42
+
+
+class IterStaticMethod:
+    __iter__ = staticmethod(lambda: iter([1, 2, 3]))
+
+
+class NextProp:
+    def __init__(self, n):
+        self.n = n
+        self.i = 0
+
+    def __iter__(self):
+        return self
+
+    @property
+    def __next__(self):
+        def inner():
+            if self.i >= self.n:
+                raise StopIteration
+            self.i += 1
+            return self.i
+
+        return inner
+
+
+class NextNone:
+    def __iter__(self):
+        return self
+
+    __next__ = None
+
+
+class NextPropAttrError:
+    def __iter__(self):
+        return self
+
+    @property
+    def __next__(self):
+        raise AttributeError("gone")
+
+
+class TestSpecialMethodIterLookup(torch._dynamo.test_case.TestCase):
+    """slot_tp_iter / slot_tp_iternext lookup semantics: __iter__ / __next__
+    resolved via MRO-only special lookup with descriptor binding
+    (lookup_maybe_method in Objects/typeobject.c)."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # Pre-3.14 slot_tp_iter blanket-clears lookup errors (PyErr_Clear) before
+    # the __getitem__ probe; Dynamo does not encode this yet.
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_iter_property_attribute_error_with_getitem(self):
+        # __iter__ bind raises AttributeError -> swallowed -> seqiter fallback
+        self.assertEqual(list(IterPropAttrErrorWithGetItem([1, 2, 3])), [1, 2, 3])
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_iter_property_attribute_error_no_getitem(self):
+        with self.assertRaises(TypeError):
+            iter(IterPropAttrErrorNoGetItem())
+
+    @make_dynamo_test
+    def test_iter_property_returns_callable(self):
+        self.assertEqual(list(IterPropReturnsCallable([1, 2, 3])), [1, 2, 3])
+
+    @xfailIfPy313AndEarlier
+    @make_dynamo_test
+    def test_iter_property_raises_value_error(self):
+        # Pre-3.14 slot_tp_iter swallows any lookup error (blanket
+        # PyErr_Clear) and falls through to the absent __getitem__ probe
+        # -> TypeError; 3.14 only swallows AttributeError, so ValueError
+        # propagates
+        expected = ValueError if sys.version_info >= (3, 14) else TypeError
+        with self.assertRaises(expected):
+            iter(IterPropRaisesValueError())
+
+    @make_dynamo_test
+    def test_iter_none_with_getitem(self):
+        # __iter__ = None wins over the __getitem__ fallback
+        with self.assertRaises(TypeError):
+            iter(BlockedIterWithGetItem())
+
+    @make_dynamo_test
+    def test_iter_via_descriptor(self):
+        self.assertEqual(list(IterViaDescriptor([1, 2, 3])), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_iter_descriptor_attribute_error_with_getitem(self):
+        self.assertEqual(list(IterDescriptorAttrErrorWithGetItem([4, 5, 6])), [4, 5, 6])
+
+    @make_dynamo_test
+    def test_iter_not_callable(self):
+        with self.assertRaises(TypeError):
+            iter(IterNotCallable())
+
+    @make_dynamo_test
+    def test_iter_staticmethod(self):
+        self.assertEqual(list(IterStaticMethod()), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_next_property(self):
+        self.assertEqual(list(NextProp(3)), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_next_none_raises_type_error(self):
+        it = iter(NextNone())
+        with self.assertRaises(TypeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_next_missing_raises_type_error(self):
+        # builtin next() gates on PyIter_Check
+        with self.assertRaises(TypeError):
+            next(NoIterNoGetitem())
+
+    @make_dynamo_test
+    def test_next_property_attribute_error_propagates(self):
+        # slot_tp_iternext uses the raising lookup variant: AttributeError
+        # from the bind is NOT swallowed
+        it = iter(NextPropAttrError())
+        with self.assertRaises(AttributeError):
+            next(it)
+
+
+class ColorInt(enum.IntEnum):
+    RED = 1
+
+
+class TestSpecialMethodLookupRegressions(torch._dynamo.test_case.TestCase):
+    """Regressions for the special-method lookup engine: C-slot dunders must
+    never recurse, and error messages must match eager."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    def test_iter_on_c_iterable_object_graph_breaks(self):
+        # zip object as graph input: its __iter__ is a C wrapper descriptor
+        # with no traceable body.  Must graph break cleanly (Unsupported),
+        # never RecursionError.
+        from torch._dynamo.exc import Unsupported
+
+        def fn(it, x):
+            return [v + 1 for v in it] and x + 1
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                zip([1, 2], [3, 4]), torch.ones(2)
+            )
+
+    def test_iter_on_dict_items_object_graph_breaks(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(items, x):
+            it = iter(items)
+            return next(it) and x + 1
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                {"a": 1}.items(), torch.ones(2)
+            )
+
+    @make_dynamo_test
+    def test_intenum_unary_neg(self):
+        # int.__neg__ on an IntEnum member: inherited C slot of a modeled
+        # constant base -- must fold/delegate, never recurse.
+        self.assertEqual(-ColorInt.RED, -1)
+
+    @make_dynamo_test
+    def test_iter_none_with_getitem_message(self):
+        # slot_tp_iter's attr_is_none branch: message is "is not iterable",
+        # not "'NoneType' object is not callable"
+        raised = False
+        try:
+            iter(BlockedIterWithGetItem())
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not iterable", str(e))
+        self.assertTrue(raised)
+
+    @make_dynamo_test
+    def test_next_missing_message(self):
+        # builtin next() gates on PyIter_Check: "is not an iterator"
+        raised = False
+        try:
+            next(NoIterNoGetitem())
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not an iterator", str(e))
+        self.assertTrue(raised)
 
 
 if __name__ == "__main__":
