@@ -343,18 +343,12 @@ struct TORCH_API TupleElements {
     IValue elementsInline_[3];
   };
 
-  void destroyInline() {
-   for (const auto ii : c10::irange(inlineSize_)) {
-     elementsInline_[ii].~IValue();
-   }
-  }
  public:
 
   using iterator = IValue*;
   using const_iterator = const IValue*;
 
-  TupleElements() : inlineSize_(0) {
-    new (&elementsVector_) std::vector<IValue>();
+  TupleElements() : inlineSize_(0), elementsVector_() {
   }
 
   explicit TupleElements(std::vector<IValue> elements)
@@ -362,45 +356,36 @@ struct TORCH_API TupleElements {
 
   explicit TupleElements(c10::ArrayRef<IValue> elements)
   : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
-    switch (inlineSize_) {
-      case 3:
-        new (&elementsInline_[2]) IValue(elements[2]);
-        [[fallthrough]];
-      case 2:
-        new (&elementsInline_[1]) IValue(elements[1]);
-        [[fallthrough]];
-      case 1:
-        new (&elementsInline_[0]) IValue(elements[0]);
-        break;
-      case 0:
-        new (&elementsVector_) std::vector<IValue>(elements.begin(), elements.end());
-        break;
+    if (inlineSize_) {
+      std::uninitialized_copy_n(elements.begin(), inlineSize_, elementsInline_);
+    } else {
+      std::construct_at(&elementsVector_, elements.begin(), elements.end());
     }
   }
 
   explicit TupleElements(IValue&& e1)
   : inlineSize_(1) {
-    new (&elementsInline_[0]) IValue(std::move(e1));
+    std::construct_at(elementsInline_ + 0, std::move(e1));
   }
 
   explicit TupleElements(IValue&& e1, IValue&& e2)
   : inlineSize_(2) {
-    new (&elementsInline_[0]) IValue(std::move(e1));
-    new (&elementsInline_[1]) IValue(std::move(e2));
+    std::construct_at(elementsInline_ + 0, std::move(e1));
+    std::construct_at(elementsInline_ + 1, std::move(e2));
   }
 
   explicit TupleElements(IValue&& e1, IValue&& e2, IValue&& e3)
   : inlineSize_(3) {
-    new (&elementsInline_[0]) IValue(std::move(e1));
-    new (&elementsInline_[1]) IValue(std::move(e2));
-    new (&elementsInline_[2]) IValue(std::move(e3));
+    std::construct_at(elementsInline_ + 0, std::move(e1));
+    std::construct_at(elementsInline_ + 1, std::move(e2));
+    std::construct_at(elementsInline_ + 2, std::move(e3));
   }
 
   ~TupleElements() {
     if (inlineSize_) {
-      destroyInline();
+      std::destroy_n(elementsInline_, inlineSize_);
     } else {
-      elementsVector_.~vector();
+      std::destroy_at(&elementsVector_);
     }
   }
 
@@ -418,41 +403,30 @@ struct TORCH_API TupleElements {
   TupleElements(const TupleElements& rhs)
   : inlineSize_(rhs.inlineSize_) {
     if (rhs.inlineSize_) {
-      for (const auto  ii : c10::irange(inlineSize_)) {
-        new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
-      }
+      std::uninitialized_copy_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
     } else {
-      new (&elementsVector_) std::vector<IValue>(rhs.elementsVector_);
+      std::construct_at(&elementsVector_, rhs.elementsVector_);
     }
   }
 
   TupleElements& operator=(const TupleElements& rhs) {
-    if (inlineSize_) {
-      if (rhs.inlineSize_) {
-        for (const auto ii : c10::irange(std::min(inlineSize_, rhs.inlineSize_))) {
-          elementsInline_[ii] = rhs.elementsInline_[ii];
-        }
-        if (rhs.inlineSize_ > inlineSize_) {
-          for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
-            new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
-          }
-        } else {
-          for (const auto ii : c10::irange(rhs.inlineSize_, inlineSize_)) {
-            elementsInline_[ii].~IValue();
-          }
-        }
-      } else {
-        destroyInline();
-        new (&elementsVector_) std::vector<IValue>(rhs.elementsVector_);
-      }
+    if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
+      elementsVector_ = rhs.elementsVector_;
+    } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
+      std::destroy_at(&elementsVector_);
+      std::uninitialized_copy_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
+    } else if (inlineSize_ > 0 && rhs.inlineSize_ == 0) {
+      std::destroy_n(elementsInline_, inlineSize_);
+      std::construct_at(&elementsVector_, rhs.elementsVector_);
     } else {
-      if (rhs.inlineSize_) {
-        elementsVector_.~vector();
-        for (const auto ii : c10::irange(rhs.inlineSize_)) {
-          new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
-        }
-      } else {
-        elementsVector_ = rhs.elementsVector_;
+      auto copySize = std::min(inlineSize_, rhs.inlineSize_);
+      auto it = std::copy_n(rhs.elementsInline_, copySize, elementsInline_);
+      if (inlineSize_ > rhs.inlineSize_) {
+        std::destroy(it, elementsInline_ + inlineSize_);
+      } else if (inlineSize_ < rhs.inlineSize_) {
+        auto remainingBegin = rhs.elementsInline_ + copySize;
+        auto remainingEnd = rhs.elementsInline_ + rhs.inlineSize_;
+        std::uninitialized_copy(remainingBegin, remainingEnd, it);
       }
     }
     inlineSize_ = rhs.inlineSize_;
@@ -461,42 +435,32 @@ struct TORCH_API TupleElements {
 
   TupleElements(TupleElements&& rhs) noexcept
   : inlineSize_(rhs.inlineSize_) {
-    if (inlineSize_) {
-      for (const auto ii : c10::irange(inlineSize_)) {
-        new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
-      }
+    if (rhs.inlineSize_) {
+      std::uninitialized_move_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
     } else {
-      new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
+      std::construct_at(&elementsVector_, std::move(rhs.elementsVector_));
     }
   }
 
   TupleElements& operator=(TupleElements&& rhs) noexcept {
-    if (inlineSize_) {
-      if (rhs.inlineSize_) {
-        for (const auto ii : c10::irange(std::min(inlineSize_, rhs.inlineSize_))) {
-          elementsInline_[ii] = std::move(rhs.elementsInline_[ii]);
-        }
-        if (rhs.inlineSize_ > inlineSize_) {
-          for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
-            new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
-          }
-        } else {
-          for (const auto ii : c10::irange(rhs.inlineSize_, inlineSize_)) {
-            elementsInline_[ii].~IValue();
-          }
-        }
-      } else {
-        destroyInline();
-        new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
-      }
+    if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
+      elementsVector_ = std::move(rhs.elementsVector_);
+    } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
+      std::destroy_at(&elementsVector_);
+      std::uninitialized_move_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
+    } else if (inlineSize_ > 0 && rhs.inlineSize_ == 0) {
+      std::destroy_n(elementsInline_, inlineSize_);
+      std::construct_at(&elementsVector_, std::move(rhs.elementsVector_));
     } else {
-      if (rhs.inlineSize_) {
-        elementsVector_.~vector();
-        for (const auto ii : c10::irange(rhs.inlineSize_)) {
-          new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
-        }
-      } else {
-        elementsVector_ = std::move(rhs.elementsVector_);
+      auto moveSize = std::min(inlineSize_, rhs.inlineSize_);
+      auto it = std::copy_n(
+        std::make_move_iterator(rhs.elementsInline_), moveSize, elementsInline_);
+      if (inlineSize_ > rhs.inlineSize_) {
+        std::destroy(it, elementsInline_ + inlineSize_);
+      } else if (inlineSize_ < rhs.inlineSize_) {
+        auto remainingBegin = rhs.elementsInline_ + moveSize;
+        auto remainingEnd = rhs.elementsInline_ + rhs.inlineSize_;
+        std::uninitialized_move(remainingBegin, remainingEnd, it);
       }
     }
     inlineSize_ = rhs.inlineSize_;
@@ -522,9 +486,8 @@ struct TORCH_API TupleElements {
 
   void setContents(std::vector<IValue>&& contents) {
     if (inlineSize_) {
-      destroyInline();
-      new (&elementsVector_) std::vector<IValue>(std::move(contents));
-      inlineSize_ = 0;
+      std::destroy_n(elementsInline_, std::exchange(inlineSize_, 0));
+      std::construct_at(&elementsVector_, std::move(contents));
     } else {
       elementsVector_ = std::move(contents);
     }
@@ -616,7 +579,11 @@ struct TORCH_API TupleElements {
   }
 
   [[nodiscard]] std::vector<IValue> vec() const& {
-    return asArrayRef().vec();
+    if (inlineSize_) {
+      return std::vector<IValue>(elementsInline_, elementsInline_ + inlineSize_);
+    } else {
+      return elementsVector_;
+    }
   }
 
   [[nodiscard]] IValue& back() {
@@ -629,9 +596,12 @@ struct TORCH_API TupleElements {
 
   [[nodiscard]] std::vector<IValue> vec() && {
     std::vector<IValue> result;
-    result.reserve(size());
-    for (auto&& iv : *this) {
-      result.push_back(std::move(iv));
+    if (inlineSize_) {
+      result.assign(
+        std::make_move_iterator(elementsInline_),
+        std::make_move_iterator(elementsInline_ + inlineSize_));
+    } else {
+      result.swap(elementsVector_);
     }
     return result;
   }
