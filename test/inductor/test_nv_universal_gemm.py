@@ -796,51 +796,79 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
+    def test_grouped_reduction_checks_all_reductions(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        unrelated = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("x", 0, None))),
+        )
+        source = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
+        )
+        store = GemmEpilogueIRStore(0, Expr("add", (unrelated, source)))
+        self.assertEqual(
+            grouped_reduction_ir(store, "gemm", 4, torch.float32),
+            ("sum", "identity"),
+        )
+
+    def test_epilogue_ir_preserves_empty_tuple_argument(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import GemmEpilogueIRExpression
+
+        expression = GemmEpilogueIRExpression("reshape", ("value", ()))
+        self.assertEqual(expression.args, ("value", ()))
+        self.assertEqual(expression.kwargs, ())
+
     def test_local_reduce_cache_specialization(self):
+        import dataclasses
+
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _local_reduce_specialization,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
-        base = {
-            "local_reduce_group": 4,
-            "local_reduce_axis": 1,
-            "local_reduce_type": "mean",
-            "local_reduce_source": "identity",
-            "local_reduce_feeds_main": False,
-            "local_reduce_secondary_feed_type": None,
-        }
-        specialization = _local_reduce_specialization(base)
-        for key, value in (
-            ("local_reduce_group", 8),
-            ("local_reduce_axis", 0),
-            ("local_reduce_feeds_main", True),
-            ("local_reduce_secondary_feed_type", "direct_bool_gt_zero"),
+        base = GemmReductionArguments(group=4, reduction_type="mean")
+        specialization = _local_reduce_specialization({"local_reduce": base})
+        for field, value in (
+            ("group", 8),
+            ("axis", 0),
+            ("feeds_main", True),
+            ("secondary_feed_type", "direct_bool_gt_zero"),
         ):
-            variant = dict(base)
-            variant[key] = value
-            self.assertNotEqual(specialization, _local_reduce_specialization(variant))
+            variant = dataclasses.replace(base, **{field: value})
+            self.assertNotEqual(
+                specialization,
+                _local_reduce_specialization({"local_reduce": variant}),
+            )
 
         tensor = torch.empty((4, 8))
         tensor_specialization = _local_reduce_specialization(
-            base | {"local_reduce_out": tensor}
+            {"local_reduce": dataclasses.replace(base, output=tensor)}
         )
         self.assertNotEqual(
             tensor_specialization,
-            _local_reduce_specialization(base | {"local_reduce_out": None}),
+            _local_reduce_specialization({"local_reduce": base}),
         )
         self.assertNotEqual(
             tensor_specialization,
             _local_reduce_specialization(
-                base | {"local_reduce_out": torch.empty((8, 4))}
+                {"local_reduce": dataclasses.replace(base, output=torch.empty((8, 4)))}
             ),
         )
         self.assertNotEqual(
             tensor_specialization,
-            _local_reduce_specialization(base | {"local_reduce_feed_out": tensor}),
+            _local_reduce_specialization(
+                {"local_reduce": dataclasses.replace(base, feed_output=tensor)}
+            ),
         )
 
     def test_local_reduce_plan_deduplicates_outputs(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import (
+        from torch._inductor.kernel.gemm_epilogue import (
             GemmReductionDescriptor,
             GemmReductionPlan,
         )
@@ -858,8 +886,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
         expression = GemmReductionDescriptor.parse("mean_linear:1:2:3")
         self.assertEqual(expression.serialize(), "mean_linear:1:2:3")
-        with self.assertRaisesRegex(ValueError, "expects 3"):
-            GemmReductionDescriptor.parse("mean_linear:1:2")
+        expression = GemmReductionDescriptor.parse("custom_reduction:1:2")
+        self.assertEqual(expression.serialize(), "custom_reduction:1:2")
 
     def test_reduction_pattern_near_misses(self):
         from torch._inductor.kernel.gemm_epilogue_ir import (
@@ -1309,6 +1337,46 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("out_ptr1", code)
         self.assertIn("out_ptr2", code)
 
+    def test_scaled_mm_large_epilogue_fusion(self):
+        m, n, k = self.M, self.N, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        biases = tuple(
+            torch.randn(n, device="cuda", dtype=torch.bfloat16) for _ in range(5)
+        )
+
+        def fn(a, b, scale_a, scale_b, *biases):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            values = tuple(result + bias for bias in biases)
+            return result, *values
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b, *biases
+        )
+        self.assertEqual(result, fn(a, b, scale_a, scale_b, *biases))
+        self.assertTrue(epilogue_fused)
+        for index in range(1, 6):
+            self.assertIn(f"out_ptr{index}", code)
+
     @parametrize(
         "case",
         (
@@ -1560,17 +1628,17 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
         )
-        b = torch.randint(
-            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
-        ).view(torch.float4_e2m1fn_x2)
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
         b = b.T
         padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(
-            _round_up(m, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
-        scale_b = torch.rand(
-            _round_up(n, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
