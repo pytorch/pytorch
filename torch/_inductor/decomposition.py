@@ -323,6 +323,16 @@ def silu(x: torch.Tensor) -> torch.Tensor:
     return x / (1 + x.neg().exp())
 
 
+@register_decomposition([aten.sign])
+def sign(x: torch.Tensor) -> torch.Tensor:
+    if x.dtype == torch.bool:
+        return x.clone()
+    result = (x > 0).to(x.dtype) - (x < 0).to(x.dtype)
+    if x.is_floating_point():
+        return torch.where(torch.isnan(x), x, result)
+    return result
+
+
 @register_decomposition([aten.full])
 def full(
     size: list[int | torch.SymInt],

@@ -18288,12 +18288,7 @@ op_db: list[OpInfo] = [
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
-                   supports_sparse_bsc=True,
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/41245
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
-                   )),
+                   supports_sparse_bsc=True),
     UnaryUfuncInfo('sgn',
                    ref=reference_sgn,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -18309,9 +18304,6 @@ op_db: list[OpInfo] = [
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
                    skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/41245
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),

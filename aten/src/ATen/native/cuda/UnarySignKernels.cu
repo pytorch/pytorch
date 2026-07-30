@@ -67,6 +67,7 @@ void sign_kernel_cuda(TensorIteratorBase& iter){
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sign_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+            if (a != a) return a; // propagate NaN
             return c10::signum(a);
         });
     });
