@@ -4,11 +4,13 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -177,6 +179,107 @@ void ProcessGroupNCCL::initNcclResources() {
 
   attachMemoryHook();
   publishComm();
+}
+
+void ProcessGroupNCCL::initFromSplitComm(
+    ncclComm_t comm,
+    at::Device device,
+    std::shared_ptr<NcclApi> nccl_api) {
+  device_ = device;
+  nccl_api_ = std::move(nccl_api);
+  nccl_comm_ = comm;
+  initNcclResources();
+  init_state_ = InitializationState::INITIALIZED;
+  TracingGuard tracingGuard(name_, comm_size_, "init", rank_);
+  TC_LOG(INFO, this) << "ProcessGroupNCCL initialized from split for rank: "
+                     << rank_;
+}
+
+c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
+    const c10::intrusive_ptr<::c10d::Store>& store,
+    const std::vector<int>& ranks,
+    const c10::intrusive_ptr<::c10d::Backend::Options>& opts) {
+  // Validate the requested ranks (in range, no duplicates). Port of the
+  // validation in TorchCommNCCL::split.
+  std::unordered_set<int> seen;
+  for (int r : ranks) {
+    TORCH_CHECK(
+        r >= 0 && r < getSize(),
+        "ProcessGroupNCCL::split: invalid rank ",
+        r,
+        "; valid ranks are 0 to ",
+        getSize() - 1);
+    TORCH_CHECK(
+        seen.insert(r).second,
+        "ProcessGroupNCCL::split: rank ",
+        r,
+        " appears multiple times in ranks");
+  }
+
+  auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  TORCH_CHECK(
+      ncclOpts != nullptr,
+      "ProcessGroupNCCL::split: opts is not a nccl2 ProcessGroupNCCL::Options");
+
+  // ncclCommSplit is collective over the parent communicator, so the parent
+  // must be initialized before we split. All parent ranks call split(), so a
+  // lazy bootstrap here stays in lockstep. Resolve a device the same way the
+  // lazy collective path does.
+  if (init_state_ != InitializationState::INITIALIZED) {
+    at::Device dev = getBoundDeviceId().has_value()
+        ? getBoundDeviceId().value()
+        : at::Device(at::kCUDA, at::cuda::current_device());
+    ensureInitialized(dev);
+  }
+  checkAndAbortIfTimedOutOrError();
+
+  // Determine this rank's color and its rank within the child communicator.
+  // color = lowest rank in the group (each rank joins exactly one group);
+  // key = index within `ranks`, giving deterministic child rank ordering.
+  // A rank not in `ranks` uses NCCL_SPLIT_NOCOLOR and produces no child comm.
+  int color = NCCL_SPLIT_NOCOLOR;
+  int newRank = -1;
+  auto it = std::find(ranks.begin(), ranks.end(), getRank());
+  if (it != ranks.end()) {
+    color = *std::min_element(ranks.begin(), ranks.end());
+    newRank = static_cast<int>(std::distance(ranks.begin(), it));
+  }
+
+  const std::string& name = ncclOpts->group_name;
+  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  config.commName = name.c_str();
+#endif
+  populateNcclConfigFromHints(config, ncclOpts->hints, name);
+
+  // Collective on the parent comm: every parent rank calls commSplit exactly
+  // once, members with their color and non-members with NCCL_SPLIT_NOCOLOR.
+  c10::cuda::CUDAGuard gpuGuard(device_);
+  ncclComm_t new_comm = nullptr;
+  const int key = newRank >= 0 ? newRank : getRank();
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->commSplit(nccl_comm_, color, key, &new_comm, &config),
+      "NCCL split failed");
+
+  if (newRank == -1) {
+    // Non-member: no child communicator.
+    return nullptr;
+  }
+
+  auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
+  childOpts->timeout = ncclOpts->timeout;
+  childOpts->abort_process_on_timeout_or_error =
+      ncclOpts->abort_process_on_timeout_or_error;
+  childOpts->hints = ncclOpts->hints;
+  childOpts->group_name = ncclOpts->group_name;
+  childOpts->group_desc = ncclOpts->group_desc;
+
+  auto child = c10::make_intrusive<ProcessGroupNCCL>(
+      store, newRank, static_cast<int>(ranks.size()), childOpts);
+  child->initFromSplitComm(new_comm, device_, nccl_api_);
+  return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
 
 void ProcessGroupNCCL::abort() {
