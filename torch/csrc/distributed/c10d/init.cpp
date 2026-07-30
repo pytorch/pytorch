@@ -18,6 +18,7 @@
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/PyBackend.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
@@ -2761,15 +2762,16 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::Device& device,
                  const ::c10d::ProcessGroup::BackendType& backendType,
-                 const std::optional<c10::intrusive_ptr<::c10d::Backend>>&
-                     backend) {
-                self->setBackend(device.type(), backendType, backend);
+                 py::object backend) {
+                std::optional<c10::intrusive_ptr<::c10d::Backend>> backendPtr;
+                if (!backend.is_none()) {
+                  backendPtr = ::c10d::PyBackend::wrap(std::move(backend));
+                }
+                self->setBackend(device.type(), backendType, backendPtr);
               },
               py::arg("device"),
               py::arg("backend_type"),
-              py::arg("backend") =
-                  std::optional<c10::intrusive_ptr<::c10d::Backend>>(),
-              py::call_guard<py::gil_scoped_release>())
+              py::arg("backend") = py::none())
           .def(
               "get_backend",
               [](const py::object& self, const c10::Device& device) {
@@ -2958,7 +2960,6 @@ Arguments:
       &::c10d::set_comm_profiling_name,
       py::arg("name"));
   module.def("_get_comm_profiling_name", &::c10d::get_comm_profiling_name);
-
   py::enum_<::c10d::ProcessGroup::BackendType>(
       processGroup,
       "BackendType",
@@ -2976,11 +2977,33 @@ Arguments:
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
   // and should be removed once all tests are transitioned
   auto backend =
-      py::class_<::c10d::Backend, c10::intrusive_ptr<::c10d::Backend>>(
-          module, "Backend")
+      py::class_<
+          ::c10d::Backend,
+          c10::intrusive_ptr<::c10d::Backend>,
+          ::c10d::PyBackend>(module, "Backend")
+          .def(
+              py::init([](int rank, int size) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::PyBackend>(rank, size);
+              }),
+              py::arg("rank"),
+              py::arg("size"))
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def(
+              "__getattr__",
+              [](const ::c10d::Backend& self, const std::string& name) {
+                auto* pyBackend = dynamic_cast<const ::c10d::PyBackend*>(&self);
+                if (pyBackend != nullptr) {
+                  return pyBackend->getPyBackendAttr(name);
+                }
+                throw py::attribute_error(name);
+              },
+              py::arg("name"))
+          .def("_id", &::c10d::Backend::getID)
           .def(
               "abort",
               &::c10d::Backend::abort,
@@ -2995,6 +3018,14 @@ Arguments:
               "setUsePgForSymmMemRendezvous",
               &::c10d::Backend::setUsePgForSymmMemRendezvous,
               py::arg("value"))
+          .def_property(
+              "use_pg_for_symm_mem_rendezvous",
+              &::c10d::Backend::getUsePgForSymmMemRendezvous,
+              &::c10d::Backend::setUsePgForSymmMemRendezvous)
+          .def_property(
+              "bound_device_id",
+              &::c10d::Backend::getBoundDeviceId,
+              &::c10d::Backend::setBoundDeviceId)
           .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
@@ -3027,6 +3058,21 @@ Arguments:
               py::arg("ranks_to_exclude"),
               py::arg("shrink_flags") = 0,
               py::arg("opts_override") = nullptr,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "split",
+              &::c10d::Backend::split,
+              py::arg("store"),
+              py::arg("ranks"),
+              py::arg("opts"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "merge",
+              &::c10d::Backend::merge,
+              py::arg("store"),
+              py::arg("opts"),
+              py::arg("rank"),
+              py::arg("size"),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_reconfigure_handle",
@@ -3084,6 +3130,12 @@ Arguments:
           .def(
               "allreduce",
               &::c10d::Backend::allreduce,
+              py::arg("tensors"),
+              py::arg("opts") = ::c10d::AllreduceOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "allreduce_sparse",
+              &::c10d::Backend::allreduce_sparse,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
@@ -3197,6 +3249,23 @@ Arguments:
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "all_gather_single_coalesced",
+              &::c10d::Backend::all_gather_single_coalesced,
+              py::arg("output_lists"),
+              py::arg("input_list"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of all_gather_single_coalesced, kept for backward
+          // compatibility. Bound to all_gather_single_coalesced to avoid
+          // referencing the deprecated C++ method.
+          .def(
+              "allgather_into_tensor_coalesced",
+              &::c10d::Backend::all_gather_single_coalesced,
+              py::arg("output_lists"),
+              py::arg("input_list"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "gather",
               &::c10d::Backend::gather,
               py::arg("output_tensors"),
@@ -3294,6 +3363,23 @@ Arguments:
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "reduce_scatter_single_coalesced",
+              &::c10d::Backend::reduce_scatter_single_coalesced,
+              py::arg("outputTensors"),
+              py::arg("inputTensors"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of reduce_scatter_single_coalesced, kept for
+          // backward compatibility. Bound to reduce_scatter_single_coalesced to
+          // avoid referencing the deprecated C++ method.
+          .def(
+              "reduce_scatter_tensor_coalesced",
+              &::c10d::Backend::reduce_scatter_single_coalesced,
+              py::arg("outputTensors"),
+              py::arg("inputTensors"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
           // Deprecated alias of reduce_scatter_single, kept for backward
           // compatibility. Bound to reduce_scatter_single to avoid referencing
           // the deprecated C++ method.
@@ -3368,6 +3454,8 @@ Arguments:
           .def(
               "recv_anysource",
               &::c10d::Backend::recvAnysource,
+              py::arg("tensors"),
+              py::arg("tag"),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "barrier",
@@ -3406,6 +3494,41 @@ Arguments:
               &::c10d::Backend::getBackendName,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_register_on_completion_hook",
+              [](const c10::intrusive_ptr<::c10d::Backend>& self,
+                 py::object hook) {
+                self->registerOnCompletionHook(
+                    [hookWrapper =
+                         ::c10d::PythonOnCompletionHook(std::move(hook))](
+                        const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
+                      hookWrapper(workInfo);
+                    });
+              },
+              py::arg("hook"),
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_wait_for_pending_works",
+              &::c10d::Backend::waitForPendingWorks,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_has_hooks",
+              &::c10d::Backend::hasHooks,
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_enable_collectives_timing",
+              &::c10d::Backend::enableCollectivesTiming,
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_set_group_name",
+              &::c10d::Backend::setGroupUid,
+              py::call_guard<py::gil_scoped_acquire>())
+          .def_property_readonly("group_name", &::c10d::Backend::getGroupUid)
+          .def(
+              "_set_group_desc",
+              &::c10d::Backend::setGroupDesc,
+              py::call_guard<py::gil_scoped_acquire>())
+          .def_property_readonly("group_desc", &::c10d::Backend::getGroupDesc)
+          .def(
               "_start_coalescing",
               &::c10d::Backend::startCoalescing,
               py::call_guard<py::gil_scoped_release>())
@@ -3436,6 +3559,11 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "mem_allocator", &::c10d::Backend::getMemAllocator)
+          .def(
+              "get_error",
+              &::c10d::Backend::getError,
+              py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly("options", &::c10d::Backend::getBackendOptions)
           .def("suspend", &::c10d::Backend::suspend)
           .def("resume", &::c10d::Backend::resume)
           .def("memory_stats", &::c10d::Backend::getMemoryStats, R"(
