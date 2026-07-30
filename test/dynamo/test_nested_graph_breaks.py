@@ -791,8 +791,10 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # make sure inner3's code options are compatible with the instructions below
         global y
 
-        def y():
-            pass
+        # y must cause a graph break on STORE_ATTR. A torch-internal class
+        # (UDCV with __module__ starting with "torch.") declines mutation.
+        class y:
+            __module__ = "torch._dynamo._test_marker"
 
         def inner3(x):
             x.attr = 1000
