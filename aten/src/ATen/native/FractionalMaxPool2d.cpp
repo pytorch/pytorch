@@ -38,6 +38,10 @@ TORCH_META_FUNC(fractional_max_pool2d) (
   int64_t poolSizeH = pool_size[0];
   int64_t poolSizeW = pool_size[1];
 
+  TORCH_CHECK(poolSizeH > 0 && poolSizeW > 0,
+    "fractional_max_pool2d(): kernel size should be greater than zero, but got ",
+    poolSizeH, "x", poolSizeW);
+
   int64_t ndims = input.ndimension();
   TORCH_CHECK(ndims == 3 || ndims == 4,
               "fractional_max_pool2d(): Expected 3D or 4D tensor, but got: ", input.sizes());
