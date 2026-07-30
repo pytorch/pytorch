@@ -348,14 +348,13 @@ struct TORCH_API TupleElements {
   using iterator = IValue*;
   using const_iterator = const IValue*;
 
-  TupleElements() : inlineSize_(0), elementsVector_() {
-  }
+  TupleElements() : inlineSize_(0), elementsVector_() {}
 
   explicit TupleElements(std::vector<IValue> elements)
-  : inlineSize_(0), elementsVector_(std::move(elements)) {}
+    : inlineSize_(0), elementsVector_(std::move(elements)) {}
 
   explicit TupleElements(c10::ArrayRef<IValue> elements)
-  : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
+    : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
     if (inlineSize_) {
       std::uninitialized_copy_n(elements.begin(), inlineSize_, elementsInline_);
     } else {
@@ -364,18 +363,18 @@ struct TORCH_API TupleElements {
   }
 
   explicit TupleElements(IValue&& e1)
-  : inlineSize_(1) {
+    : inlineSize_(1) {
     std::construct_at(elementsInline_ + 0, std::move(e1));
   }
 
   explicit TupleElements(IValue&& e1, IValue&& e2)
-  : inlineSize_(2) {
+    : inlineSize_(2) {
     std::construct_at(elementsInline_ + 0, std::move(e1));
     std::construct_at(elementsInline_ + 1, std::move(e2));
   }
 
   explicit TupleElements(IValue&& e1, IValue&& e2, IValue&& e3)
-  : inlineSize_(3) {
+    : inlineSize_(3) {
     std::construct_at(elementsInline_ + 0, std::move(e1));
     std::construct_at(elementsInline_ + 1, std::move(e2));
     std::construct_at(elementsInline_ + 2, std::move(e3));
@@ -401,7 +400,7 @@ struct TORCH_API TupleElements {
   // it the inefficient way.
   // See also operator std::vector below.
   TupleElements(const TupleElements& rhs)
-  : inlineSize_(rhs.inlineSize_) {
+    : inlineSize_(rhs.inlineSize_) {
     if (rhs.inlineSize_) {
       std::uninitialized_copy_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
     } else {
@@ -435,7 +434,7 @@ struct TORCH_API TupleElements {
   }
 
   TupleElements(TupleElements&& rhs) noexcept
-  : inlineSize_(rhs.inlineSize_) {
+    : inlineSize_(rhs.inlineSize_) {
     if (rhs.inlineSize_) {
       std::uninitialized_move_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
     } else {
