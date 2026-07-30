@@ -132,6 +132,60 @@ def fold_in(key: torch.Tensor, data: int | torch.Tensor) -> torch.Tensor:
     return torch.ops.aten._philox_key_fold_in(key, data)
 
 
+class StatefulPRNG:
+    r"""Own a mutable root key for stateless random operations.
+
+    ``take_key()`` splits the current state into two independent keys, returns
+    the first, and stores the second as the next state. One call therefore
+    represents one state transition regardless of how much work consumes the
+    returned key.
+
+    Args:
+        seed (int): Seed used to create the initial key.
+        device (:class:`torch.device`, optional): Device on which to store the
+            key. Default: ``cpu``.
+
+    .. note::
+
+        Mutating state-owner methods are intended for single-threaded host
+        control flow outside ``torch.compile`` and accelerator graph capture.
+        The keys returned by :meth:`take_key` may be consumed by compiled or
+        captured stateless operations.
+    """
+
+    def __init__(self, seed: int, *, device: torch.device | None = None) -> None:
+        self._state = key(seed, device=device)
+
+    @property
+    def device(self) -> torch.device:
+        """Return the device storing this PRNG's state."""
+        return self._state.device
+
+    def take_key(self) -> torch.Tensor:
+        """Return one child key and advance to the other child."""
+        children = split(self._state, 2)
+        self._state = children[1].clone()
+        return children[0]
+
+    def get_state(self) -> torch.Tensor:
+        """Return a copy of the current key state."""
+        return self._state.clone()
+
+    def set_state(self, state: torch.Tensor) -> "StatefulPRNG":
+        """Restore state, copying it onto this PRNG's construction device."""
+        if not isinstance(state, torch.Tensor):
+            raise TypeError(
+                f"StatefulPRNG state must be a torch.Tensor, got {type(state).__name__}"
+            )
+        if state.dtype != torch.uint64 or state.shape != (2,):
+            raise ValueError("StatefulPRNG state must be a uint64 tensor of shape (2,)")
+        if state.layout != torch.strided:
+            raise ValueError("StatefulPRNG state must have strided layout")
+        new_state = state.to(device=self.device, copy=True)
+        self._state = new_state
+        return self
+
+
 def normal_(
     key: torch.Tensor,
     result: torch.Tensor,

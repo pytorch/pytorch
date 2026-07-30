@@ -403,6 +403,73 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         )
 
 
+class TestStatefulPRNG(TestCase):
+    def test_take_key_matches_manual_split(self, device):
+        rng = random.StatefulPRNG(42, device=torch.device(device))
+        expected_state = random.key(42, device=device)
+
+        for _ in range(3):
+            expected_key, expected_state = random.split(expected_state, 2)
+            self.assertEqual(rng.take_key(), expected_key)
+            self.assertEqual(rng.get_state(), expected_state)
+
+    def test_get_set_state_replays(self, device):
+        rng = random.StatefulPRNG(42, device=torch.device(device))
+        rng.take_key()
+        checkpoint = rng.get_state()
+        expected = tuple(rng.take_key() for _ in range(3))
+
+        rng.set_state(checkpoint)
+        actual = tuple(rng.take_key() for _ in range(3))
+        self.assertEqual(actual, expected)
+
+    def test_state_copies_do_not_alias(self, device):
+        rng = random.StatefulPRNG(42, device=torch.device(device))
+        expected_key, expected_state = random.split(rng.get_state(), 2)
+
+        returned_key = rng.take_key()
+        returned_key.zero_()
+        self.assertEqual(rng.get_state(), expected_state)
+
+        state_copy = rng.get_state()
+        state_copy.zero_()
+        self.assertEqual(rng.get_state(), expected_state)
+
+        restore_state = expected_state.clone()
+        rng.set_state(restore_state)
+        restore_state.zero_()
+        self.assertEqual(rng.get_state(), expected_state)
+        self.assertNotEqual(expected_key, returned_key)
+
+    def test_set_state_validates_before_mutation(self, device):
+        rng = random.StatefulPRNG(42, device=torch.device(device))
+        expected_state = rng.get_state()
+        bad_states = (
+            None,
+            torch.zeros((2,), dtype=torch.int64, device=device),
+            torch.zeros((3,), dtype=torch.uint64, device=device),
+        )
+
+        for bad_state in bad_states:
+            expected_error = TypeError if bad_state is None else ValueError
+            with self.assertRaises(expected_error):
+                rng.set_state(bad_state)
+            self.assertEqual(rng.get_state(), expected_state)
+
+    @onlyAccelerator
+    def test_state_is_device_portable(self, device):
+        cpu_rng = random.StatefulPRNG(42)
+        device_rng = random.StatefulPRNG(0, device=torch.device(device))
+
+        device_rng.set_state(cpu_rng.get_state())
+        self.assertEqual(device_rng.device, torch.device(device))
+        self.assertEqual(device_rng.take_key().cpu(), cpu_rng.take_key())
+
+        cpu_rng.set_state(device_rng.get_state())
+        self.assertEqual(cpu_rng.device, torch.device("cpu"))
+        self.assertEqual(cpu_rng.take_key(), device_rng.take_key().cpu())
+
+
 class TestStatelessRNGDistribution(TestCase):
     def _gen(self, gen_fn_name, *args, **kwargs):
         return getattr(random, gen_fn_name)(*args, **kwargs)
@@ -1178,6 +1245,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestStatelessRNGKeyFoldIn, globals(), only_for=("cpu", "cuda")
 )
+instantiate_device_type_tests(TestStatefulPRNG, globals(), only_for=("cpu", "cuda"))
 instantiate_device_type_tests(
     TestStatelessRNGDistribution, globals(), only_for=("cpu", "cuda")
 )
