@@ -80,7 +80,9 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
 
     def _solve_simple_expr(expr: sympy.Expr) -> sympy.Expr | None:
         if expr.has(ModularIndexing) or expr.has(FloorDiv):
-            raise AssertionError("expected no ModularIndexing or FloorDiv in expr")
+            # the div approximation could not eliminate all ModularIndexing /
+            # FloorDiv nodes; we cannot solve this expression
+            return None
         if len(expr.free_symbols) != 1:
             return None
 
@@ -132,12 +134,21 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
     ) -> sympy.Expr:
         return x / y
 
-    # For the purposes of tiling/coalesced access, approximate ModularIndexing and FloorDiv
-    # then check later
+    # For the purposes of tiling/coalesced access, approximate ModularIndexing
+    # and FloorDiv, then check later. sympy `replace` only peels one layer of
+    # nested self-referential functions per pass, so iterate to a fixpoint.
+    eq_1_expr_simplified = eq_1_expr
     # pyrefly: ignore [missing-attribute]
-    eq_1_expr_simplified = eq_1_expr.replace(ModularIndexing, indexing_div_rep).replace(
-        FloorDiv, indexing_div_rep
-    )
+    while eq_1_expr_simplified.has(ModularIndexing) or eq_1_expr_simplified.has(
+        FloorDiv
+    ):
+        # pyrefly: ignore [missing-attribute]
+        new_expr = eq_1_expr_simplified.replace(
+            ModularIndexing, indexing_div_rep
+        ).replace(FloorDiv, indexing_div_rep)
+        if new_expr == eq_1_expr_simplified:
+            break
+        eq_1_expr_simplified = new_expr
 
     out = _solve_simple_expr(eq_1_expr_simplified)
 

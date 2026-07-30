@@ -1674,6 +1674,19 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_tiling(expr)
             self.assertEqual(result, expected)
 
+    def test_solve_for_tiling_nested_modularindexing(self):
+        from torch._inductor import tiling_utils
+
+        n0 = sympy.Symbol("n0", integer=True, nonnegative=True)
+        inner = ModularIndexing(n0 - 252252, 1, 50)
+        for expr in (
+            inner,
+            ModularIndexing(inner, 1, 50),
+            ModularIndexing(ModularIndexing(inner, 1, 50), 1, 50),
+        ):
+            # must not raise, and nested forms solve identically to the flat form
+            self.assertEqual(tiling_utils.solve_for_tiling(expr), sympy.Integer(252253))
+
     @parametrize("dynamic", (False, True))
     def test_induced_fused_tiling(self, dynamic):
         def fn(nodes):
