@@ -491,6 +491,26 @@ def _clamp_max(x, y):
 
 
 @cute.jit
+def _clamp(x, lo, hi):
+    # Two-sided clamp. An OMITTED bound is filled by the row's optional_defaults with
+    # that dtype's extreme, so this one formula serves clamp, clamp_min and clamp_max.
+    # NaN in x propagates (aten), hence the x!=x tests rather than plain comparisons.
+    t = x if ((x > lo) or (x != x)) else lo
+    return t if ((t < hi) or (t != t)) else hi
+
+
+@cute.jit
+def _lerp(x, y, w):
+    # start + w*(end-start). aten uses this form for |w|<0.5 and the
+    # end-(end-start)*(1-w) form otherwise, to keep precision when w approaches 1.
+    half = w.__class__(0.5)
+    aw = w if w >= w.__class__(0.0) else -w
+    near = x + w * (y - x)
+    far = y - (y - x) * (w.__class__(1.0) - w)
+    return near if aw < half else far
+
+
+@cute.jit
 def _copysign(x, y):
     # |x| with y's sign bit. cute.math.copysign needs CTK>=13, so branch on y with a
     # signed-zero-correct test: 1/y < 0 catches y = -0.0 (1/-0.0 = -inf).
@@ -504,6 +524,14 @@ def _copysign(x, y):
 @cute.jit
 def _fmod(x, y):
     # C fmod: x - trunc(x/y)*y, result sign follows x.
+    #
+    # KNOWN LIMIT: this loses accuracy once |x/y| approaches the mantissa width,
+    # because trunc(x/y)*y rounds away the low bits that the subtraction needs --
+    # fmod(-1e20, 501) gives -6400 where aten (libm, exact multi-word reduction)
+    # gives -388. Routing through _remainder's floor-remainder does NOT help: it
+    # trades these for a larger number of small fp32 diffs (measured 34 -> 81
+    # divergent OpInfo samples). A real fix needs exact reduction, not a rearranged
+    # formula.
     q = x / y
     z = q.__class__(0.0)
     tq = cute.math.floor(q) if q >= z else -cute.math.floor(-q)
@@ -512,8 +540,14 @@ def _fmod(x, y):
 
 @cute.jit
 def _remainder(x, y):
-    # Python %: x - floor(x/y)*y, result sign follows y.
-    return x - cute.math.floor(x / y) * y
+    # Python %, result sign follows y. NOT x - floor(x/y)*y: that loses the identity
+    # when x/y rounds across an integer (see _floor_divide). aten's remainder_cuda is
+    # fmod plus a single sign fixup -- fmod is exact, so this is too.
+    z = x.__class__(0.0)
+    q = x / y
+    tq = cute.math.floor(q) if q >= z else -cute.math.floor(-q)
+    mod = x - tq * y  # fmod(x, y): sign follows x
+    return mod + y if (mod != z) and ((y < z) != (mod < z)) else mod
 
 
 @cute.jit
@@ -536,13 +570,51 @@ def _remainder_int(x, y):
 
 @cute.jit
 def _floor_divide(x, y):
-    return cute.math.floor(x / y)
+    # NOT floor(x/y): aten's c10::div_floor_floating derives the quotient from the
+    # REMAINDER so it stays exact when x/y rounds across an integer. floor(1.0/0.001)
+    # gives 1000 because the division rounds UP to exactly 1000.0, but the true
+    # quotient is 999.99...; aten returns 999. Mirror aten's algorithm:
+    #   mod = fmod(x, y); div = (x - mod) / y   (exact -- x-mod is a multiple of y)
+    #   div -= 1 when mod is nonzero and its sign differs from y (floor, not trunc)
+    #   then snap div to the nearest integer when it is within 0.5 (rounding guard)
+    # b == 0 keeps the plain IEEE result (inf/nan), as aten does.
+    z = x.__class__(0.0)
+    q = x / y
+    tq = cute.math.floor(q) if q >= z else -cute.math.floor(-q)
+    mod = x - tq * y  # fmod(x, y): sign follows x
+    div = (x - mod) / y
+    div = div - x.__class__(1.0) if (mod != z) and ((y < z) != (mod < z)) else div
+    fd = cute.math.floor(div)
+    fd = fd + x.__class__(1.0) if (div - fd) > x.__class__(0.5) else fd
+    # div == 0 -> signed zero carrying q's sign (cute.math.copysign needs CTK>=13, so
+    # negate manually; 1/q < 0 catches q == -0.0).
+    one = x.__class__(1.0)
+    q_neg = (q < z) or ((q == z) and (one / q < z))
+    snapped = fd if div != z else (-z if q_neg else z)
+    return q if y == z else snapped
 
 
 @cute.jit
 def _floor_divide_int(x, y):
     # The DSL's Int `//` is already floor division.
     return x // y
+
+
+@cute.jit
+def _div_trunc(x, y):
+    # div(rounding_mode="trunc"): round the quotient TOWARD ZERO, unlike _floor_divide.
+    q = x / y
+    z = q.__class__(0.0)
+    return cute.math.floor(q) if q >= z else -cute.math.floor(-q)
+
+
+@cute.jit
+def _div_trunc_int(x, y):
+    # Integer trunc division. `//` FLOORS, which differs from truncation exactly when
+    # the quotient is negative and the division is inexact -- add 1 back in that case.
+    z = x.__class__(0)
+    q = x // y
+    return q + x.__class__(1) if (q < z) and (q * y != x) else q
 
 
 # ---- logical (ALWAYS_BOOL over any input dtype) ----
@@ -676,6 +748,129 @@ def _to_bool(x):
     # True; a trunc-style convert would give False). Computed in the SOURCE dtype;
     # returns 0/1 which the store casts into the target's int8 (bool-byte) view.
     return x.__class__(0) if x == x.__class__(0) else x.__class__(1)
+
+
+# ---- trivial additions (verified against aten; see table.py rows) ----
+
+
+@cute.jit
+def _angle(x):
+    # REAL-input angle: nan -> nan, negative -> pi, else 0 (aten's angle_wrapper).
+    # Complex input declines (no DSL complex).
+    z = x.__class__(0.0)
+    pi = x.__class__(3.141592653589793)
+    return x if x != x else (pi if x < z else z)
+
+
+@cute.jit
+def _isposinf(x):
+    # x == +inf, without needing an inf literal: inf is the only value where x-x is
+    # nan while x itself is not nan (the covered _isinf test), and is positive.
+    z = x.__class__(0.0)
+    return ((x - x) != (x - x)) and (x == x) and (x > z)
+
+
+@cute.jit
+def _isneginf(x):
+    z = x.__class__(0.0)
+    return ((x - x) != (x - x)) and (x == x) and (x < z)
+
+
+@cute.jit
+def _sinc(x):
+    # sin(pi x)/(pi x), 1 at x==0. aten yields NaN at +-inf (verified), which the
+    # sin(inf)/inf form produces naturally -- no special case needed.
+    z = x.__class__(0.0)
+    one = x.__class__(1.0)
+    px = x * x.__class__(3.141592653589793)
+    return one if x == z else cute.math.sin(px) / px
+
+
+@cute.jit
+def _heaviside(x, y):
+    # 0 for x<0, y at x==0, 1 for x>0. Integer-capable (no float-only primitive).
+    z = x.__class__(0)
+    return y if x == z else (x.__class__(1) if x > z else z)
+
+
+@cute.jit
+def _logaddexp2(x, y):
+    # log2(2^x + 2^y), overflow-safe: m + log2(1 + 2^-|x-y|). Base-2 twin of the
+    # covered _logaddexp.
+    d = x - y if x > y else y - x
+    m = x if x > y else y  # noqa: FURB136 -- builtin max() does not lower in the DSL
+    return m + cute.math.log2(x.__class__(1.0) + cute.math.exp2(-d))
+
+
+@cute.jit
+def _entr(x):
+    # -x*log(x) for x>0, 0 at x==0, -inf for x<0, nan for nan (aten's calc_entr).
+    # -inf is produced arithmetically as log(0) since there is no inf literal.
+    z = x.__class__(0.0)
+    neg_inf = cute.math.log(z)
+    return (
+        x
+        if x != x
+        else ((-x * cute.math.log(x)) if x > z else (z if x == z else neg_inf))
+    )
+
+
+@cute.jit
+def _xlog1py(x, y):
+    # x*log1p(y), with x==0 short-circuiting to 0 unless y is nan (as for xlogy).
+    z = x.__class__(0.0)
+    return z if (x == z) and (y == y) else x * cute.math.log(x.__class__(1.0) + y)
+
+
+@cute.jit
+def _hardswish(x):
+    # x * clamp(x+3, 0, 6) / 6
+    z = x.__class__(0.0)
+    six = x.__class__(6.0)
+    t = x + x.__class__(3.0)
+    lo = t if t > z else z  # noqa: FURB136 -- no DSL builtin max/min
+    hi = lo if lo < six else six  # noqa: FURB136
+    return x * hi / six
+
+
+@cute.jit
+def _leaky_relu(x, negative_slope):
+    z = x.__class__(0.0)
+    return x if x > z else x * negative_slope
+
+
+@cute.jit
+def _addcdiv(x, t1, t2, value):
+    # nin=3: out = self + value * (t1 / t2). INT_TO_FLOAT twin of addcmul.
+    return x + value * (t1 / t2)
+
+
+@cute.jit
+def _gelu_erf(x):
+    # Exact gelu: x * 0.5 * (1 + erf(x / sqrt(2))).
+    half = x.__class__(0.5)
+    e = cute.math.erf(x * x.__class__(0.7071067811865476))
+    return x * half * (x.__class__(1.0) + e)
+
+
+@cute.jit
+def _gelu_tanh(x):
+    # approximate="tanh": 0.5x(1 + tanh(sqrt(2/pi)(x + 0.044715 x^3))).
+    x3 = x * x * x
+    inner = x.__class__(0.7978845608028654) * (x + x.__class__(0.044715) * x3)
+    return x * x.__class__(0.5) * (x.__class__(1.0) + cute.math.tanh(inner))
+
+
+@cute.jit
+def _nan_to_num(x, nan, posinf, neginf):
+    # nan -> `nan`; +inf -> `posinf`; -inf -> `neginf`; else unchanged. An omitted
+    # posinf/neginf is filled by optional_defaults with the compute dtype's finite
+    # max/lowest, matching aten. inf is detected without an inf literal: x-x is nan
+    # only for inf (and for nan, excluded by the x==x test).
+    z = x.__class__(0.0)
+    is_inf = ((x - x) != (x - x)) and (x == x)
+    sat = posinf if x > z else neginf
+    return nan if x != x else (sat if is_inf else x)
 
 
 # ---- lazy fn resolver (table.py rows reference these by name) ----

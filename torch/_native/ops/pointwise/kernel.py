@@ -512,7 +512,25 @@ def _vec_ok(inputs, shape, out_dtypes, compute_torch, V):
     numel = math.prod(shape)
     if numel == 0 or numel % V != 0:
         return False
+    if not all(_is_16b_aligned(t) for t in inputs):
+        return False
     return all(tuple(t.shape) == tuple(shape) and t.is_contiguous() for t in inputs)
+
+
+def _is_16b_aligned(t) -> bool:
+    # The vec/rowvec wraps pass assumed_align=16 so the DSL may emit 128-bit loads;
+    # from_dlpack VALIDATES that promise and raises "Tensor data pointer is not aligned
+    # to 16 bytes" otherwise. A fresh torch allocation is >=256 B aligned, but a VIEW
+    # into one is not: base[1:5] on int32 starts 4 B in. That raise is a hard crash on
+    # an ordinary call (it hit mul/add/maximum on a sliced narrow-dtype operand), so
+    # gate the fast path on the real pointer and let unaligned operands take the
+    # strided path instead.
+    #
+    # const_data_ptr, NOT data_ptr: this runs from a cond on every input, and data_ptr()
+    # MATERIALIZES a copy-on-write tensor (breaking the COW-preservation contract the
+    # read-only export exists to honour). The const accessor reads the same address
+    # without taking write ownership.
+    return t.const_data_ptr() % 16 == 0
 
 
 def _row_gap_view(t):
@@ -553,6 +571,8 @@ def _rowvec_ok(inputs, shape, out_dtypes, compute_torch, V):
         return None
     if any(tuple(t.shape) != tuple(shape) for t in inputs):
         return None  # no broadcast on this path (operands must share the exact shape)
+    if not all(_is_16b_aligned(t) for t in inputs):
+        return None  # rowvec also wraps at assumed_align=16 (see _is_16b_aligned)
     views = [_row_gap_view(t) for t in inputs]
     if any(v is None for v in views) or len({v for v in views}) != 1:
         return None  # all inputs must share ONE row-gapped geometry
@@ -694,10 +714,19 @@ def _build_plan(
         path = "strided"
         lays = tuple((tuple(t.shape), t.stride()) for t in inputs)
         kkey = common + ("strided", shape, lays, block, ept)
+    # Compile against PLACEHOLDER scalar values, not the live ones. The scalars are
+    # genuine runtime arguments (they arrive as %arg f32/i32 in the IR), but the DSL
+    # mangles every non-IR argument's VALUE into the generated MLIR symbol name, so
+    # compiling with the live value both (a) makes the symbol vary with data that the
+    # kernel does not bake and (b) emits an UNPARSABLE symbol once repr() switches to
+    # exponent form: repr(1e16) == "1e+16", and the mangler's character filter does not
+    # strip "+", yielding `..._Float321e+16_...` -> "expected '('". Seeding with a
+    # canonical value keeps one symbol per kkey; the real values are passed at launch.
+    seed_consts = [c.__class__(1) for c in consts]
     compiled = cached_plan(
         _KERNELS,
         kkey,
-        lambda: _L.compile(op, cin, cout, list(consts), _L.stream()),
+        lambda: _L.compile(op, cin, cout, seed_consts, _L.stream()),
         op=op_name,
     )
     return _Plan(path, shape, V, tuple(out_dtypes), compiled, rowgap)
