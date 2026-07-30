@@ -112,13 +112,6 @@ class TestScheduler(TestCase):
         node.is_reduction.return_value = False
         return node
 
-    class _FakeBuffer:
-        def __init__(self, name):
-            self.name = name
-
-        def get_name(self):
-            return self.name
-
     class _FakeSchedulerBuffer:
         def __init__(self, defining_op_name):
             self._defining_op_name = defining_op_name
@@ -129,8 +122,16 @@ class TestScheduler(TestCase):
     class _FakeScheduler:
         def __init__(self):
             self.name_to_buf = {}
+            self.available_buffer_names = OrderedSet()
 
     class _FakeNode:
+        class _FakeOutputBuffer:
+            def __init__(self, name):
+                self.name = name
+
+            def get_name(self):
+                return self.name
+
         def __init__(
             self,
             scheduler,
@@ -147,7 +148,7 @@ class TestScheduler(TestCase):
             self.operation_names = tuple(operation_names or (name,))
             self.node = None
             self.ancestors = OrderedSet(ancestors)
-            self.outputs = [TestScheduler._FakeBuffer(name) for name in outputs]
+            self.outputs = [self._FakeOutputBuffer(name) for name in outputs]
             self.outputs_by_name = {buf.get_name(): buf for buf in self.outputs}
             self.read_writes = ReadWrites(
                 OrderedSet(
@@ -370,6 +371,7 @@ class TestScheduler(TestCase):
             use_custom_partition_algo=False,
             prev_node_1=foreach_node,
             prev_node_2=fused_subnode,
+            dry_run=True,
         )
 
         self.assertEqual(foreach_node.ancestors, original_ancestors)
@@ -378,6 +380,38 @@ class TestScheduler(TestCase):
         self.assertIn("other_ancestor", candidate.ancestors)
         self.assertIs(candidate.name_to_node["other_op"], fused_subnode)
         self.assertIs(candidate.read_to_node["other_read"], fused_subnode)
+
+    def test_foreach_non_dry_run_preserves_lookup_state_behavior(self):
+        scheduler = self._FakeScheduler()
+        base_node = self._FakeNode(
+            scheduler,
+            "base_op",
+            reads=("base_read",),
+            outputs=("base_out",),
+            ancestors=("base_ancestor",),
+        )
+        foreach_node = ForeachKernelSchedulerNode(
+            scheduler, [base_node], use_custom_partition_algo=False
+        )
+        fused_subnode = self._FakeNode(
+            scheduler,
+            "fused_op",
+            reads=("base_read", "other_read"),
+            outputs=("base_out", "other_out"),
+            ancestors=("base_ancestor", "other_ancestor"),
+            operation_names=("base_op", "other_op"),
+        )
+        candidate = ForeachKernelSchedulerNode(
+            scheduler,
+            [fused_subnode],
+            use_custom_partition_algo=False,
+            prev_node_1=foreach_node,
+            prev_node_2=fused_subnode,
+        )
+
+        self.assertIn("other_ancestor", foreach_node.ancestors)
+        self.assertIs(foreach_node.name_to_node["other_op"], fused_subnode)
+        self.assertEqual(candidate.read_to_node, {})
 
     def test_foreach_ignores_stale_subnode_lookup_entries(self):
         scheduler = self._FakeScheduler()

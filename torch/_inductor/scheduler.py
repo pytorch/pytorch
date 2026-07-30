@@ -3493,6 +3493,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             prev_node_1=prev_node_1,
             prev_node_2=prev_node_2,
             enable_autotune=enable_autotune,
+            dry_run=dry_run,
         )
 
     def __init__(
@@ -3504,6 +3505,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         prev_node_2: BaseSchedulerNode | None = None,
         enable_autotune: bool = False,
         per_subkernel_blocks: bool = False,
+        dry_run: bool = False,
     ) -> None:
         self.read_to_node = {}
         self.name_to_node = {}
@@ -3562,14 +3564,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     )
                 foreach_node, other_node = prev_node_2, prev_node_1
 
-            self.ancestors = OrderedSet(foreach_node.ancestors)
+            if dry_run:
+                self.ancestors = OrderedSet(foreach_node.ancestors)
+                self.read_to_node = dict(foreach_node.read_to_node)
+                for read in other_node.read_writes.reads:
+                    self.read_to_node[read.name] = other_node
+                self.name_to_node = dict(foreach_node.name_to_node)
+            else:
+                self.ancestors = foreach_node.ancestors
+                self.name_to_node = foreach_node.name_to_node
+
             self.ancestors.update(other_node.ancestors)
-
-            self.read_to_node = dict(foreach_node.read_to_node)
-            for read in other_node.read_writes.reads:
-                self.read_to_node[read.name] = other_node
-
-            self.name_to_node = dict(foreach_node.name_to_node)
             for name in other_node.get_operation_names():
                 self.name_to_node[name] = other_node
 
@@ -7497,7 +7502,7 @@ class Scheduler:
         candidate_last_use_steps: dict[int, int | None] = {}
         affected_buffers = OrderedSet()
         for node, step in new_step.items():
-            if node_to_idx.get(node) != step:
+            if node_to_idx.get(node) != step and hasattr(node, "mpi_node"):
                 affected_buffers.update(node.mpi_node.pred_buffers)
         for buf in affected_buffers:
             last_step = None
