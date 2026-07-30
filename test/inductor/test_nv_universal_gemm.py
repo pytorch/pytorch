@@ -573,13 +573,16 @@ class TestNVUniversalGemm(TestCase):
         )
         bias = torch.randn((1, 1), device="cuda", dtype=torch.bfloat16)
         out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
-        expected = torch._scaled_mm(
-            a,
-            b,
-            scale_a=scale_a,
-            scale_b=scale_b,
-            out_dtype=torch.bfloat16,
-        ) + bias
+        expected = (
+            torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            + bias
+        )
         epilogue = EpilogueArguments(
             epilogue_fn="def epilogue(accum, bias):\n    D = accum + bias\n    return D\n",
             bias=bias,
@@ -1461,17 +1464,17 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
         )
-        b = torch.randint(
-            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
-        ).view(torch.float4_e2m1fn_x2)
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
         b = b.T
         padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(
-            _round_up(m, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
-        scale_b = torch.rand(
-            _round_up(n, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
