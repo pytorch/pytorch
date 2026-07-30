@@ -141,7 +141,7 @@ del simple_op
 
 # some binary ops which we can stamp out
 mul_impl = register_binary_nonlinear(aten.mul)
-mul__impl = register_binary_nonlinear(aten.mul_)
+mul__impl = register_binary_linear_inplace(aten.mul_, mul_impl)
 mm_impl = register_binary_nonlinear(aten.mm)
 dot_impl = register_binary_nonlinear(aten.dot)
 bmm_impl = register_binary_nonlinear(aten.bmm)
@@ -443,7 +443,7 @@ def eq_impl(
 def ne_impl(
     self: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
 ) -> torch.Tensor:
-    a_r, a_i = split_complex_tensor(self)
+    a_r, a_i = split_complex_arg(self)
     b_r, b_i = split_complex_arg(rhs)
     return torch.ne(a_r, b_r, *args, **kwargs) | torch.ne(a_i, b_i, *args, **kwargs)
 

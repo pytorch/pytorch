@@ -43,12 +43,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   // See Note [Device Management] for more details.
   auto platform_list = sycl::platform::get_platforms();
   auto is_igpu = [](const sycl::device& device) {
-#if SYCL_COMPILER_VERSION < 20260000
-    // Generally, iGPUs share a unified memory subsystem with the host.
-    return device.get_info<sycl::info::device::host_unified_memory>();
-#else
     return device.has(sycl::aspect::ext_oneapi_is_integrated_gpu);
-#endif
   };
 
   // Check if a platform contains at least one GPU (either iGPU or dGPU).
@@ -135,7 +130,7 @@ inline void initGlobalDevicePoolState() {
           ") is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.\n",
           "For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.\n",
           "Refer to the hardware prerequisites for more information: ",
-          "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite");
+          "https://docs.pytorch.org/docs/main/notes/get_start_xpu.html#hardware-prerequisite");
     }
   }
 
@@ -189,9 +184,7 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
 
-#if SYCL_COMPILER_VERSION >= 20260000
   ASSIGN_DEVICE_ASPECT(is_integrated_gpu)
-#endif
 
   AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_HAS_ASPECT);
 
@@ -199,6 +192,22 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
 
+#if SYCL_COMPILER_VERSION >= 20260100
+  // TODO: Remove once driver supports querying Xe topology properties.
+#define OVERRIDE_DEVICE_PROP_XE(name, property, default) \
+  device_prop->name = device_prop->name == 0 ? default : device_prop->name;
+
+  namespace syclex = sycl::ext::oneapi::experimental;
+  if (device_prop->architecture >= syclex::architecture::intel_gpu_acm_g10 ||
+      device_prop->architecture <= syclex::architecture::intel_gpu_pvc_vg) {
+    AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(OVERRIDE_DEVICE_PROP_XE)
+    device_prop->xe_cores_per_cluster =
+        (device_prop->gpu_eu_count / device_prop->gpu_eu_count_per_subslice) /
+        (device_prop->xe_stack_count * device_prop->xe_regions_per_stack *
+         device_prop->xe_clusters_per_region);
+    device_prop->eus_per_xe_core = device_prop->gpu_eu_count_per_subslice;
+  }
+#endif
   return;
 }
 

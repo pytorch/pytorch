@@ -618,7 +618,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
                 \end{cases}\\
         \end{array}
 
-    where :math:`x_\text{min/max}` is the running average min/max, :math:`X` is
+    where :math:`x_\text{min/max}` is the running average min/max, :math:`X`
     is the incoming tensor, and :math:`c` is the ``averaging_constant``.
 
     The scale and zero point are then computed as in
@@ -1061,7 +1061,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor
     ) -> torch.Tensor:
         r"""
-        Compute the norm of the values uniformaly distributed between
+        Compute the norm of the values uniformly distributed between
         delta_begin and delta_end.
         Currently only L2 norm is supported.
 

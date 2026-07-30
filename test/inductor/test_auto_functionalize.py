@@ -186,7 +186,7 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = foo_default = None
+        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg2_1, arg3_1], arg4_1, 2, arg0_1);  arg1_1 = arg2_1 = arg3_1 = arg4_1 = arg0_1 = foo_default = None
         return ()""",
                     ignore_comments=True,
                 )
@@ -247,7 +247,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg2_1, arg3_1], arg4_1, 2, arg0_1);  arg1_1 = arg2_1 = arg3_1 = arg4_1 = arg0_1 = None
         getitem_4: "f32[3][1]cpu" = foo_default[0]
         getitem_5: "f32[3][1]cpu" = foo_default[1];  foo_default = None
         return (getitem_4, getitem_5)""",
@@ -335,8 +335,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = \
-arg3_1 = arg0_1 = arg1_1 = foo_default = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg1_1, arg2_1], arg3_1, 2, arg0_1);  arg1_1 = arg2_1 = arg3_1 = arg0_1 = foo_default = None
         return ()""",
                     ignore_comments=True,
                 )
@@ -416,10 +415,10 @@ arg3_1 = arg0_1 = arg1_1 = foo_default = None
                     self.assertExpectedInline(
                         post_grad_graphs,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu", arg2_1: "f32[s77][1]cpu", arg3_1: "f32[s77][1]cpu", arg4_1: "f32[s77][1]cpu", arg5_1: "f32[s77][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg4_1, arg5_1], arg2_1, 2, arg3_1);  arg4_1 = arg5_1 = arg3_1 = foo_default = None
+def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "f32[s77][1]cpu", arg2_1: "Sym(s77)", arg3_1: "f32[s77][1]cpu", arg4_1: "f32[s77][1]cpu", arg5_1: "f32[s77][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg3_1, arg4_1], arg5_1, 2, arg0_1);  arg3_1 = arg4_1 = arg0_1 = foo_default = None
         copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
-        copy__1: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg2_1, arg2_1);  arg2_1 = copy__1 = None
+        copy__1: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg5_1, arg5_1);  arg5_1 = copy__1 = None
         return ()""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
@@ -429,9 +428,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu", arg2_1: "f32[s77
                         post_grad_graphs,
                         """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg3_1 = arg4_1 = arg2_1 = foo_default = None
-        copy_: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
-        copy__1: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy__1 = None
+        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg2_1, arg3_1], arg4_1, 2, arg0_1);  arg2_1 = arg3_1 = arg0_1 = foo_default = None
+        copy_: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
+        copy__1: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg4_1, arg4_1);  arg4_1 = copy__1 = None
         return ()""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
@@ -608,11 +607,11 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg3_1 = arg4_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg2_1, arg3_1], arg4_1, 2, arg0_1);  arg2_1 = arg3_1 = arg0_1 = None
         getitem_4: "f32[3][1]cpu" = foo_default[0]
         getitem_5: "f32[3][1]cpu" = foo_default[1];  foo_default = None
-        copy_: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
-        copy__1: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy__1 = None
+        copy_: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
+        copy__1: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg4_1, arg4_1);  arg4_1 = copy__1 = None
         return (getitem_4, getitem_5)""",
                     ignore_comments=True,
                     ignore_empty_lines=True,
@@ -666,12 +665,12 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     self.assertExpectedInline(
                         graph_aot,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu", arg2_1: "f32[s77][1]cpu"):
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _y_base_index = 1, _all_bases = [arg1_1, arg2_1])
+def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)", arg2_1: "f32[s77][1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _y_base_index = 1, _all_bases = [arg0_1, arg2_1])
         getitem_1: "f32[s77][1]cpu" = auto_functionalized_v2[1]
         getitem_2: "f32[s77][1]cpu" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
         add: "f32[s77][1]cpu" = torch.ops.aten.add.Tensor(getitem_1, getitem_2)
-        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         copy__1: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg2_1, getitem_2);  arg2_1 = getitem_2 = copy__1 = None
         return (add,)""",
                         ignore_comments=True,
@@ -698,10 +697,10 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
                     self.assertExpectedInline(
                         graph_inductor,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu", arg2_1: "f32[s77][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg1_1, arg2_1);  foo_default = None
-        add: "f32[s77][1]cpu" = torch.ops.aten.add.Tensor(arg1_1, arg2_1)
-        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
+def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)", arg2_1: "f32[s77][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg0_1, arg2_1);  foo_default = None
+        add: "f32[s77][1]cpu" = torch.ops.aten.add.Tensor(arg0_1, arg2_1)
+        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
         copy__1: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg2_1, arg2_1);  arg2_1 = copy__1 = None
         return (add,)""",
                         ignore_comments=True,
@@ -766,10 +765,10 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
                     self.assertExpectedInline(
                         graph_aot,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu"):
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_size = (), _x_stride = (), _x_storage_offset = 0, _y_base_index = 0, _y_size = (), _y_stride = (), _y_storage_offset = 1, _all_bases = [arg1_1])
+def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_size = (), _x_stride = (), _x_storage_offset = 0, _y_base_index = 0, _y_size = (), _y_stride = (), _y_storage_offset = 1, _all_bases = [arg0_1])
         getitem_1: "f32[s77][1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         return ()""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
@@ -794,11 +793,11 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     self.assertExpectedInline(
                         graph_inductor,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu"):
-        as_strided_default: "f32[][]cpu" = torch.ops.aten.as_strided.default(arg1_1, [], [], 0)
-        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(arg1_1, [], [], 1)
+def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
+        as_strided_default: "f32[][]cpu" = torch.ops.aten.as_strided.default(arg0_1, [], [], 0)
+        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(arg0_1, [], [], 1)
         foo_default = torch.ops.mylib.foo.default(as_strided_default, as_strided_default_1);  as_strided_default = as_strided_default_1 = foo_default = None
-        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
+        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
         return ()""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
@@ -992,13 +991,13 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
                     graph_aot,
                     """\
 def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2][1]cpu"):
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_size = (), _x_stride = (), _x_storage_offset = 0, _y_length = 2, _y_0_base_index = 1, _y_0_size = (), _y_0_stride = (), _y_0_storage_offset = 0, _y_1_base_index = 2, _all_bases = [arg0_1, arg1_1, arg2_1])
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_size = (), _x_stride = (), _x_storage_offset = 0, _y_length = 2, _y_0_base_index = 1, _y_0_size = (), _y_0_stride = (), _y_0_storage_offset = 0, _y_1_base_index = 2, _all_bases = [arg0_1, arg2_1, arg1_1])
         getitem_1: "f32[2][1]cpu" = auto_functionalized_v2[1]
         getitem_2: "f32[2][1]cpu" = auto_functionalized_v2[2]
         getitem_3: "f32[2][1]cpu" = auto_functionalized_v2[3];  auto_functionalized_v2 = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
-        copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_2);  arg1_1 = getitem_2 = copy__1 = None
-        copy__2: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg2_1, getitem_3);  arg2_1 = getitem_3 = copy__2 = None
+        copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = getitem_3 = copy__1 = None
+        copy__2: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg2_1, getitem_2);  arg2_1 = getitem_2 = copy__2 = None
         return ()""",
                     ignore_comments=True,
                     ignore_empty_lines=True,
@@ -1012,8 +1011,8 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2
                     """\
 def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2][1]cpu"):
         as_strided_default: "f32[][]cpu" = torch.ops.aten.as_strided.default(arg0_1, [], [], 0)
-        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(arg1_1, [], [], 0)
-        foo_default = torch.ops.mylib.foo.default(as_strided_default, [as_strided_default_1, arg2_1]);  as_strided_default = as_strided_default_1 = foo_default = None
+        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(arg2_1, [], [], 0)
+        foo_default = torch.ops.mylib.foo.default(as_strided_default, [as_strided_default_1, arg1_1]);  as_strided_default = as_strided_default_1 = foo_default = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
         copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy__1 = None
         copy__2: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg2_1, arg2_1);  arg2_1 = copy__2 = None
@@ -1064,8 +1063,8 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = arg3_1 = arg1_1 = foo_default = None
-        copy_: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg1_1, arg2_1], arg3_1, 2, arg0_1);  arg1_1 = arg2_1 = arg0_1 = foo_default = None
+        copy_: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg3_1, arg3_1);  arg3_1 = copy_ = None
         return ()""",
                     ignore_comments=True,
                     ignore_empty_lines=True,
@@ -1434,12 +1433,12 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                     self.assertExpectedInline(
                         graph_aot,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, s77][s77, 1]cpu"):
-        floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
+def forward(self, arg0_1: "f32[s77, s77][s77, 1]cpu", arg1_1: "Sym(s77)"):
+        floordiv: "Sym(0)" = 0 // arg1_1;  arg1_1 = None
         add_6: "Sym(2)" = floordiv + 2
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg1_1]);  floordiv = add_6 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg0_1]);  floordiv = add_6 = None
         getitem_1: "f32[s77, s77][s77, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-        copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
+        copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
         slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
         slice_4: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
         return (slice_3, slice_4)""",
@@ -1467,15 +1466,15 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                     self.assertExpectedInline(
                         graph_inductor,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, s77][s77, 1]cpu"):
-        floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
+def forward(self, arg0_1: "f32[s77, s77][s77, 1]cpu", arg1_1: "Sym(s77)"):
+        floordiv: "Sym(0)" = 0 // arg1_1;  arg1_1 = None
         add_6: "Sym(2)" = floordiv + 2;  floordiv = add_6 = None
-        slice_tensor: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
-        slice_tensor_1: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        slice_tensor: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+        slice_tensor_1: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 3, 4)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
-        copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
-        slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
-        slice_4: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4);  arg1_1 = None
+        copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
+        slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+        slice_4: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 3, 4);  arg0_1 = None
         return (slice_3, slice_4)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
@@ -1615,17 +1614,17 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                     self.assertExpectedInline(
                         graph_aot,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu"):
-        clone: "f32[s77][1]cpu" = torch.ops.aten.clone.default(arg1_1)
+def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
+        clone: "f32[s77][1]cpu" = torch.ops.aten.clone.default(arg0_1)
         nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(clone);  clone = None
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0;  sym_size_int_1 = None
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _to_copy: "f32[u0, 1][1, u0]cpu" = torch.ops.aten._to_copy.default(nonzero, dtype = torch.float32);  nonzero = None
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_alias = True, _y_base_index = 1, _y_alias = True, _all_bases = [arg1_1, _to_copy]);  _to_copy = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_alias = True, _y_base_index = 1, _y_alias = True, _all_bases = [arg0_1, _to_copy]);  _to_copy = None
         getitem_1: "f32[s77][1]cpu" = auto_functionalized_v2[1]
         getitem_2: "f32[u0, 1][1, u0]cpu" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
-        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
+        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
         alias_1: "f32[s77][1]cpu" = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
         slice_2: "f32[u0, 1][1, u0]cpu" = torch.ops.aten.slice.Tensor(getitem_2);  getitem_2 = None
         return (alias_1, slice_2)""",
@@ -1662,18 +1661,18 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     self.assertExpectedInline(
                         graph_inductor,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu"):
-        nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(arg1_1)
+def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
+        nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(arg0_1)
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0;  sym_size_int_1 = None
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
         convert_element_type: "f32[u0, 1][1, u0]cpu" = torch.ops.prims.convert_element_type.default(nonzero, torch.float32);  nonzero = None
-        alias_default: "f32[s77][1]cpu" = torch.ops.aten.alias.default(arg1_1)
+        alias_default: "f32[s77][1]cpu" = torch.ops.aten.alias.default(arg0_1)
         alias_default_1: "f32[u0, 1][1, u0]cpu" = torch.ops.aten.alias.default(convert_element_type)
         foo_default = torch.ops.mylib.foo.default(alias_default, alias_default_1);  alias_default = alias_default_1 = foo_default = None
-        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
+        copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
         slice_2: "f32[u0, 1][1, u0]cpu" = torch.ops.aten.slice.Tensor(convert_element_type);  convert_element_type = None
-        return (arg1_1, slice_2)""",
+        return (arg0_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -2102,6 +2101,58 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 self.assertEqual(
                     counters["inductor"]["fix_auto_functionalized_dtype_views"], 2
                 )
+
+    def test_reinplace_mutated_empty_no_self_edge(self):
+        # Regression test for a Scheduler.compute_ancestors KeyError.
+        #
+        # An auto_functionalized custom op that mutates freshly allocated (empty)
+        # output buffers whose results are then reshaped forces the reinplace pass
+        # to fold a realization back onto the op's own buffer. That produced a
+        # scheduler node with a non-weak MemoryDep on the buffer it also writes --
+        # a self-edge -- and compute_ancestors looked up name_to_ancestors[op]
+        # before it was populated, raising KeyError: 'opN'.
+        #
+        # Mirrors flash_attn._flash_attn_backward writing dq/dk/dv into empties.
+        D = 512
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::attn_bwd",
+                "(Tensor dout, Tensor(a!) dq, Tensor(b!) dk, Tensor(c!) dv) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::attn_bwd", "cpu", lib=lib)
+            def attn_bwd(dout, dq, dk, dv):
+                src = dout.reshape(dq.shape)
+                dq.copy_(src)
+                dk.copy_(src)
+                dv.copy_(src)
+                return torch.zeros_like(dq)  # workspace, discarded by caller
+
+            @torch.library.register_fake("mylib::attn_bwd", lib=lib)
+            def _(dout, dq, dk, dv):
+                return torch.empty_like(dq)
+
+            def f(dout, weight, num_heads):
+                head_dim = D // num_heads
+                seqlen = dout.shape[0]
+                dq = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                dk = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                dv = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                torch.ops.mylib.attn_bwd(dout, dq, dk, dv)  # return discarded
+                a = dq.reshape(1, seqlen, D)
+                b = dk.reshape(1, seqlen, D)
+                c = dv.reshape(1, seqlen, D)
+                return (a + b + c) @ weight
+
+            dout = torch.randn(128, D)
+            weight = torch.randn(D, D)
+            torch._dynamo.mark_dynamic(dout, 0)
+
+            expected = f(dout, weight, 8)
+            got = torch.compile(f, fullgraph=True, dynamic=True)(dout, weight, 8)
+            self.assertEqual(got, expected)
 
 
 if __name__ == "__main__":

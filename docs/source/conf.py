@@ -1879,8 +1879,6 @@ coverage_ignore_classes = [
     "mode_out",
     "nanmedian",
     "nanmedian_out",
-    "qr",
-    "qr_out",
     "slogdet",
     "slogdet_out",
     "sort",
@@ -2044,8 +2042,6 @@ coverage_ignore_classes = [
     "DLDeviceType",
     # torch.utils.file_baton
     "FileBaton",
-    # torch.utils.flop_counter
-    "FlopCounterMode",
     # torch.utils.hipify.hipify_python
     "CurrentState",
     "GeneratedFileCleaner",
@@ -2373,8 +2369,7 @@ def coverage_post_process(app, exception):
 
     if output:
         with open(output_file, "a") as f:
-            for o in output:
-                f.write(o)
+            f.writelines(output)
 
 
 def process_docstring(app, what_, name, obj, options, lines):
@@ -2408,6 +2403,10 @@ def process_docstring(app, what_, name, obj, options, lines):
         # Remove all xdoctest directives
         re.compile(r"\s*>>>\s*#\s*x?doctest:\s*.*"),
         re.compile(r"\s*>>>\s*#\s*x?doc:\s*.*"),
+        # Remove lines marked `# docs: hide`. These run under the doctest
+        # runner but are hidden from rendered docs (e.g. a filterwarnings call
+        # that silences a warning an intentionally-deprecated example emits).
+        re.compile(r"\s*>>>.*#\s*docs:\s*hide\s*$"),
     ]
     filtered_lines = [
         line for line in lines if not any(pat.match(line) for pat in remove_directives)

@@ -39,7 +39,7 @@ jobs:
   # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
   get_workflow_conclusion:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
     steps:
@@ -135,7 +135,7 @@ jobs:
 
   check-api-rate:
     if: ${{ always() && github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - name: Get our GITHUB_TOKEN API limit usage

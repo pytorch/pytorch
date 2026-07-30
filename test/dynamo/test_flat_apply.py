@@ -30,14 +30,14 @@ def distance(a, b, norm):
 
 
 @dataclass(frozen=True)
-class Norm(torch._opaque_base.OpaqueBase):
+class Norm(torch._custom_class_base.CustomClassBase):
     typ: str
 
     def __fx_repr__(self):
         return f"Norm(typ={self.typ!r})", {"Norm": Norm}
 
 
-torch._library.opaque_object.register_opaque_type(Norm, typ="value")
+torch._library.opaque_object.register_custom_class(Norm, typ="constant")
 
 
 @dataclass
@@ -191,11 +191,10 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        trace_point_tensor_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.trace_point_tensor_callable
-        trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
-
         add: "f32[10]" = l_x_ + l_y_
 
+        trace_point_tensor_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.trace_point_tensor_callable
+        trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, add);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = add = None
         getitem: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
         return (getitem,)

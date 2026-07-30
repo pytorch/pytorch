@@ -12,7 +12,7 @@ jobs:
       contents: read
       pull-requests: write
     name: Auto Request Review
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Request review based on files changes and/or groups the author belongs to
         # v0.7.0

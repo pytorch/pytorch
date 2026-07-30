@@ -1160,6 +1160,13 @@ Args:
     non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect. Default: ``False``
+
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the copy is issued on a
+    non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
 """,
 )
 
@@ -2512,7 +2519,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to accumulate into,
         should have dtype either `torch.int64` or `torch.int32`
     source (FloatTensor): the tensor containing values to accumulate
     reduce (str): the reduction operation to apply
@@ -3794,15 +3801,6 @@ put(input, index, source, accumulate=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.put_`.
 `input` corresponds to `self` in :meth:`torch.Tensor.put_`.
-""",
-)
-
-add_docstr_all(
-    "qr",
-    r"""
-qr(some=True) -> (Tensor, Tensor)
-
-See :func:`torch.qr`
 """,
 )
 
@@ -5183,6 +5181,13 @@ Here are the ways to call ``to``:
     `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
+
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the conversion is issued on
+    a non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
 
 Example::
 
@@ -6770,7 +6775,7 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 
 .. warning::
-    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    The use of :attr:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
     is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
     to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
     the dimensions of a tensor.

@@ -199,6 +199,11 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
     "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
+    # ArrayRefTensor outputs do not expose AtenTensorHandle, so this wrapper
+    # variant intentionally skips fallback output metadata assertions.
+    "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_stack_allocation(
+        is_skip=True
+    ),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
     "test_aot_inductor_consts_cpp_build": fail_stack_allocation(is_skip=True),
@@ -221,8 +226,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_stack_allocation(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     # segfault
@@ -360,6 +363,37 @@ if IS_FBCODE:
         "cpu_with_stack_allocation_and_minimal_arrayref_interface",
         CPU_TEST_FAILURES,
     )
+
+
+class TestCppWrapperCpuSelection(TestCase):
+    def test_cpu_cpp_wrapper_follows_current_stack_allocation_config(self):
+        # Regression test: the CPU cpp wrapper class (CppWrapperCpu vs
+        # CppWrapperCpuArrayRef) must track the current allow_stack_allocation
+        # config at each compile. It used to be frozen at the process's first
+        # backend registration, so whichever config was active for the first
+        # compile decided the wrapper for the whole process -- making tests that
+        # toggle the config order-dependent and flaky.
+        from torch._inductor.codegen.common import (
+            get_wrapper_codegen_for_device,
+            init_backend_registration,
+        )
+        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+        from torch._inductor.codegen.cpp_wrapper_cpu_array_ref import (
+            CppWrapperCpuArrayRef,
+        )
+
+        init_backend_registration()
+        with config.patch({"aot_inductor.allow_stack_allocation": True}):
+            self.assertIs(
+                get_wrapper_codegen_for_device("cpu", cpp_wrapper=True),
+                CppWrapperCpuArrayRef,
+            )
+        with config.patch({"aot_inductor.allow_stack_allocation": False}):
+            self.assertIs(
+                get_wrapper_codegen_for_device("cpu", cpp_wrapper=True),
+                CppWrapperCpu,
+            )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

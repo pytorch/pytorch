@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_upsample_bicubic2d_aa_backward_native.h>
 #include <ATen/ops/_upsample_bicubic2d_aa_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_native.h>
@@ -437,6 +438,30 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
               "_upsample_bilineard2d_aa_out_mps only supports floating-point dtypes");
   upsample_kernel_out_template<4>(input, output_size, align_corners, {scales_w, scales_h}, output, "bilinear2d_aa");
+}
+
+TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_mps)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& grad_input) {
+  upsample_kernel_backward_out_template<4>(
+      grad_input, grad_output, output_size, align_corners, {scales_w, scales_h}, "bilinear2d_aa");
+}
+
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_backward_out_mps)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& grad_input) {
+  upsample_kernel_backward_out_template<4>(
+      grad_input, grad_output, output_size, align_corners, {scales_w, scales_h}, "bicubic2d_aa");
 }
 
 TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)

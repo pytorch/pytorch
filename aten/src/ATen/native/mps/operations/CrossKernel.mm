@@ -16,6 +16,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other, int64_t dim) {
+  TORCH_CHECK_NOT_IMPLEMENTED(out.scalar_type() != at::kBool, "linalg.cross: not implemented for 'Bool'");
   // numThreads = number of cross triplets = numel / 3
   const auto numThreads = out.numel() / 3;
   // The dense kernel handles any contiguous layout: it uses dim_stride and a

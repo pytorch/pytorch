@@ -31,7 +31,7 @@ jobs:
   download-docker-builds-artifacts:
     if: github.repository_owner == 'pytorch'
     name: download-docker-builds-artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
       pytorch-linux-noble-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}

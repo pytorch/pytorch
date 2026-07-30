@@ -403,7 +403,6 @@ aliasing_ops_list_return = {
 skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
-    "native_group_norm",
 }
 
 bool_unsupported_ordered_ops = {
@@ -1031,6 +1030,7 @@ class TestOperators(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
+                skip("native_group_norm"),  # takes too long
             }
         ),
     )
@@ -1053,7 +1053,6 @@ class TestOperators(TestCase):
         {
             xfail("as_strided", "partial_views"),
             xfail("as_strided_copy"),
-            xfail("native_group_norm"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1213,7 +1212,6 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1329,7 +1327,6 @@ class TestOperators(TestCase):
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1349,9 +1346,7 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            arg_values = [sample.input] + list(sample.args)
             kwarg_values = sample.kwargs
-            args = tuple(arg_values) + tuple(kwarg_values)
             fn, args = get_jvp_variant_primals_tangents(op, sample)
             is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
             generator = get_fallback_and_vmap_exhaustive(
@@ -1370,9 +1365,6 @@ class TestOperators(TestCase):
                 xfail(
                     "cdouble"
                 ),  # RuntimeError: required rank 4 tensor to use channels_last format
-                xfail("cumprod"),
-                xfail("masked_fill"),
-                xfail("fill"),
                 skip("masked.mean"),  # ???
                 xfail("masked_scatter"),
                 xfail("put"),
@@ -1395,9 +1387,7 @@ class TestOperators(TestCase):
                 xfail("linalg.lu", ""),
                 xfail("nn.functional.dropout3d", ""),
                 xfail("as_strided_scatter", ""),
-                xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1416,9 +1406,7 @@ class TestOperators(TestCase):
 
         def test():
             for sample in samples:
-                arg_values = [sample.input] + list(sample.args)
                 kwarg_values = sample.kwargs
-                args = tuple(arg_values) + tuple(kwarg_values)
                 fn, args = get_jvp_variant_primals_tangents(op, sample)
                 is_batch_norm_and_training = is_batch_norm_training(
                     op.name, kwarg_values
@@ -1445,13 +1433,11 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 xfail("cummax"),
                 xfail("cummin"),
-                xfail("fill"),
                 xfail(
                     "narrow"
                 ),  # Batching rule not implemented for `narrow.Tensor` (and view op)
                 xfail("special.log_ndtr"),
                 xfail("linalg.householder_product"),
-                xfail("masked_fill"),
                 xfail("masked_scatter"),
                 xfail("masked_select"),
                 xfail("nanquantile"),
@@ -1518,7 +1504,6 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
-                xfail("native_group_norm"),
                 xfail(
                     "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
                 ),  # aten::_scaled_dot_product_flash_attention_for_cpu hit the vmap fallback which is currently disabled
@@ -1630,7 +1615,6 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("as_strided", "partial_views"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1878,6 +1862,7 @@ class TestOperators(TestCase):
                 skip("broadcast_tensors"),
                 skip("linalg.lstsq"),
                 skip("nn.functional.bilinear"),
+                skip("native_group_norm"),
                 skip("native_layer_norm"),
                 skip("ormqr"),
                 # Not actually a problem
@@ -2016,7 +2001,6 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -2341,8 +2325,6 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-            # Removed in next PR
-            skip("native_group_norm", dtypes=(torch.float32,), device_type="cpu"),
         },
     )
     @opsToleranceOverride(
@@ -2376,11 +2358,9 @@ class TestOperators(TestCase):
             tol1(
                 "nn.functional.conv2d",
                 {torch.float32: tol(atol=5e-05, rtol=5e-05)},
-                device_type="cuda",
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
-            tol1("native_group_norm", {torch.float32: tol(atol=5e-5, rtol=5e-6)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):

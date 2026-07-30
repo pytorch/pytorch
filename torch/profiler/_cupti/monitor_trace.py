@@ -209,36 +209,71 @@ def _driver_requires_flow(name: str) -> bool:
     return name in _DRIVER_FLOW_NAMES
 
 
-_RUNTIME_DROPPED_CBIDS: frozenset[int] | None = None
-_DRIVER_KEPT_CBIDS: frozenset[int] | None = None
+_GRAPH_DEP_FLOW_ID_BASE = (
+    1 << 40
+)  # keep node->node arrow flow ids clear of correlation ids
 
 
-def runtime_dropped_cbids() -> frozenset[int]:
-    """cbids of RUNTIME APIs the trace drops (names in the blocklist), so the decoder can
-    filter the noise (e.g. cudaGetDevice/GetLastError) out of the window before it is
-    built/merged. CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under
-    user-defined records, so it cannot be done in CUPTI; this is the post-decode
-    equivalent, drop-set-identical to the merge's name blocklist."""
-    global _RUNTIME_DROPPED_CBIDS
-    if _RUNTIME_DROPPED_CBIDS is None:
-        names = _load_cbid_names(Runtime_api_trace_cbid)
-        _RUNTIME_DROPPED_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _RUNTIME_BLOCKLIST
-        )
-    return _RUNTIME_DROPPED_CBIDS
+def _graph_dependency_flow_events(
+    node_rows: list[tuple[int, int, int, int, int, int]],
+    graph_deps: dict[int, list[int]],
+    *,
+    base_ns: int,
+) -> list[dict[str, object]]:
+    """Chrome flow (s/f) events drawing CUDA-graph node->node dependency arrows in the JSON
+    export. ``node_rows`` is (correlation_id, graph_node_id, device, tid, start_ns, end_ns) per
+    graphed op as displayed (tid is the resolver lane). Dependencies (graph_deps: node_id ->
+    predecessor node_ids) are resolved within the same replay (correlation_id) so arrows never
+    cross replays; each edge is one flow from the predecessor's end to the successor's start.
+    Empty without deps.
 
-
-def driver_kept_cbids() -> frozenset[int]:
-    """cbids of DRIVER APIs the trace keeps (names in the registered allowlist); the
-    decoder drops every other driver record (the driver kind is an allowlist, unlike the
-    runtime blocklist). Keep-set-identical to the merge's allowlist."""
-    global _DRIVER_KEPT_CBIDS
-    if _DRIVER_KEPT_CBIDS is None:
-        names = _load_cbid_names(Driver_api_trace_cbid)
-        _DRIVER_KEPT_CBIDS = frozenset(
-            cb for cb, n in names.items() if n in _DRIVER_REGISTERED
-        )
-    return _DRIVER_KEPT_CBIDS
+    NOTE: under cross-stream clock skew the recorded predecessor end can land after the successor
+    start, and chrome/Perfetto JSON flows cannot render backwards in time, so such an arrow may
+    misrender (or bind to the wrong slice when spans overlap on one lane). The .pftrace export
+    encodes the same edges as native render-stage waits (GpuRenderStageEvent.event_wait_ids) and
+    renders them correctly regardless -- prefer it when dependency arrows matter."""
+    if not graph_deps:
+        return []
+    by_corr: dict[int, dict[int, tuple[int, int, int, int]]] = {}
+    for corr, gnid, dev, tid, start_ns, end_ns in node_rows:
+        by_corr.setdefault(corr, {})[gnid] = (dev, tid, start_ns, end_ns)
+    events: list[dict[str, object]] = []
+    fid = _GRAPH_DEP_FLOW_ID_BASE
+    for node_map in by_corr.values():
+        for gnid, (dev, tid, start_ns, end_ns) in node_map.items():
+            for pred in graph_deps.get(gnid, ()):
+                p = node_map.get(pred)
+                if p is None:
+                    continue
+                pdev, ptid, _pstart_ns, pend_ns = p
+                # Arrow from the predecessor's end to the successor's start (the dependency
+                # handoff). See the NOTE in the docstring: this can render backwards under clock
+                # skew in the JSON export; the .pftrace export does not have that limitation.
+                events.append(
+                    {
+                        "ph": "s",
+                        "id": fid,
+                        "pid": pdev,
+                        "tid": ptid,
+                        "ts": max((pend_ns - base_ns) / 1000.0, 0.0),
+                        "cat": _FLOW_CATEGORY,
+                        "name": _FLOW_CATEGORY,
+                    }
+                )
+                events.append(
+                    {
+                        "ph": "f",
+                        "id": fid,
+                        "pid": dev,
+                        "tid": tid,
+                        "ts": max((start_ns - base_ns) / 1000.0, 0.0),
+                        "cat": _FLOW_CATEGORY,
+                        "name": _FLOW_CATEGORY,
+                        "bp": "e",
+                    }
+                )
+                fid += 1
+    return events
 
 
 def _trace_window_entries(
@@ -315,9 +350,14 @@ def _trace_window_entries(
     trace_events: list[dict[str, object]] = []
     seen_devices: dict[int, int] = {}
     seen_streams: set[tuple[int, int]] = set()
+    lane_names: dict[tuple[int, int], str] = {}
     seen_cpu_processes: dict[int, int] = {}
     seen_cpu_threads: set[tuple[int, int]] = set()
     need_overhead_metadata = False
+    # CUDA-graph node->node dependency arrows (drawn as flows below). Collect each graphed op as
+    # displayed so the arrows land on the resolver lanes, then emit after all GPU kinds.
+    graph_deps = cast("dict[int, list[int]]", trace_window.get("graph_deps") or {})
+    dep_node_rows: list[tuple[int, int, int, int, int, int]] = []
 
     # --- GPU ops (kernel / memcpy / memset): one X event + a terminating ac2g flow ---
     # Each kind builds X events from one dict literal per row over the bulk-converted
@@ -331,6 +371,7 @@ def _trace_window_entries(
         ts_l = np.maximum((starts - base_ns) / 1000.0, 0.0).tolist()
         dur_l = np.maximum((c["end_ns"] - starts) / 1000.0, 0.0).tolist()
         start_l = starts.tolist()
+        end_l = c["end_ns"].tolist()
         dev_l = c["device_id"].tolist()
         ctx_l = c["context_id"].tolist()
         str_l = c["stream_id"].tolist()
@@ -389,6 +430,8 @@ def _trace_window_entries(
                 c["dst_kind"].tolist(),
             )
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -408,6 +451,8 @@ def _trace_window_entries(
                         "src kind": _MEMORY_KIND_NAMES.get(sk_l[i], sk_l[i]),
                         "dst kind": _MEMORY_KIND_NAMES.get(dk_l[i], dk_l[i]),
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -417,6 +462,8 @@ def _trace_window_entries(
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
             fl_l = c["flags"].tolist()
+            chan_l = c["channel"].tolist()
+            chant_l = c["channel_type"].tolist()
             events = [
                 {
                     "ph": "X",
@@ -435,6 +482,8 @@ def _trace_window_entries(
                         "value": val_l[i],
                         "memory kind": mk_l[i],
                         "flags": fl_l[i],
+                        "channel": chan_l[i],
+                        "channel_type": chant_l[i],
                     },
                 }
                 for i in range(n)
@@ -447,41 +496,95 @@ def _trace_window_entries(
         ann_l = c["annotation"].tolist()
         meta_col = c.get("metadata")
         meta_l = meta_col.tolist() if meta_col is not None else None
+        # Pluggable lane assignment: a graph lane resolver (if installed) supplies per-op
+        # (logical_lane, lane_name) columns; a graphed op whose logical lane differs from
+        # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops on
+        # whatever streams the graph executor placed them on -- often hundreds of distinct
+        # streams -- which scatters one logical replay across a wall of stream lanes and makes
+        # for a very confusing profile (the ops don't overlap or disappear, there are just far
+        # too many lanes). The resolver collapses them onto a few meaningful logical lanes.
+        # Baking the move into this export pass (tid + args["stream"] moved, the op's CUDA
+        # stream kept as original_stream) means consumers need no read/reassign/rewrite round
+        # trip. Absent a resolver, ops render on their CUDA stream lane.
+        lane_col = c.get("logical_lane")
+        lane_name_col = c.get("lane_name")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        lane_name_l = lane_name_col.tolist() if lane_name_col is not None else None
+        display_tid_l = tid_l
         if (
             gid.any()
             or gnid.any()
-            or any(a is not None for a in ann_l)
+            or any(ann_l)  # any non-empty annotation (None / empty skip)
             or meta_l is not None
+            or lane_l is not None
         ):
             gid_l = gid.tolist()
             gnid_l = gnid.tolist()
+            display_tid_l = list(tid_l)
             for i, ev in enumerate(events):
                 a = ev["args"]
                 if gid_l[i]:
                     a["graph id"] = gid_l[i]
                 if gnid_l[i]:
-                    a["graph node id"] = gnid_l[i]
+                    # Upper 32 bits are the graph id (emitted separately above); keep only the
+                    # lower 32-bit node id here rather than the full 9-digit packed value.
+                    a["graph node id"] = gnid_l[i] & 0xFFFFFFFF
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
+                if gnid_l[i] and lane_l is not None and lane_l[i] != str_l[i]:
+                    lane_id = lane_l[i]
+                    lane = _export_tid(lane_id)
+                    ev["tid"] = lane
+                    a["stream"] = lane_id
+                    a["original_stream"] = str_l[i]
+                    display_tid_l[i] = lane
+                    seen_streams.add((dev_l[i], lane_id))
+                    if lane_name_l is not None and lane_name_l[i] is not None:
+                        lane_names[(dev_l[i], lane_id)] = lane_name_l[i]
+            for i in range(n):
+                if gnid_l[i]:
+                    dep_node_rows.append(
+                        (
+                            corr_l[i],
+                            gnid_l[i],
+                            dev_l[i],
+                            display_tid_l[i],
+                            start_l[i],
+                            end_l[i],
+                        )
+                    )
         trace_events.extend(events)
+        # CPU-launch -> GPU-op flow (the terminating end of the host launch's correlation).
+        # When graph node->node arrows are drawn (graph_deps present), a graphed op that has a
+        # predecessor in the graph gets its incoming edge from that arrow, so drop this launch
+        # flow for it: only root graph nodes (and eager ops) keep it, so a cudaGraphLaunch links
+        # to the graph's roots instead of fanning out to every replayed kernel. A graph_deps key
+        # is a node with predecessors; 0 (eager) and root node ids are absent -> kept.
+        drop_launch_flow = (
+            [g in graph_deps for g in gnid.tolist()] if graph_deps else None
+        )
         trace_events.extend(
             {
                 "ph": "f",
                 "id": corr_l[i],
                 "pid": dev_l[i],
-                "tid": tid_l[i],
+                "tid": display_tid_l[i],
                 "ts": ts_l[i],
                 "cat": _FLOW_CATEGORY,
                 "name": _FLOW_CATEGORY,
                 "bp": "e",
             }
             for i in range(n)
-            if corr_l[i]
+            if corr_l[i] and not (drop_launch_flow and drop_launch_flow[i])
         )
         seen_streams.update(zip(dev_l, str_l))
         for dev, s in zip(dev_l, start_l):
             seen_devices.setdefault(dev, s)
+
+    trace_events.extend(
+        _graph_dependency_flow_events(dep_node_rows, graph_deps, base_ns=base_ns)
+    )
 
     # --- runtime / driver API: registered names only, remapped onto their CPU thread ---
     for ks in ("cuda_runtime", "cuda_driver"):
@@ -657,11 +760,10 @@ def _trace_window_entries(
 
     for did, rid in sorted(seen_streams):
         ts_us = 0.0
+        lane_name = lane_names.get((did, rid), f"stream {rid} ")
         metadata_events.extend(
             [
-                _metadata_event(
-                    "thread_name", ts_us, did, rid, "name", f"stream {rid} "
-                ),
+                _metadata_event("thread_name", ts_us, did, rid, "name", lane_name),
                 _metadata_event(
                     "thread_sort_index", ts_us, did, rid, "sort_index", rid
                 ),
@@ -725,16 +827,35 @@ def _gpu_user_annotation_events(
         return []
 
     span_map: dict[tuple[int, int, int], dict[str, int]] = {}
+    # (device, stream) lanes that still render real GPU work after lane reassignment. A graphed
+    # op the resolver moved to a logical lane no longer displays on its capture stream (mirrors
+    # the display rule in _trace_window_entries); a span stranded on such a stream is dropped
+    # below.
+    streams_with_display: set[tuple[int, int]] = set()
     for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
         c = columns.get(ks)
         if not c or not len(c["correlation_id"]):
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
+        # Keep the annotation on the kernel's real capture stream; do not follow graphed
+        # ops onto the synthetic logical lanes assigned by the lane resolver.
         str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
+        lane_col = c.get("logical_lane")
+        gnid_col = c.get("graph_node_id")
+        lane_l = lane_col.tolist() if lane_col is not None else None
+        gnid_l = gnid_col.tolist() if gnid_col is not None else None
         for i in range(len(corr_l)):
+            reassigned = (
+                lane_l is not None
+                and gnid_l is not None
+                and gnid_l[i]
+                and lane_l[i] != str_l[i]
+            )
+            if not reassigned:
+                streams_with_display.add((dev_l[i], str_l[i]))
             external_id = correlation_to_user_external.get(corr_l[i])
             if external_id is None:
                 continue
@@ -753,6 +874,10 @@ def _gpu_user_annotation_events(
         name = user_annotations.get(external_id)
         if not isinstance(name, str):
             continue
+        # Orphaned span: the capture stream's ops all moved to logical lanes, so it would sit
+        # alone on an empty lane divorced from its kernels -- drop it instead.
+        if (device_id, stream_id) not in streams_with_display:
+            continue
         start_us = max((span["start_ns"] - base_ns) / 1000.0 - 0.001, 0.0)
         dur_us = max((span["end_ns"] - span["start_ns"]) / 1000.0 + 0.002, 0.0)
         gpu_user_events.append(
@@ -769,6 +894,171 @@ def _gpu_user_annotation_events(
         )
 
     return gpu_user_events
+
+
+# PM counter descriptor ids: local (0-based, by metric order); _merge_counters maps them onto the
+# global monotonic id sequence, alongside the env and cycle counters.
+
+# Friendly display names for common PM metrics, keyed by the metric base (before the rollup); a
+# "% of peak" rollup gets a "(%)" suffix. Unknown metrics fall back to their raw metric name.
+_PM_METRIC_LABELS = {
+    "sm__cycles_active": "SM Active",
+    "gpu__dram_throughput": "DRAM BW",
+    "dram__throughput": "HBM BW",
+    "dram__read_throughput": "HBM Read",
+    "dram__write_throughput": "HBM Write",
+    "nvlrx__bytes": "NVLink RX",
+    "nvltx__bytes": "NVLink TX",
+    "pcie__throughput": "PCIe",
+}
+
+
+def _pm_label(metric: str) -> str:
+    base, _, rollup = metric.partition(".")
+    friendly = _PM_METRIC_LABELS.get(base)
+    if friendly is None:
+        return metric
+    return f"{friendly} (%)" if "pct_of_peak" in rollup else friendly
+
+
+def _build_pm_counters(pm: dict | None, active_devices: set):
+    """Build the GpuCounterEvent payload from PM-sampling columns (start_ns/device_id plus one
+    value column per metric, keyed by the CUPTI metric name): same tuple shape as
+    :func:`_build_gpu_counters`. The metric columns are self-describing, so each is assigned a
+    local descriptor id here (mapped to a global id in :func:`_merge_counters`) and labeled with a
+    friendly display name (:func:`_pm_label`, or the raw metric name if unmapped). Restricted to
+    devices that ran GPU work."""
+    if not pm or not len(pm.get("start_ns", ())):
+        return None
+    ts = np.ascontiguousarray(pm["start_ns"], dtype=np.int64)
+    dev = np.asarray(pm["device_id"], dtype=np.int64)
+    base = (
+        np.isin(dev, list(active_devices))
+        if active_devices
+        else np.ones(len(dev), dtype=bool)
+    )
+    if not base.any():
+        return None
+    metric_cols = [k for k in pm if k not in ("start_ns", "device_id")]
+    specs, gpu_l, ts_l, cid_l, val_l = [], [], [], [], []
+    for name in metric_cols:
+        col = pm.get(name)
+        if col is None:
+            continue
+        cid = len(specs)  # local id; _merge_counters assigns the global id
+        specs.append((cid, _pm_label(name)))
+        gpu_l.append(dev[base])
+        ts_l.append(ts[base])
+        cid_l.append(np.full(int(base.sum()), cid, dtype=np.int32))
+        val_l.append(np.asarray(col, dtype=np.float64)[base])
+    if not specs:
+        return None
+    return (
+        specs,
+        np.concatenate(gpu_l).astype(np.int32),
+        np.concatenate(ts_l).astype(np.int64),
+        np.concatenate(cid_l).astype(np.int32),
+        np.concatenate(val_l).astype(np.float64),
+    )
+
+
+def _merge_counters(*parts):
+    """Concatenate GpuCounterEvent payloads (the tuples from the per-source builders) into a single
+    payload for the encoder. Each source uses its own local descriptor ids; here they are assigned
+    onto a single monotonic sequence (0, 1, 2, ...) so ids are globally unique by construction, and
+    each source's cid column, COMPUTE-group ids (6th element), and int-valued ids (7th) are remapped
+    through it."""
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    specs: list = []
+    gpu_l, ts_l, cid_l, val_l = [], [], [], []
+    compute_group: list = []
+    int_value_ids: list = []
+    next_id = 0
+    for p in parts:
+        s, g, t, c, v = p[:5]
+        remap = {old: next_id + k for k, (old, _name) in enumerate(s)}
+        next_id += len(s)
+        specs.extend((remap[old], name) for old, name in s)
+        gpu_l.append(g)
+        ts_l.append(t)
+        lut = np.zeros(max(remap) + 1, dtype=np.int32)
+        for old, new in remap.items():
+            lut[old] = new
+        cid_l.append(lut[np.asarray(c)])
+        val_l.append(v)
+        if len(p) > 5 and p[5]:
+            compute_group.extend(remap[i] for i in p[5])
+        if len(p) > 6 and p[6]:
+            int_value_ids.extend(remap[i] for i in p[6])
+    return (
+        specs,
+        np.concatenate(gpu_l),
+        np.concatenate(ts_l),
+        np.concatenate(cid_l),
+        np.concatenate(val_l),
+        compute_group,
+        int_value_ids,
+    )
+
+
+def _active_devices(columns: dict) -> set:
+    """Devices that ran GPU work this window (so idle GPUs get no counters)."""
+    active: set = set()
+    for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
+        c = columns.get(ks)
+        if c is not None and len(c.get("device_id", ())):
+            active.update(np.unique(c["device_id"]).tolist())
+    return active
+
+
+def _gpu_counter_process(device_id: int) -> str:
+    """String "pid" for a device's GPU counter row. A string pid makes Perfetto label the process
+    row with the string verbatim ("GPU N Counters", no numeric suffix -- the same way kineto's
+    "Spans"/"Traces" rows work) and keeps it a distinct process: an integer pid would show its
+    number, and a pid <= 0 collapses into the device/unknown process."""
+    return f"GPU {device_id} Counters"
+
+
+def _build_chrome_counters(counters, base_ns: int) -> list[dict]:
+    """Emit the merged GPU counter payload as chrome-trace "C" (counter) events -- one per
+    sample -- in a per-device "GPU N Counters" process row, separate from the device's kernel/
+    stream work (the JSON counterpart of the .pftrace "GPU / Counters / <gpu>" tracks)."""
+    if counters is None:
+        return []
+    specs, gpu, ts, cid, val = counters[:5]
+    int_ids = set(counters[6]) if len(counters) > 6 else set()
+    name_by_id = dict(specs)
+    ts_us = (ts - base_ns) / 1000.0
+    out: list[dict] = []
+    counter_procs: dict[int, str] = {}
+    for i in range(len(cid)):
+        name = name_by_id.get(int(cid[i]))
+        if name is None:
+            continue
+        did = int(gpu[i])
+        proc = _gpu_counter_process(did)
+        counter_procs[did] = proc
+        v = int(val[i]) if int(cid[i]) in int_ids else float(val[i])
+        out.append(
+            {
+                "ph": "C",
+                "name": name,
+                "pid": proc,
+                "ts": float(ts_us[i]),
+                # single unnamed series (empty key): keying it by the metric name instead
+                # makes Perfetto render the track label doubled ("name name").
+                "args": {"": v},
+            }
+        )
+    # Low sort index (below the CPU pid and the 5000000 + did device rows) so Perfetto floats
+    # the counter rows to the top of the trace, above the CPU and GPU work.
+    meta: list[dict] = [
+        _metadata_event("process_sort_index", 0.0, proc, 0, "sort_index", 100 + did)
+        for did, proc in sorted(counter_procs.items())
+    ]
+    return meta + out
 
 
 def merge_trace_window_into_chrome_trace(
@@ -837,6 +1127,19 @@ def merge_trace_window_into_chrome_trace(
     events[metadata_insert:metadata_insert] = metadata_events
 
     events.extend(trace_events)
+
+    # GPU counters (PM utilization) as chrome "C" events on the device pid -- the JSON
+    # counterpart of the .pftrace GPU counter tracks.
+    columns = cast("dict[str, dict[str, Any]]", trace_window.get("columns", {}))
+    active_devices = _active_devices(columns)
+    events.extend(
+        _build_chrome_counters(
+            _merge_counters(
+                _build_pm_counters(columns.get("pm_sampling"), active_devices),
+            ),
+            base_ns,
+        )
+    )
 
     min_ts = math.inf
     max_end_ts = 0.0

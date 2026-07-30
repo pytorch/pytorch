@@ -23,6 +23,7 @@ from github_utils import (
     gh_fetch_merge_base,
     gh_fetch_url,
     gh_graphql,
+    gh_merge_pr,
     gh_post_commit_comment,
     gh_post_pr_comment,
     gh_update_pr_state,
@@ -949,6 +950,9 @@ class GitHubPR:
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
+    def is_dependabot_pr(self) -> bool:
+        return self.get_pr_creator_login() == "dependabot[bot]"
+
     def _fetch_authors(self) -> list[tuple[str, str]]:
         if self._authors is not None:
             return self._authors
@@ -1286,19 +1290,25 @@ class GitHubPR:
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             ignore_current_checks=ignore_current_checks,
         )
-        additional_merged_prs = self.merge_changes_locally(
-            repo, skip_mandatory_checks, comment_id
-        )
+        # Dependabot commits are authored/signed by the bot; merge them through
+        # GitHub's squash+merge API so that signature is preserved and dependabot
+        # can track the merge, instead of re-authoring a squash commit locally.
+        if self.is_dependabot_pr():
+            additional_merged_prs: list[GitHubPR] = []
+            merge_commit_sha = self.merge_via_github_api(dry_run)
+        else:
+            additional_merged_prs = self.merge_changes_locally(
+                repo, skip_mandatory_checks, comment_id
+            )
+            repo.push(self.default_branch(), dry_run)
+            # When the merge process reaches this part, we can assume that the
+            # commit has been successfully pushed to trunk
+            merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
-        repo.push(self.default_branch(), dry_run)
         if not dry_run:
             self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
             for pr in additional_merged_prs:
                 pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
-
-        # When the merge process reaches this part, we can assume that the commit
-        # has been successfully pushed to trunk
-        merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
         if comment_id and self.pr_num:
             # Finally, upload the record to s3. The list of pending and failed
@@ -1333,6 +1343,22 @@ class GitHubPR:
             pr=self,
             additional_merged_prs=additional_merged_prs,
             merge_commit_sha=merge_commit_sha,
+            dry_run=dry_run,
+        )
+
+    def merge_via_github_api(self, dry_run: bool = False) -> str:
+        """Squash-and-merge this PR through GitHub's merge API, pinned to the
+        commit that was reviewed, and return the resulting merge commit sha."""
+        msg = self.gen_commit_message()
+        title, _, body = msg.partition("\n\n")
+        return gh_merge_pr(
+            self.org,
+            self.project,
+            self.pr_num,
+            merge_method="squash",
+            commit_title=title,
+            commit_message=body,
+            sha=self.last_commit_sha(),
             dry_run=dry_run,
         )
 
@@ -1911,6 +1937,26 @@ def is_invalid_cancel(
     )
 
 
+def is_crcr_l3(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if this check is a non-blocking CRCR L3 failure.
+
+    Dr.CI is the classification authority. A check is L3 non-blocking when
+    Dr.CI returns it under the ``CRCR_L3`` category. CRCR (cross-repo CI
+    relay) L3 check runs are named ``crcr/<owner>/<repo>/<workflow>`` and will be
+    classified as CRCR_L3 by Dr.CI when their downstream_repo_level is L3.
+    """
+    if not check or not drci_classifications:
+        return False
+
+    name = check.name
+    job_id = check.job_id
+
+    return any(
+        name == crcr["name"] or (job_id and job_id == crcr["id"])
+        for crcr in drci_classifications.get("CRCR_L3", [])
+    )
+
+
 def get_classifications(
     pr_num: int,
     project: str,
@@ -2003,6 +2049,18 @@ def get_classifications(
                 check.url,
                 check.status,
                 "INVALID_CANCEL",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
+        elif is_crcr_l3(check, drci_classifications):
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "CRCR_L3",
                 check.job_id,
                 check.title,
                 check.summary,
@@ -2298,7 +2356,13 @@ def categorize_checks(
             target = (
                 failed_checks_categorization[classification]
                 if classification
-                in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
+                in (
+                    "IGNORE_CURRENT_CHECK",
+                    "BROKEN_TRUNK",
+                    "FLAKY",
+                    "UNSTABLE",
+                    "CRCR_L3",
+                )
                 else failed_checks
             )
             target.append((checkname, url, job_id))

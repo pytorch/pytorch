@@ -52,7 +52,7 @@ class SubprocessHandler:
         args_str = (entrypoint, *[str(e) for e in args])
         args_str = _maybe_wrap_command_args_with_numa_binding(
             args_str,
-            gpu_index=local_rank_id,
+            device_index=local_rank_id,
             numa_options=numa_options,
         )
 

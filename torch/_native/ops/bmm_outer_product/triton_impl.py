@@ -23,12 +23,13 @@ def _bmm_outer_product_impl(
 ) -> torch.Tensor:
     from .triton_kernels import bmm_outer_product
 
-    device = a.get_device()
-    if device == torch.cuda.current_device():
+    with torch.accelerator.device_index(a.get_device()):
         return bmm_outer_product(a, b)
 
-    with torch.cuda.device(device):
-        return bmm_outer_product(a, b)
+
+def _is_acc_tensor(t: torch.Tensor) -> bool:
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and acc.type == t.device.type
 
 
 def _bmm_outer_product_cond(
@@ -37,15 +38,10 @@ def _bmm_outer_product_cond(
     *args,
     **kwargs,
 ) -> bool:
-    a_is_cow = torch._C._is_cow_tensor(a)  # pyrefly: ignore[missing-attribute]
-    b_is_cow = torch._C._is_cow_tensor(b)  # pyrefly: ignore[missing-attribute]
-    if (
-        a.is_cuda
-        and b.is_cuda
-        and a.device == b.device
-        and _is_outer_product(a, b)
-        and not (a_is_cow or b_is_cow)
-    ):
+    # a and b are read-only here: the kernel wraps them in ConstTensorWrapper and
+    # reads through const_data_ptr(), so copy-on-write inputs are not
+    # materialized and need not be excluded.
+    if _is_acc_tensor(a) and a.device == b.device and _is_outer_product(a, b):
         return True
     return False
 

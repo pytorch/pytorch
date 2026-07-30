@@ -199,17 +199,16 @@ def backfill_test_jsons_while_running(
             )
 
         for unzipped_dir in unzipped_xml_dirs:
-            reports_root = unzipped_dir / "test" / "test-reports"
             for xml in unzipped_dir.glob("**/*.xml"):
-                # Most jobs lay reports out under <unzipped_dir>/test/test-reports,
-                # but some (e.g. ROCm gfx950) put them directly under
-                # <unzipped_dir>/test-reports. Those can't be keyed relative to
-                # reports_root, so skip them instead of aborting the whole upload.
-                try:
-                    relative_json = xml.with_suffix(".json").relative_to(reports_root)
-                except ValueError:
+                # Some jobs (e.g. ROCm) upload reports under <dir>/test-reports
+                # instead of <dir>/test/test-reports; key off the nearest one.
+                reports_root = next(
+                    (p for p in xml.parents if p.name == "test-reports"), None
+                )
+                if reports_root is None:
                     print(f"Skipping test json with unexpected layout: {xml}")
                     continue
+                relative_json = xml.with_suffix(".json").relative_to(reports_root)
                 corresponding_json = str(relative_json)
                 if corresponding_json in all_existing_jsons:
                     print(f"Skipping upload for existing test json for {xml}")
