@@ -3225,14 +3225,17 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
 
-        if value is torch.utils._pytree.SUPPORTED_NODES and not self.save_guards:
-            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
-            # DICT_VERSION is not serializable, so fall back to a keys match when
-            # guards are being serialized. Deserialization rebuilds guards without
-            # save_guards, so a loaded artifact still gets DICT_VERSION here,
-            # re-baselined on the loading process's dict.
-            self.DICT_VERSION(guard)
-            return
+        # SUPPORTED_NODES normally uses DICT_VERSION (PEP 509) as an O(1) fast
+        # path. That guard cannot be serialized, so when saving we fall through
+        # to keys-match and stick the choice on the Guard. Load rebuilds with
+        # save_guards=False but sees the pickled flag, so it keeps keys-match
+        # instead of re-promoting to DICT_VERSION.
+        if value is torch.utils._pytree.SUPPORTED_NODES:
+            if self.save_guards:
+                guard._force_dict_keys_match = True
+            if not guard._force_dict_keys_match:
+                self.DICT_VERSION(guard)
+                return
 
         self.SEQUENCE_LENGTH(guard)
 
