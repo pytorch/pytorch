@@ -144,7 +144,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <cudnn.h>
 
+#include <cstdlib>
 #include <iostream>
+#include <list>
 
 namespace at::native {
 
@@ -372,6 +374,48 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
   }
 };
 
+// Optional cap on the number of distinct cuDNN execution plans that a single
+// (thread-local, see getMHAGraphCache_ below) MHAGraphCache will retain.
+//
+// Each cache entry keeps a compiled fe::graph::Graph -- and the cuDNN-side
+// execution-plan/workspace-sizing state that comes with it -- alive for the
+// lifetime of the owning thread, since the cache is never evicted by default.
+// A long-running, multi-threaded server (e.g. one dispatching each request's
+// SDPA calls onto a different worker thread, as Python's
+// `asyncio.to_thread`/ThreadPoolExecutor does) can therefore end up with as
+// many independent, ever-growing caches as it has worker threads, each
+// keyed on every distinct (batch, heads, seqlen, ...) shape it happens to
+// see. That is a real, measurable, unbounded memory-growth risk independent
+// of any specific correctness bug.
+//
+// Setting TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT to a positive integer bounds the
+// number of entries retained per thread via true LRU eviction (mirroring the
+// TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT-based BenchmarkCache used for cuDNN
+// convolutions in Conv_v8.cpp): only the single least-recently-used entry is
+// dropped once the cap is reached, so a steady-state working set that fits
+// within the limit keeps its cached plans and avoids repeated cold-start
+// recompiles. The default (0, or unset) preserves the historical unbounded
+// behavior, so this is strictly opt-in.
+size_t getMHAGraphCacheLRULimit() {
+  static size_t limit = []() -> size_t {
+    const char* raw = std::getenv("TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT");
+    if (!raw || !*raw) {
+      return 0;
+    }
+    try {
+      long parsed = std::stol(raw);
+      return parsed > 0 ? static_cast<size_t>(parsed) : 0;
+    } catch (const std::exception&) {
+      TORCH_WARN(
+          "Ignoring unparsable TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT='",
+          raw,
+          "'; expected a positive integer.");
+      return 0;
+    }
+  }();
+  return limit;
+}
+
 struct MHAGraphCache {
   using KeyType = MHACacheKeyWrapper;
   using ValueType = std::unique_ptr<fe::graph::Graph>;
@@ -381,8 +425,31 @@ struct MHAGraphCache {
   using const_iterator = typename MapType::const_iterator;
 
   MapType engine_cache;
+  // LRU recency tracking, only populated/consulted when
+  // TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT > 0. lru_order.front() is the
+  // most-recently-used key and lru_order.back() is the next eviction
+  // candidate. lru_positions maps each cached key to its node in lru_order
+  // so find()/try_emplace() can bump recency or evict in O(1). This is kept
+  // as a side structure (rather than folding the list iterator into
+  // MapType's value_type, as Conv_v8.cpp's BenchmarkCache does) so that
+  // engine_cache's iterator/value-type contract -- callers dereference
+  // cache_it->second directly as ValueType -- is unchanged.
+  std::list<KeyType> lru_order;
+  std::unordered_map<
+      KeyType,
+      typename std::list<KeyType>::iterator,
+      ParamsWrapperHash<KeyType>>
+      lru_positions;
   int count = 0;
   int hits = 0;
+  int evictions = 0;
+
+  void touch_lru(const KeyType& key) {
+    auto pos_it = lru_positions.find(key);
+    if (pos_it != lru_positions.end()) {
+      lru_order.splice(lru_order.begin(), lru_order, pos_it->second);
+    }
+  }
 
   // no mutexes here as caches are now thread local for v8, can also return a
   // pointer to the Execution Plan if we know it will not be invalidated by
@@ -396,12 +463,17 @@ struct MHAGraphCache {
           count,
           " times. Hit rate: ",
           100 * hits / count,
-          "%");
+          "%. Evictions: ",
+          evictions,
+          ".");
     }
     count++;
     auto it = engine_cache.find(key);
     if (it != engine_cache.end()) {
       hits++;
+      if (getMHAGraphCacheLRULimit() > 0) {
+        touch_lru(key);
+      }
     }
     return it;
   }
@@ -412,6 +484,35 @@ struct MHAGraphCache {
 
   template <typename... Args>
   std::pair<iterator, bool> try_emplace(const KeyType& key, Args&&... args) {
+    size_t limit = getMHAGraphCacheLRULimit();
+    if (limit == 0) {
+      return engine_cache.try_emplace(key, std::forward<Args>(args)...);
+    }
+    auto existing = engine_cache.find(key);
+    if (existing != engine_cache.end()) {
+      touch_lru(key);
+      return {existing, false};
+    }
+    if (engine_cache.size() >= limit) {
+      // True LRU eviction: only the single least-recently-used entry is
+      // dropped, unlike a bulk-clear, so plans for shapes that are still
+      // part of the active working set survive and don't need to be
+      // recompiled from scratch.
+      const KeyType lru_key = lru_order.back();
+      engine_cache.erase(lru_key);
+      lru_positions.erase(lru_key);
+      lru_order.pop_back();
+      evictions++;
+      TORCH_WARN_ONCE(
+          "cuDNN SDPA plan cache on this thread hit "
+          "TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT=",
+          limit,
+          "; evicting the least-recently-used cached plan. Increase the "
+          "limit, or leave TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT unset (default) "
+          "to disable this bound.");
+    }
+    lru_order.emplace_front(key);
+    lru_positions.emplace(key, lru_order.begin());
     return engine_cache.try_emplace(key, std::forward<Args>(args)...);
   }
 };
@@ -420,6 +521,10 @@ struct MHAGraphCache {
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
 // We also leak the caches to workaround potential teardown race issues.
+//
+// The caches are unbounded by default; set TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT
+// to cap the number of distinct execution plans retained per thread via LRU
+// eviction (see getMHAGraphCacheLRULimit above).
 
 MHAGraphCache& getMHAGraphCache_() {
   thread_local MHAGraphCache* instance{new MHAGraphCache()};
