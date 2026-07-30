@@ -49,7 +49,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t"
+      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
     steps:
       # BINARY_ENV_FILE needs ${RUNNER_TEMP} so it has to be populated in-step
@@ -141,6 +141,22 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_14t-cpu
+      - name: Upload wheel-py3_15-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_15-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_15-cpu
+      - name: Upload wheel-py3_15t-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_15t-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_15t-cpu
   # Each matrix entry invokes _binary-test-macos.yml independently, so the
   # test (on macos-26) -> upload (on ubuntu, via _binary-upload.yml) chain
   # runs per-Python-version: test-X failing blocks only upload-X.
@@ -181,6 +197,14 @@ jobs:
             setup_python_version: "3.14.0"
             freethreaded: true
             build_name: wheel-py3_14t-cpu
+          - desired_python: "3.15"
+            setup_python_version: "3.15"
+            freethreaded: false
+            build_name: wheel-py3_15-cpu
+          - desired_python: "3.15t"
+            setup_python_version: "3.15"
+            freethreaded: true
+            build_name: wheel-py3_15t-cpu
     uses: ./.github/workflows/_binary-test-macos.yml
     with:
       build_name: ${{ matrix.build_name }}

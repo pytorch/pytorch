@@ -2047,6 +2047,10 @@ def expectedFailureCUDA(fn):
     return expectedFailure("cuda")(fn)
 
 
+def expectedFailureIfRocm(fn):
+    return expectedFailure("cuda")(fn) if TEST_WITH_ROCM else fn
+
+
 def expectedFailureXPU(fn):
     return expectedFailure("xpu")(fn)
 
