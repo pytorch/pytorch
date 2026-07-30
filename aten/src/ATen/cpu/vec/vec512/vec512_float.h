@@ -221,7 +221,8 @@ class Vectorized<float> {
   }
   Vectorized<float> angle() const {
     __m512 zero_vec = _mm512_set1_ps(0.f);
-    const auto nan_vec = _mm512_set1_ps(std::numeric_limits<float>::quiet_NaN());
+    const auto nan_vec =
+        _mm512_set1_ps(std::numeric_limits<float>::quiet_NaN());
     const auto not_nan_mask = _mm512_cmp_ps_mask(values, values, _CMP_EQ_OQ);
     const auto not_nan_vec = _mm512_mask_set1_epi32(
         _mm512_castps_si512(zero_vec), not_nan_mask, 0xFFFFFFFF);

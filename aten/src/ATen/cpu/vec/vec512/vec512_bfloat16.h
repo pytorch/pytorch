@@ -449,7 +449,8 @@ class Vectorized16 {
     cvt_to_fp32<T>(values, lo, hi);
     auto angle_lambda = [](__m512 values) {
       const auto zero_vec = _mm512_set1_ps(0.f);
-      const auto nan_vec = _mm512_set1_ps(std::numeric_limits<float>::quiet_NaN());
+      const auto nan_vec =
+          _mm512_set1_ps(std::numeric_limits<float>::quiet_NaN());
       const auto not_nan_mask = _mm512_cmp_ps_mask(values, values, _CMP_EQ_OQ);
       const auto non_nan_mask_vec = _mm512_mask_set1_epi32(
           _mm512_castps_si512(zero_vec), not_nan_mask, 0xFFFFFFFF);
