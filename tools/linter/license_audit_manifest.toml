@@ -68,7 +68,8 @@ excluded = [
   'third_party/mslk/external/cutlass/python/LICENSE.txt',
   'third_party/mslk/external/googletest/LICENSE',
   'third_party/mslk/external/hipify_torch/LICENSE.txt',
-  # NCCL Python bindings only (NCCL itself is in license-files)
+  # NCCL (third_party/nccl/ is gitignored; present only when USE_SYSTEM_NCCL=0)
+  'third_party/nccl/LICENSE.txt',
   'third_party/nccl/bindings/nccl4py/LICENSE.txt',
   # docs / test / nested googletest trees
   'third_party/nlohmann/docs/mkdocs/docs/home/license.md',
@@ -142,7 +143,6 @@ paths = [
   'third_party/mslk/LICENSE',
   'third_party/mslk/external/cutlass/LICENSE.txt',
   'third_party/mslk/mslk/attention/flash_attn/LICENSE',
-  'third_party/nccl/LICENSE.txt',
   'third_party/pocketfft/LICENSE.md',
   'third_party/protobuf/LICENSE',
   'third_party/pybind11/LICENSE',

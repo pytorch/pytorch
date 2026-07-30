@@ -295,9 +295,8 @@ requires-python = ">=3.10"
 # License info:
 #   - The main Pytorch project license is BSD-3-Clause.
 #   - Explicit license-files list; audit in test/test_license.py (issue #183434).
-#   - Some entries are build-config-specific (ROCm-only submodules, FetchContent
-#     deps such as nccl) and may be absent in a given checkout; packaging relies
-#     on the backend tolerating unmatched patterns until dynamic metadata lands.
+#   - third_party/nccl/ is gitignored and populated only when USE_SYSTEM_NCCL=0;
+#     its license is tracked in license_audit_manifest.toml excluded, not here.
 license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-2-Clause AND Zlib AND BSD-3-Clause AND BSL-1.0 AND MIT"
 license-files = [
     "LICENSE",
@@ -344,7 +343,6 @@ license-files = [
     "third_party/mslk/external/composable_kernel/LICENSE",
     "third_party/mslk/external/cutlass/LICENSE.txt",
     "third_party/mslk/mslk/attention/flash_attn/LICENSE",
-    "third_party/nccl/LICENSE.txt",
     "third_party/nlohmann/LICENSE.MIT",
     "third_party/onnx/LICENSE",
     "third_party/perfetto/LICENSE",
