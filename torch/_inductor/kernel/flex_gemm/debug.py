@@ -13,15 +13,6 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._logging import LazyString, trace_structured
 
-from .epilogue_nodes import (
-    NormalizedGetItem,
-    NormalizedPrepareSoftmax,
-    NormalizedReduction,
-    NormalizedSqueeze,
-    NormalizedUnsupportedReduction,
-    NormalizedView,
-)
-
 
 if TYPE_CHECKING:
     from torch._inductor import ir
@@ -152,30 +143,6 @@ def _format_geometry(geometry: Any) -> str:
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
-    """Render one normalized FX operation as compact dataflow."""
-    match normalized:
-        case NormalizedView(shape=shape):
-            operation = f"view(shape={shape})"
-        case NormalizedReduction(
-            dim=dim,
-            keepdim=keepdim,
-            reduction_type=reduction_type,
-        ):
-            operation = f"{reduction_type}(dim={dim}, keepdim={keepdim})"
-        case NormalizedPrepareSoftmax(dim=dim):
-            operation = f"prepare_softmax(dim={dim})"
-        case NormalizedSqueeze():
-            operation = "squeeze"
-        case NormalizedGetItem(index=index):
-            operation = f"getitem(index={index})"
-        case NormalizedUnsupportedReduction():
-            operation = f"unsupported_reduction({node.target})"
-        case _:
-            return repr(normalized)
-    return f"{normalized.source.name} -> {operation}"
-
-
 def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     """Render the semantic decisions a FlexGEMM developer acts on first."""
     outputs = analysis.outputs
@@ -202,19 +169,11 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
             consumers.append("main")
         if store is not None:
             consumers.append("returned")
-        normalized = analysis.local_reduce.graph.normalized_nodes.get(
-            local_reduce.match.value_node
-        )
-        dataflow = (
-            str(local_reduce.match.value_node.target)
-            if normalized is None
-            else _format_normalized_dataflow(local_reduce.match.value_node, normalized)
-        )
         lines.extend(
             (
                 "local_reduction:",
                 f"  value: {local_reduce.match.value_node.name}",
-                f"  dataflow: {dataflow}",
+                f"  operation: {local_reduce.match.value_node.target}",
                 f"  geometry: {_format_geometry(local_reduce.match.geometry)}",
                 f"  consumers: {' + '.join(consumers)}",
             )
@@ -239,10 +198,9 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
 def format_flex_gemm_analysis_details(
     analysis: "FlexGemmEpilogueAnalysis",
 ) -> str:
-    """Render normalized nodes and recognizer records for deep debugging."""
+    """Render recognizer records for deep debugging."""
     lines: list[str] = []
     for label, values in (
-        ("normalized_nodes", analysis.local_reduce.graph.normalized_nodes),
         ("grouped_tensors", analysis.local_reduce.grouped_tensors),
         ("local_reduce_matches", analysis.local_reduce.matches),
     ):
