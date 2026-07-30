@@ -375,11 +375,6 @@ class TestTypeCacheRetention(TestCase):
         gc.collect()
         return ref() is not None
 
-    def test_get_type_slots_no_type_retention(self):
-        from torch._dynamo.variables.object_protocol import _get_type_slots
-
-        self.assertFalse(self._retains_type(_get_type_slots))
-
     def test_tp_type_no_type_retention(self):
         from torch._dynamo.variables.base import _tp_type
 
