@@ -299,6 +299,10 @@ struct C10_API ExtraMeta {
   // fake_tensor_mode_->tensor_to_constant_. Deliberately NOT copied: a cloned
   // ExtraMeta belongs to a different (unregistered) fake tensor.
   bool is_fake_constant_ = false;
+  // the constant's storage (or nullptr), recorded so remove_constant can prune
+  // this tensor's weak entry from fake_tensor_mode_->constant_storage_mapping_
+  // on destruction. Deliberately NOT copied (see is_fake_constant_).
+  c10::StorageImpl* constant_storage_ = nullptr;
 
   ExtraMeta() = default;
   // erases this fake tensor's entry from fake_tensor_mode_ so it never outlives
@@ -1503,8 +1507,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // the fake device recorded for this tensor, or nullopt if none
   std::optional<c10::Device> fake_device() const {
-    if (!extra_meta_)
+    if (!extra_meta_) {
       return std::nullopt;
+    }
     return extra_meta_->fake_device_;
   }
 

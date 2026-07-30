@@ -1050,6 +1050,39 @@ std::function<py::object(py::object)> make_fake_device_stamp(
   };
 }
 
+// Python dispatch keys that op-impl / fast-op-impl callbacks must run beneath so
+// their own tensor ops don't re-enter the Python dispatcher. Named so the two
+// call sites can't drift.
+constexpr c10::DispatchKeySet kFakeCallbackExcludeKeys =
+    c10::DispatchKeySet(c10::DispatchKey::Python) |
+    c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot);
+
+// Apply `convert` to each returned tensor (tuple/list/single). Lists are mutated
+// in place (e.g. the _foreach_* ops hand back raw meta tensors to stamp).
+py::object apply_output_convert(
+    py::object result,
+    const std::function<py::object(py::object)>& convert) {
+  if (!convert) {
+    return result;
+  }
+  if (py::isinstance<py::tuple>(result)) {
+    py::tuple tup = result.cast<py::tuple>();
+    py::tuple converted(tup.size());
+    for (size_t i = 0; i < tup.size(); i++) {
+      converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
+    }
+    return converted;
+  }
+  if (py::isinstance<py::list>(result)) {
+    py::list lst = result.cast<py::list>();
+    for (size_t i = 0; i < lst.size(); i++) {
+      lst[i] = convert(py::reinterpret_borrow<py::object>(lst[i]));
+    }
+    return result;
+  }
+  return convert(std::move(result));
+}
+
 // Runs a Python fake callback over the op's stack args; returns false and
 // restores the stack if it returns NotImplemented, else pushes the results.
 bool run_fake_python_callback(
@@ -1076,26 +1109,7 @@ bool run_fake_python_callback(
   if (result.is(py::handle(Py_NotImplemented))) {
     return false;
   }
-  if (convert) {
-    if (py::isinstance<py::tuple>(result)) {
-      py::tuple tup = result.cast<py::tuple>();
-      py::tuple converted(tup.size());
-      for (size_t i = 0; i < tup.size(); i++) {
-        converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
-      }
-      result = std::move(converted);
-    } else if (py::isinstance<py::list>(result)) {
-      // List returns (e.g. the _foreach_* ops, whose impl hands back the raw
-      // meta tensors for the C++ mode to stamp) need each element converted.
-      // Lists are mutable, so convert in place.
-      py::list lst = result.cast<py::list>();
-      for (size_t i = 0; i < lst.size(); i++) {
-        lst[i] = convert(py::reinterpret_borrow<py::object>(lst[i]));
-      }
-    } else {
-      result = convert(std::move(result));
-    }
-  }
+  result = apply_output_convert(std::move(result), convert);
   committed = true;
   pushPyOutToStack(op, stack, std::move(result), label);
   return true;
@@ -1166,6 +1180,23 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
   auto stamp =
       make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/true);
 
+  // Pop and parse the op's args once, then try each matching op_impl against the
+  // same parsed args. A rejected (NotImplemented) impl leaves the parsed args
+  // untouched, so we avoid re-popping/re-parsing the stack per check
+  // (O(checks x args) on the hot dispatch path). Args are restored -- including
+  // if a callback raises -- unless one impl commits its results.
+  const auto& schema = op.schema();
+  auto arguments = torch::jit::pop(*stack, schema.arguments().size());
+  bool committed = false;
+  auto restore_args = c10::make_scope_exit([&]() {
+    if (!committed) {
+      for (auto& arg : arguments) {
+        stack->push_back(std::move(arg));
+      }
+    }
+  });
+  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+
   for (auto item : op_impl_checks) {
     py::tuple check_impl = item.cast<py::tuple>();
     py::object run_impl_check = check_impl[0];
@@ -1173,20 +1204,19 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     if (!run_impl_check(py_op).cast<bool>()) {
       continue;
     }
-    if (run_fake_python_callback(
-            op,
-            stack,
-            [&](py::object args, py::dict kwargs) {
-              c10::impl::ExcludeDispatchKeyGuard guard(
-                  c10::DispatchKeySet(c10::DispatchKey::Python) |
-                  c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
-              return op_impl(active.py_fake_mode, py_op, *args, **kwargs);
-            },
-            stamp,
-            "op_impl")) {
-      return true;
+    py::object result;
+    {
+      c10::impl::ExcludeDispatchKeyGuard guard(kFakeCallbackExcludeKeys);
+      result = op_impl(
+          active.py_fake_mode, py_op, *args_kwargs.first, **args_kwargs.second);
     }
-    // op_impl returned NotImplemented; try the next check.
+    if (result.is(py::handle(Py_NotImplemented))) {
+      continue; // try the next check
+    }
+    result = apply_output_convert(std::move(result), stamp);
+    committed = true;
+    pushPyOutToStack(op, stack, std::move(result), "op_impl");
+    return true;
   }
   return false;
 }
@@ -1212,9 +1242,7 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
       op,
       stack,
       [&](py::object args, py::dict kwargs) {
-        c10::impl::ExcludeDispatchKeyGuard guard(
-            c10::DispatchKeySet(c10::DispatchKey::Python) |
-            c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
+        c10::impl::ExcludeDispatchKeyGuard guard(kFakeCallbackExcludeKeys);
         return fast_impl(active.py_fake_mode, *args, **kwargs);
       },
       make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/false),
@@ -1248,15 +1276,9 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
   py::gil_scoped_acquire gil;
   at::Tensor real(real_impl);
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "No C++ FakeTensorMode is active");
+  auto active = get_active_fake_mode();
   auto converter = py::reinterpret_borrow<py::object>(
-      mode->fake_tensor_converter_->ptr(getPyInterpreter()));
-  TORCH_CHECK(
-      mode->fake_mode_pyobj_ != nullptr,
-      "CppFakeTensorMode must be set on mode");
-  auto py_fake_mode = py::reinterpret_borrow<py::object>(
-      mode->fake_mode_pyobj_->ptr(getPyInterpreter()));
+      active.mode->fake_tensor_converter_->ptr(getPyInterpreter()));
 
   at::Tensor fake_tensor;
   {
@@ -1264,7 +1286,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     // fake fallback.
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
-    auto obj = converter.attr("from_real_tensor")(py_fake_mode, real);
+    auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
     fake_tensor = py::cast<at::Tensor>(std::move(obj));
   }
   return fake_tensor.unsafeReleaseIntrusivePtr();
@@ -1277,14 +1299,8 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   if (!override_val.is_none()) {
     return override_val.cast<bool>();
   }
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  TORCH_CHECK(
-      mode->fake_mode_pyobj_ != nullptr,
-      "CppFakeTensorMode must be set on mode");
-  py::object py_fake_mode = py::reinterpret_borrow<py::object>(
-      mode->fake_mode_pyobj_->ptr(getPyInterpreter()));
-  return py_fake_mode.attr("allow_non_fake_inputs").cast<bool>();
+  auto active = get_active_fake_mode();
+  return active.py_fake_mode.attr("allow_non_fake_inputs").cast<bool>();
 }
 
 PyInterpreterHolder self_interpreter;

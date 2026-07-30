@@ -1071,12 +1071,18 @@ void FakeTensorMode::set_constant(
     c10::intrusive_ptr<c10::TensorImpl> constant,
     c10::StorageImpl* constant_storage) {
   std::lock_guard<std::mutex> lock(constant_mutex_);
-  if (constant_storage) {
-    constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
-  }
   // a registered fake tensor always has ExtraMeta (set by set_fake_device)
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  // The cleanup contract requires this fake to belong to this mode: ~ExtraMeta
+  // calls extra_meta->fake_tensor_mode_->remove_constant(extra_meta), so an
+  // entry registered here against a different mode would leak / dangle.
+  TORCH_INTERNAL_ASSERT(extra_meta->fake_tensor_mode_.get() == this);
+  if (constant_storage) {
+    constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
+  }
+  // Back-pointer so remove_constant can prune this tensor's weak alias entry.
+  extra_meta->constant_storage_ = constant_storage;
   extra_meta->is_fake_constant_ = true;
   tensor_to_constant_[extra_meta] = std::move(constant);
 }
@@ -1085,11 +1091,13 @@ c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
     c10::TensorImpl* fake_impl) const {
   std::lock_guard<std::mutex> lock(constant_mutex_);
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
-  if (extra_meta == nullptr)
+  if (extra_meta == nullptr) {
     return nullptr;
+  }
   auto it = tensor_to_constant_.find(extra_meta);
-  if (it == tensor_to_constant_.end())
+  if (it == tensor_to_constant_.end()) {
     return nullptr;
+  }
   return it->second;
 }
 
@@ -1097,8 +1105,9 @@ void FakeTensorMode::invalidate_constant_aliases(
     c10::StorageImpl* storage_impl) {
   std::lock_guard<std::mutex> lock(constant_mutex_);
   auto it = constant_storage_mapping_.find(storage_impl);
-  if (it == constant_storage_mapping_.end())
+  if (it == constant_storage_mapping_.end()) {
     return;
+  }
   for (auto& weak_ref : it->second) {
     auto impl = weak_ref.lock();
     if (impl) {
@@ -1116,6 +1125,34 @@ void FakeTensorMode::invalidate_constant_aliases(
 void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
   std::lock_guard<std::mutex> lock(constant_mutex_);
   tensor_to_constant_.erase(extra_meta);
+  // Also drop this (now-dead) tensor's weak entry from the storage map, pruning
+  // any other expired aliases while we're here. Without this the vector grows
+  // unbounded as constants churn over one storage, and each dead weak ref pins a
+  // weakcount on a destroyed TensorImpl until the storage is invalidated. The
+  // storage pointer is used only as a map key (never dereferenced), so it is
+  // safe even if the storage itself has already been freed.
+  auto* storage = extra_meta->constant_storage_;
+  if (storage == nullptr) {
+    return;
+  }
+  auto it = constant_storage_mapping_.find(storage);
+  if (it == constant_storage_mapping_.end()) {
+    return;
+  }
+  auto& aliases = it->second;
+  size_t kept = 0;
+  for (size_t i = 0; i < aliases.size(); ++i) {
+    if (!aliases[i].expired()) {
+      if (kept != i) {
+        aliases[kept] = std::move(aliases[i]);
+      }
+      ++kept;
+    }
+  }
+  aliases.resize(kept);
+  if (aliases.empty()) {
+    constant_storage_mapping_.erase(it);
+  }
 }
 
 ExtraMeta::~ExtraMeta() {
