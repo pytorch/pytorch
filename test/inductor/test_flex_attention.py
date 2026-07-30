@@ -653,7 +653,6 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
     def test_flex_tdm_gate_preserves_dynamic_sequence_lengths(self):
         from torch._inductor.utils import use_flex_tdm_descriptor
         from torch._inductor.virtualized import V
-        from torch.utils._sympy.symbol import make_symbol, SymT
 
         def make_qkv(name, seq_len):
             qkv = mock.Mock()
@@ -675,15 +674,8 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         query = make_qkv("query", q_len)
         key = make_qkv("key", kv_len)
         value = make_qkv("value", kv_len)
-        precomputed_stride = make_symbol(
-            SymT.PRECOMPUTED_SIZE, 0, integer=True, positive=True
-        )
-        query.get_stride.return_value[1] = precomputed_stride
 
         sizevars = mock.Mock()
-        sizevars.remove_precomputed_replacements.side_effect = (
-            lambda expr: expr.xreplace({precomputed_stride: 64 * q_len})
-        )
         sizevars.statically_known_true.return_value = True
         sizevars.statically_known_equals.side_effect = lambda expr, val: expr == val
         sizevars.statically_known_multiple_of.side_effect = (
@@ -700,7 +692,6 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         sizevars.guard_int.assert_not_called()
         sizevars.guard_int_seq.assert_not_called()
         sizevars.guard_or_false.assert_not_called()
-        sizevars.remove_precomputed_replacements.assert_any_call(2 * precomputed_stride)
 
     def test_flex_templates_gate_descriptors_on_tma_or_tdm(self):
         from torch._inductor.kernel.flex.common import load_flex_template

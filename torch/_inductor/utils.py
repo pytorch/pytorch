@@ -2306,24 +2306,12 @@ def use_flex_tdm_descriptor(
         offset = mat.get_layout().offset
         itemsize = mat.get_dtype().itemsize
 
-        def restore_precomputed(expr: sympy.Expr | int) -> sympy.Expr | int:
-            # Precomputed symbols hide factors such as 128 * Q_LEN that the
-            # symbolic divisibility check needs. Restore the equivalent original
-            # expression so alignment remains provable without adding guards.
-            if isinstance(expr, sympy.Expr):
-                return V.graph.sizevars.remove_precomputed_replacements(expr)
-            return expr
-
         def aligned(expr: sympy.Expr | int, alignment: int) -> bool:
-            return V.graph.sizevars.statically_known_multiple_of(
-                restore_precomputed(expr), alignment
-            )
+            return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
 
         # TMA_ALIGNMENT is the existing name for Triton's shared 16-byte tensor
         # descriptor contract; AMD TDM descriptors have the same requirement.
-        if not V.graph.sizevars.statically_known_equals(
-            restore_precomputed(strides[-1]), 1
-        ):
+        if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
             return reject("innermost stride is not statically known to be one")
         if not aligned(offset * itemsize, TMA_ALIGNMENT):
             return reject(f"offset is not {TMA_ALIGNMENT}-byte aligned")
