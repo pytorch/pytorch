@@ -10,7 +10,9 @@ from unittest.mock import patch
 import torch
 import torch.hub as hub
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_SANDCASTLE,
+    parametrize,
     retry,
     run_tests,
     skipIfTorchDynamo,
@@ -425,6 +427,49 @@ class TestHub(TestCase):
                     hub._safe_extract_zip(cached_zipfile, hub_dir)
 
                 self.assertIn("directory traversal", str(cm.exception))
+
+
+class TestHubHashValidation(TestCase):
+    def _load_mocked(self, filename, **kwargs):
+        with tempfile.TemporaryDirectory() as model_dir:
+            with (
+                patch("torch.hub.download_url_to_file") as mocked_download,
+                patch("torch.load", return_value={}),
+            ):
+                hub.load_state_dict_from_url(
+                    f"https://example.com/{filename}", model_dir=model_dir, **kwargs
+                )
+            return mocked_download
+
+    @parametrize("filename", ["weights.pth", "weights-.pth", "weights-0123456.pth"])
+    def test_check_hash_rejects_missing_or_short_prefix(self, filename):
+        with tempfile.TemporaryDirectory() as model_dir:
+            with patch("torch.hub.download_url_to_file") as mocked_download:
+                with self.assertRaisesRegex(ValueError, "filename-<sha256>"):
+                    hub.load_state_dict_from_url(
+                        f"https://example.com/{filename}",
+                        model_dir=model_dir,
+                        check_hash=True,
+                    )
+                mocked_download.assert_not_called()
+
+    @parametrize(
+        "filename,expected_prefix",
+        [
+            ("resnet18-f37072fd.pth", "f37072fd"),
+            ("my-model-abcd1234ef.pth", "abcd1234ef"),
+        ],
+    )
+    def test_check_hash_accepts_valid_prefix(self, filename, expected_prefix):
+        mocked_download = self._load_mocked(filename, check_hash=True)
+        self.assertEqual(mocked_download.call_args.args[2], expected_prefix)
+
+    def test_no_check_hash_allows_hashless_filename(self):
+        mocked_download = self._load_mocked("weights.pth", check_hash=False)
+        self.assertIsNone(mocked_download.call_args.args[2])
+
+
+instantiate_parametrized_tests(TestHubHashValidation)
 
 
 if __name__ == "__main__":
