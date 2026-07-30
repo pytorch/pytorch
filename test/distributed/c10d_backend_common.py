@@ -44,29 +44,19 @@ class BackendConfig:
     supports_bitwise_reductions: bool = False
     supports_cuda_graph_barrier: bool = False
     supports_dropped_p2p_work: bool = False
-    supports_collectives_timing: bool = False
-    supports_work_sequence_number: bool = False
-    supports_gather_single: bool = False
+    supports_sequence_numbers: bool = True
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
     complex_dtypes: tuple[torch.dtype, ...] = COMPLEX_DTYPES
 
 
 C10D_BACKENDS = (
-    BackendConfig(
-        "gloo",
-        "cpu",
-        supports_bitwise_reductions=True,
-        supports_work_sequence_number=True,
-    ),
+    BackendConfig("gloo", "cpu", supports_bitwise_reductions=True),
     BackendConfig(
         "nccl-legacy",
         "cuda",
         supports_coalescing=True,
         supports_dropped_p2p_work=True,
-        supports_collectives_timing=True,
-        supports_work_sequence_number=True,
-        supports_gather_single=True,
         float8_dtypes=FLOAT8_DTYPES,
     ),
     BackendConfig(
@@ -75,9 +65,18 @@ C10D_BACKENDS = (
         supports_coalescing=True,
         supports_cuda_graph_barrier=True,
         supports_dropped_p2p_work=True,
-        supports_collectives_timing=True,
-        supports_work_sequence_number=True,
-        supports_gather_single=True,
+        float8_dtypes=FLOAT8_DTYPES,
+    ),
+    # nccl-lazy wraps a primary ProcessGroupNCCL (all collectives delegate to
+    # it) plus lazily-built per-peer P2P comms, so it matches nccl2's
+    # capabilities except that it does not implement sequence numbers.
+    BackendConfig(
+        "nccl-lazy",
+        "cuda",
+        supports_coalescing=True,
+        supports_cuda_graph_barrier=True,
+        supports_dropped_p2p_work=True,
+        supports_sequence_numbers=False,
         float8_dtypes=FLOAT8_DTYPES,
     ),
 )
@@ -139,9 +138,7 @@ def instantiate_backend_tests(namespace, suite_name, base_class, backends):
                 "supports_bitwise_reductions": backend.supports_bitwise_reductions,
                 "supports_cuda_graph_barrier": backend.supports_cuda_graph_barrier,
                 "supports_dropped_p2p_work": backend.supports_dropped_p2p_work,
-                "supports_collectives_timing": backend.supports_collectives_timing,
-                "supports_work_sequence_number": backend.supports_work_sequence_number,
-                "supports_gather_single": backend.supports_gather_single,
+                "supports_sequence_numbers": backend.supports_sequence_numbers,
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "complex_dtypes": backend.complex_dtypes,
