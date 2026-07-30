@@ -280,9 +280,12 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         # tensor with the wrong dtype
         with self.assertRaisesRegex(RuntimeError, "data must have dtype uint64"):
             random.fold_in(key, torch.tensor(7, dtype=torch.int64, device=device))
-        # tensor with more than one value
-        with self.assertRaisesRegex(RuntimeError, "data must be a single value"):
-            random.fold_in(key, torch.tensor([1, 2], dtype=torch.uint64, device=device))
+        # tensor data whose shape does not broadcast with the key batch
+        keys = random.split(key, 2)
+        with self.assertRaisesRegex(RuntimeError, "must match the size"):
+            random.fold_in(
+                keys, torch.tensor([1, 2, 3], dtype=torch.uint64, device=device)
+            )
 
     @onlyAccelerator
     def test_error_data_wrong_device(self, device):
@@ -311,12 +314,55 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         self.assertEqual(random.fold_in(key, scalar), expected)
         self.assertEqual(random.fold_in(key, one_d), expected)
 
+    def test_tensor_data_broadcasts(self, device):
+        base_key = random.key(42, device=device)
+        data = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.uint64, device=device)
+        result = random.fold_in(base_key, data)
+        self.assertEqual(result.shape, (2, 3, 2))
+        self.assertEqual(result.stride(-1), 1)
+        for i in range(2):
+            for j in range(3):
+                self.assertEqual(result[i, j], random.fold_in(base_key, data[i, j]))
+
+        keys = random.split(base_key, 2).reshape(2, 1, 2)
+        row_data = data[:1]
+        result = random.fold_in(keys, row_data)
+        self.assertEqual(result.shape, (2, 3, 2))
+        for i in range(2):
+            for j in range(3):
+                self.assertEqual(
+                    result[i, j], random.fold_in(keys[i, 0], row_data[0, j])
+                )
+
+        keys = random.split(base_key, 6).reshape(2, 3, 2).transpose(0, 1)
+        data = data.transpose(0, 1)
+        self.assertFalse(keys.is_contiguous())
+        self.assertFalse(data.is_contiguous())
+        result = random.fold_in(keys, data)
+        for i in range(3):
+            for j in range(2):
+                self.assertEqual(result[i, j], random.fold_in(keys[i, j], data[i, j]))
+
+    def test_tensor_data_empty(self, device):
+        key = random.key(42, device=device)
+        data = torch.empty((0, 3), dtype=torch.uint64, device=device)
+        self.assertEqual(random.fold_in(key, data).shape, (0, 3, 2))
+
+    def test_tensor_data_meta(self, device):
+        key = torch.empty((3, 1, 2), dtype=torch.uint64, device="meta")
+        data = torch.empty((1, 4), dtype=torch.uint64, device="meta")
+        self.assertEqual(random.fold_in(key, data).shape, (3, 4, 2))
+
     @onlyCUDA
     def test_tensor_data_cuda_graph(self, device):
         # A tensor data is not baked into the graph: mutating it and replaying
         # produces the result for the new value.
         key = random.key(42, device=device)
-        data = torch.zeros((), dtype=torch.uint64, device=device)
+        data = torch.zeros((2, 3), dtype=torch.uint64, device=device)
+        replay_values = (
+            torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.uint64, device=device),
+            torch.tensor([[9, 8, 7], [6, 5, 4]], dtype=torch.uint64, device=device),
+        )
 
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
@@ -329,8 +375,8 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         with torch.cuda.graph(g):
             out = random.fold_in(key, data)
 
-        for value in (5, 99):
-            data.fill_(value)
+        for value in replay_values:
+            data.copy_(value)
             g.replay()
             torch.cuda.synchronize()
             self.assertEqual(out, random.fold_in(key, value))
@@ -631,7 +677,374 @@ class TestStatelessRNGDistribution(TestCase):
         )
 
 
+class TestStatelessRNGLogicalShards(TestCase):
+    def _dense_reference(self, key, shape, dtype, distribution):
+        indices = torch.arange(
+            torch.Size(shape).numel(), dtype=torch.int64, device=key.device
+        ).reshape(shape)
+        element_keys = random.fold_in(key, indices.to(torch.uint64))
+        if distribution == "normal":
+            return random.normal(element_keys, shape, mean=1.25, std=0.75, dtype=dtype)
+        return random.uniform(element_keys, shape, low=-2.0, high=3.0, dtype=dtype)
+
+    def _fill(self, key, result, distribution, **metadata):
+        if distribution == "normal":
+            return random.normal_shards_(key, result, mean=1.25, std=0.75, **metadata)
+        return random.uniform_shards_(key, result, low=-2.0, high=3.0, **metadata)
+
+    @parametrize("distribution", ["normal", "uniform"])
+    @dtypes(*all_floating_dtypes)
+    def test_layouts_match_dense(self, device, dtype, distribution):
+        key = random.key(123, device=device)
+        global_shape = (5, 7)
+        expected = self._dense_reference(key, global_shape, dtype, distribution)
+
+        full = torch.empty(global_shape, dtype=dtype, device=device)
+        self._fill(
+            key,
+            full,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=(global_shape,),
+        )
+        self.assertEqual(full, expected, atol=0, rtol=0)
+
+        reconstructed = torch.empty_like(expected)
+        for start, end in ((0, 2), (2, 5)):
+            local = torch.empty((end - start, 7), dtype=dtype, device=device)
+            self._fill(
+                key,
+                local,
+                distribution,
+                global_shape=global_shape,
+                global_offsets=((start, 0),),
+                local_offsets=((0, 0),),
+                local_sizes=((end - start, 7),),
+            )
+            reconstructed[start:end] = local
+        self.assertEqual(reconstructed, expected, atol=0, rtol=0)
+
+        reconstructed = torch.empty_like(expected)
+        for start, end in ((0, 3), (3, 7)):
+            local = torch.empty((5, end - start), dtype=dtype, device=device)
+            self._fill(
+                key,
+                local,
+                distribution,
+                global_shape=global_shape,
+                global_offsets=((0, start),),
+                local_offsets=((0, 0),),
+                local_sizes=((5, end - start),),
+            )
+            reconstructed[:, start:end] = local
+        self.assertEqual(reconstructed, expected, atol=0, rtol=0)
+
+        sentinel = 123.0
+        padded = torch.full((8, 10), sentinel, dtype=dtype, device=device)
+        self._fill(
+            key,
+            padded,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((0, 0), (2, 0)),
+            local_offsets=((1, 2), (5, 2)),
+            local_sizes=((2, 7), (3, 7)),
+        )
+        expected_padded = torch.full_like(padded, sentinel)
+        expected_padded[1:3, 2:9] = expected[:2]
+        expected_padded[5:8, 2:9] = expected[2:]
+        self.assertEqual(padded, expected_padded, atol=0, rtol=0)
+
+        backing = torch.full((5, 14), sentinel, dtype=dtype, device=device)
+        noncontiguous = backing[:, ::2]
+        self.assertFalse(noncontiguous.is_contiguous())
+        self._fill(
+            key,
+            noncontiguous,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=(global_shape,),
+        )
+        self.assertEqual(noncontiguous, expected, atol=0, rtol=0)
+        self.assertEqual(backing[:, 1::2], torch.full_like(backing[:, 1::2], sentinel))
+
+        empty = torch.empty((0, 7), dtype=dtype, device=device)
+        self._fill(
+            key,
+            empty,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((5, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((0, 7),),
+        )
+        self.assertEqual(empty.shape, (0, 7))
+
+    def test_partition_invariance_with_empty_owners(self, device):
+        key = random.key(321, device=device)
+        global_shape = (3, 4)
+        expected = self._dense_reference(key, global_shape, torch.float32, "normal")
+        reconstructed = torch.empty_like(expected)
+
+        for rank in range(5):
+            owns_row = rank < global_shape[0]
+            local_rows = 1 if owns_row else 0
+            global_row = rank if owns_row else global_shape[0]
+            local = torch.empty((local_rows, 4), device=device)
+            random.normal_shards_(
+                key,
+                local,
+                global_shape=global_shape,
+                global_offsets=((global_row, 0),),
+                local_offsets=((0, 0),),
+                local_sizes=((local_rows, 4),),
+                mean=1.25,
+                std=0.75,
+            )
+            if owns_row:
+                reconstructed[rank] = local[0]
+
+        self.assertEqual(reconstructed, expected, atol=0, rtol=0)
+
+    def test_metadata_validation_precedes_writes(self, device):
+        key = random.key(123, device=device)
+        sentinel = 17.0
+
+        cases = (
+            (
+                "same length",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((0, 0),),
+                    local_offsets=(),
+                    local_sizes=((1, 2),),
+                ),
+            ),
+            (
+                "must have 2 dimensions",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((0,),),
+                    local_offsets=((0, 0),),
+                    local_sizes=((1, 2),),
+                ),
+            ),
+            (
+                "outside global_shape",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((0, 0), (2, 0)),
+                    local_offsets=((0, 0), (1, 0)),
+                    local_sizes=((1, 2), (1, 2)),
+                ),
+            ),
+            (
+                "global rectangles",
+                dict(
+                    global_shape=(3, 2),
+                    global_offsets=((0, 0), (1, 0)),
+                    local_offsets=((0, 0), (2, 0)),
+                    local_sizes=((2, 2), (2, 2)),
+                ),
+            ),
+            (
+                "local rectangles",
+                dict(
+                    global_shape=(4, 2),
+                    global_offsets=((0, 0), (2, 0)),
+                    local_offsets=((0, 0), (0, 0)),
+                    local_sizes=((2, 2), (2, 2)),
+                ),
+            ),
+            (
+                "int64 elements",
+                dict(
+                    global_shape=(1 << 62, 4),
+                    global_offsets=(),
+                    local_offsets=(),
+                    local_sizes=(),
+                ),
+            ),
+            (
+                "outside global_shape",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((3, 0),),
+                    local_offsets=((0, 0),),
+                    local_sizes=((0, 2),),
+                ),
+            ),
+        )
+
+        for error, metadata in cases:
+            result = torch.full((4, 2), sentinel, device=device)
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                random.normal_shards_(key, result, **metadata)
+            self.assertEqual(result, torch.full_like(result, sentinel))
+
+        overlapping = torch.zeros((1, 2), device=device).expand(2, 2)
+        with self.assertRaisesRegex(ValueError, "internal overlap"):
+            random.normal_shards_(
+                key,
+                overlapping,
+                global_shape=(2, 2),
+                global_offsets=((0, 0),),
+                local_offsets=((0, 0),),
+                local_sizes=((2, 2),),
+            )
+
+    @parametrize("distribution", ["normal", "uniform"])
+    def test_parameter_validation_precedes_writes(self, device, distribution):
+        key = random.key(123, device=device)
+        metadata = dict(
+            global_shape=(2, 2),
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((2, 2),),
+        )
+        invalid_params = (
+            ({"std": -1.0}, {"std": float("nan")})
+            if distribution == "normal"
+            else ({"low": 1.0, "high": -1.0}, {"low": float("nan")})
+        )
+
+        for params in invalid_params:
+            result = torch.full((2, 2), 17.0, device=device)
+            with self.assertRaisesRegex(ValueError, "expects"):
+                getattr(random, f"{distribution}_shards_")(
+                    key, result, **params, **metadata
+                )
+            self.assertEqual(result, torch.full_like(result, 17.0))
+
+    @onlyCUDA
+    def test_cuda_fused_path_is_stateless(self, device):
+        key = random.key(123, device=device)
+        result = torch.empty((3, 4), device=device)
+        state = torch.cuda.get_rng_state(device)
+
+        random.normal_shards_(
+            key,
+            result,
+            global_shape=(3, 4),
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((3, 4),),
+        )
+
+        self.assertEqual(torch.cuda.get_rng_state(device), state)
+
+    @onlyCUDA
+    def test_cuda_fused_path_graph_replay_reads_key(self, device):
+        key = random.key(123, device=device)
+        result = torch.empty((3, 4), device=device)
+        metadata = dict(
+            global_shape=(3, 4),
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((3, 4),),
+        )
+
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            for _ in range(3):
+                random.normal_shards_(key, result, mean=1.25, std=0.75, **metadata)
+        torch.cuda.current_stream().wait_stream(stream)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            random.normal_shards_(key, result, mean=1.25, std=0.75, **metadata)
+
+        for seed in (456, 789):
+            replay_key = random.key(seed, device=device)
+            key.copy_(replay_key)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(
+                result,
+                self._dense_reference(replay_key, (3, 4), torch.float32, "normal"),
+                atol=0,
+                rtol=0,
+            )
+
+    @onlyCUDA
+    def test_cuda_native_validation_precedes_writes(self, device):
+        key = random.key(123, device=device)
+        result = torch.full((2, 2), 17.0, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "outside global_shape"):
+            torch.ops.aten._philox_keyed_distribution_shards_(
+                result,
+                key,
+                (2, 2),
+                (0, 0, 2, 0),
+                (0, 0, 1, 0),
+                (1, 2, 1, 2),
+                2,
+                0,
+                (0.0, 1.0),
+            )
+        self.assertEqual(result, torch.full_like(result, 17.0))
+
+    def test_native_meta(self, device):
+        key = torch.empty((2,), dtype=torch.uint64, device="meta")
+        result = torch.empty((2, 3), device="meta")
+
+        output = torch.ops.aten._philox_keyed_distribution_shards_(
+            result,
+            key,
+            (2, 3),
+            (0, 0),
+            (0, 0),
+            (2, 3),
+            1,
+            0,
+            (0.0, 1.0),
+        )
+        self.assertEqual(output.shape, result.shape)
+
+        with self.assertRaisesRegex(RuntimeError, "outside global_shape"):
+            torch.ops.aten._philox_keyed_distribution_shards_(
+                result,
+                key,
+                (2, 3),
+                (2, 0),
+                (0, 0),
+                (1, 3),
+                1,
+                0,
+                (0.0, 1.0),
+            )
+
+
 class TestStatelessRNGCompile(TestCase):
+    @onlyCUDA
+    def test_keyed_shards_fullgraph(self, device):
+        key = random.key(42, device=device)
+        sentinel = 17.0
+
+        def fill(key, result):
+            result = result.clone()
+            return torch.ops.aten._philox_keyed_distribution_shards_(
+                result,
+                key,
+                (3, 4),
+                (1, 0),
+                (1, 2),
+                (2, 4),
+                1,
+                0,
+                (1.25, 0.75),
+            )
+
+        result = torch.full((4, 8), sentinel, device=device)
+        compiled = torch.compile(fill, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled(key, result), fill(key, result), atol=0, rtol=0)
+
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -651,9 +1064,9 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(f(key), random.fold_in(key, 7))
 
     def test_fold_in_tensor_fullgraph(self, device):
-        key = random.key(42, device=device)
-        # data as a graph input (not a constant) exercises the Tensor overload.
-        data = torch.tensor(7, dtype=torch.uint64, device=device)
+        key = random.split(random.key(42, device=device), 2).reshape(2, 1, 2)
+        # Tensor data as a graph input exercises broadcast shape inference.
+        data = torch.tensor([[1, 2, 3]], dtype=torch.uint64, device=device)
 
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(key, data):
@@ -767,6 +1180,9 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestStatelessRNGDistribution, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestStatelessRNGLogicalShards, globals(), only_for=("cpu", "cuda")
 )
 instantiate_device_type_tests(
     TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")

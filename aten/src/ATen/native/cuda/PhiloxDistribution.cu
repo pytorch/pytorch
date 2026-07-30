@@ -1,18 +1,25 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/TransformationHelper.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/StatelessPhilox4x32.cuh>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/PhiloxShardMetadata.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/core/TransformationHelper.h>
+#include <c10/util/irange.h>
+
+#include <algorithm>
 #include <type_traits>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_keyed_distribution_shards_native.h>
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
@@ -62,6 +69,57 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   ::sincos(TWO_PI * u2, &s, &c);
   return {radius * c, radius * s};
 }
+
+template <typename scalar_t>
+struct UniformSampler {
+  __device__ auto operator()(uint64_t seed, uint64_t offset) const {
+    uint4 r = philox_4x32(seed, offset);
+    if constexpr (std::is_same_v<scalar_t, double>) {
+      ulonglong2 packed;
+      packed.x = (static_cast<unsigned long long>(r.x) << 32) | r.y;
+      packed.y = (static_cast<unsigned long long>(r.z) << 32) | r.w;
+      return packed;
+    } else {
+      return r;
+    }
+  }
+};
+
+template <typename scalar_t>
+struct NormalSampler {
+  __device__ auto operator()(uint64_t seed, uint64_t offset) const {
+    if constexpr (std::is_same_v<scalar_t, double>) {
+      return box_muller_double(philox_4x32(seed, offset));
+    } else {
+      return box_muller_float(philox_4x32(seed, offset));
+    }
+  }
+};
+
+template <typename scalar_t>
+struct UniformTransform {
+  scalar_t low;
+  scalar_t high;
+
+  template <typename random_t>
+  __device__ scalar_t operator()(random_t random) const {
+    return static_cast<scalar_t>(
+        at::transformation::uniform_real(random, low, high));
+  }
+};
+
+template <typename scalar_t>
+struct NormalTransform {
+  using compute_t =
+      std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+
+  compute_t mean;
+  compute_t stddev;
+
+  __device__ scalar_t operator()(compute_t random) const {
+    return static_cast<scalar_t>(random * stddev + mean);
+  }
+};
 
 // Single-key kernel: one thread per chunk of elements, where each chunk
 // comes from a single Philox 4x32 call. Uses vectorized stores for full
@@ -255,37 +313,173 @@ void philox_distribution_kernel(
   }
 }
 
+enum class KeyedDistributionKind : int64_t {
+  Normal = 0,
+  Uniform = 1,
+};
+
+struct KeyedShardOffsets {
+  int64_t global;
+  int64_t local;
+};
+
+struct KeyedShardOffsetCalculator {
+  __device__ KeyedShardOffsets get(int64_t linear_index) const {
+    KeyedShardOffsets offsets{0, 0};
+    for (int dim = 0; dim < dims; ++dim) {
+      const int64_t coordinate = linear_index % sizes[dim];
+      linear_index /= sizes[dim];
+      offsets.global += coordinate * global_strides[dim];
+      offsets.local += coordinate * local_strides[dim];
+    }
+    return offsets;
+  }
+
+  int dims{0};
+  int64_t sizes[MAX_DIMS];
+  int64_t global_strides[MAX_DIMS];
+  int64_t local_strides[MAX_DIMS];
+};
+
+struct KeyedShardLaunch {
+  int64_t numel{0};
+  int64_t global_base{0};
+  int64_t local_base{0};
+  KeyedShardOffsetCalculator offset_calculator;
+};
+
+std::vector<KeyedShardLaunch> build_keyed_shard_launches(
+    const Tensor& self,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    const detail::ValidatedPhiloxShardMetadata& metadata,
+    const char* op_name) {
+  TORCH_CHECK(
+      self.dim() <= MAX_DIMS,
+      op_name,
+      ": tensors with more than ",
+      MAX_DIMS,
+      " dimensions are not supported");
+  if (metadata.global_numel == 0) {
+    return {};
+  }
+
+  const size_t ndim = global_shape.size();
+  std::vector<int64_t> global_strides(ndim);
+  int64_t stride = 1;
+  for (size_t dim = ndim; dim > 0; --dim) {
+    global_strides[dim - 1] = stride;
+    stride *= global_shape[dim - 1];
+  }
+
+  std::vector<KeyedShardLaunch> launches;
+  launches.reserve(static_cast<size_t>(chunk_count));
+  for (const auto chunk : c10::irange(static_cast<size_t>(chunk_count))) {
+    if (metadata.chunk_numels[chunk] == 0) {
+      continue;
+    }
+    KeyedShardLaunch launch;
+    launch.numel = metadata.chunk_numels[chunk];
+    launch.offset_calculator.dims = static_cast<int>(ndim);
+    for (const auto dim : c10::irange(ndim)) {
+      const size_t metadata_index = chunk * ndim + dim;
+      launch.global_base +=
+          global_offsets[metadata_index] * global_strides[dim];
+      launch.local_base += local_offsets[metadata_index] *
+          self.stride(static_cast<int64_t>(dim));
+
+      const size_t calculator_dim = ndim - 1 - dim;
+      launch.offset_calculator.sizes[calculator_dim] =
+          local_sizes[metadata_index];
+      launch.offset_calculator.global_strides[calculator_dim] =
+          global_strides[dim];
+      launch.offset_calculator.local_strides[calculator_dim] =
+          self.stride(static_cast<int64_t>(dim));
+    }
+    launches.push_back(launch);
+  }
+  return launches;
+}
+
+template <typename scalar_t, typename sample_t, typename transform_t>
+__global__ void philox_keyed_shard_kernel(
+    scalar_t* __restrict__ output,
+    const uint64_t* __restrict__ key,
+    KeyedShardLaunch launch,
+    sample_t sample_func,
+    transform_t transform_func) {
+  const uint64_t draw_seed = key[0];
+  const uint64_t draw_offset = key[1];
+  const int64_t thread_index =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t thread_stride =
+      static_cast<int64_t>(blockDim.x) * gridDim.x;
+
+  for (int64_t local_index = thread_index; local_index < launch.numel;
+       local_index += thread_stride) {
+    const auto offsets = launch.offset_calculator.get(local_index);
+    const int64_t global_index = launch.global_base + offsets.global;
+    const int64_t output_index = launch.local_base + offsets.local;
+
+    const uint4 folded = philox_4x32(
+        draw_seed, draw_offset + static_cast<uint64_t>(global_index));
+    const uint64_t element_seed = static_cast<uint64_t>(folded.x) |
+        (static_cast<uint64_t>(folded.y) << 32);
+    const uint64_t element_offset = static_cast<uint64_t>(folded.z) |
+        (static_cast<uint64_t>(folded.w) << 32);
+    const auto sample = sample_func(element_seed, element_offset);
+    output[output_index] = transform_func(sample.x);
+  }
+}
+
+template <typename scalar_t, typename sample_t, typename transform_t>
+void run_keyed_shard_kernels(
+    Tensor& self,
+    const Tensor& key,
+    ArrayRef<KeyedShardLaunch> launches,
+    const sample_t& sample_func,
+    const transform_t& transform_func) {
+  if (launches.empty()) {
+    return;
+  }
+
+  auto key_contiguous = key.contiguous();
+  constexpr int block_size = 256;
+  const int max_blocks =
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4;
+  auto* output = self.mutable_data_ptr<scalar_t>();
+  for (const auto& launch : launches) {
+    const int64_t required_blocks =
+        (launch.numel + block_size - 1) / block_size;
+    const int blocks = static_cast<int>(std::min<int64_t>(
+        required_blocks, static_cast<int64_t>(max_blocks)));
+    philox_keyed_shard_kernel<scalar_t>
+        <<<blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
+            output,
+            key_contiguous.const_data_ptr<uint64_t>(),
+            launch,
+            sample_func,
+            transform_func);
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 } // anonymous namespace
 
 Tensor& _philox_uniform_cuda_(
     Tensor& self, const Tensor& key, double low, double high) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
-    auto sample_func = []() {
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          uint4 r = philox_4x32(seed, offset);
-          ulonglong2 packed;
-          packed.x = (static_cast<unsigned long long>(r.x) << 32) | r.y;
-          packed.y = (static_cast<unsigned long long>(r.z) << 32) | r.w;
-          return packed;
-        };
-      } else {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          return philox_4x32(seed, offset);
-        };
-      }
-    }();
-
-    auto lo = static_cast<scalar_t>(low);
-    auto hi = static_cast<scalar_t>(high);
-    auto param_func = [lo, hi] __device__ (auto rand) {
-      return static_cast<scalar_t>(
-          at::transformation::uniform_real(rand, lo, hi));
-    };
-
     philox_distribution_kernel<scalar_t>(
-        "_philox_uniform_", self, key, sample_func, param_func);
+        "_philox_uniform_",
+        self,
+        key,
+        UniformSampler<scalar_t>{},
+        UniformTransform<scalar_t>{
+            static_cast<scalar_t>(low), static_cast<scalar_t>(high)});
   });
   return self;
 }
@@ -294,27 +488,129 @@ Tensor& _philox_normal_cuda_(
     Tensor& self, const Tensor& key, double mean, double stddev) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
-    using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
-    auto sample_func = []() {
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          return box_muller_double(philox_4x32(seed, offset));
-        };
-      } else {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          return box_muller_float(philox_4x32(seed, offset));
-        };
-      }
-    }();
-
-    auto mu = static_cast<compute_t>(mean);
-    auto sigma = static_cast<compute_t>(stddev);
-    auto param_func = [mu, sigma] __device__ (compute_t rand) {
-      return static_cast<scalar_t>(rand * sigma + mu);
-    };
-
+    using transform_t = NormalTransform<scalar_t>;
     philox_distribution_kernel<scalar_t>(
-        "_philox_normal_", self, key, sample_func, param_func);
+        "_philox_normal_",
+        self,
+        key,
+        NormalSampler<scalar_t>{},
+        transform_t{
+            static_cast<typename transform_t::compute_t>(mean),
+            static_cast<typename transform_t::compute_t>(stddev)});
+  });
+  return self;
+}
+
+Tensor& _philox_keyed_distribution_shards_cuda_(
+    Tensor& self,
+    const Tensor& key,
+    IntArrayRef global_shape,
+    IntArrayRef global_offsets,
+    IntArrayRef local_offsets,
+    IntArrayRef local_sizes,
+    int64_t chunk_count,
+    int64_t distribution,
+    ArrayRef<Scalar> params) {
+  constexpr const char* op_name = "_philox_keyed_distribution_shards_";
+  TORCH_CHECK(
+      self.is_floating_point(),
+      op_name,
+      ": self must be a floating point tensor, got ",
+      self.scalar_type());
+  TORCH_CHECK(
+      key.scalar_type() == kUInt64,
+      op_name,
+      ": key must have dtype uint64, got ",
+      key.scalar_type());
+  TORCH_CHECK(
+      key.dim() == 1 && key.size(0) == 2,
+      op_name,
+      ": key must have shape (2,), got ",
+      key.sizes());
+  TORCH_CHECK(
+      self.device() == key.device(),
+      op_name,
+      ": self and key must be on the same device, got ",
+      self.device(),
+      " and ",
+      key.device());
+  at::assert_no_overlap(self, key);
+
+  const auto distribution_kind =
+      static_cast<KeyedDistributionKind>(distribution);
+  TORCH_CHECK(
+      distribution_kind == KeyedDistributionKind::Normal ||
+          distribution_kind == KeyedDistributionKind::Uniform,
+      op_name,
+      ": unsupported distribution kind ",
+      distribution);
+  TORCH_CHECK(
+      params.size() == 2,
+      op_name,
+      ": distribution kind ",
+      distribution,
+      " expects 2 parameters, got ",
+      params.size());
+  TORCH_CHECK(
+      !params[0].isComplex() && !params[1].isComplex(),
+      op_name,
+      ": parameters must be real");
+  const double first_param = params[0].toDouble();
+  const double second_param = params[1].toDouble();
+  if (distribution_kind == KeyedDistributionKind::Normal) {
+    TORCH_CHECK(
+        second_param >= 0.0,
+        "normal expects std >= 0.0, but found std ",
+        second_param);
+  } else {
+    TORCH_CHECK(
+        first_param <= second_param,
+        "uniform expects low <= high, but found ",
+        first_param,
+        " > ",
+        second_param);
+  }
+
+  const auto metadata = detail::validate_philox_shard_metadata(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count,
+      op_name);
+  const auto launches = build_keyed_shard_launches(
+      self,
+      global_shape,
+      global_offsets,
+      local_offsets,
+      local_sizes,
+      chunk_count,
+      metadata,
+      op_name);
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), op_name, [&] {
+    if (distribution_kind == KeyedDistributionKind::Normal) {
+      using transform_t = NormalTransform<scalar_t>;
+      run_keyed_shard_kernels<scalar_t>(
+          self,
+          key,
+          launches,
+          NormalSampler<scalar_t>{},
+          transform_t{
+              static_cast<typename transform_t::compute_t>(first_param),
+              static_cast<typename transform_t::compute_t>(second_param)});
+    } else {
+      run_keyed_shard_kernels<scalar_t>(
+          self,
+          key,
+          launches,
+          UniformSampler<scalar_t>{},
+          UniformTransform<scalar_t>{
+              static_cast<scalar_t>(first_param),
+              static_cast<scalar_t>(second_param)});
+    }
   });
   return self;
 }
