@@ -35,7 +35,6 @@ from ...kernel.gemm_epilogue import (
     GemmReductionGeometry,
     GemmReductionPlan,
 )
-from ...kernel.gemm_epilogue_codegen import GemmEpilogueIRCodegen
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_ir,
     centered_mean_consumer_type_unrolled_ir,
@@ -53,6 +52,7 @@ from ...kernel.gemm_epilogue_ir import (
     sum_normalize_consumer_type_ir,
     variance_parameters_ir,
 )
+from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -2083,7 +2083,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                                 "dense NVGEMM providers require an EVT DAG"
                             )
                         reads, writes, var_renames, evt_code = (
-                            GemmEpilogueIRCodegen.from_buffers(
+                            LoopIRCuteDSLCodegen.from_buffers(
                                 original_buffer_name,
                                 evt_buffers,
                                 removed_buffers_with_gemm,
