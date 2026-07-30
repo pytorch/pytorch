@@ -319,7 +319,7 @@ def _check_method_arity(
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
-    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
+    # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
     qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
@@ -331,20 +331,57 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
+# CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
+# deliberately mirrors the low four so the mapping is near-identity.
+_METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
+
+
+@functools.cache
+def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
+    """Arity convention for `python_type.name`, read from its CPython
+    PyMethodDef.ml_flags. Falls back to VARARGS|KEYWORDS when python_type has no
+    such attribute or it carries no ml_flags (slot wrappers, pure-Python
+    functions)."""
+    import torch
+
+    default = MethodFlags.VARARGS | MethodFlags.KEYWORDS
+    fn = getattr(python_type, name, None)
+    ml = None if fn is None else torch._C._dynamo.eval_frame.get_method_ml_flags(fn)
+    if ml is None:
+        return default
+    flags = MethodFlags(0)
+    if ml & _METH_NOARGS:
+        flags |= MethodFlags.NOARGS
+    if ml & _METH_O:
+        flags |= MethodFlags.O
+    if ml & (_METH_VARARGS | _METH_FASTCALL):
+        flags |= MethodFlags.VARARGS
+    if ml & _METH_KEYWORDS:
+        flags |= MethodFlags.KEYWORDS
+    return flags or default
+
+
+def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
+    """Resolve the arity flags for method `name` from the VT's runtime
+    python_type()."""
+    return _flags_from_ml_flags(maybe_get_python_type(vt), name)
+
+
 @dataclasses.dataclass(slots=True)
 class Method:
     """Declarative entry in a VariableTracker's `tp_methods` table, analogous
-    to CPython's PyMethodDef. `flags` drives centralized arity checking.
+    to CPython's PyMethodDef.
 
     Handlers have signature `(self, tx, args, kwargs)` and return the result
     VariableTracker, or None to decline the call (the equivalent of the old
     `super().call_method` fall-through) so `call_method` continues to the
-    object-protocol dispatch below."""
+    object-protocol dispatch below. The method name is the tp_methods key this
+    entry is stored under; its arity convention is derived
+    on demand from that method's ml_flags (see _derive_method_flags)."""
 
     handler: Callable[..., VariableTracker | None]
-    flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
 
-    def invoke(
+    def __call__(
         self,
         vt: VariableTracker,
         tx: InstructionTranslatorBase,
@@ -352,7 +389,8 @@ class Method:
         args: Any,
         kwargs: Any,
     ) -> VariableTracker | None:
-        _check_method_arity(vt, tx, name, self.flags, args, kwargs)
+        flags = _derive_method_flags(vt, name)
+        _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
 
@@ -838,7 +876,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
         #
-        # Returns None when the type has no nb_bool, causing generic_bool to
+        # Returns None when the type has no nb_bool, causing generic_is_true to
         # fall through to length check, then truthy default.
         return None
 
@@ -1198,7 +1236,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        # vt_getitem handles dispatch and raises TypeError for non-subscriptable
+        # generic_getitem handles dispatch and raises TypeError for non-subscriptable
         # objects.  This base fallback fires for types with mp_subscript at the
         # C level but no Dynamo override yet.
         unimplemented(
@@ -1215,7 +1253,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
-        # Key has already been converted to int via nb_index_impl by vt_getitem.
+        # Key has already been converted to int via nb_index_impl by generic_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
             context=f"sq_item_impl {self} {key}",
@@ -1298,15 +1336,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # (tp_slot) dispatch below, mirroring the old super().call_method path.
         method = self.lookup_tp_method(name)
         if method is not None:
-            result = method.invoke(self, tx, name, args, kwargs)
+            result = method(self, tx, name, args, kwargs)
             if result is not None:
                 return result
 
         if name == "__getitem__":
             if len(args) == 1 and not kwargs:
-                from .object_protocol import vt_getitem
+                from .object_protocol import generic_getitem
 
-                return vt_getitem(tx, self, args[0])
+                return generic_getitem(tx, self, args[0])
             raise_args_mismatch(
                 tx,
                 name,
@@ -1336,9 +1374,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         elif name == "__len__" and not (args or kwargs):
-            from .object_protocol import generic_len
+            from .object_protocol import generic_size
 
-            return generic_len(tx, self)
+            return generic_size(tx, self)
         elif name == "__str__" and not (args or kwargs):
             from .object_protocol import generic_str
 

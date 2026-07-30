@@ -593,6 +593,7 @@
   - frgossen
   - fxdawnn
   - georgehong
+  - haoyuz
   - htyu
   - huydhn
   - IvanKobzarev
@@ -621,12 +622,11 @@
   - sevenEng
   - shawnxu26
   - SherlockNoMad
-  - shunting314
   - slayton58
   - soulitzer
   - tianyu-l
-  - tugsbayasgalan
   - tushar00jain
+  - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
@@ -634,7 +634,6 @@
   - ydwu4
   - yushangdi
   - ZainRizvi
-  - ZixinYang
   - zpcore
   mandatory_checks_name:
   - EasyCLA
