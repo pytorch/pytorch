@@ -30,7 +30,7 @@ from ...kernel.mm import (
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
 )
-from ...kernel.mm_plus_mm import mm_plus_mm_template
+from ...kernel.mm_plus_mm import mm_plus_mm_template, mm_plus_mm_xpu_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
@@ -3595,6 +3595,23 @@ class XPUMMPlusMMTemplateConfigHeuristic(
     MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
 ):
     """MM Plus MM template heuristic for XPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use mm_plus_mm_configs
+        self.mm_configs = self.mm_plus_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_plus_mm_configs
+
+
+@register_template_heuristic(mm_plus_mm_xpu_template.uid, "xpu")
+class XPUMMPlusMMXpuTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """MM Plus MM ascending-K template heuristic for XPU"""
 
     def __init__(self) -> None:
         super().__init__()
