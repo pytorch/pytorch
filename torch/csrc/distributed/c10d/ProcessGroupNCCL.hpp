@@ -984,6 +984,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // instead of relying on ProcessGroupNCCL destructor.
   void abort() override;
 
+  // Revoke the ProcessGroup's communicators -- cancel in-flight operations
+  // without destroying them (non-terminal, unlike abort()).
+  void revoke(int revokeFlags = 0) override;
+
   void eagerConnectSingleDevice(at::Device device) override;
 
   void performNocolorSplit(at::Device device);
@@ -1361,6 +1365,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
+
+  // Whether revoke() has already run; makes revoke() idempotent.
+  std::atomic<bool> revoked_{false};
 
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;

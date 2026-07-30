@@ -2219,6 +2219,12 @@ Arguments:
               py::call_guard<py::gil_scoped_release>(),
               "abort all operations and connections if supported by the backend")
           .def(
+              "revoke",
+              &::c10d::ProcessGroup::revoke,
+              py::arg("revoke_flags") = 0,
+              py::call_guard<py::gil_scoped_release>(),
+              "revoke (cancel) in-flight operations without destroying communicators, if supported")
+          .def(
               "shutdown",
               &::c10d::ProcessGroup::shutdown,
               py::call_guard<py::gil_scoped_release>(),
@@ -2986,6 +2992,12 @@ Arguments:
               &::c10d::Backend::abort,
               py::call_guard<py::gil_scoped_release>(),
               "abort all operations and connections if supported by the backend")
+          .def(
+              "revoke",
+              &::c10d::Backend::revoke,
+              py::arg("revoke_flags") = 0,
+              py::call_guard<py::gil_scoped_release>(),
+              "revoke in-flight operations without destroying the communicator")
           .def(
               "shutdown",
               &::c10d::Backend::shutdown,

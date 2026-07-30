@@ -54,6 +54,12 @@ static_assert(
 #define NCCL_HAS_COMM_SHRINK
 #endif
 
+// ROCm/RCCL advertises NCCL_VERSION_CODE >= 2.28 but does not provide
+// ncclCommRevoke, so exclude it and fall back to the unsupported path.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 7) && !defined(USE_ROCM)
+#define NCCL_HAS_COMM_REVOKE
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
 #define NCCL_HAS_COMM_OFFLOAD
 #endif
@@ -305,6 +311,10 @@ class NCCLComm {
   std::optional<std::string> getNcclCommFailureReason() const;
 
   void abort(std::optional<std::string> commFailureReason = std::nullopt);
+
+  // Revoke the communicator -- cancel in-flight operations without destroying
+  // it (non-terminal, unlike abort()). Requires NCCL 2.28.7+ at runtime.
+  void revoke(int revokeFlags = 0);
 
   // Finalize a communicator -- asking it to flush its operations. When the
   // communicator is marked as nonblocking, this is a nonblocking function;

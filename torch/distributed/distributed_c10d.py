@@ -118,6 +118,7 @@ __all__ = [
     "recv_object_list",
     "broadcast_object_list",
     "destroy_process_group",
+    "revoke_process_group",
     "gather",
     "gather_into_tensor",
     "gather_object",
@@ -3105,6 +3106,37 @@ def _abort_process_group(
             except Exception:
                 pass
         _unregister_process_group(pg.group_name)
+
+
+def revoke_process_group(
+    group: ProcessGroup | None = None, revoke_flags: int = 0
+) -> None:
+    """
+    Revoke a process group, cancelling in-flight NCCL work without destroying it.
+
+    Unlike :func:`destroy_process_group`, revoke is non-terminal: the process
+    group and its communicators remain usable afterwards, enabling recovery
+    from a failed or timed-out collective without triggering peer-side teardown
+    errors.
+
+    Args:
+        group (ProcessGroup, optional): The process group to revoke. If ``None``
+            (default), the default process group is revoked (not all groups).
+        revoke_flags (int, optional): Flags forwarded to ``ncclCommRevoke``.
+            Defaults to ``0``.
+
+    .. note:: this API is experimental and only works with the NCCL backend
+        (NCCL 2.28.7 or later).
+    """
+    group = group or _get_default_group()
+    device = torch.accelerator.current_accelerator() or torch.device("cpu")
+    try:
+        backend = group._get_backend(device)
+    except RuntimeError:
+        backend = None
+    if not is_nccl_available() or not isinstance(backend, ProcessGroupNCCL):
+        raise RuntimeError("revoke_process_group only supports the NCCL backend")
+    group.revoke(revoke_flags)
 
 
 def get_rank(group: ProcessGroup | None = None) -> int:

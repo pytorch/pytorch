@@ -55,6 +55,7 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
+    requires_gloo,
     requires_multicast_support,
     requires_nccl,
     requires_nccl_shrink,
@@ -475,6 +476,79 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
         with self.assertRaises(ValueError):
             dist.all_reduce(t)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_revoke_basic(self):
+        # Disable ASYNC_ERROR_HANDLING so the watchdog does not abort the PG for
+        # us; the test exercises revoke and the resulting failure directly.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        # A collective succeeds before revoke (and initializes the communicator).
+        dist.all_reduce(torch.rand(10, 10, device=device))
+
+        dist.revoke_process_group()
+
+        # revoke is non-terminal but the communicator is revoked: the next
+        # collective must fail cleanly instead of hanging or segfaulting.
+        with self.assertRaisesRegex(dist.DistBackendError, "revoked"):
+            dist.all_reduce(torch.rand(10, 10, device=device))
+
+        # abort (not the graceful destroy/finalize path) is the valid teardown
+        # for a revoked communicator.
+        c10d.distributed_c10d._get_default_group().abort()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_revoke_idempotent(self):
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        dist.all_reduce(torch.rand(10, 10, device=device))
+
+        # The revoked_ atomic guard makes the second revoke a no-op, not an error.
+        dist.revoke_process_group()
+        dist.revoke_process_group()
+
+        c10d.distributed_c10d._get_default_group().abort()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_revoke_abort_teardown(self):
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        dist.all_reduce(torch.rand(10, 10, device=device))
+        dist.revoke_process_group()
+
+        # abort() routes to ncclCommAbort, which is valid on a revoked comm, so
+        # teardown after revoke completes cleanly.
+        c10d.distributed_c10d._get_default_group().abort()
+
+    @requires_gloo()
+    def test_revoke_unsupported_backend(self):
+        # revoke_process_group is NCCL-only; other backends raise RuntimeError.
+        # Runs on CPU (Gloo) and does not require GPUs.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            "gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        with self.assertRaisesRegex(RuntimeError, "NCCL"):
+            dist.revoke_process_group()
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

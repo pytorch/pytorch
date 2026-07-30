@@ -721,6 +721,26 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemoryStats"));
   }
 
+  // Cancel in-flight operations on the backend's communicators without
+  // destroying them (non-terminal), if supported by the backend.
+  virtual void revoke(int revokeFlags = 0) {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support revoke"));
+  }
+
+  c10::impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const c10::impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.

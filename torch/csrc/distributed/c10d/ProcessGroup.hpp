@@ -1138,6 +1138,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const MergeOptions& opts,
       const int& size);
 
+  // Revoke in-flight operations on all backends without destroying them
+  // (non-terminal), if supported by the backend.
+  virtual void revoke(int revokeFlags = 0) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->revoke(revokeFlags);
+    }
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
