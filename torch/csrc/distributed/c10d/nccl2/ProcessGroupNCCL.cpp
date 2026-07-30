@@ -250,8 +250,8 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   }
 
   const std::string& name = ncclOpts->group_name;
-  ncclConfig_t config = newRank == -1 ? ncclOpts->config
-                                      : cloneNcclConfig(ncclOpts->config);
+  ncclConfig_t config =
+      newRank == -1 ? ncclOpts->config : cloneNcclConfig(ncclOpts->config);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name.c_str();
 #endif
