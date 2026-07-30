@@ -96,8 +96,7 @@ class LogRegistry:
     # log level is set to DEBUG. It must be explicitly named in the settings
     off_by_default_artifact_names: set[str] = field(default_factory=set)
 
-    # custom logging format strings keyed by logger qualified name and artifact
-    log_formatters: dict[str, logging.Formatter] = field(default_factory=dict)
+    # logging format string for artifacts
     artifact_log_formatters: dict[str, logging.Formatter] = field(default_factory=dict)
 
     def is_artifact(self, name):
@@ -107,17 +106,10 @@ class LogRegistry:
         return alias in self.log_alias_to_log_qnames
 
     # register a log with an alias
-    def register_log(
-        self, alias, log_qnames: str | list[str], log_format: str | None = None
-    ) -> None:
+    def register_log(self, alias, log_qnames: str | list[str]) -> None:
         if isinstance(log_qnames, str):
             log_qnames = [log_qnames]
         self.log_alias_to_log_qnames[alias] = log_qnames
-        if log_format is not None:
-            formatter = logging.Formatter(log_format)
-            self.log_formatters.update(
-                (log_qname, formatter) for log_qname in log_qnames
-            )
 
     # register an artifact name
     def register_artifact_name(
@@ -248,7 +240,6 @@ def set_logs(
     trace_bytecode: bool = False,
     output_code: bool = False,
     kernel_code: bool = False,
-    flex_gemm: int | None = None,
     schedule: bool = False,
     perf_hints: bool = False,
     pre_grad_graphs: bool = False,
@@ -416,11 +407,6 @@ def set_logs(
 
         kernel_code (:class:`bool`):
             Whether to emit the TorchInductor output code on a per-kernel basis. Default: ``False``
-
-        flex_gemm (:class:`Optional[int]`):
-            The FlexGEMM lowering report level. ``logging.INFO`` emits the concise
-            phase report and ``logging.DEBUG`` also emits recognizer internals,
-            generated epilogues, and config candidates. Default: ``logging.WARN``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -590,7 +576,6 @@ def set_logs(
         trace_bytecode=trace_bytecode,
         output_code=output_code,
         kernel_code=kernel_code,
-        flex_gemm=flex_gemm,
         schedule=schedule,
         perf_hints=perf_hints,
         pre_grad_graphs=pre_grad_graphs,
@@ -626,15 +611,14 @@ def get_loggers() -> list[logging.Logger]:
     return [logging.getLogger(qname) for qname in log_registry.get_log_qnames()]
 
 
-def register_log(setting_name, log_name, log_format=None) -> None:
+def register_log(setting_name, log_name) -> None:
     """
     Enables a log to be controlled by the env var and user API with the setting_name
     Args:
         setting_name:  the shorthand name used in the env var and user API
         log_name:  the log name that the setting_name is associated with
-        log_format: optional custom format for records emitted by this logger
     """
-    log_registry.register_log(setting_name, log_name, log_format)
+    log_registry.register_log(setting_name, log_name)
 
 
 def register_artifact(
@@ -978,19 +962,6 @@ class TorchLogsFormatter(logging.Formatter):
         self._trace_id_filter = trace_id_filter
 
     def format(self, record):
-        record.traceid = ""
-        if (
-            not self._is_trace
-            and (trace_id := torch._guards.CompileContext.current_trace_id())
-            is not None
-        ):
-            record.traceid = f" [{trace_id}]"
-        if (
-            self._trace_id_filter
-            and record.traceid.strip() not in self._trace_id_filter
-        ):
-            return ""
-
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
         if artifact_name is not None:
             artifact_formatter = log_registry.artifact_log_formatters.get(
@@ -998,9 +969,6 @@ class TorchLogsFormatter(logging.Formatter):
             )
             if artifact_formatter is not None:
                 return artifact_formatter.format(record)
-
-        if log_formatter := log_registry.log_formatters.get(record.name):
-            return log_formatter.format(record)
 
         record.message = record.getMessage()
         record.asctime = self.formatTime(record, "%m%d %H:%M:%S")
@@ -1029,6 +997,14 @@ class TorchLogsFormatter(logging.Formatter):
         if not self._is_trace and dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
 
+        record.traceid = ""
+        if (
+            not self._is_trace
+            and (trace_id := torch._guards.CompileContext.current_trace_id())
+            is not None
+        ):
+            record.traceid = f" [{trace_id}]"
+
         glog_level_to_abbr = {
             "DEBUG": "V",  # V is for VERBOSE in glog
             "INFO": "I",
@@ -1044,6 +1020,12 @@ class TorchLogsFormatter(logging.Formatter):
             record.artifactprefix = f" [__{artifact_name}]"
 
         filepath = make_module_path_relative(record.pathname)
+
+        if (
+            self._trace_id_filter
+            and record.traceid.strip() not in self._trace_id_filter
+        ):
+            return ""
 
         prefix = (
             f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs * 1000):06d} {record.process} "
