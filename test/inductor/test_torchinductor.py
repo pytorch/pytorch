@@ -8199,8 +8199,7 @@ for dtype in (torch.int32, torch.int64):
     def test_scatter_empty_index(self):
         def fn(x):
             m = torch.nn.AdaptiveMaxPool1d((0,), return_indices=False).eval()
-            y = torch.special.ndtri(x)
-            empty_tensor = m(y)
+            empty_tensor = m(x)
             result = torch.scatter(empty_tensor, -1, empty_tensor, empty_tensor)
             result = torch.nn.functional.hardswish(result, inplace=False)
             return result
