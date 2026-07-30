@@ -642,6 +642,100 @@ class TestMarkKernels(TestCase):
         for anns in annotations.values():
             self.assertEqual(anns, [{"name": "tagged"}])
 
+    def test_backward_kernels_annotated(self):
+        """Backward kernels of ops run inside a scope carry its annotation."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("fwd_scope"):
+                y = (x * 2).sin()
+            z = y.sum()
+            _ = torch.autograd.grad(z, x)
+
+        annotations = get_kernel_annotations()
+        tagged = [
+            tid
+            for tid, anns in annotations.items()
+            for ann in anns
+            if ann["name"] == "fwd_scope"
+        ]
+        # 2 forward kernels (mul, sin) plus the backward kernels of their
+        # autograd nodes (SinBackward0, MulBackward0), captured outside the
+        # forward scope but tagged via node-creation hooks.
+        self.assertGreater(len(tagged), 2)
+
+    def test_backward_captured_in_separate_graph(self):
+        """Backward captured in its own graph (the make_graphed_callables
+        pattern) still tags its kernels with the forward scope's annotation."""
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        graph_fwd = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph_fwd, enable_annotations=True):
+            with mark_kernels("layer"):
+                y = (x * 2).sin()
+
+        graph_bwd = torch.cuda.CUDAGraph()
+        grad_out = torch.ones_like(y)
+        with torch.cuda.graph(graph_bwd, enable_annotations=True):
+            _ = torch.autograd.grad(y, x, grad_outputs=grad_out, retain_graph=True)
+
+        annotations = get_kernel_annotations()
+        tagged = [
+            tid
+            for tid, anns in annotations.items()
+            for ann in anns
+            if ann["name"] == "layer"
+        ]
+        # 2 forward kernels plus the backward kernels captured in graph_bwd.
+        self.assertGreater(len(tagged), 2)
+
+    def test_backward_nested_scopes_inner_wins(self):
+        """Backward kernels of nested scopes merge with the inner scope
+        winning common keys, matching the forward merge order."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels({"name": "outer", "tag": "O"}):
+                with mark_kernels("inner"):
+                    y = (x * 2).sin()
+            z = y.sum()
+            _ = torch.autograd.grad(z, x)
+
+        annotations = get_kernel_annotations()
+        inner_count = 0
+        for anns in annotations.values():
+            for ann in anns:
+                if ann.get("tag") == "O":
+                    self.assertEqual(ann["name"], "inner")
+                    inner_count += 1
+        # 2 forward kernels plus their backward node kernels.
+        self.assertGreater(inner_count, 2)
+
+    def test_backward_outside_capture_is_noop(self):
+        """Hooks registered by a captured forward are inert in eager backward."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("scope"):
+                y = (x * 2).sum()
+
+        before = {tid: list(anns) for tid, anns in get_kernel_annotations().items()}
+        # Eager replay-independent backward: not capturing, hooks must no-op.
+        y.backward()
+        torch.cuda.synchronize()
+        resolve_pending_annotations()
+        self.assertEqual(get_kernel_annotations(), before)
+
+    def test_eager_forward_backward_noop(self):
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        with mark_kernels("eager"):
+            y = (x * 2).sum()
+        y.backward()
+        torch.cuda.synchronize()
+        self.assertEqual(len(get_kernel_annotations()), 0)
+
 
 # cuda.bindings is NVIDIA-only; get_graph_data has no ROCm equivalent.
 @skipIfRocm
