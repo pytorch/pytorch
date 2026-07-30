@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
+import sys
 
 import torch
 import torch._dynamo
@@ -613,6 +614,19 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), total
 
         n = 300
+        arg_sets = [(t, list(range(n))), (t, list(range(1, n + 1)))]
+        self._check(fn, arg_sets, expected_frames=2)
+
+    def test_recursion_limit_sized_chain_no_recursion_error(self):
+        t = torch.ones(2)
+
+        def fn(t, vals):
+            total = 0
+            for v in vals:
+                total = total + v
+            return t.sin(), total
+
+        n = sys.getrecursionlimit()
         arg_sets = [(t, list(range(n))), (t, list(range(1, n + 1)))]
         self._check(fn, arg_sets, expected_frames=2)
 
