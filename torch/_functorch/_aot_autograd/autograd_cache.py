@@ -901,6 +901,8 @@ def autograd_cache_key(
                     "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
                     exc_info=True,
                 )
+                # Use UUID rather than random.random() so fallback keys are independent of
+                # application RNG state and remain unique across processes with the same seed.
                 return uuid.uuid4().hex, []
             else:
                 raise
