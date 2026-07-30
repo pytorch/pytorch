@@ -4,6 +4,8 @@ These are experimental and subject to change without notice.
 Access via ``torch.func._random``.
 """
 
+import math
+import operator
 from collections.abc import Sequence
 
 import torch
@@ -288,3 +290,262 @@ def uniform(
     # pyrefly: ignore [no-matching-overload]
     result = torch.empty(shape, dtype=dtype, device=key.device)
     return uniform_(key, result, low=low, high=high)
+
+
+def _as_index_tuple(values: Sequence[int], name: str) -> tuple[int, ...]:
+    try:
+        return tuple(operator.index(value) for value in values)
+    except TypeError as error:
+        raise TypeError(f"{name} must contain integers") from error
+
+
+def _rectangles_overlap(
+    first_offset: tuple[int, ...],
+    first_size: tuple[int, ...],
+    second_offset: tuple[int, ...],
+    second_size: tuple[int, ...],
+) -> bool:
+    return all(
+        first < second + second_extent and second < first + first_extent
+        for first, first_extent, second, second_extent in zip(
+            first_offset,
+            first_size,
+            second_offset,
+            second_size,
+        )
+    )
+
+
+def _validate_shard_metadata(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    global_shape: Sequence[int],
+    global_offsets: Sequence[Sequence[int]],
+    local_offsets: Sequence[Sequence[int]],
+    local_sizes: Sequence[Sequence[int]],
+) -> tuple[
+    tuple[int, ...],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, ...], ...],
+]:
+    op_name = "stateless shard distribution"
+    if key.dtype != torch.uint64 or key.shape != (2,):
+        raise ValueError(
+            f"{op_name}: key must be an unbatched uint64 key of shape (2,)"
+        )
+    if key.device != result.device:
+        raise ValueError(
+            f"{op_name}: key and result must be on the same device, "
+            f"got {key.device} and {result.device}"
+        )
+    if result.layout != torch.strided:
+        raise ValueError(f"{op_name}: result must have strided layout")
+    if not result.is_floating_point():
+        raise ValueError(f"{op_name}: result must have a floating point dtype")
+    if torch._debug_has_internal_overlap(result) == 1:
+        raise ValueError(f"{op_name}: result must not have internal overlap")
+    if torch._C._overlaps(key, result):
+        raise ValueError(f"{op_name}: key and result must not overlap")
+
+    shape = _as_index_tuple(global_shape, "global_shape")
+    if len(shape) != result.ndim:
+        raise ValueError(f"{op_name}: global_shape and result must have the same rank")
+    if any(size < 0 for size in shape):
+        raise ValueError(f"{op_name}: global_shape must be non-negative")
+    if math.prod(shape) > torch.iinfo(torch.int64).max:
+        raise ValueError(f"{op_name}: global tensor has more than int64 elements")
+
+    global_rects = tuple(
+        _as_index_tuple(offset, f"global_offsets[{index}]")
+        for index, offset in enumerate(global_offsets)
+    )
+    local_rects = tuple(
+        _as_index_tuple(offset, f"local_offsets[{index}]")
+        for index, offset in enumerate(local_offsets)
+    )
+    sizes = tuple(
+        _as_index_tuple(size, f"local_sizes[{index}]")
+        for index, size in enumerate(local_sizes)
+    )
+    if len(global_rects) != len(local_rects) or len(global_rects) != len(sizes):
+        raise ValueError(
+            f"{op_name}: global_offsets, local_offsets, and local_sizes "
+            "must have the same length"
+        )
+
+    local_shape = tuple(result.shape)
+    nonempty: list[int] = []
+    for index, (global_offset, local_offset, size) in enumerate(
+        zip(global_rects, local_rects, sizes)
+    ):
+        if len(global_offset) != result.ndim:
+            raise ValueError(
+                f"{op_name}: global_offsets[{index}] must have {result.ndim} dimensions"
+            )
+        if len(local_offset) != result.ndim:
+            raise ValueError(
+                f"{op_name}: local_offsets[{index}] must have {result.ndim} dimensions"
+            )
+        if len(size) != result.ndim:
+            raise ValueError(
+                f"{op_name}: local_sizes[{index}] must have {result.ndim} dimensions"
+            )
+        for dim, (offset, extent, bound) in enumerate(zip(global_offset, size, shape)):
+            if offset < 0 or extent < 0 or offset > bound - extent:
+                raise ValueError(
+                    f"{op_name}: global rectangle {index} dimension {dim} "
+                    "is outside global_shape"
+                )
+        for dim, (offset, extent, bound) in enumerate(
+            zip(local_offset, size, local_shape)
+        ):
+            if offset < 0 or offset > bound - extent:
+                raise ValueError(
+                    f"{op_name}: local rectangle {index} dimension {dim} "
+                    "is outside result shape"
+                )
+        if all(extent > 0 for extent in size):
+            nonempty.append(index)
+
+    for position, first in enumerate(nonempty):
+        for second in nonempty[position + 1 :]:
+            if _rectangles_overlap(
+                global_rects[first], sizes[first], global_rects[second], sizes[second]
+            ):
+                raise ValueError(
+                    f"{op_name}: global rectangles {first} and {second} overlap"
+                )
+            if _rectangles_overlap(
+                local_rects[first], sizes[first], local_rects[second], sizes[second]
+            ):
+                raise ValueError(
+                    f"{op_name}: local rectangles {first} and {second} overlap"
+                )
+
+    return shape, global_rects, local_rects, sizes
+
+
+def _materialized_shards_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    *,
+    global_shape: Sequence[int],
+    global_offsets: Sequence[Sequence[int]],
+    local_offsets: Sequence[Sequence[int]],
+    local_sizes: Sequence[Sequence[int]],
+    distribution: str,
+    params: tuple[float, float],
+) -> torch.Tensor:
+    shape, global_rects, local_rects, sizes = _validate_shard_metadata(
+        key,
+        result,
+        global_shape,
+        global_offsets,
+        local_offsets,
+        local_sizes,
+    )
+    if distribution == "normal":
+        if params[1] < 0:
+            raise ValueError(f"normal expects std >= 0.0, but found std {params[1]}")
+    elif distribution == "uniform":
+        if params[0] > params[1]:
+            raise ValueError(
+                f"uniform expects low <= high, but found {params[0]} > {params[1]}"
+            )
+    else:
+        raise ValueError(f"unsupported distribution: {distribution}")
+
+    global_strides = [0] * len(shape)
+    stride = 1
+    for dim in range(len(shape) - 1, -1, -1):
+        global_strides[dim] = stride
+        stride *= shape[dim]
+
+    for global_offset, local_offset, size in zip(global_rects, local_rects, sizes):
+        if any(extent == 0 for extent in size):
+            continue
+        indices = torch.zeros(size, dtype=torch.int64, device=result.device)
+        for dim, (offset, extent, global_stride) in enumerate(
+            zip(global_offset, size, global_strides)
+        ):
+            coordinate = torch.arange(
+                offset,
+                offset + extent,
+                dtype=torch.int64,
+                device=result.device,
+            )
+            coordinate_shape = [1] * len(size)
+            coordinate_shape[dim] = extent
+            indices.add_(coordinate.reshape(coordinate_shape), alpha=global_stride)
+
+        element_keys = fold_in(key, indices.to(torch.uint64))
+        local_slices = tuple(
+            slice(offset, offset + extent) for offset, extent in zip(local_offset, size)
+        )
+        local_result = result[local_slices]
+        if distribution == "normal":
+            normal_(element_keys, local_result, mean=params[0], std=params[1])
+        else:
+            uniform_(element_keys, local_result, low=params[0], high=params[1])
+    return result
+
+
+def normal_shards_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    *,
+    global_shape: Sequence[int],
+    global_offsets: Sequence[Sequence[int]],
+    local_offsets: Sequence[Sequence[int]],
+    local_sizes: Sequence[Sequence[int]],
+    mean: float = 0.0,
+    std: float = 1.0,
+) -> torch.Tensor:
+    r"""Fill logical tensor shards with values from a stateless normal distribution.
+
+    Each local element is keyed by its row-major index in ``global_shape``, so
+    the logical values are independent of how rectangles are partitioned or
+    placed in ``result``. Padding and holes outside the rectangles are not
+    modified.
+    """
+    return _materialized_shards_(
+        key,
+        result,
+        global_shape=global_shape,
+        global_offsets=global_offsets,
+        local_offsets=local_offsets,
+        local_sizes=local_sizes,
+        distribution="normal",
+        params=(mean, std),
+    )
+
+
+def uniform_shards_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    *,
+    global_shape: Sequence[int],
+    global_offsets: Sequence[Sequence[int]],
+    local_offsets: Sequence[Sequence[int]],
+    local_sizes: Sequence[Sequence[int]],
+    low: float = 0.0,
+    high: float = 1.0,
+) -> torch.Tensor:
+    r"""Fill logical tensor shards with values from a stateless uniform distribution.
+
+    Each local element is keyed by its row-major index in ``global_shape``, so
+    the logical values are independent of how rectangles are partitioned or
+    placed in ``result``. Padding and holes outside the rectangles are not
+    modified.
+    """
+    return _materialized_shards_(
+        key,
+        result,
+        global_shape=global_shape,
+        global_offsets=global_offsets,
+        local_offsets=local_offsets,
+        local_sizes=local_sizes,
+        distribution="uniform",
+        params=(low, high),
+    )

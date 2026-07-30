@@ -677,6 +677,227 @@ class TestStatelessRNGDistribution(TestCase):
         )
 
 
+class TestStatelessRNGLogicalShards(TestCase):
+    def _dense_reference(self, key, shape, dtype, distribution):
+        indices = torch.arange(
+            torch.Size(shape).numel(), dtype=torch.int64, device=key.device
+        ).reshape(shape)
+        element_keys = random.fold_in(key, indices.to(torch.uint64))
+        if distribution == "normal":
+            return random.normal(element_keys, shape, mean=1.25, std=0.75, dtype=dtype)
+        return random.uniform(element_keys, shape, low=-2.0, high=3.0, dtype=dtype)
+
+    def _fill(self, key, result, distribution, **metadata):
+        if distribution == "normal":
+            return random.normal_shards_(key, result, mean=1.25, std=0.75, **metadata)
+        return random.uniform_shards_(key, result, low=-2.0, high=3.0, **metadata)
+
+    @parametrize("distribution", ["normal", "uniform"])
+    @dtypes(*all_floating_dtypes)
+    def test_layouts_match_dense(self, device, dtype, distribution):
+        key = random.key(123, device=device)
+        global_shape = (5, 7)
+        expected = self._dense_reference(key, global_shape, dtype, distribution)
+
+        full = torch.empty(global_shape, dtype=dtype, device=device)
+        self._fill(
+            key,
+            full,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=(global_shape,),
+        )
+        self.assertEqual(full, expected, atol=0, rtol=0)
+
+        reconstructed = torch.empty_like(expected)
+        for start, end in ((0, 2), (2, 5)):
+            local = torch.empty((end - start, 7), dtype=dtype, device=device)
+            self._fill(
+                key,
+                local,
+                distribution,
+                global_shape=global_shape,
+                global_offsets=((start, 0),),
+                local_offsets=((0, 0),),
+                local_sizes=((end - start, 7),),
+            )
+            reconstructed[start:end] = local
+        self.assertEqual(reconstructed, expected, atol=0, rtol=0)
+
+        reconstructed = torch.empty_like(expected)
+        for start, end in ((0, 3), (3, 7)):
+            local = torch.empty((5, end - start), dtype=dtype, device=device)
+            self._fill(
+                key,
+                local,
+                distribution,
+                global_shape=global_shape,
+                global_offsets=((0, start),),
+                local_offsets=((0, 0),),
+                local_sizes=((5, end - start),),
+            )
+            reconstructed[:, start:end] = local
+        self.assertEqual(reconstructed, expected, atol=0, rtol=0)
+
+        sentinel = 123.0
+        padded = torch.full((8, 10), sentinel, dtype=dtype, device=device)
+        self._fill(
+            key,
+            padded,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((0, 0), (2, 0)),
+            local_offsets=((1, 2), (5, 2)),
+            local_sizes=((2, 7), (3, 7)),
+        )
+        expected_padded = torch.full_like(padded, sentinel)
+        expected_padded[1:3, 2:9] = expected[:2]
+        expected_padded[5:8, 2:9] = expected[2:]
+        self.assertEqual(padded, expected_padded, atol=0, rtol=0)
+
+        backing = torch.full((5, 14), sentinel, dtype=dtype, device=device)
+        noncontiguous = backing[:, ::2]
+        self.assertFalse(noncontiguous.is_contiguous())
+        self._fill(
+            key,
+            noncontiguous,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=(global_shape,),
+        )
+        self.assertEqual(noncontiguous, expected, atol=0, rtol=0)
+        self.assertEqual(backing[:, 1::2], torch.full_like(backing[:, 1::2], sentinel))
+
+        empty = torch.empty((0, 7), dtype=dtype, device=device)
+        self._fill(
+            key,
+            empty,
+            distribution,
+            global_shape=global_shape,
+            global_offsets=((5, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((0, 7),),
+        )
+        self.assertEqual(empty.shape, (0, 7))
+
+    def test_partition_invariance_with_empty_owners(self, device):
+        key = random.key(321, device=device)
+        global_shape = (3, 4)
+        expected = self._dense_reference(key, global_shape, torch.float32, "normal")
+        reconstructed = torch.empty_like(expected)
+
+        for rank in range(5):
+            owns_row = rank < global_shape[0]
+            local_rows = 1 if owns_row else 0
+            global_row = rank if owns_row else global_shape[0]
+            local = torch.empty((local_rows, 4), device=device)
+            random.normal_shards_(
+                key,
+                local,
+                global_shape=global_shape,
+                global_offsets=((global_row, 0),),
+                local_offsets=((0, 0),),
+                local_sizes=((local_rows, 4),),
+                mean=1.25,
+                std=0.75,
+            )
+            if owns_row:
+                reconstructed[rank] = local[0]
+
+        self.assertEqual(reconstructed, expected, atol=0, rtol=0)
+
+    def test_metadata_validation_precedes_writes(self, device):
+        key = random.key(123, device=device)
+        sentinel = 17.0
+
+        cases = (
+            (
+                "same length",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((0, 0),),
+                    local_offsets=(),
+                    local_sizes=((1, 2),),
+                ),
+            ),
+            (
+                "must have 2 dimensions",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((0,),),
+                    local_offsets=((0, 0),),
+                    local_sizes=((1, 2),),
+                ),
+            ),
+            (
+                "outside global_shape",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((0, 0), (2, 0)),
+                    local_offsets=((0, 0), (1, 0)),
+                    local_sizes=((1, 2), (1, 2)),
+                ),
+            ),
+            (
+                "global rectangles",
+                dict(
+                    global_shape=(3, 2),
+                    global_offsets=((0, 0), (1, 0)),
+                    local_offsets=((0, 0), (2, 0)),
+                    local_sizes=((2, 2), (2, 2)),
+                ),
+            ),
+            (
+                "local rectangles",
+                dict(
+                    global_shape=(4, 2),
+                    global_offsets=((0, 0), (2, 0)),
+                    local_offsets=((0, 0), (0, 0)),
+                    local_sizes=((2, 2), (2, 2)),
+                ),
+            ),
+            (
+                "int64 elements",
+                dict(
+                    global_shape=(1 << 62, 4),
+                    global_offsets=(),
+                    local_offsets=(),
+                    local_sizes=(),
+                ),
+            ),
+            (
+                "outside global_shape",
+                dict(
+                    global_shape=(2, 2),
+                    global_offsets=((3, 0),),
+                    local_offsets=((0, 0),),
+                    local_sizes=((0, 2),),
+                ),
+            ),
+        )
+
+        for error, metadata in cases:
+            result = torch.full((4, 2), sentinel, device=device)
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                random.normal_shards_(key, result, **metadata)
+            self.assertEqual(result, torch.full_like(result, sentinel))
+
+        overlapping = torch.zeros((1, 2), device=device).expand(2, 2)
+        with self.assertRaisesRegex(ValueError, "internal overlap"):
+            random.normal_shards_(
+                key,
+                overlapping,
+                global_shape=(2, 2),
+                global_offsets=((0, 0),),
+                local_offsets=((0, 0),),
+                local_sizes=((2, 2),),
+            )
+
+
 class TestStatelessRNGCompile(TestCase):
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
@@ -813,6 +1034,9 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestStatelessRNGDistribution, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestStatelessRNGLogicalShards, globals(), only_for=("cpu", "cuda")
 )
 instantiate_device_type_tests(
     TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")
