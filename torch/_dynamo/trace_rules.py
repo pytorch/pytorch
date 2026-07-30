@@ -1663,7 +1663,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._fused_moving_avg_obs_fq_helper",
         "torch._fused_sdp_choice",
         "torch._fw_primal_copy",
-        "torch._grid_sampler_2d_cpu_fallback",
         "torch._grouped_mm",
         "torch._histogramdd_bin_edges",
         "torch._histogramdd_from_bin_cts",
