@@ -1311,6 +1311,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         ):
             result, code_list = run_and_get_code(torch.compile(fn), *args)
         code = "\n".join(code_list)
+        self.assertEqual(code.count(".run("), 1)
         epilogue_fused = EPILOGUE_FN_NAME in code and "EpilogueArguments" in code
         return result, code, epilogue_fused
 
