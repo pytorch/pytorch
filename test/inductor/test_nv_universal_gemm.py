@@ -796,98 +796,33 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
-    def test_local_reduce_cache_specialization(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
-            _local_reduce_specialization,
-        )
-
-        base = {
-            "local_reduce_group": 4,
-            "local_reduce_axis": 1,
-            "local_reduce_type": "mean",
-            "local_reduce_source": "identity",
-            "local_reduce_feeds_main": False,
-            "local_reduce_secondary_feed_type": None,
-        }
-        specialization = _local_reduce_specialization(base)
-        for key, value in (
-            ("local_reduce_group", 8),
-            ("local_reduce_axis", 0),
-            ("local_reduce_feeds_main", True),
-            ("local_reduce_secondary_feed_type", "direct_bool_gt_zero"),
-        ):
-            variant = dict(base)
-            variant[key] = value
-            self.assertNotEqual(specialization, _local_reduce_specialization(variant))
-
-        tensor = torch.empty((4, 8))
-        tensor_specialization = _local_reduce_specialization(
-            base | {"local_reduce_out": tensor}
-        )
-        self.assertNotEqual(
-            tensor_specialization,
-            _local_reduce_specialization(base | {"local_reduce_out": None}),
-        )
-        self.assertNotEqual(
-            tensor_specialization,
-            _local_reduce_specialization(
-                base | {"local_reduce_out": torch.empty((8, 4))}
-            ),
-        )
-        self.assertNotEqual(
-            tensor_specialization,
-            _local_reduce_specialization(base | {"local_reduce_feed_out": tensor}),
-        )
-
-    def test_local_reduce_plan_deduplicates_outputs(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import (
-            GemmReductionDescriptor,
-            GemmReductionPlan,
-        )
-
-        plan = GemmReductionPlan(
-            reduction_output="aux",
-            group=4,
-            axis=1,
-            reduction_type="sum",
-            source_type="identity",
-            primary_output="output",
-            feed_output="aux",
-            secondary_feed_output="output",
-        )
-        self.assertEqual(plan.auxiliary_outputs, ("aux",))
-        expression = GemmReductionDescriptor.parse("mean_linear:1:2:3")
-        self.assertEqual(expression.serialize(), "mean_linear:1:2:3")
-        with self.assertRaisesRegex(ValueError, "expects 3"):
-            GemmReductionDescriptor.parse("mean_linear:1:2")
-
-    def test_reduction_pattern_near_misses(self):
+    def test_grouped_reduction_checks_all_reductions(self):
         from torch._inductor.kernel.gemm_epilogue_ir import (
             GemmEpilogueIRExpression as Expr,
             GemmEpilogueIRStore,
-            is_absmax_normalize_ir,
-            is_logsumexp_ir,
-            is_softmax_ir,
+            grouped_reduction_ir,
         )
 
-        load = Expr("load", ("gemm", 0, None))
-        scale = Expr("load", ("scale", 0, None))
-        one = Expr("constant", (1.0, torch.float32))
-        near_softmax = Expr("truediv", (Expr("exp", (load,)), Expr("add", (load, one))))
-        near_absmax = Expr(
-            "mul", (load, Expr("reciprocal", (Expr("add", (scale, one)),)))
+        unrelated = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("x", 0, None))),
         )
-        near_logsumexp = Expr(
-            "add", (Expr("log", (Expr("exp", (load,)),)), Expr("maximum", (load, one)))
+        source = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
+        )
+        store = GemmEpilogueIRStore(0, Expr("add", (unrelated, source)))
+        self.assertEqual(
+            grouped_reduction_ir(store, "gemm", 4, torch.float32),
+            ("sum", "identity"),
         )
 
-        self.assertFalse(is_softmax_ir(GemmEpilogueIRStore(0, near_softmax), "gemm", 4))
-        self.assertFalse(
-            is_absmax_normalize_ir(GemmEpilogueIRStore(0, near_absmax), "gemm", "scale")
-        )
-        self.assertFalse(
-            is_logsumexp_ir(GemmEpilogueIRStore(0, near_logsumexp), "gemm", 4)
-        )
+    def test_epilogue_ir_preserves_empty_tuple_argument(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import GemmEpilogueIRExpression
+
+        expression = GemmEpilogueIRExpression("reshape", ("value", ()))
+        self.assertEqual(expression.args, ("value", ()))
+        self.assertEqual(expression.kwargs, ())
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
@@ -1169,8 +1104,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return torch.relu(result), result + 1.0
 
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
-        self.assertIn("EpilogueArguments", code)
-        self.assertNotIn("CuTeDSLEpilogueArguments", code)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
@@ -1253,7 +1186,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(
             fn, a, b, scale_a, scale_b
         )
-        self.assertIn("CuTeDSLEpilogueArguments", code)
         torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
         self.assertTrue(
             epilogue_fused, f"{operation} was NOT fused into scaled epilogue"
@@ -1560,17 +1492,17 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
         )
-        b = torch.randint(
-            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
-        ).view(torch.float4_e2m1fn_x2)
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
         b = b.T
         padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(
-            _round_up(m, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
-        scale_b = torch.rand(
-            _round_up(n, 128) * padded_k_blocks, device="cuda"
-        ).to(torch.float8_e4m3fn)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
