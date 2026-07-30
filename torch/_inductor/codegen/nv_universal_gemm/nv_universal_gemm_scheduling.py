@@ -30,6 +30,7 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
+from ...kernel.gemm_epilogue_codegen import GemmEpilogueIRCodegen
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_ir,
     centered_mean_consumer_type_unrolled_ir,
@@ -2040,6 +2041,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         )
 
         epilogue_fn_code: str | None = None
+        epilogue_is_cutedsl = False
         epilogue_reads: list[str] = []
         epilogue_writes: list[str] = []
         epilogue_var_renames: dict[str, Any] = {}
@@ -2074,15 +2076,35 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     removed_buffers_with_gemm.add(original_buffer_name)
 
                 if evt_nodes:
-                    reads, writes, var_renames, evt_code = (
-                        CutlassEVTCodegen.ir_to_evt_python_code(
-                            original_buffer_name,
-                            list(evt_nodes),
-                            removed_buffers_with_gemm,
-                            fn_name=EPILOGUE_FN_NAME,
-                            as_standalone_function=True,
+                    evt_buffers = [
+                        node.node
+                        for node in evt_nodes
+                        if isinstance(node.node, ComputedBuffer)
+                    ]
+                    try:
+                        if ctb.variant.name != "SCALED_GEMM":
+                            raise NotImplementedError(
+                                "dense NVGEMM providers require an EVT DAG"
+                            )
+                        reads, writes, var_renames, evt_code = (
+                            GemmEpilogueIRCodegen.from_buffers(
+                                original_buffer_name,
+                                evt_buffers,
+                                removed_buffers_with_gemm,
+                                EPILOGUE_FN_NAME,
+                            )
                         )
-                    )
+                        epilogue_is_cutedsl = True
+                    except NotImplementedError:
+                        reads, writes, var_renames, evt_code = (
+                            CutlassEVTCodegen.ir_to_evt_python_code(
+                                original_buffer_name,
+                                list(evt_nodes),
+                                removed_buffers_with_gemm,
+                                fn_name=EPILOGUE_FN_NAME,
+                                as_standalone_function=True,
+                            )
+                        )
                     epilogue_fn_code = evt_code
                     epilogue_reads = reads
                     epilogue_writes = writes
@@ -2132,6 +2154,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         kernel, render = ctb.make_kernel_render(
             ctb,
             epilogue_fn_code=epilogue_fn_code,
+            epilogue_is_cutedsl=epilogue_is_cutedsl,
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
