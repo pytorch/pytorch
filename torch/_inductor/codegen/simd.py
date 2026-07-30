@@ -2056,49 +2056,6 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
-    # This is private so only TritonScheduling opts into Triton-specific metrics.
-    def _get_tiling_and_memory_metrics(
-        self, nodes: Sequence[scheduler.BaseSchedulerNode]
-    ) -> scheduler.TilingAndMemoryMetrics | None:
-        from torch._inductor.tiling_utils import analyze_memory_coalescing_for_nodes
-
-        if (
-            not nodes
-            or not config.triton.coalesce_tiling_analysis
-            or config.triton.prefer_nd_tiling
-        ):
-            return None
-
-        snodes = [subnode for node in nodes for subnode in node.get_nodes()]
-        if not snodes or not all(
-            isinstance(node, scheduler.SchedulerNode) for node in snodes
-        ):
-            return None
-
-        analysis = analyze_memory_coalescing_for_nodes(snodes)
-        if analysis is None:
-            return None
-
-        reduction = max(snodes, key=lambda node: int(node.is_reduction()))
-        _, (numel, rnumel) = reduction.group
-        node_schedule = self.generate_node_schedule(snodes, numel, rnumel)
-        selection = self._get_tiling_selection(node_schedule, numel, rnumel, analysis)
-        if selection.tiling_scores is None or selection.coalesced_memory_cost is None:
-            # Forced and fallback tilings do not carry raw selected-memory costs.
-            return None
-
-        total_cost = sum(analysis.coalesced_by_var.values()) + sum(
-            analysis.uncoalesced_addrs.values()
-        )
-        return scheduler.TilingAndMemoryMetrics(
-            selected_tiling=selection.tiling,
-            tiling_scores=selection.tiling_scores,
-            coalesced_memory_cost=selection.coalesced_memory_cost,
-            uncoalesced_memory_cost=max(
-                total_cost - selection.coalesced_memory_cost, 0
-            ),
-        )
-
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
@@ -4543,20 +4500,15 @@ class SIMDScheduling(BaseScheduling):
         )
 
         # score of a pointwise or reduction split
-        scored_sub_split: dict[Any, tuple[list[int], list[int], int]] = {}
+        scored_sub_split: dict[Any, _SubSplit] = {}
 
-        score_split: list[
-            tuple[
-                tuple[list[int], list[int], int],
-                tuple[list[int], list[int], int],
-            ]
-        ] = []
+        score_split: list[tuple[_SubSplit, _SubSplit]] = []
 
         def process_node_vars(
             vars_to_use: tuple[sympy.Expr, ...] = (),
             use_split_var: bool = False,
             is_pointwise: bool = False,
-        ) -> tuple[list[int], list[int], int]:
+        ) -> _SubSplit:
             """
             Generate a tiling, and a tiling score, given vars to use as splits.
             """
@@ -4566,9 +4518,9 @@ class SIMDScheduling(BaseScheduling):
             # Some kernels have no reduction ranges, and a reduction numel of 1
             if not ranges:
                 if target_numel:
-                    return ([target_numel], [], 0)
+                    return _SubSplit([target_numel], [], 0)
                 else:
-                    return ([], [], 0)
+                    return _SubSplit([], [], 0)
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
             if out := scored_sub_split.get(key):
@@ -4580,6 +4532,10 @@ class SIMDScheduling(BaseScheduling):
             split_scores = []
             prod = 1
             prev_var_coalesced_score = 0
+            # Absolute coalesced memory captured by this split. Unlike
+            # split_scores, this is never penalized below, because it is used to
+            # compare *different kernels* rather than to rank tilings within one.
+            coalesced_memory = 0
 
             # iterate from non-dense to dense
             for v, v_range in zip(splitting_vars, ranges):
@@ -4604,6 +4560,11 @@ class SIMDScheduling(BaseScheduling):
                     splits.append(tile)
                     split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
 
+                    # Splitting this var converts its uncoalesced accesses into
+                    # coalesced ones, so var_tiling.score counts as coalesced.
+                    coalesced_memory += var_tiling.score
+                    coalesced_memory += coalesce_analysis.coalesced_by_var.get(v, 0)
+
                     prod = 1
                     prev_var_coalesced_score = 0
 
@@ -4612,13 +4573,13 @@ class SIMDScheduling(BaseScheduling):
                 prod *= v_range
                 splits.append(prod)
                 split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
+                coalesced_memory += coalesce_analysis.coalesced_by_var.get(v, 0)
                 prod = 1
 
             if prod != 1 or (is_pointwise and len(splits) == 0):
                 splits.append(prod)
                 split_scores.append(prev_var_coalesced_score)
-
-            raw_coalesced_cost = sum(split_scores)
+                coalesced_memory += prev_var_coalesced_score
 
             # penalize splits that leave small blocks
             # where we can't fully utilize full memory transaction
@@ -4629,8 +4590,9 @@ class SIMDScheduling(BaseScheduling):
                 s = min(s, 8)
                 split_scores[i] = int(split_scores[i] * s / 8)
 
-            scored_sub_split[key] = (splits, split_scores, raw_coalesced_cost)
-            return (splits, split_scores, raw_coalesced_cost)
+            sub_split = _SubSplit(splits, split_scores, coalesced_memory)
+            scored_sub_split[key] = sub_split
+            return sub_split
 
         # add the default tiling
         score_split.append(
@@ -4673,17 +4635,15 @@ class SIMDScheduling(BaseScheduling):
                 )
 
         tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr], int]] = []
-        for (pw_split, pw_score, pw_cost), (
-            red_split,
-            red_score,
-            red_cost,
-        ) in score_split:
+        for pw, red in score_split:
             candidate = CandidateTiling(
-                cls.create_tiling(pw_split, red_split),
-                score=sum(pw_score) + sum(red_score),
+                cls.create_tiling(pw.splits, red.splits),
+                score=sum(pw.split_scores) + sum(red.split_scores),
             )
-            tiling_score = cls.create_tiling(pw_score, red_score)
-            tilings.append((candidate, tiling_score, pw_cost + red_cost))
+            tiling_score = cls.create_tiling(pw.split_scores, red.split_scores)
+            tilings.append(
+                (candidate, tiling_score, pw.coalesced_memory + red.coalesced_memory)
+            )
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
@@ -4693,6 +4653,11 @@ class SIMDScheduling(BaseScheduling):
         good_size_tiling_penalty = 1.005
 
         total_uncoalesced = sum(coalesce_analysis.uncoalesced_addrs.values())
+        # Every access is either coalesced or not under a given tiling, and the
+        # total is tiling-independent, so the uncoalesced remainder is exact.
+        total_memory = (
+            sum(coalesce_analysis.coalesced_by_var.values()) + total_uncoalesced
+        )
 
         def score_mod(t):
             score_factor = 1.0
@@ -4708,8 +4673,22 @@ class SIMDScheduling(BaseScheduling):
 
             return -(t[0].score + uncoalesced_penalty) * score_factor
 
+        def make_selection(
+            tiling: dict[str, sympy.Expr],
+            tiling_score: immutable_dict[str, sympy.Expr],
+            coalesced_memory: int,
+        ) -> _TilingSelection:
+            return _TilingSelection(
+                tiling,
+                tiling_score,
+                MemoryCoalescing(
+                    coalesced=coalesced_memory,
+                    uncoalesced=max(total_memory - coalesced_memory, 0),
+                ),
+            )
+
         # apply penalty for longer tilings that don't increase score much
-        for cand, tiling_score, coalesced_cost in sorted(tilings, key=score_mod):
+        for cand, tiling_score, coalesced_memory in sorted(tilings, key=score_mod):
             if (
                 cls.tiling_is_compatible(
                     node_schedule, pointwise_numel, reduction_numel, cand.tiling
@@ -4727,12 +4706,12 @@ class SIMDScheduling(BaseScheduling):
                     )
                     continue
 
-                return _TilingSelection(cand.tiling, tiling_score, coalesced_cost)
+                return make_selection(cand.tiling, tiling_score, coalesced_memory)
 
             # surprisingly, the default tiling is not always read as compatible by `tiling_is_compatible`
             # TODO - look into, occurs with dynamic shapes often
             if cand.tiling == default_tiling:
-                return _TilingSelection(cand.tiling, tiling_score, coalesced_cost)
+                return make_selection(cand.tiling, tiling_score, coalesced_memory)
 
         return _TilingSelection(default_tiling, None, None)
 
@@ -4788,14 +4767,20 @@ class SIMDScheduling(BaseScheduling):
         reduction_numel=sympy.S.One,
         coalesce_analysis: CoalesceVarAnalysis | None = None,
     ) -> tuple[dict[str, sympy.Expr], dict[str, sympy.Expr] | None]:
-        """Return the selected tiling and its existing ranking scores."""
-        selection = cls._get_tiling_selection(
+        """
+        Heuristics to decide how to tile kernels.
+        Currently, we tile based on stride-1 dimensions.
+
+        Returns:
+            `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
+        """
+        selection = cls.select_tiling_with_memory(
             node_schedule, numel, reduction_numel, coalesce_analysis
         )
         return selection.tiling, selection.tiling_scores
 
     @classmethod
-    def _get_tiling_selection(
+    def select_tiling_with_memory(
         cls,
         node_schedule,
         numel,
@@ -4806,7 +4791,8 @@ class SIMDScheduling(BaseScheduling):
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
 
-        Return the full selection result, including raw coalesced memory cost.
+        Same selection as get_tiling_and_scores(), additionally reporting the
+        coalesced/uncoalesced memory under the selected tiling when known.
         """
         # If this is a reduction, only tile reduction dims.
         is_pointwise = reduction_numel == 1
@@ -5018,10 +5004,43 @@ class SIMDScheduling(BaseScheduling):
 
 
 @dataclasses.dataclass(frozen=True)
+class _SubSplit:
+    """A candidate pointwise or reduction split, and what it coalesces."""
+
+    splits: list[sympy.Expr]
+    # Intra-kernel ranking scores, penalized for small blocks.
+    split_scores: list[int]
+    # Absolute coalesced memory, comparable across kernels.
+    coalesced_memory: int
+
+
+# Use a fixed 16x heuristic for uncoalesced memory traffic.
+_UNCOALESCED_MEMORY_COST_WEIGHT = 16
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryCoalescing:
+    """Memory accessed under a tiling, split by whether it coalesces.
+
+    These are absolute memory scores (writes weighted x2, as in
+    CoalesceVarAnalysis), so unlike tiling scores they are comparable across
+    different kernels - e.g. one fused kernel against two separate ones.
+    """
+
+    coalesced: int
+    uncoalesced: int
+
+    def weighted_cost(self) -> int:
+        """Total cost, weighting uncoalesced traffic as more expensive."""
+        return self.coalesced + _UNCOALESCED_MEMORY_COST_WEIGHT * self.uncoalesced
+
+
+@dataclasses.dataclass(frozen=True)
 class _TilingSelection:
     tiling: dict[str, sympy.Expr]
     tiling_scores: dict[str, sympy.Expr] | None
-    coalesced_memory_cost: int | None
+    # None when the tiling was forced or fell back, so memory was never scored.
+    memory: MemoryCoalescing | None
 
 
 @dataclasses.dataclass(frozen=True)
