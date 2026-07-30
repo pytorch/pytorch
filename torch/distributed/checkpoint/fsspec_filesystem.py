@@ -94,7 +94,7 @@ class _FileSystem(FileSystemBase):
 
 class FsspecWriter(FileSystemWriter):
     """
-    Basic implementation of StorageWriter using FFspec.
+    Basic implementation of StorageWriter using fsspec.
 
     This implementation makes the following assumptions and simplifications:
 
