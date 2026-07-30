@@ -402,22 +402,16 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // outputBuffer on the root rank, interpreted as a contiguous collection of
   // size inputBuffer * WORLD_SIZE. This is the single-tensor analog of gather
   // that avoids materializing a per-rank output tensor list.
-  // Named after the torchcomms backend naming scheme.
-  virtual c10::intrusive_ptr<Work> gather_single(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const GatherOptions& opts = GatherOptions()) {
-    C10D_BACKEND_FORWARDING_GUARD();
-    return gather_into_tensor(outputBuffer, inputBuffer, opts);
-  }
-
-  // Deprecated: use gather_single instead. Kept as an overridable, forwarding
-  // alias for backward compatibility with existing backends and callers.
   virtual c10::intrusive_ptr<Work> gather_into_tensor(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const GatherOptions& opts = GatherOptions()) {
-    return gather_single(outputBuffer, inputBuffer, opts);
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const GatherOptions& /* opts */ = GatherOptions()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support gather_into_tensor"));
   }
 
   virtual c10::intrusive_ptr<Work> scatter(

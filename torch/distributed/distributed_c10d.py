@@ -51,7 +51,6 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     GatherOptions,
     get_debug_level,
-    NanCheckHook,
     PrefixStore,
     ProcessGroup,
     ReconfigureOptions,
@@ -119,7 +118,6 @@ __all__ = [
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
-    "gather_single",
     "gather_into_tensor",
     "gather_object",
     "get_backend_config",
@@ -684,24 +682,19 @@ def _create_nccl_process_group(
     return backend_class
 
 
-def _nccl2_options(
-    backend_options: object | None,
-) -> "ProcessGroupNCCL.Options":
-    if backend_options is None:
-        return ProcessGroupNCCL.Options()
-    if not isinstance(backend_options, ProcessGroupNCCL.Options):
-        raise AssertionError(
-            "Expected backend_options argument to be of type ProcessGroupNCCL.Options"
-        )
-    return backend_options
-
-
 def _create_nccl2_process_group(
     opts: _DistributedBackendOptions, backend_options: object | None
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    pg_options = _nccl2_options(backend_options)
+    # Accept a ProcessGroupNCCL2.Options if given; otherwise (None, or a
+    # ProcessGroupNCCL.Options passed through the generic path) build a fresh one.
+    if backend_options is not None and isinstance(
+        backend_options, ProcessGroupNCCL2.Options
+    ):
+        pg_options = backend_options
+    else:
+        pg_options = ProcessGroupNCCL2.Options()
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -716,7 +709,12 @@ def _create_nccl_lazy_process_group(
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    pg_options = _nccl2_options(backend_options)
+    if backend_options is not None and isinstance(
+        backend_options, ProcessGroupNCCL2.Options
+    ):
+        pg_options = backend_options
+    else:
+        pg_options = ProcessGroupNCCL2.Options()
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -2868,12 +2866,6 @@ def _new_process_group_helper(
         raise AssertionError("group_desc must not be None")
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
-
-    # Backend-agnostic NaN checking, for backends without a native checker
-    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself). The group owns the
-    # hook, so there is no handle to keep alive here.
-    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
-        NanCheckHook.attach(pg)
 
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
@@ -5393,7 +5385,7 @@ def gather(
 
 
 @_exception_logger
-def gather_single(
+def gather_into_tensor(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
     dst: int | None = None,
@@ -5446,7 +5438,7 @@ def gather_single(
         >>>     gather_tensor = torch.zeros(2 * 2, dtype=torch.int64, device=device)
         >>> else:
         >>>     gather_tensor = None
-        >>> dist.gather_single(tensor, gather_tensor, dst=0)
+        >>> dist.gather_into_tensor(tensor, gather_tensor, dst=0)
         >>> gather_tensor
         tensor([1, 2, 3, 4], device='cuda:0')  # Rank 0
         None                                    # Rank 1
@@ -5455,7 +5447,7 @@ def gather_single(
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
-            gather_single,
+            gather_into_tensor,
             relevant_args,
             tensor,
             gather_tensor=gather_tensor,
@@ -5468,7 +5460,7 @@ def gather_single(
     _check_single_tensor(tensor, "tensor")
     group = _group_or_default_group(group)
     if _rank_not_in_group(group):
-        _warn_not_in_group("gather_single")
+        _warn_not_in_group("gather_into_tensor")
         return
     if dst is None and group_dst is None:
         dst = 0
@@ -5489,7 +5481,7 @@ def gather_single(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    work = group.gather_single(output_tensor, tensor, opts)
+    work = group.gather_into_tensor(output_tensor, tensor, opts)
 
     if async_op:
         return work
@@ -5498,31 +5490,6 @@ def gather_single(
     ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
-
-
-@_exception_logger
-@deprecated(
-    "`torch.distributed.gather_into_tensor` is deprecated. "
-    "Please use `torch.distributed.gather_single` instead.",
-    category=FutureWarning,
-)
-def gather_into_tensor(
-    tensor: torch.Tensor,
-    gather_tensor: torch.Tensor | None = None,
-    dst: int | None = None,
-    group: ProcessGroup | None = None,
-    async_op: bool = False,
-    group_dst: int | None = None,
-):
-    """
-    Gather the input tensor from all ranks into a single output tensor on ``dst``.
-
-    .. warning::
-        `gather_into_tensor` is deprecated. Users should use `gather_single`
-        instead.
-
-    """
-    return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
 
 
 @_exception_logger
@@ -7836,6 +7803,9 @@ def _supports_reconfigure(group: ProcessGroup | None = None) -> bool:
     """
     Return whether ``group`` supports the reconfigure-based fault tolerance API.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
             the default process group is used.
@@ -7850,6 +7820,9 @@ def _get_reconfigure_handle(group: ProcessGroup | None = None) -> str:
 
     The handle encodes the information peers exchange out-of-band to
     (re)initialize the communicator via :func:`_reconfigure`.
+
+    .. warning::
+        This API is experimental and subject to change or removal.
 
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
@@ -7869,6 +7842,9 @@ def _reconfigure(
     """
     Reconfigure ``group`` with a new set of peers for fault tolerance.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         uuid (int): Uniquely identifies this instance of the communicator. Pass
             a fresh value on every (re)initialization.
@@ -7883,6 +7859,13 @@ def _reconfigure(
 
     Returns:
         Work: An async work handle for the reconfigure operation.
+
+    Example::
+        >>> # xdoctest: +SKIP("requires out-of-band rendezvous")
+        >>> dist.init_process_group("gloo", enable_reconfigure=True)
+        >>> # Every peer receives the same fresh UUID and rank-ordered handles.
+        >>> uuid, handles = rendezvous_reconfigure(dist._get_reconfigure_handle())
+        >>> dist._reconfigure(uuid=uuid, handles=handles).wait()
     """
     pg = group or _get_default_group()
     opts = ReconfigureOptions()
