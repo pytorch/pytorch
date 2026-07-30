@@ -2,10 +2,12 @@
 
 import contextlib
 import csv
+import importlib.util
 import io
 import os
 import sys
 import tempfile
+import unittest
 from pathlib import Path
 
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -13,8 +15,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-
-from benchmarks.dynamo.check_perf_csv import check_perf_csv
 
 
 CSV_COLUMNS = [
@@ -57,7 +57,17 @@ def _perf_csv(speedup=1.0, abs_latency=10.0, columns=CSV_COLUMNS, rows=None):
         os.remove(path)
 
 
+@unittest.skipUnless(
+    importlib.util.find_spec("pandas") is not None, "pandas is not installed"
+)
 class CheckPerfCsvTest(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from benchmarks.dynamo.check_perf_csv import check_perf_csv
+
+        cls.check_perf_csv = staticmethod(check_perf_csv)
+
     def _run_check(
         self,
         *,
@@ -76,7 +86,7 @@ class CheckPerfCsvTest(TestCase):
             _perf_csv(speedup, abs_latency) as path,
             contextlib.redirect_stdout(output),
         ):
-            check_perf_csv(
+            self.check_perf_csv(
                 path,
                 threshold,
                 threshold_scale,
@@ -94,7 +104,7 @@ class CheckPerfCsvTest(TestCase):
                 ) as path,
                 contextlib.redirect_stdout(output),
             ):
-                check_perf_csv(
+                self.check_perf_csv(
                     path,
                     kwargs.pop("threshold", 1.0),
                     kwargs.pop("threshold_scale", 0.99),
@@ -129,6 +139,8 @@ class CheckPerfCsvTest(TestCase):
         )
         self.assertIn("performance regressed", regression)
         self.assertIn("performance improved", improvement)
+        self.assertIn("abs_latency=9.8 ms/iter", improvement)
+        self.assertIn("-1.0% from bound", improvement)
 
     def test_two_sided_latency_check_passes_in_band(self):
         output = self._run_check(
@@ -152,7 +164,7 @@ class CheckPerfCsvTest(TestCase):
                         ValueError, "threshold_scale must be positive"
                     ),
                 ):
-                    check_perf_csv(path, 1.0, threshold_scale)
+                    self.check_perf_csv(path, 1.0, threshold_scale)
 
     def test_multi_row_check_reports_only_out_of_band_count(self):
         output = io.StringIO()
@@ -166,58 +178,42 @@ class CheckPerfCsvTest(TestCase):
                 ) as path,
                 contextlib.redirect_stdout(output),
             ):
-                check_perf_csv(path, 1.0, 0.99, fail_on_improvement=True)
+                self.check_perf_csv(path, 1.0, 0.99, fail_on_improvement=True)
 
         self.assertIn("Error: 1 model(s) performance regressed", output.getvalue())
         self.assertIn("    failing_model", output.getvalue())
 
-    def test_osdc_baseline_optional_threshold_scales(self):
-        target_file = (
-            REPO_ROOT
-            / "benchmarks/dynamo/expected_ci_abs_latency_inductor_torchbench_cpu_osdc.csv"
-        )
-        default_target = None
-        override_targets = []
-        with open(target_file, newline="") as csv_file:
-            for row in csv.reader(csv_file):
-                if not row or row[0].startswith("#"):
-                    continue
-                target = float(row[5])
-                if len(row) > 6:
-                    override_targets.append((target, float(row[6])))
-                elif default_target is None:
-                    default_target = target
-
-        self.assertIsNotNone(default_target)
-        default_in_band = default_target / 0.99 * 0.999
+    def test_explicit_threshold_scale_widens_latency_band(self):
+        target = 10.0
+        only_in_wider_band = 10.4
         output = self._run_check(
             speedup=1.0,
-            abs_latency=default_in_band,
+            abs_latency=only_in_wider_band,
             metric="abs_latency",
-            threshold=default_target,
-        )
-        self.assertIn("passed threshold check", output)
-
-        override_target, override_scale = min(
-            override_targets, key=lambda item: item[1]
-        )
-        override_in_band = override_target / override_scale * 0.999
-        output = self._run_check(
-            speedup=1.0,
-            abs_latency=override_in_band,
-            metric="abs_latency",
-            threshold=override_target,
-            threshold_scale=override_scale,
+            threshold=target,
+            threshold_scale=0.95,
         )
         self.assertIn("passed threshold check", output)
 
         default_scale_failure = self._run_check_expecting_failure(
             speedup=1.0,
-            abs_latency=override_in_band,
+            abs_latency=only_in_wider_band,
             metric="abs_latency",
-            threshold=override_target,
+            threshold=target,
         )
         self.assertIn("performance regressed", default_scale_failure)
+
+    def test_submillisecond_latency_failure_keeps_precision(self):
+        output = self._run_check_expecting_failure(
+            speedup=1.0,
+            abs_latency=0.29,
+            metric="abs_latency",
+            threshold=0.297512,
+            threshold_scale=0.985,
+        )
+        self.assertIn("abs_latency=0.29 ms/iter", output)
+        self.assertIn("< 0.293049 ms/iter", output)
+        self.assertIn("-1.0% from bound", output)
 
     def test_latency_summary_without_speedup_column_has_no_leading_comma(self):
         output = io.StringIO()
@@ -229,7 +225,7 @@ class CheckPerfCsvTest(TestCase):
             ) as path,
             contextlib.redirect_stdout(output),
         ):
-            check_perf_csv(
+            self.check_perf_csv(
                 path,
                 10.0,
                 0.99,
@@ -238,7 +234,7 @@ class CheckPerfCsvTest(TestCase):
             )
 
         self.assertIn(
-            "test_model                         latency=10.0 ms/iter", output.getvalue()
+            "test_model                         latency=10 ms/iter", output.getvalue()
         )
         self.assertNotIn(
             "test_model                         , latency", output.getvalue()

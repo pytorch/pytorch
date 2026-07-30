@@ -506,6 +506,11 @@ test_h100_symm_mem() {
   _run_symm_mem_tests
 }
 
+test_h100_fabric() {
+  time python test/run_test.py --include distributed/test_p2p_ipc.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_b200_symm_mem() {
   _run_symm_mem_tests
 }
@@ -1380,7 +1385,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   while IFS=',' read -r -a model_cfg
   do
     local model_name=${model_cfg[0]:-}
-    if [[ -z "$model_name" || "$model_name" == \#* ]]; then
+    if [[ "$model_name" =~ ^[[:space:]]*(#|$) ]]; then
       continue
     fi
     local data_type=${model_cfg[2]}
@@ -1394,16 +1399,28 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     local output_name="$TEST_REPORTS_DIR/inductor_inference_${model_cfg[0]}_${model_cfg[1]}_${model_cfg[2]}_${model_cfg[3]}_cpu_smoketest.csv"
 
+    local benchmark_status=0
     if [[ ${model_cfg[3]} == "dynamic" ]]; then
       $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
-        --dynamic-batch-only --freezing --timeout 9000 --"$backend" --output "$output_name"
+        --dynamic-batch-only --freezing --timeout 9000 --"$backend" --output "$output_name" \
+        || benchmark_status=$?
     else
       $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
-        --freezing --timeout 9000 --"$backend" --output "$output_name"
+        --freezing --timeout 9000 --"$backend" --output "$output_name" \
+        || benchmark_status=$?
     fi
-    cat "$output_name"
+    if [[ "$benchmark_status" -ne 0 ]]; then
+      echo "CPU TorchBench smoketest failed for $model_name (exit $benchmark_status)" >&2
+      validation_status=$benchmark_status
+      continue
+    fi
+    if ! cat "$output_name"; then
+      echo "Missing CPU TorchBench smoketest output for $model_name: $output_name" >&2
+      validation_status=1
+      continue
+    fi
     # The threshold value needs to be actively maintained to make this check useful.
     # Allow 1% variance by default for CPU perf to accommodate perf fluctuation.
     # Some models can override this in the target CSV when a tighter band is flaky.
@@ -2453,6 +2470,8 @@ elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
+elif [[ "${TEST_CONFIG}" == "h100-fabric" ]]; then
+  test_h100_fabric
 elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_b200_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then

@@ -12,7 +12,7 @@ def _format_metric_value(metric, value):
     if metric == "speedup":
         return f"{value:.3f}x"
     if metric == "abs_latency":
-        return f"{value:.1f} ms/iter"
+        return f"{value:.6g} ms/iter"
     return f"{value:.3f}"
 
 
@@ -52,9 +52,11 @@ def _print_failures(metric, failures, bound, comparator, label):
         )
     )
     for name, value in sorted(failures, key=lambda x: x[1]):
+        pct_from_bound = (value / bound - 1.0) * 100.0
         print(
             f"  - {name}: {metric}={_format_metric_value(metric, value)} "
-            f"({comparator} {_format_metric_value(metric, bound)})"
+            f"({comparator} {_format_metric_value(metric, bound)}; "
+            f"{pct_from_bound:+.1f}% from bound)"
         )
 
 
@@ -120,7 +122,9 @@ def check_perf_csv(
         if speedup is not None:
             perf_details.append(f"speedup={speedup:.3f}x")
         if abs_latency is not None:
-            perf_details.append(f"latency={abs_latency:.1f} ms/iter")
+            perf_details.append(
+                f"latency={_format_metric_value('abs_latency', abs_latency)}"
+            )
         if compilation_latency is not None:
             perf_details.append(f"compile={compilation_latency:.3f}s")
         if compression_ratio is not None and compression_ratio != 0:

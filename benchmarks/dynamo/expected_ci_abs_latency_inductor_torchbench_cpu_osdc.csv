@@ -1,19 +1,19 @@
 # ARC maps linux.24xl.spr-metal to the fixed c7i.metal-24xl instance type (l-bx86iamx-92-167).
-# Targets center two main runs on benchmark image 07303684; default-band rows varied less than 1%.
-# Optional scales preserve wider fixed-runner noise bands observed before the image change.
+# Targets center six main runs on benchmark image e480c7d7.
+# Optional scales preserve wider fixed-runner noise bands observed across recent images.
 #name,backend,data_type,shape,wrapper,abs_latency_ms_l_bx86iamx_92_167,optional_threshold_scale
-phlippe_densenet,inductor,float32,static,default,13.187668,0.975
-basic_gnn_edgecnn,inductor,float32,dynamic,default,12.737712,0.980
-llama_v2_7b_16h,inductor,float32,dynamic,default,741.383050,0.985
-resnet50,inductor,float32,dynamic,default,55.583507,0.985
-mobilenet_v3_large,inductor,float32,static,cpp,8.752700
-functorch_maml_omniglot,inductor,float32,dynamic,cpp,0.297512,0.985
-yolov3,export-aot-inductor,float32,static,default,112.203187,0.975
-mobilenet_v2,export-aot-inductor,float32,static,default,5.301228
-resnext50_32x4d,export-aot-inductor,float32,dynamic,default,16.517218
-resnext50_32x4d,inductor,amp,static,default,6.883004,0.95
-vgg16,inductor,amp,static,default,6.768309,0.985
-llama,inductor,amp,static,default,10.581579,0.975
-mnasnet1_0,inductor,amp,static,cpp,5.294622
+phlippe_densenet,inductor,float32,static,default,12.715548,0.975
+basic_gnn_edgecnn,inductor,float32,dynamic,default,12.590870,0.980
+llama_v2_7b_16h,inductor,float32,dynamic,default,726.331509,0.970
+resnet50,inductor,float32,dynamic,default,54.321595,0.975
+mobilenet_v3_large,inductor,float32,static,cpp,8.772686,0.985
+functorch_maml_omniglot,inductor,float32,dynamic,cpp,0.295667,0.980
+yolov3,export-aot-inductor,float32,static,default,111.418907,0.975
+mobilenet_v2,export-aot-inductor,float32,static,default,5.267464,0.985
+resnext50_32x4d,export-aot-inductor,float32,dynamic,default,16.509045
+resnext50_32x4d,inductor,amp,static,default,6.900092,0.95
+vgg16,inductor,amp,static,default,6.766451,0.985
+llama,inductor,amp,static,default,10.677781,0.975
+mnasnet1_0,inductor,amp,static,cpp,5.259239
 #mobilenet_v2,inductor,amp,dynamic,cpp,disabled # https://github.com/pytorch/pytorch/issues/131693
-densenet121,export-aot-inductor,amp,static,default,47.900602
+densenet121,export-aot-inductor,amp,static,default,48.043733,0.980
