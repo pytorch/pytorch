@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/StatelessPhilox4x32.cuh>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -326,34 +327,31 @@ Tensor& _philox_normal_cuda_(
 }
 
 Tensor& _philox_bits_cuda_(Tensor& self, const Tensor& key) {
-  TORCH_CHECK(self.scalar_type() == kUInt32 || self.scalar_type() == kUInt64,
-      "_philox_bits_: self must have dtype uint32 or uint64, got ",
-      self.scalar_type());
-  if (self.scalar_type() == kUInt64) {
-    // Pack the four uint32 Philox outputs into two uint64 values.
+  auto st = self.scalar_type();
+  TORCH_CHECK(
+      st == kUInt32 || st == kUInt64 || st == kInt || st == kLong,
+      "_philox_bits_: self must have dtype int32, int64, uint32, or uint64, got ",
+      st);
+  AT_DISPATCH_V2(st, "_philox_bits_", AT_WRAP([&] {
+    // 8-byte types pack the four uint32 outputs into two 64-bit values; 4-byte
+    // types emit the raw uint32 outputs. Signed dtypes receive the same bits.
     auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
       uint4 r = philox_4x32(seed, offset);
-      ulonglong2 packed;
-      packed.x = (static_cast<unsigned long long>(r.x) << 32) | r.y;
-      packed.y = (static_cast<unsigned long long>(r.z) << 32) | r.w;
-      return packed;
+      if constexpr (sizeof(scalar_t) == 8) {
+        ulonglong2 packed;
+        packed.x = (static_cast<unsigned long long>(r.x) << 32) | r.y;
+        packed.y = (static_cast<unsigned long long>(r.z) << 32) | r.w;
+        return packed;
+      } else {
+        return r;
+      }
     };
     auto param_func = [] __device__ (auto rand) {
-      return static_cast<uint64_t>(rand);
+      return static_cast<scalar_t>(rand);
     };
-    philox_distribution_kernel<uint64_t>(
+    philox_distribution_kernel<scalar_t>(
         "_philox_bits_", self, key, sample_func, param_func);
-  } else {
-    // Emit the four raw uint32 Philox outputs directly.
-    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
-      return philox_4x32(seed, offset);
-    };
-    auto param_func = [] __device__ (auto rand) {
-      return static_cast<uint32_t>(rand);
-    };
-    philox_distribution_kernel<uint32_t>(
-        "_philox_bits_", self, key, sample_func, param_func);
-  }
+  }), kUInt32, kUInt64, kInt, kLong);
   return self;
 }
 
