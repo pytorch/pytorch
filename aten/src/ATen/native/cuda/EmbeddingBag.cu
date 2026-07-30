@@ -375,6 +375,15 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     // implementation even this flag is enabled.
     TORCH_CHECK(
         numBags >= 1, "include_last_offset: numBags should be at least 1");
+    // Reject the combination that produces 0 bags with non-empty indices,
+    // which previously caused OOB access. See
+    // https://github.com/pytorch/pytorch/issues/190044.
+    TORCH_CHECK(
+        numBags >= 2 || numIndices == 0,
+        "embedding_bag: When include_last_offset is True and there are indices, "
+        "offsets must have at least 2 elements to define at least one bag, "
+        "but got offsets of size ", numBags,
+        " with ", numIndices, " indices");
     numBags -= 1;
   }
   int64_t featureSize = weight.size(1);
