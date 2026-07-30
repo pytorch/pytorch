@@ -51,7 +51,7 @@ from typing import Any, TYPE_CHECKING, TypeAlias
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 import torch
 from torch.cuda._utils import (
@@ -572,6 +572,17 @@ def clear_kernel_annotations() -> None:
     """
     _kernel_annotations.clear()
     _pending_scopes.clear()
+
+
+def remove_kernel_annotations(exec_graph_ids: Iterable[int]) -> None:
+    """Drop kernel-annotation entries whose exec graph id (tools_id >> 32) is in
+    exec_graph_ids, so the map does not grow across the run. Run by the annotation
+    resolver's graph-destroy handler."""
+    ids = set(exec_graph_ids)
+    if not ids:
+        return
+    for key in [k for k in _kernel_annotations if k >> 32 in ids]:
+        del _kernel_annotations[key]
 
 
 # Counter-based stream ID registry. IDs start at 60 (above the highest
