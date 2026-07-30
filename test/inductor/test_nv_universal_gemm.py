@@ -1306,24 +1306,38 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     @parametrize(
         "case",
         (
-            (0, "sum"),
-            (0, "mean"),
-            (0, "prod"),
-            (0, "amax"),
-            (0, "amin"),
-            (1, "sum"),
-            (1, "mean"),
-            (1, "prod"),
-            (1, "amax"),
-            (1, "amin"),
+            (0, "sum", 4),
+            (0, "mean", 4),
+            (0, "prod", 4),
+            (0, "amax", 4),
+            (0, "amin", 4),
+            (0, "sum", 8),
+            (0, "mean", 8),
+            (0, "prod", 8),
+            (0, "amax", 8),
+            (0, "amin", 8),
+            (0, "sum", 16),
+            (0, "mean", 16),
+            (0, "prod", 16),
+            (0, "amax", 16),
+            (0, "amin", 16),
+            (1, "sum", 32),
+            (1, "mean", 32),
+            (1, "prod", 32),
+            (1, "amax", 32),
+            (1, "amin", 32),
+            (1, "sum", 64),
+            (1, "mean", 64),
+            (1, "prod", 64),
+            (1, "amax", 64),
+            (1, "amin", 64),
         ),
-        name_fn=lambda case: f"axis_{case[0]}_{case[1]}",
+        name_fn=lambda case: f"axis_{case[0]}_{case[1]}_group_{case[2]}",
     )
     def test_scaled_mm_grouped_reduce_fusion(self, case):
-        axis, reduction = case
-        m, n, k = 128, 128, 512
+        axis, reduction, group = case
+        m, n, k = 128, 256 if group > 32 else 128, 512
         packed_k = k // 2
-        group = 4 if axis == 0 else 32
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
         )
@@ -1440,6 +1454,40 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
         self.assertNotIn("'local_reduce_out'", code)
+
+    def test_scaled_mm_grouped_reduce_feeds_main(self):
+        m, n, k, group = 128, 128, 512, 4
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(
+            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(
+            _round_up(m, 128) * padded_k_blocks, device="cuda"
+        ).to(torch.float8_e4m3fn)
+        scale_b = torch.rand(
+            _round_up(n, 128) * padded_k_blocks, device="cuda"
+        ).to(torch.float8_e4m3fn)
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(-1, group, n)
+            mean = grouped.mean(1, keepdim=True).expand(-1, group, -1)
+            return result.float() - mean.reshape(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("'local_reduce_feeds_main': True", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one

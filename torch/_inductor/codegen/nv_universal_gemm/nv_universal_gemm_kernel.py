@@ -14,7 +14,7 @@ import importlib
 import logging
 import re
 import threading
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
     IndentedBuffer,
@@ -407,14 +407,16 @@ def _create_gemm_arguments(
     local_reduce_axis: int = 1,
     local_reduce_type: str = "sum",
     local_reduce_source: str = "identity",
+    local_reduce_feeds_main: bool = False,
 ):
     import cutlass.operators
 
-    if local_reduce_out is not None and variant_name != "SCALED_GEMM":
+    has_local_reduce = local_reduce_out is not None or local_reduce_feeds_main
+    if has_local_reduce and variant_name != "SCALED_GEMM":
         raise NotImplementedError(
             "NVGEMM local reductions currently require scaled GEMM"
         )
-    if local_reduce_out is not None and (
+    if has_local_reduce and (
         local_reduce_axis not in (0, 1) or local_reduce_group <= 1
     ):
         raise NotImplementedError(
@@ -422,15 +424,18 @@ def _create_gemm_arguments(
         )
 
     def with_local_reduce(args):
-        if local_reduce_out is None:
+        if not has_local_reduce:
             return args
         from cutlass.operators.utils.tensor import TensorWrapper
 
-        args.local_reduce_out = TensorWrapper(local_reduce_out)
+        args.local_reduce_out = (
+            TensorWrapper(local_reduce_out) if local_reduce_out is not None else None
+        )
         args.local_reduce_group = local_reduce_group
         args.local_reduce_axis = local_reduce_axis
         args.local_reduce_type = local_reduce_type
         args.local_reduce_source = local_reduce_source
+        args.local_reduce_feeds_main = local_reduce_feeds_main
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
@@ -1252,8 +1257,12 @@ class NVUniversalGemmKernel(Kernel):
             run_variant_kwargs = "_VARIANT_KWARGS"
             if self.local_reduce is not None:
                 reduction = self.local_reduce
-                reduce_name = cast(str, reduction.reduction_output)
-                reduce_ptr = f"out_ptr{output_buffers.index(reduce_name)}"
+                feed_main = reduction.feeds_main
+                reduce_ptr = (
+                    "None"
+                    if reduction.reduction_output is None
+                    else f"out_ptr{output_buffers.index(reduction.reduction_output)}"
+                )
                 run_variant_kwargs = (
                     "_VARIANT_KWARGS | {"
                     f"'local_reduce_out': {reduce_ptr}, "
@@ -1261,9 +1270,11 @@ class NVUniversalGemmKernel(Kernel):
                     f"'local_reduce_axis': {reduction.axis}, "
                     f"'local_reduce_type': {reduction.reduction_type!r}, "
                     f"'local_reduce_source': {reduction.source_type!r}"
+                    f", 'local_reduce_feeds_main': {feed_main!r}"
                     "}"
                 )
-                aux_tensors.append(reduce_ptr)
+                if not feed_main:
+                    aux_tensors.append(reduce_ptr)
 
             aux_tensors_expr = f"({', '.join(aux_tensors)},)" if aux_tensors else "()"
 
