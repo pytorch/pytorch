@@ -547,6 +547,10 @@ add_dependencies(torch_python gen_torch_version)
 # via Python package collection. Install it explicitly via cmake instead.
 install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
 
+if(EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
+  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py" DESTINATION ".")
+endif()
+
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930
 if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
