@@ -177,6 +177,7 @@ class TestFFT(TestCase):
     })
     @dtypes(torch.half, torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
     def test_fft_round_trip(self, device, dtype):
+        device_type = torch.device(device).type
         skip_helper_for_fft(device, dtype)
         # Test that round trip through ifft(fft(x)) is the identity
         if dtype not in (torch.half, torch.complex32):
@@ -222,6 +223,8 @@ class TestFFT(TestCase):
                 }
 
                 y = backward(forward(x, **kwargs), **kwargs)
+                if device_type == 'xpu' and x.dtype is torch.half and y.dtype in (torch.float32, torch.complex64):
+                    x = x.to(y.dtype)
                 if (
                     (x.dtype is torch.half and y.dtype is torch.complex32) or
                     (x.dtype is torch.bfloat16 and y.dtype is torch.bcomplex32)
@@ -271,6 +274,7 @@ class TestFFT(TestCase):
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
+        device_type = torch.device(device).type
         skip_helper_for_fft(device, dtype)
 
         if dtype.is_complex or dtype.is_floating_point:
@@ -280,7 +284,7 @@ class TestFFT(TestCase):
 
         PROMOTION_MAP = {
             torch.int8: torch.complex64,
-            torch.half: torch.complex32,
+            torch.half: torch.complex64 if device_type == 'xpu' else torch.complex32,
             torch.float: torch.complex64,
             torch.double: torch.complex128,
             torch.complex32: torch.complex32,
@@ -292,7 +296,7 @@ class TestFFT(TestCase):
 
         PROMOTION_MAP_C2R = {
             torch.int8: torch.float,
-            torch.half: torch.half,
+            torch.half: torch.float32 if device_type == 'xpu' else torch.half,
             torch.float: torch.float,
             torch.double: torch.double,
             torch.complex32: torch.half,
@@ -312,13 +316,12 @@ class TestFFT(TestCase):
         if not dtype.is_complex:
             PROMOTION_MAP_R2C = {
                 torch.int8: torch.complex64,
-                torch.half: torch.complex32,
+                torch.half: torch.complex64 if device_type == 'xpu' else torch.complex32,
                 torch.float: torch.complex64,
                 torch.double: torch.complex128,
                 # bfloat16 is promoted to float32 on CUDA/XPU, yielding complex64
                 torch.bfloat16: torch.complex64,
             }
-            device_type = torch.device(device).type
             if dtype is torch.bfloat16 and device_type not in ('cuda', 'xpu'):
                 pass  # bfloat16 FFT only supported on CUDA/XPU, skip on CPU
             elif dtype in PROMOTION_MAP_R2C:
@@ -423,6 +426,7 @@ class TestFFT(TestCase):
     @dtypes(torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fftn_round_trip(self, device, dtype):
+        device_type = torch.device(device).type
         skip_helper_for_fft(device, dtype)
 
         norm_modes = (None, "forward", "backward", "ortho")
@@ -462,7 +466,9 @@ class TestFFT(TestCase):
                 kwargs = {'s': s, 'dim': dim, 'norm': norm}
                 y = backward(forward(x, **kwargs), **kwargs)
                 # For real input, ifftn(fftn(x)) will convert to complex
-                if x.dtype is torch.half and y.dtype is torch.chalf:
+                if device_type == 'xpu' and x.dtype is torch.half and y.dtype in (torch.float32, torch.complex64):
+                    self.assertEqual(x.to(y.dtype), y)
+                elif x.dtype is torch.half and y.dtype is torch.chalf:
                     # Since type promotion currently doesn't work with complex32
                     # manually promote `x` to complex32
                     self.assertEqual(x.to(torch.chalf), y)
@@ -496,8 +502,9 @@ class TestFFT(TestCase):
     @dtypes(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_fftn_noop_transform(self, device, dtype):
         skip_helper_for_fft(device, dtype)
+        device_type = torch.device(device).type
         RESULT_TYPE = {
-            torch.half: torch.chalf,
+            torch.half: torch.complex64 if device_type == 'xpu' else torch.chalf,
             torch.float: torch.cfloat,
             torch.double: torch.cdouble,
         }
@@ -523,6 +530,7 @@ class TestFFT(TestCase):
     })
     @dtypes(torch.half, torch.float, torch.double)
     def test_hfftn(self, device, dtype):
+        device_type = torch.device(device).type
         skip_helper_for_fft(device, dtype)
 
         # input_ndim, dim
@@ -554,6 +562,8 @@ class TestFFT(TestCase):
             s = [shape[dim] for dim in actual_dims]
             actual = torch.fft.hfftn(input, s=s, dim=dim, norm="ortho")
 
+            if device_type == 'xpu' and expect.dtype is torch.half and actual.dtype is torch.float32:
+                expect = expect.to(torch.float32)
             self.assertEqual(expect, actual)
 
     @skipCPUIfNoFFT

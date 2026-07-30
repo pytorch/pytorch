@@ -79,7 +79,7 @@ def _promote_type_fft(
         #     input. Otherwise, for size-1 inputs the prim would return a view
         #     while aten returns a fresh tensor, breaking view-consistency
         #     (test_python_ref__refs_fft_*_cuda_bfloat16).
-        if dtype == torch.bfloat16:
+        if dtype == torch.bfloat16 or dtype == torch.float16 and device.type == "xpu":
             dtype = torch.float32
     torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
 
