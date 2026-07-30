@@ -14409,9 +14409,10 @@ fn
         self.assertTrue(same(result[0], torch.tensor(3)))
 
     def test_dynamo_reset_clears_cache(self):
-        """Test that dynamo bytecode cache is freed
+        """Test that dynamo bytecode and fake tensor caches are freed
         when dynamo reset is called
         """
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x):
             return torch.sin(x)
@@ -14422,9 +14423,16 @@ fn
         c1 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c1), 1)
 
+        # Under symbolic shapes the dispatch cache lives on the ShapeEnv rather
+        # than the process-global FakeTensorMode.cache, so only check the latter
+        # is populated when shapes are static.
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertGreater(len(FakeTensorMode.cache), 0)
+
         torch._dynamo.reset()
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
+        self.assertEqual(len(FakeTensorMode.cache), 0)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_check_simplification(self):
