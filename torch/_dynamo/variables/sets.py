@@ -741,7 +741,10 @@ class OrderedSetClassVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name == "__new__":
+        # Mirror the names call_method below can dispatch (__new__ plus the set
+        # methods invoked unbound, e.g. OrderedSet.add(s, x)).  Without this the
+        # generic MRO walk finds nothing on the class and raises AttributeError.
+        if name == "__new__" or getattr(set, name, None) in set_methods:
             from .misc import CallMethodVariable
 
             if self.source:
