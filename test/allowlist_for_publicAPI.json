@@ -1062,6 +1062,8 @@
   ],
   "torch.utils.data": [
     "_DatasetKind",
+    "SharedDict",
+    "SharedList",
     "argument_validation",
     "default_collate",
     "default_convert",

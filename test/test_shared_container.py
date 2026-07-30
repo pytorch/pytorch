@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
-import unittest
+# Owner(s): ["module: unknown"]
 
-import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.data import SharedDict, SharedList
 
@@ -83,7 +82,7 @@ class TestSharedList(TestCase):
 
     def test_iteration(self) -> None:
         sl = SharedList([1, 2, 3])
-        self.assertEqual([x for x in sl], [1, 2, 3])
+        self.assertEqual(list(sl), [1, 2, 3])
 
     def test_negative_index(self) -> None:
         sl = SharedList([1, 2, 3])
@@ -104,7 +103,7 @@ class TestSharedList(TestCase):
         self.assertEqual(len(sl), N)
         self.assertEqual(sl[0]["id"], 0)
         self.assertEqual(sl[N - 1]["id"], N - 1)
-        self.assertEqual(sl[42]["value"], f"item_42_" * 20)
+        self.assertEqual(sl[42]["value"], "item_42_" * 20)
 
     def test_tuple_keys_values(self) -> None:
         data = [{(1, 2): "a"}, {("x", "y"): (3, 4)}]
@@ -213,7 +212,7 @@ class TestSharedDict(TestCase):
         sd = SharedDict(d)
         self.assertEqual(len(sd), N)
         self.assertEqual(sd["key_0"], "value_0")
-        self.assertEqual(sd[f"key_{N-1}"], f"value_{N-1}")
+        self.assertEqual(sd[f"key_{N - 1}"], f"value_{N - 1}")
 
 
 if __name__ == "__main__":

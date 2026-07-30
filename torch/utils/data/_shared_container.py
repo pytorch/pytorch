@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import pickle
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Union
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 import torch
 
@@ -32,13 +33,13 @@ class SharedList(Sequence):
             picklable.
     """
 
-    def __init__(self, data: Union[Sequence, Iterator]) -> None:
+    def __init__(self, data: Sequence | Iterator) -> None:
         if isinstance(data, SharedList):
             self._index = data._index.clone()
             self._storage = data._storage.clone()
             self._length = data._length
             return
-        serialized: List[bytes] = [pickle.dumps(item) for item in data]
+        serialized: list[bytes] = [pickle.dumps(item) for item in data]
         offsets = [0]
         for s in serialized:
             offsets.append(offsets[-1] + len(s))
@@ -47,9 +48,7 @@ class SharedList(Sequence):
             raw[offsets[i] : offsets[i + 1]] = s
         self._index = torch.tensor(offsets, dtype=torch.int64)
         if offsets[-1] > 0:
-            self._storage = torch.frombuffer(
-                bytearray(raw), dtype=torch.uint8
-            )
+            self._storage = torch.frombuffer(bytearray(raw), dtype=torch.uint8)
         else:
             self._storage = torch.empty(0, dtype=torch.uint8)
         self._length = len(serialized)
@@ -57,7 +56,7 @@ class SharedList(Sequence):
     def __len__(self) -> int:
         return self._length
 
-    def __getitem__(self, idx: Union[int, slice]) -> Any:
+    def __getitem__(self, idx: int | slice) -> Any:
         if isinstance(idx, slice):
             return [self[i] for i in range(*idx.indices(self._length))]
         if idx < 0:
@@ -85,7 +84,7 @@ class SharedList(Sequence):
         suffix = ", ..." if self._length > 5 else ""
         return f"SharedList([{preview}{suffix}])"
 
-    def index(self, item: Any, start: int = 0, end: Optional[int] = None) -> int:
+    def index(self, item: Any, start: int = 0, end: int | None = None) -> int:
         if end is None:
             end = self._length
         for i in range(start, end):
@@ -135,14 +134,12 @@ class SharedDict:
     """
 
     def __init__(self, mapping=None, /, **kwargs) -> None:
-        source: Dict[Any, Any] = {}
+        source: dict[Any, Any] = {}
         if mapping is not None:
             source.update(mapping)
         source.update(kwargs)
-        keys_serialized: List[bytes] = [pickle.dumps(k) for k in source.keys()]
-        values_serialized: List[bytes] = [
-            pickle.dumps(v) for v in source.values()
-        ]
+        keys_serialized: list[bytes] = [pickle.dumps(k) for k in source]
+        values_serialized: list[bytes] = [pickle.dumps(v) for v in source.values()]
         k_offsets = [0]
         v_offsets = [0]
         for k, v in zip(keys_serialized, values_serialized):
@@ -155,16 +152,12 @@ class SharedDict:
             v_raw[v_offsets[i] : v_offsets[i + 1]] = v
         self._k_index = torch.tensor(k_offsets, dtype=torch.int64)
         if k_offsets[-1] > 0:
-            self._k_storage = torch.frombuffer(
-                bytearray(k_raw), dtype=torch.uint8
-            )
+            self._k_storage = torch.frombuffer(bytearray(k_raw), dtype=torch.uint8)
         else:
             self._k_storage = torch.empty(0, dtype=torch.uint8)
         self._v_index = torch.tensor(v_offsets, dtype=torch.int64)
         if v_offsets[-1] > 0:
-            self._v_storage = torch.frombuffer(
-                bytearray(v_raw), dtype=torch.uint8
-            )
+            self._v_storage = torch.frombuffer(bytearray(v_raw), dtype=torch.uint8)
         else:
             self._v_storage = torch.empty(0, dtype=torch.uint8)
         self._length = len(source)
@@ -190,9 +183,7 @@ class SharedDict:
             yield self._deserialize_key(i)
 
     def __repr__(self) -> str:
-        pairs = ", ".join(
-            f"{repr(k)}: {repr(v)}" for k, v in self.items()[:5]
-        )
+        pairs = ", ".join(f"{repr(k)}: {repr(v)}" for k, v in self.items()[:5])
         suffix = ", ..." if self._length > 5 else ""
         return f"SharedDict({{{pairs}{suffix}}})"
 
@@ -206,13 +197,13 @@ class SharedDict:
         end = int(self._v_index[idx + 1].item())
         return pickle.loads(_tensor_to_bytes(self._v_storage[start:end]))
 
-    def keys(self) -> List[Any]:
+    def keys(self) -> list[Any]:
         return [self._deserialize_key(i) for i in range(self._length)]
 
-    def values(self) -> List[Any]:
+    def values(self) -> list[Any]:
         return [self._deserialize_value(i) for i in range(self._length)]
 
-    def items(self) -> List[tuple]:
+    def items(self) -> list[tuple]:
         return [
             (self._deserialize_key(i), self._deserialize_value(i))
             for i in range(self._length)
