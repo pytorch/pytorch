@@ -4,7 +4,9 @@
 #include <ATen/cpu/StatelessPhilox4x32.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/core/TransformationHelper.h>
+#include <ATen/native/cpu/Loops.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -220,15 +222,45 @@ Tensor _philox_key_fold_in_cpu(const Tensor& key, int64_t data) {
 }
 
 Tensor _philox_key_fold_in_tensor_cpu(const Tensor& key, const Tensor& data) {
+  TORCH_CHECK(key.dim() >= 1 && key.size(-1) == 2,
+      "_philox_key_fold_in: key must have shape (*batch, 2), got shape ",
+      key.sizes());
+  TORCH_CHECK(key.scalar_type() == kUInt64,
+      "_philox_key_fold_in: key must have dtype uint64, got ",
+      key.scalar_type());
   TORCH_CHECK(data.scalar_type() == kUInt64,
       "_philox_key_fold_in: data must have dtype uint64, got ",
       data.scalar_type());
-  // TODO: Relax this and allow for arbitrary data shape that broadcasts with
-  // batched keys?
-  TORCH_CHECK(data.numel() == 1,
-      "_philox_key_fold_in: data must be a single value, got ",
-      data.numel(), " elements");
-  return philox_key_fold_in_impl(key, data.const_data_ptr<uint64_t>()[0]);
+
+  auto output_shape = at::infer_size_dimvector(
+      key.sizes().slice(0, key.dim() - 1), data.sizes());
+  output_shape.push_back(2);
+  Tensor output = at::empty(output_shape, key.options());
+  Tensor output_seed = output.select(-1, 0);
+  Tensor output_offset = output.select(-1, 1);
+  Tensor key_seed = key.select(-1, 0);
+  Tensor key_offset = key.select(-1, 1);
+
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .add_output(output_seed)
+      .add_output(output_offset)
+      .add_const_input(key_seed)
+      .add_const_input(key_offset)
+      .add_const_input(data)
+      .build();
+  cpu_kernel_multiple_outputs(
+      iter,
+      [](uint64_t seed, uint64_t offset, uint64_t fold)
+          -> std::tuple<uint64_t, uint64_t> {
+        auto r = philox_4x32(seed, offset + fold);
+        return {
+            static_cast<uint64_t>(r[0]) |
+                (static_cast<uint64_t>(r[1]) << 32),
+            static_cast<uint64_t>(r[2]) |
+                (static_cast<uint64_t>(r[3]) << 32)};
+      });
+  return output;
 }
 
 Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double high) {
