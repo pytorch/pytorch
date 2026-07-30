@@ -6,7 +6,6 @@ Each phase is also available as a structured trace artifact.
 """
 
 import logging
-import sys
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, TYPE_CHECKING
 
@@ -40,26 +39,18 @@ def log_flex_gemm_artifact(
     payload_fn: Callable[[], str],
     *,
     lowering_name: str | None = None,
-    colored_payload_fn: Callable[[], str] | None = None,
     verbose: bool = False,
 ) -> None:
     """Emit one lazily rendered local and structured FlexGEMM phase."""
     heading = "FLEXGEMM LOWERING"
     if lowering_name is not None:
         heading += f" [{lowering_name}]"
-    local_payload_fn = payload_fn
-    if colored_payload_fn is not None:
-        try:
-            if sys.stderr.isatty():
-                local_payload_fn = colored_payload_fn
-        except AttributeError:
-            pass
     flex_gemm_log.log(
         logging.DEBUG if verbose else logging.INFO,
         "%s\n ===== %s =====\n%s",
         heading,
         name.replace("_", " ").upper(),
-        LazyString(local_payload_fn),
+        LazyString(payload_fn),
     )
     trace_structured(
         "artifact",
@@ -101,7 +92,6 @@ def format_flex_gemm_problem(
     tuned: bool,
     fast_math: bool,
     explicit_config: dict[str, Any] | None,
-    colored: bool = False,
 ) -> str:
     """Render the inputs and captured body entering FlexGEMM analysis."""
     lines = [
@@ -131,7 +121,6 @@ def format_flex_gemm_problem(
                 print_output=False,
                 include_stride=True,
                 include_device=True,
-                colored=colored,
             ).strip(),
         )
     )
