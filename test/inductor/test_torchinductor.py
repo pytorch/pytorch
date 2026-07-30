@@ -17203,6 +17203,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         so the native calc_log_ndtr lowering is used instead of the _refs
         decomposition, which loses the signbit under -fno-signed-zeros.
         """
+
         def fn(x):
             return torch.special.log_ndtr(x)
 
