@@ -2651,13 +2651,21 @@ class TestMaxAutotune(TestCase):
             ]
 
         # Valid cache hit.
+        # XPU registers a second, ascending-K mm_plus_mm template alongside
+        # the shared descending-K one (device-gated in tuned_mm_plus_mm), so
+        # each fusion generates twice as many cached triton modules
+        # (max_mm_configs=4 -> 8 modules per fusion).
+        if GPU_TYPE == "xpu":
+            expected_hits, expected_misses = 8, 8
+        else:
+            expected_hits, expected_misses = 4, 4
         with fresh_cache():
             torch._dynamo.utils.counters.clear()
             compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
             eager_results = func_test1(a, b, a, b)
             self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
-            self.assertEqual(hits(), 4)
-            self.assertEqual(misses(), 4)
+            self.assertEqual(hits(), expected_hits)
+            self.assertEqual(misses(), expected_misses)
 
     @fresh_cache()
     @unittest.skipIf(
