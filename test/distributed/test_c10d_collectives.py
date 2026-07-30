@@ -147,21 +147,26 @@ class AbstractCollectivesTest(C10dBackendTest):
 
     def _test_gather_single(self, count, dtype, async_op):
         tensor = self._tensor(count, dtype)
-        output = (
-            torch.empty(self.world_size * count, dtype=dtype, device=self.device)
-            if self.rank == 0
-            else None
-        )
-        work = dist.gather_single(tensor, output, dst=0, async_op=async_op)
-        self._wait(work, async_op)
-        if self.rank == 0:
-            expected = torch.cat(
-                [
-                    self._expected_tensor(count, dtype, rank)
-                    for rank in range(self.world_size)
-                ]
-            )
-            self.assertEqual(output, expected)
+        expected = [
+            self._expected_tensor(count, dtype, rank) for rank in range(self.world_size)
+        ]
+        for stacked in (False, True):
+            with self.subTest(stacked=stacked):
+                shape = (
+                    (self.world_size, count) if stacked else (self.world_size * count,)
+                )
+                output = (
+                    torch.empty(shape, dtype=dtype, device=self.device)
+                    if self.rank == 0
+                    else None
+                )
+                work = dist.gather_single(tensor, output, dst=0, async_op=async_op)
+                self._wait(work, async_op)
+                if self.rank == 0:
+                    self.assertEqual(
+                        output,
+                        torch.stack(expected) if stacked else torch.cat(expected),
+                    )
 
     def _test_scatter(self, count, dtype, async_op):
         output = torch.empty(count, dtype=dtype, device=self.device)
@@ -236,6 +241,15 @@ class AbstractCollectivesTest(C10dBackendTest):
                 self._test_gather_single(4, torch.float32, False)
             return
         self._test_transport_matrix(self._test_gather_single)
+
+        # Only the destination rank validates the output size, so only it calls
+        # into the (failing) collective; the size check happens before any
+        # communication is issued.
+        if self.rank == 0:
+            input = torch.ones(4, device=self.device)
+            output = torch.empty(input.numel(), device=self.device)
+            with self.assertRaises((RuntimeError, ValueError)):
+                dist.gather_single(input, output, dst=0)
 
     def test_gather_into_tensor_deprecated(self):
         if not self.supports_gather_single:
