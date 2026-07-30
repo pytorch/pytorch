@@ -2295,10 +2295,6 @@ def use_flex_tdm_descriptor(
         strides = mat.get_stride()
         if len(sizes) != 4 or len(strides) != 4:
             return reject("expected four-dimensional sizes and strides")
-        # Descriptor bounds may install int32 range guards. These do not pin
-        # dynamic sequence lengths to their current values.
-        if not _descriptor_shape_fits_in_int32(sizes, add_guards=True):
-            return reject("descriptor shape does not fit in int32")
         if mat.get_name() in V.graph.unaligned_buffers:
             return reject("buffer is marked unaligned")
 
@@ -2327,8 +2323,6 @@ def use_flex_tdm_descriptor(
         if block_shape:
             if len(block_shape) != 2:
                 return reject("expected a two-dimensional block shape")
-            if not _descriptor_shape_fits_in_int32(block_shape, add_guards=True):
-                return reject("block shape does not fit in int32")
             if not aligned(block_shape[-1] * itemsize, TMA_ALIGNMENT):
                 return reject(f"block width is not {TMA_ALIGNMENT}-byte aligned")
             if not aligned(
@@ -2353,6 +2347,15 @@ def use_flex_tdm_descriptor(
                 "outer strides do not preserve the preferred "
                 f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
             )
+
+        # Descriptor bounds may install int32 range guards. These do not pin
+        # dynamic sequence lengths to their current values.
+        if not _descriptor_shape_fits_in_int32(sizes, add_guards=True):
+            return reject("descriptor shape does not fit in int32")
+        if block_shape and not _descriptor_shape_fits_in_int32(
+            block_shape, add_guards=True
+        ):
+            return reject("block shape does not fit in int32")
         return True
 
     return all(

@@ -685,11 +685,15 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         key = make_qkv("key", kv_len)
         value = make_qkv("value", kv_len)
 
+        graph.unaligned_buffers.add("query")
         guards_before = len(graph.sizevars.shape_env.guards)
         with (
             V.set_graph_handler(graph),
             mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
         ):
+            self.assertFalse(use_flex_tdm_descriptor(query, key, value))
+            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
+            graph.unaligned_buffers.remove("query")
             self.assertTrue(use_flex_tdm_descriptor(query, key, value))
 
         new_guards = graph.sizevars.shape_env.guards[guards_before:]
