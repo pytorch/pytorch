@@ -1828,7 +1828,7 @@ class f(torch.nn.Module):
             self.assertEqual(x.storage_offset(), y.storage_offset())
 
     def test_compound_tracked_input_sources_used_for_guards(self):
-        from torch._dynamo.source import ConstantSource, LocalSource
+        from torch._dynamo.source import ConstantSource, EphemeralSource, LocalSource
 
         shape_env = ShapeEnv()
         symbol = shape_env.create_symbol(5, source=ConstantSource("s"))
@@ -1868,6 +1868,27 @@ class f(torch.nn.Module):
         self.assertIsNotNone(guard_expr)
         self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [6]))
         self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [7]))
+
+        pruned_guards = shape_env.get_pruned_guards([2 * symint])
+        guard_expr = shape_env.produce_guards_expression(
+            [2 * symint], guards=pruned_guards
+        )
+        self.assertIsNotNone(guard_expr)
+        self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [10]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [8]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [11]))
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(5, source=ConstantSource("s"))
+        ephemeral = shape_env.create_symbol(3, source=EphemeralSource("e"))
+        symint = torch.SymInt(SymNode(symbol, shape_env, int, hint=5))
+        shape_env.guard_or_defer_runtime_assert(
+            sympy.Eq(2 * ephemeral, symbol + 1), "test"
+        )
+        guard_expr = shape_env.produce_guards_expression([symint])
+        self.assertIsNotNone(guard_expr)
+        self.assertTrue(shape_env.evaluate_guards_expression(guard_expr, [5]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guard_expr, [4]))
 
     def test_tensor_factory_with_symint(self):
         args = list(range(3))

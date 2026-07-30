@@ -66,6 +66,7 @@ from torch.compiler._cache import (
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.fx.traceback import _get_memory_budget_annotation
+from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -569,6 +570,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         super().__init__(gm)
         self._canonical_symbol_names: dict[str, str] = {}
+        self._canonical_nested_int_names: dict[int, str] = {}
         self._seed_symbols_from_placeholders(gm)
         # pyrefly: ignore[missing-attribute]
         self.dispatch_table.update(
@@ -758,17 +760,15 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return (_ident, (metadata,))
 
     def _seed_symbols_from_placeholders(self, gm: torch.fx.GraphModule) -> None:
-        if not hasattr(gm, "graph"):
-            return
         for node in gm.graph.find_nodes(op="placeholder", sort=True):
             self._seed_symbols(node.meta.get("example_value"))
             self._seed_symbols(node.meta.get("val"))
 
     def _seed_symbols(self, value: Any) -> None:
         if isinstance(value, torch.SymInt):
-            self._canonical_symbolic_expr(value.node.expr)
+            self._canonical_symint(value)
         elif isinstance(value, torch.SymBool):
-            self._canonical_symbolic_expr(value.node.expr)
+            self._canonical_symbool(value)
         elif isinstance(value, torch.Tensor):
             self._seed_symbols(tuple(value.shape))
             self._seed_symbols(tuple(value.stride()))
@@ -787,23 +787,59 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return self._canonical_symbol_names[name]
 
     def _canonical_symbolic_expr(self, expr: Any) -> str:
-        if not hasattr(expr, "free_symbols"):
-            return str(expr)
         replacements = {
             symbol: type(symbol)(self._canonical_symbol_name(symbol))
             for symbol in sorted(expr.free_symbols, key=lambda symbol: symbol.name)
         }
         return str(expr.xreplace(replacements))
 
+    def _canonical_nested_int_name(self, nested_int: int) -> str:
+        if nested_int not in self._canonical_nested_int_names:
+            self._canonical_nested_int_names[nested_int] = (
+                f"j{len(self._canonical_nested_int_names)}"
+            )
+        return self._canonical_nested_int_names[nested_int]
+
+    def _canonical_symint(self, value: torch.SymInt) -> str:
+        node = value.node
+        if node.is_symbolic():
+            # pyrefly: ignore[missing-attribute]
+            return f"symbolic:{self._canonical_symbolic_expr(node.expr)}"
+        if isinstance(node, NestedIntNode):
+            return (
+                f"nested:{self._canonical_nested_int_name(node.nested_int())}:"
+                f"{node.nested_int_coeff()}"
+            )
+        if node.is_constant():
+            value_as_int = node.maybe_as_int()
+            if value_as_int is None:
+                raise AssertionError("Constant SymInt must have an integer value")
+            return f"constant:{value_as_int}"
+        raise BypassAOTAutogradCache(
+            f"Unsupported SymInt node type: {type(node).__qualname__}"
+        )
+
+    def _canonical_symbool(self, value: torch.SymBool) -> str:
+        node = value.node
+        if node.is_symbolic():
+            # pyrefly: ignore[missing-attribute]
+            return f"symbolic:{self._canonical_symbolic_expr(node.expr)}"
+        value_as_bool = node.maybe_as_bool()
+        if value_as_bool is not None:
+            return f"constant:{value_as_bool}"
+        raise BypassAOTAutogradCache(
+            f"Unsupported SymBool node type: {type(node).__qualname__}"
+        )
+
     def _reduce_symint(
         self, s: torch.SymInt
     ) -> tuple[Callable[[Any], Any], tuple[str]]:
-        return (_ident, (self._canonical_symbolic_expr(s.node.expr),))
+        return (_ident, (self._canonical_symint(s),))
 
     def _reduce_symbool(
         self, s: torch.SymBool
     ) -> tuple[Callable[[Any], Any], tuple[str]]:
-        return (_ident, (self._canonical_symbolic_expr(s.node.expr),))
+        return (_ident, (self._canonical_symbool(s),))
 
 
 @contextlib.contextmanager

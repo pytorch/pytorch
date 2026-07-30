@@ -3888,6 +3888,35 @@ class _FrameLocalResult:
     symbols: dict[str, str] = field(default_factory=dict)
 
 
+def _solve_symbol_from_source(
+    expr: sympy.Expr, source_symbol: sympy.Symbol
+) -> tuple[sympy.Symbol, sympy.Expr] | None:
+    if len(expr.free_symbols) != 1:
+        return None
+    symbol = next(iter(expr.free_symbols))
+    solution = try_solve(
+        sympy.Eq(source_symbol, expr), symbol, floordiv_inequality=False
+    )
+    if solution is None:
+        return None
+    solved = solution[1]
+    if solved.free_symbols - {source_symbol}:
+        return None
+    if all(t.is_integer for t in sympy.preorder_traversal(solved)):
+        return symbol, solved
+
+    numerator, denominator = solved.as_numer_denom()
+    if not isinstance(denominator, sympy.Integer):
+        return None
+    if denominator < 0:
+        numerator = -numerator
+        denominator = -denominator
+    floor_div_solution = FloorDiv(numerator, denominator)
+    if all(t.is_integer for t in sympy.preorder_traversal(floor_div_solution)):
+        return symbol, floor_div_solution
+    return None
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -6285,26 +6314,20 @@ class ShapeEnv:
             )
 
         def track_solvable_symbol_source(source: Source, expr: sympy.Expr) -> None:
-            if len(expr.free_symbols) != 1:
-                return
-            symbol = next(iter(expr.free_symbols))
-            if symbol in symbol_to_expr:
-                return
-            source_symbol = sympy.Symbol(f"__shape_source_{len(symbol_to_expr)}")
-            solution = try_solve(
-                sympy.Eq(source_symbol, expr), symbol, floordiv_inequality=False
+            source_symbol = sympy.Symbol(
+                f"__shape_source_{len(symbol_to_expr)}", integer=True
             )
+            solution = _solve_symbol_from_source(expr, source_symbol)
             if solution is None:
                 return
-            # Keep this to offset-only forms such as t0 = s + 1.  Wider
-            # affine forms like t0 = 2 * s require divisibility guards.
-            if sympy.simplify(solution[1] - source_symbol).free_symbols:
+            symbol, source_expr = solution
+            if symbol in symbol_to_expr:
                 return
             if not symbol_to_source.get(symbol):
                 symbol_to_source[symbol].extend(self.var_to_sources.get(symbol, []))
                 fallback_source_symbols.add(symbol)
             symbol_to_source[source_symbol].append(source)
-            symbol_to_expr[symbol] = solution[1]
+            symbol_to_expr[symbol] = source_expr
 
         if equalities_inputs:
             source_index = {}
@@ -7138,8 +7161,13 @@ class ShapeEnv:
         symint_symbols: set[sympy.Symbol] = set()
         for s in symints:
             expr = s.node.expr
-            if isinstance(expr, sympy.Basic):
-                symint_symbols.update(expr.free_symbols)
+            if isinstance(expr, sympy.Symbol):
+                symint_symbols.add(expr)
+            elif isinstance(expr, sympy.Expr):
+                source_symbol = sympy.Symbol("__shape_source", integer=True)
+                if solution := _solve_symbol_from_source(expr, source_symbol):
+                    symbol, _ = solution
+                    symint_symbols.add(symbol)
         guards = [
             g
             for g in self.guards
@@ -8248,7 +8276,8 @@ class ShapeEnv:
             if denominator < 0:
                 numerator = -numerator
                 denominator = -denominator
-            # Exact divisibility follows from the ephemeral-source caller gate.
+            # The original equality remains a guard, so non-exact inputs are
+            # rejected even though this replacement uses floor division.
             return FloorDiv(numerator, denominator)
 
         free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]

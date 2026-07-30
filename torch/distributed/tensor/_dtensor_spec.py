@@ -73,11 +73,18 @@ class TensorMeta(NamedTuple):
     dtype: torch.dtype
 
 
-def _normalize_int_for_key(value: Any) -> Any:
+def _normalize_int_for_key(value: Any, include_shape_env: bool = False) -> Any:
     if isinstance(value, int | torch.SymInt):
         from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
 
-        return SymIntEqByExpr(value)
+        normalized = SymIntEqByExpr(value)
+        if (
+            include_shape_env
+            and isinstance(value, torch.SymInt)
+            and normalized.val.free_symbols
+        ):
+            return value.node.shape_env, normalized
+        return normalized
     return value
 
 
@@ -89,17 +96,21 @@ def _tensor_meta_has_symint(tensor_meta: TensorMeta) -> bool:
     return _has_symint(tensor_meta.shape) or _has_symint(tensor_meta.stride)
 
 
-def _normalize_sequence_for_key(values: Any, force: bool = False) -> Any:
+def _normalize_sequence_for_key(
+    values: Any, force: bool = False, include_shape_env: bool = False
+) -> Any:
     if force or _has_symint(values):
-        return tuple(_normalize_int_for_key(value) for value in values)
+        return tuple(
+            _normalize_int_for_key(value, include_shape_env) for value in values
+        )
     return values
 
 
 def _normalize_sequence_pair_for_compare(lhs: Any, rhs: Any) -> tuple[Any, Any]:
     has_symint = _has_symint(lhs) or _has_symint(rhs)
     return (
-        _normalize_sequence_for_key(lhs, force=has_symint),
-        _normalize_sequence_for_key(rhs, force=has_symint),
+        _normalize_sequence_for_key(lhs, force=has_symint, include_shape_env=True),
+        _normalize_sequence_for_key(rhs, force=has_symint, include_shape_env=True),
     )
 
 
@@ -500,7 +511,7 @@ class DTensorSpec:
         # changes by overriding `__setattr__`. This must be lazy so that Dynamo
         # does not try to hash non-singleton `SymInt`s for the stride.
         if self.tensor_meta is not None and _tensor_meta_has_symint(self.tensor_meta):
-            return self._hash_impl()
+            raise TypeError("DTensorSpec with symbolic TensorMeta is not hashable")
         if self._hash is None:
             self._hash = self._hash_impl()
         return self._hash

@@ -53,6 +53,7 @@ from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.nested._internal.nested_int import NestedIntNode
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -3514,6 +3515,19 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
+
+    def test_nested_symint_cache_key(self):
+        def get_hash(nested_id, coeff):
+            nested_int = torch.SymInt(NestedIntNode(nested_id, coeff))
+            graph = torch.fx.Graph()
+            placeholder = graph.placeholder("nested_int")
+            placeholder.meta["val"] = nested_int
+            graph.output(placeholder)
+            gm = torch.fx.GraphModule({}, graph)
+            return AOTAutogradCachePickler(gm).get_hash(nested_int)
+
+        self.assertEqual(get_hash(1, 1), get_hash(2, 1))
+        self.assertNotEqual(get_hash(1, 1), get_hash(2, 2))
 
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):

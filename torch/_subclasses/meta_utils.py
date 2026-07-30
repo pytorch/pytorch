@@ -1532,9 +1532,10 @@ class MetaConverter(Generic[_TensorT]):
                 # for symbolic SymInts or fake tensors.
                 if t.view_func is None:
                     raise AssertionError("t.view_func must not be None for view replay")
-                # Replay may emit guards on the ephemeral symbols we create for
-                # closed-over view metadata. Suppress those replay-local guards
-                # and register source-backed relationships with the checks below.
+                # Replay may emit guards on ephemeral closed-over metadata or
+                # the hidden view base. As in the dense as_strided path above,
+                # neither has an actionable Dynamo source. Re-establish the
+                # visible outer metadata relationships with the checks below.
                 with maybe_suppress():
                     fake_t = t.view_func.apply(
                         t,
@@ -1551,9 +1552,23 @@ class MetaConverter(Generic[_TensorT]):
                 torch._check(sym_eq(fake_t.size(), sizes))
                 torch._check(sym_eq(fake_t.stride(), strides))
                 if t.is_traceable_wrapper_subclass and not t.is_nested:
-                    fake_t = self._checked_cast_tensor_t(
-                        fake_t.as_strided(sizes, strides, storage_offset)
+                    from torch._subclasses.fake_tensor import (
+                        in_kernel_invocation_manager,
+                        maybe_get_fake_mode,
                     )
+
+                    fake_mode = maybe_get_fake_mode(fake_t)
+                    if fake_mode is not None:
+                        # Canonicalize only the wrapper's outer metadata. Going
+                        # through as_strided would require subclass support and
+                        # could incorrectly transform layout-opaque inner tensors.
+                        with in_kernel_invocation_manager(fake_mode):
+                            fake_t.set_(
+                                fake_t.untyped_storage(),
+                                storage_offset,
+                                sizes,
+                                strides,
+                            )
                 return fake_t
 
         if self.get_tensor_memo(t) is None:
