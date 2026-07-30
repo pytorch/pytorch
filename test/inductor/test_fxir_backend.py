@@ -25,6 +25,7 @@ from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.codegen.wrapper_fxir import (
+    _FxIRReferenceAnalysis,
     FxConverter,
     replace_floor_div,
     WrapperFxCodegen,
@@ -43,7 +44,9 @@ from torch.testing._internal.inductor_utils import (
     patch_custom_fallback_pass,
     requires_gpu,
 )
+from torch.fx.proxy import GraphAppendingTracer
 from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.interp import sympy_interp
 
 
 try:
@@ -1497,6 +1500,52 @@ class TestReplaceFloorDiv(InductorTestCase):
         x, y = sympy.symbols("x y")
         expr = sympy.floor(-FloorDiv(x * y, 2) / FloorDiv(-x * y, 131070))
         self._check(expr)
+
+
+class TestFxIRSymbolicMinMax(InductorTestCase):
+    """
+    Symbolic Min/Max size expressions must be materialized as torch.sym_min/
+    torch.sym_max call_function nodes during FX IR codegen. The reference-analysis
+    handlers run on fx.Proxy operands, so they must emit explicit proxies rather
+    than the concrete-only sym_min/sym_max path. CPU-only; no GPU backend needed.
+    """
+
+    def _proxies(self, count):
+        graph = torch.fx.Graph()
+        tracer = GraphAppendingTracer(graph)
+        return [torch.fx.Proxy(graph.placeholder(f"s{i}"), tracer) for i in range(count)]
+
+    def test_minimum_proxy_emits_sym_min(self):
+        a, b = self._proxies(2)
+        out = _FxIRReferenceAnalysis.minimum(a, b)
+        self.assertIsInstance(out, torch.fx.Proxy)
+        self.assertEqual(out.node.op, "call_function")
+        self.assertEqual(out.node.target, torch.sym_min)
+
+    def test_maximum_proxy_emits_sym_max(self):
+        a, b = self._proxies(2)
+        out = _FxIRReferenceAnalysis.maximum(a, b)
+        self.assertIsInstance(out, torch.fx.Proxy)
+        self.assertEqual(out.node.op, "call_function")
+        self.assertEqual(out.node.target, torch.sym_max)
+
+    def test_mixed_proxy_and_constant_emits_node(self):
+        (a,) = self._proxies(1)
+        out = _FxIRReferenceAnalysis.minimum(a, 5)
+        self.assertIsInstance(out, torch.fx.Proxy)
+        self.assertEqual(out.node.target, torch.sym_min)
+        self.assertEqual(out.node.args, (a.node, 5))
+
+    def test_concrete_operands_fall_back_to_eager(self):
+        self.assertEqual(_FxIRReferenceAnalysis.minimum(3, 5), 3)
+        self.assertEqual(_FxIRReferenceAnalysis.maximum(3, 5), 5)
+
+    def test_sympy_min_dispatches_to_handler(self):
+        s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+        p0, p1 = self._proxies(2)
+        out = sympy_interp(_FxIRReferenceAnalysis, {s0: p0, s1: p1}, sympy.Min(s0, s1))
+        self.assertIsInstance(out, torch.fx.Proxy)
+        self.assertEqual(out.node.target, torch.sym_min)
 
 
 if __name__ == "__main__":

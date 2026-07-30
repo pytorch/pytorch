@@ -280,6 +280,28 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         return cls()
 
 
+def _trace_sym_binary(fn: Callable[..., Any], a: Any, b: Any) -> Any:
+    proxy = a if isinstance(a, torch.fx.Proxy) else b
+    if isinstance(proxy, torch.fx.Proxy):
+        return proxy.tracer.create_proxy("call_function", fn, (a, b), {})
+    return fn(a, b)
+
+
+class _FxIRReferenceAnalysis(OptimizedPythonReferenceAnalysis):
+    # torch.sym_min/torch.sym_max eagerly assert concrete numeric operands rather
+    # than dispatching via torch_function, so they are not recorded into the graph
+    # when handed fx.Proxy operands (unlike operators such as // and %, which trace
+    # through Proxy dunders). Emit explicit call_function nodes so that symbolic
+    # Min/Max shape expressions can be materialized during FX IR codegen.
+    @staticmethod
+    def minimum(a: Any, b: Any) -> Any:
+        return _trace_sym_binary(torch.sym_min, a, b)
+
+    @staticmethod
+    def maximum(a: Any, b: Any) -> Any:
+        return _trace_sym_binary(torch.sym_max, a, b)
+
+
 @dataclasses.dataclass
 class FxConverter:
     """
@@ -661,12 +683,12 @@ class FxConverter:
             ),
         ):
             return sympy_interp(
-                OptimizedPythonReferenceAnalysis, self.expr_to_proxy, expr
+                _FxIRReferenceAnalysis, self.expr_to_proxy, expr
             )
 
         # hash cons on arguments, run expr handler
         self.expr_to_proxy[expr] = _run_sympy_handler(
-            OptimizedPythonReferenceAnalysis,
+            _FxIRReferenceAnalysis,
             [self._sympy_interp(arg) for arg in expr.args],
             expr,
         )

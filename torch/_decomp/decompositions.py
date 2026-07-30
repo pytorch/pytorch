@@ -1275,6 +1275,51 @@ def dropout(input: Tensor, p: float, train: bool | None):
         return input
 
 
+@register_decomposition(aten.cov)
+@aten.cov.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.cov.default.py_impl(DispatchKey.Autograd)
+def cov(
+    self: Tensor,
+    correction: int = 1,
+    fweights: Tensor | None = None,
+    aweights: Tensor | None = None,
+) -> Tensor:
+    # The ATen composite (Correlation.cpp) reads concrete shapes via
+    # .numel() and takes data-dependent branches (is_scalar_tensor_true) on
+    # the weights, neither of which is traceable under symbolic shapes. This
+    # decomposition expresses cov purely in terms of shape arithmetic and
+    # elementwise/matmul ops so it can be captured and lowered by a compiler.
+    if self.dim() < 2:
+        self = self.view(1, -1)
+    num_observations = self.size(1)
+
+    w: Tensor | None = None
+    if fweights is not None:
+        w = fweights
+    if aweights is not None:
+        w = aweights if w is None else w * aweights
+
+    if w is not None:
+        w_sum = w.sum()
+        avg = (self * w).sum(1) / w_sum
+    else:
+        avg = self.sum(1) / num_observations
+
+    if w is None:
+        norm_factor = num_observations - correction
+    elif correction == 0:
+        norm_factor = w_sum
+    elif aweights is None:
+        norm_factor = w_sum - correction
+    else:
+        norm_factor = w_sum - correction * (w * aweights).sum() / w_sum
+
+    self = self - avg.unsqueeze(1)
+    weighted = self * w if w is not None else self
+    c = torch.mm(self, weighted.t().conj())
+    return torch.true_divide(c, norm_factor).squeeze()
+
+
 @register_decomposition(aten.native_dropout)
 @out_wrapper("out0", "out1")
 def native_dropout(input: Tensor, p: float, train: bool | None):
