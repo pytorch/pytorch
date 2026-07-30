@@ -119,11 +119,20 @@ def log_ndtr(a: TensorLikeType) -> TensorLikeType:
     # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
     M_SQRT1_2 = 0.707106781186547524400844362104849039
     t = a * M_SQRT1_2
+    # For a < 1: use erfcx-based formula for numerical stability with negative inputs
+    # For a >= 1: use log1p-based formula; erfc(t) underflows to 0 for large t
     res = torch.where(
         a < 1.0,
         torch.log(torch.special.erfcx(-t) / 2) - t * t,
         torch.log1p(-torch.erfc(t) / 2),
     )
+    # Mathematical invariant: log_ndtr(x) <= 0 for all finite x, since
+    # ndtr(x) = P(Z <= x) is in (0, 1] and log of values in (0, 1] is <= 0.
+    # Without this, when erfc(t) underflows to +0.0 for large t, the log1p
+    # branch returns +0.0 instead of the mathematically correct -0.0.
+    # Note: under Inductor's -fno-signed-zeros codegen flag, the -0.0
+    # signbit may still be lost; a complete fix requires codegen-level
+    # changes (see https://github.com/pytorch/pytorch/issues/187336).
     return -torch.abs(res)
 
 
