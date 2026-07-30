@@ -17,7 +17,13 @@ void MPSHooks::init() const {
 }
 
 bool MPSHooks::hasMPS() const {
-  return at::mps::is_available();
+  static bool available = []() {
+    @autoreleasepool {
+      NSOperatingSystemVersion version = [[NSProcessInfo processInfo] operatingSystemVersion];
+      return version.majorVersion > 10 || (version.majorVersion == 10 && version.minorVersion >= 15);
+    }
+  }();
+  return available;
 }
 
 bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {

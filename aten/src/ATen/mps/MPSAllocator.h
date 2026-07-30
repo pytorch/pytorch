@@ -44,11 +44,25 @@ inline HeapTier getHeapTier(size_t size, bool has_memory_pressure) {
 enum UsageFlags : uint32_t {
   PRIVATE = 0,
   SMALL = (1 << 0), // small heaps have sizes of kSmallHeap, and large ones kLargeHeap
-  SHARED = (1 << 1), // shared pools allocated on devices with unified memory; otherwise, private between host/device
-  MANAGED = (1 << 2), // managed storage mode
+  SHARED = (1 << 1), // shared (unified-memory) storage. Only ever actually used on
+                      // Apple Silicon (Apple-family GPU + unified memory) — see
+                      // MPSHeapAllocatorImpl::normalizeUsage(), which remaps any
+                      // SHARED request to MANAGED on every other device, so this
+                      // bit should never reach Metal except on Apple Silicon.
+  MANAGED = (1 << 2), // managed storage mode: CPU and GPU each keep their own copy of the
+                       // buffer's contents, kept in sync via didModifyRange/synchronizeResource.
+                       // This is the substitute we use for SHARED on Intel/AMD (non-Apple-family)
+                       // Macs, since those devices cannot back Shared-storage heaps at all.
   HAZARD = (1 << 3), // enables Automatic Hazard Tracking for the resources allocated on the pool
   SCALAR = (1 << 4), // used to import CPU scalar values to GPU and use them in MPS Stream
 };
+
+// Bitmask of usage flags whose underlying MTLBuffer exposes a valid, non-nil CPU pointer
+// via `-contents`. On Apple Silicon that's SHARED; on Intel/AMD Macs we use MANAGED instead,
+// since PRIVATE buffers have no CPU-visible memory at all (`-contents` is nil/unusable for
+// them) and would crash any code path that dereferences `cpu_ptr`.
+static constexpr uint32_t kHostAccessibleUsageMask = UsageFlags::SHARED | UsageFlags::MANAGED;
+
 // debug verbosity flags
 enum DebugVerbosity : uint32_t {
   SILENT = 0,
@@ -63,7 +77,7 @@ struct HeapBlock;
 
 struct BufferBlock {
   id<MTLBuffer> buffer;
-  void* cpu_ptr = nullptr; // stores the pointer to CPU mapping of a Shared MTLBuffer
+  void* cpu_ptr = nullptr; // stores the pointer to CPU mapping of a Shared/Managed MTLBuffer
   size_t size; // size after alignment
   size_t requested_size; // requested size (before alignment)
   // buffer shape is used for retrieving base of views in cached graphs
@@ -153,6 +167,9 @@ struct HeapBlock {
 
   static HeapBlock* createHeapBlock(AllocParams& params, id<MTLDevice> device, uint32_t usage) {
     HeapBlock* heapBlock = nullptr;
+    if (!device) {
+      return nullptr; // defensive: no Metal device to allocate from
+    }
     bool is_split = true;
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
@@ -172,13 +189,28 @@ struct HeapBlock {
           is_split = false;
           break;
       }
-      d.storageMode = (usage & UsageFlags::SHARED) ? MTLStorageModeShared : MTLStorageModePrivate;
+      // Mirror getOptions()'s priority: MANAGED > SHARED > PRIVATE. `usage` here
+      // is expected to have already passed through
+      // MPSHeapAllocatorImpl::normalizeUsage()/hostAccessibleUsage(), so on a
+      // non-Apple-family device this will never end up MTLStorageModeShared.
+      d.storageMode = (usage & UsageFlags::MANAGED) ? MTLStorageModeManaged
+                      : (usage & UsageFlags::SHARED) ? MTLStorageModeShared
+                                                      : MTLStorageModePrivate;
       d.cpuCacheMode = MTLCPUCacheModeDefaultCache;
       // this automatically handles Metal buffer access synchronizations at the
       // cost of slightly lower performance.
       d.hazardTrackingMode =
           (usage & UsageFlags::HAZARD) ? MTLHazardTrackingModeTracked : MTLHazardTrackingModeUntracked;
-      d.resourceOptions = getOptions(usage);
+      // NOTE: do NOT also set d.resourceOptions here. MTLHeapDescriptor.resourceOptions
+      // is a legacy/deprecated combined property kept only for backward compatibility;
+      // setting it on top of the explicit storageMode/cpuCacheMode/hazardTrackingMode
+      // above makes the driver re-decode those bits, and on Managed-storage heaps (the
+      // path actually exercised on Intel/AMD Macs) that re-decoding does not reliably
+      // round-trip back to a valid MTLStorageMode on every driver — surfacing as
+      // "Invalid storageMode (Invalid)" heap-descriptor validation failures. This was
+      // previously masked because Intel Macs always hit the (also wrong) Shared-storage
+      // validation failure first. getOptions(usage) is still used correctly elsewhere,
+      // for the actual MTLResourceOptions argument to newBufferWithLength:options:.
       d.type = MTLHeapTypeAutomatic;
       id<MTLHeap> heap = [device newHeapWithDescriptor:d];
       if (heap) {
@@ -191,6 +223,11 @@ struct HeapBlock {
       }
       [d release];
     }
+    // heapBlock stays nullptr if `d` or `heap` creation failed (e.g. out of GPU
+    // memory) — callers must treat that as an ordinary allocation failure, not
+    // assert/crash. This is especially relevant on Intel Macs, where discrete
+    // GPU VRAM is a small fixed pool and heap creation can fail far more often
+    // than on Apple Silicon's large unified memory pool.
     return heapBlock;
   }
   static bool Comparator(const HeapBlock* a, const HeapBlock* b) {
@@ -250,7 +287,12 @@ struct BufferPool {
       : device(Device), usage(Usage), heaps(HeapBlock::Comparator), available_buffers(BufferBlock::Comparator) {}
 
   const id<MTLDevice> device;
-  // usage flags to customize the pool for various purposes (see UsageFlags enum)
+  // usage flags to customize the pool for various purposes (see UsageFlags enum).
+  // Note: the Kind names (SHARED_SMALL/SHARED_LARGE) are historical pool *roles*,
+  // not a guarantee of literal Shared storage — on Intel/AMD devices these pools
+  // are actually backed by Managed storage (see
+  // MPSHeapAllocatorImpl::hostAccessibleUsage()/normalizeUsage()). This `usage`
+  // field is always the already-resolved, device-correct value.
   const uint32_t usage;
   // total number of buffers in the pool
   uint32_t n_buffers = 0;
@@ -282,13 +324,35 @@ class MPSHeapAllocatorImpl {
  public:
   explicit MPSHeapAllocatorImpl()
       : m_device(at::mps::MPSDevice::getInstance()->device()),
-        m_max_buffer_size([m_device maxBufferLength]),
+        // IMPORTANT: [device hasUnifiedMemory] is YES on Apple Silicon, but it
+        // is ALSO YES on many Intel Macs that only have an Intel integrated
+        // GPU (Intel iGPUs physically share system RAM with the CPU too — that
+        // property answers "does this GPU share RAM with the CPU", not "is
+        // this an Apple-family GPU"). Relying on hasUnifiedMemory alone caused
+        // Shared-storage heaps to be requested on such Intel Macs, which Metal
+        // rejects with "Shared storage mode disallowed" (Shared/Managed heaps
+        // are only valid on Apple-family GPUs).
+        //
+        // We therefore require BOTH hasUnifiedMemory AND Apple-GPU-family
+        // support. This is computed once here and is the single source of
+        // truth consulted by hostAccessibleUsage()/normalizeUsage() below, so
+        // every other Intel/AMD (non-Apple-family) device — unified-memory-
+        // reporting or not — always falls back to Managed (or Private), and
+        // only genuine Apple Silicon ever gets Shared storage.
+        m_has_unified_memory(m_device != nil &&
+                              [m_device hasUnifiedMemory] &&
+                              [m_device supportsFamily:MTLGPUFamilyApple1]),
+        m_max_buffer_size(m_device != nil ? [m_device maxBufferLength] : 0),
         m_stream(getDefaultMPSStream()),
         m_event_pool(getMPSEventPool()) {
     init_allocator();
   }
   ~MPSHeapAllocatorImpl() {
     emptyCache();
+    if (m_scalar_staging_buffer) {
+      [m_scalar_staging_buffer release];
+      m_scalar_staging_buffer = nil;
+    }
   }
   // interface exposed to at::Allocator
   id<MTLBuffer> malloc(size_t size, uint32_t usage);
@@ -298,7 +362,8 @@ class MPSHeapAllocatorImpl {
   void emptyCache();
   // free inactive buffers that are pending to be freed
   void freeInactiveBuffers();
-  // returns true if buffer was allocated from the shared pool
+  // returns true if buffer was allocated from a CPU-accessible pool
+  // (Shared on Apple Silicon, Managed on Intel/AMD)
   bool isSharedBuffer(const void* ptr);
   // get the requested unaligned size of an MTLBuffer
   ssize_t getUnalignedBufferSize(const void* ptr);
@@ -311,18 +376,18 @@ class MPSHeapAllocatorImpl {
   // allocate a buffer from a specialized pool to import CPU scalars into GPU
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // returns a CPU-mapping of the input buffer and its retainCount,
-  // if only it has Shared storage-mode and allocated on MPSAllocator
+  // if only it has Shared/Managed storage-mode and allocated on MPSAllocator
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* buffer);
   // returns a CPU-device c10::Storage aliasing the host-visible contents of
   // the MTLBuffer backing `mps_storage`. The returned storage keeps the
   // source MPS storage alive for its lifetime. Raises if `mps_storage` is
-  // not MPS-allocated or not shared-storage.
+  // not MPS-allocated or not host-accessible (Shared/Managed) storage.
   c10::Storage getHostAliasStorage(const c10::Storage& mps_storage);
   // records events for a list of MTLBuffers (list is used to lock the mutex once)
-  // returns true if records any event (given if passed buffers exist and are shared-storage)
+  // returns true if records any event (given if passed buffers exist and are host-accessible)
   bool recordEvents(c10::ArrayRef<const void*> buffers);
   // waits for the event to signal the completion of GPU execution
-  // on the passed shared buffers (list is used to lock the mutex once)
+  // on the passed host-accessible buffers (list is used to lock the mutex once)
   // returns true if actually waited on any event
   bool waitForEvents(c10::ArrayRef<const void*> buffers);
   // this indicates how far (in Megabytes) the current total allocations are from the
@@ -370,19 +435,38 @@ class MPSHeapAllocatorImpl {
   inline id<MTLDevice> Device() const {
     return m_device;
   }
+  // true on Apple Silicon (unified memory + Apple GPU family); false on
+  // Intel/AMD Macs (discrete or non-Apple-family GPUs), REGARDLESS of what
+  // [device hasUnifiedMemory] reports on its own. Buffer pools use Shared
+  // storage in the former case and fall back to Managed storage in the
+  // latter (see hostAccessibleUsage()/normalizeUsage()).
+  inline bool hasUnifiedMemory() const {
+    return m_has_unified_memory;
+  }
 
   inline std::string format_size(uint64_t size) const;
 
  private:
-  // (see m_high_watermark_ratio for description)
+  // (see m_high_watermark_ratio for description) — Apple Silicon (unified memory) default
   constexpr static double default_high_watermark_ratio = 1.7;
+  // Intel/AMD (discrete GPU) default: VRAM is a small, fixed pool, unlike the large unified
+  // pool on Apple Silicon, so we don't allow over-committing past the recommended size.
+  constexpr static double default_high_watermark_ratio_intel = 1.0;
   // we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
   constexpr static double default_high_watermark_upper_bound = 2.0;
-  // (see m_low_watermark_ratio for description)
+  // (see m_low_watermark_ratio for description) — Apple Silicon (unified memory) default
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
   constexpr static double default_low_watermark_ratio = 1.4;
+  // Intel/AMD (discrete GPU) default: stay conservatively under the recommended size, since
+  // there's no unified pool to fall back on.
+  constexpr static double default_low_watermark_ratio_intel = 0.95;
 
   const id<MTLDevice> m_device;
+  // true ONLY on genuine Apple Silicon (Apple-family GPU AND unified memory).
+  // Computed once at construction time and used as the single source of truth
+  // for every Shared-vs-Managed decision in this allocator. See the
+  // constructor above for why this is NOT simply `[m_device hasUnifiedMemory]`.
+  const bool m_has_unified_memory;
   std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
@@ -419,6 +503,12 @@ class MPSHeapAllocatorImpl {
   MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
   std::shared_ptr<MPSEventPool> m_event_pool;
+  // Lazily-created, reused, standalone (non-heap) Managed staging buffer used
+  // by uploadScalarViaBlit() to get a CPU-supplied scalar value into a
+  // Private-storage heap buffer on non-Apple-Silicon devices. nil/unused on
+  // Apple Silicon, where the scalar pool is Shared and memcpy works directly.
+  // Released in the destructor.
+  id<MTLBuffer> m_scalar_staging_buffer = nil;
 
   void init_allocator();
   void init_buffer_pools();
@@ -450,15 +540,67 @@ class MPSHeapAllocatorImpl {
   // returns the aligned allocation size that is optimized
   // for the buffers to get reused frequently
   size_t get_allocation_size(size_t size, uint32_t usage) const;
+  // returns the usage-flag combination for the device's general-purpose
+  // (heap-backed) buffer pools. IMPORTANT: per Apple's own MTLHeap
+  // documentation, MTLHeapDescriptor.storageMode disallows
+  // MTLStorageModeManaged (and Memoryless) — Heaps may ONLY be Shared or
+  // Private, on every platform, Apple Silicon included. So the only
+  // CPU-accessible heap storage mode that exists at all is Shared, and it is
+  // only valid on Apple-family GPUs with unified memory. On every other
+  // device (Intel/AMD) the general pools fall back to plain PRIVATE
+  // (GPU-only — no `cpu_ptr`, no pinned-memory aliasing for ordinary
+  // tensors, which honestly reflects what Metal actually allows there). The
+  // one call site that still needs to get a CPU-supplied value into GPU
+  // memory on such devices (allocScalarBufferWithValue) does NOT rely on a
+  // heap-backed Managed buffer (impossible) — it uses a small standalone,
+  // non-heap MTLBuffer with Managed storage instead (Managed storage *is*
+  // valid for an individually-allocated buffer; the restriction is specific
+  // to Heaps) plus a blit copy. See uploadScalarViaBlit().
+  inline uint32_t hostAccessibleUsage() const {
+    return m_has_unified_memory ? UsageFlags::SHARED : UsageFlags::PRIVATE;
+  }
+  // Single funnel point: resolves any caller-requested SHARED or MANAGED bit
+  // to whatever this device's HEAPS can actually back (see
+  // hostAccessibleUsage()), regardless of which literal bit the caller
+  // happened to pass in. This is what guarantees Intel/AMD Macs never end up
+  // requesting a Shared- or Managed-storage heap — even though the
+  // registered c10 MPSAllocator (the "default" allocator wired into
+  // c10::SetAllocator) is constructed with a compile-time-literal
+  // UsageFlags::SHARED, that literal gets remapped here to PRIVATE on
+  // non-Apple-Silicon devices before it ever reaches Metal. PRIVATE usage
+  // (neither SHARED nor MANAGED set) passes through unchanged.
+  inline uint32_t normalizeUsage(uint32_t usage) const {
+    if (usage & (UsageFlags::SHARED | UsageFlags::MANAGED)) {
+      usage &= ~(UsageFlags::SHARED | UsageFlags::MANAGED);
+      usage |= hostAccessibleUsage();
+    }
+    return usage;
+  }
+  // Uploads `size` bytes from a CPU-side `value` into `dst`, a Private,
+  // heap-backed MTLBuffer that itself has no CPU pointer. Used only on
+  // non-Apple-Silicon devices, where the scalar pool (like every other pool)
+  // is Private — see hostAccessibleUsage(). Copies the value into a small,
+  // lazily-created, reusable *standalone* (non-heap) Managed staging buffer
+  // — legal, since the Managed-storage restriction applies to Heaps, not to
+  // individually-allocated buffers — then blits from staging into `dst`.
+  void uploadScalarViaBlit(id<MTLBuffer> dst, const void* value, size_t size);
+  // On non-Apple-Silicon, brings the CPU-visible copy of a Managed buffer's
+  // contents up to date with any pending GPU writes. Kept for any
+  // standalone (non-heap) Managed buffer that may need it; a no-op on Apple
+  // Silicon, where Shared storage is always coherent. NOTE: as of the
+  // PRIVATE-heap fix above, no *heap-backed* buffer is ever Managed on any
+  // platform, so this currently only matters for standalone Managed buffers
+  // such as the scalar staging buffer.
+  void synchronizeManagedBuffer(BufferBlock* buffer_block);
   // maximum size of device memory available for allocation in current process
   // Note: the recommendedMaxWorkingSetSize is typically 75% of the total system memory.
   size_t max_device_size() const {
-    return [m_device recommendedMaxWorkingSetSize];
+    return m_device != nil ? [m_device recommendedMaxWorkingSetSize] : 0;
   }
   // there are implicit allocations from MPS backend, so we need to query the 'device' for
   // total allocated size instead of manually tracking in MPSAllocator
   size_t current_allocated_size() const {
-    return [m_device currentAllocatedSize];
+    return m_device != nil ? [m_device currentAllocatedSize] : 0;
   }
 
   bool trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {

@@ -26,7 +26,22 @@ uint64_t HeapBlock::heap_counter = 0;
 static std::atomic<bool> s_mps_allocator_initialized{false};
 
 void MPSHeapAllocatorImpl::init_allocator() {
-  TORCH_CHECK(m_device.hasUnifiedMemory, "MPS backend is only supported on devices with unified memory");
+  // Make sure we actually have a Metal device before doing anything else with it.
+  // A nil device (e.g., no GPU available, or running inside some restricted/
+  // virtualized environment) would otherwise silently propagate into every
+  // Objective-C message send below (Objective-C tolerates messaging nil, but
+  // every query just degrades to 0/NO), which previously surfaced as a
+  // confusing OOM error from alloc_buffer_block instead of a clear message here.
+  TORCH_CHECK(m_device != nil, "MPS backend: no Metal device available (MPSDevice::getInstance()->device() is nil)");
+
+  // NOTE: Apple Silicon devices have unified memory AND are Apple-family GPUs
+  // (see the m_has_unified_memory computation in the header) and keep using
+  // Shared storage exactly as before. Every other device — Intel integrated
+  // GPUs, Intel/AMD discrete GPUs, even ones that happen to report
+  // hasUnifiedMemory == YES — is treated as non-Apple-Silicon here; the buffer
+  // pools created below pick Private storage instead (GPU-only — Heaps
+  // hostAccessibleUsage()/init_buffer_pools()), so MPS keeps working there —
+  // just without the zero-copy unified-memory aliasing.
   init_buffer_pools();
 
   // debug verbosity flags (see DebugVerbosity enum)
@@ -34,35 +49,53 @@ void MPSHeapAllocatorImpl::init_allocator() {
   m_debug_verbosity = verbosity_str ? strtol(verbosity_str->c_str(), nullptr, 0) : DebugVerbosity::SILENT;
 
   static const auto high_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
+  // Apple Silicon (unified memory) can safely over-commit past the recommended
+  // working-set size; a discrete/non-unified GPU's VRAM is a small fixed pool, so
+  // default to a stricter ratio there instead (still overridable via the env-var).
+  const double high_watermark_default = m_has_unified_memory ? default_high_watermark_ratio : default_high_watermark_ratio_intel;
   const double high_watermark_ratio =
-      high_watermark_ratio_str ? strtod(high_watermark_ratio_str->c_str(), nullptr) : default_high_watermark_ratio;
+      high_watermark_ratio_str ? strtod(high_watermark_ratio_str->c_str(), nullptr) : high_watermark_default;
   setHighWatermarkRatio(high_watermark_ratio);
 
   static const auto low_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_LOW_WATERMARK_RATIO");
+  const double low_watermark_default = m_has_unified_memory ? default_low_watermark_ratio : default_low_watermark_ratio_intel;
   const double low_watermark_ratio =
-      low_watermark_ratio_str ? strtod(low_watermark_ratio_str->c_str(), nullptr) : default_low_watermark_ratio;
+      low_watermark_ratio_str ? strtod(low_watermark_ratio_str->c_str(), nullptr) : low_watermark_default;
   setLowWatermarkRatio(low_watermark_ratio);
 
   if (m_debug_verbosity & DebugVerbosity::PROFILING) {
-    LOG(INFO) << "Initializing heap allocator on unified device memory of size " << format_size(max_device_size());
+    LOG(INFO) << "Initializing heap allocator ("
+              << (m_has_unified_memory ? "Apple Silicon, unified memory" : "non-Apple-Silicon, Managed/Private storage")
+              << ") on device memory of size " << format_size(max_device_size());
   }
 
   s_mps_allocator_initialized.store(true);
 }
 
 void MPSHeapAllocatorImpl::init_buffer_pools() {
+  // SHARED on Apple Silicon. On every other device (Intel/AMD, or any GPU
+  // that isn't Apple-family — see m_has_unified_memory in the header) these
+  // pools are PRIVATE (GPU-only, no CPU pointer at all): Apple's MTLHeap API
+  // disallows MTLStorageModeManaged for ALL heaps on ALL platforms, so
+  // "Managed heap" was never actually a valid fallback — Private is the only
+  // option left once Shared is unavailable. The scalar pool is the one
+  // place that still needs to get a CPU value into GPU memory on such
+  // devices; it does so via a small standalone (non-heap) Managed buffer
+  // instead — see uploadScalarViaBlit().
+  const uint32_t host_usage = hostAccessibleUsage();
+
   // using a container for pools to simplify iterating over them
-  // Pool of large buffers with shared storage mode
+  // Pool of large buffers with host-accessible storage mode
   m_pools.emplace(BufferPool::Kind::SHARED_LARGE,
-                  std::make_unique<BufferPool>(m_device, UsageFlags::SHARED | UsageFlags::HAZARD));
-  // Pool of small buffers with shared storage mode
+                  std::make_unique<BufferPool>(m_device, host_usage | UsageFlags::HAZARD));
+  // Pool of small buffers with host-accessible storage mode
   m_pools.emplace(BufferPool::Kind::SHARED_SMALL,
-                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::HAZARD));
-  // Pool of small buffers with shared storage mode used to allocate and copy Scalars
+                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | host_usage | UsageFlags::HAZARD));
+  // Pool of small buffers with host-accessible storage mode used to allocate and copy Scalars
   // from CPU to Metal buffers (see allocScalarBufferWithValue()).
   // no Hazard Tracking required for the Scalar pool (synchronized manually).
   m_pools.emplace(BufferPool::Kind::SCALAR,
-                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::SCALAR));
+                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | host_usage | UsageFlags::SCALAR));
 }
 
 BufferPool& MPSHeapAllocatorImpl::get_pool(size_t requested_size, size_t aligned_size, uint32_t usage) {
@@ -149,6 +182,9 @@ HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& params) {
                   << ", current allocated: " << format_size(current_allocated_size()) << ")";
       }
     }
+    // heap_block may legitimately be nullptr here (e.g. out of GPU memory on
+    // a discrete GPU's small, fixed-size VRAM pool) — callers (alloc_buffer)
+    // already treat a nullptr heap as an ordinary allocation failure.
   } else {
     heap_block = *it;
     // remove and re-insert heap in the set later after a buffer is created.
@@ -170,8 +206,15 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
   BufferPool& pool = *params.pool;
 
   id<MTLBuffer> buffer = heap->newMTLBuffer(params.size(), pool.usage);
-  // this should never happen as the backing memory (i.e., heap) was allocated successfully.
-  TORCH_INTERNAL_ASSERT(buffer);
+  if (!buffer) {
+    // Buffer creation can legitimately fail under memory pressure even though
+    // the backing heap exists — this is far more likely on a discrete GPU's
+    // small, fixed VRAM pool than on Apple Silicon's large unified pool. Put
+    // the heap back (it wasn't destroyed) and report an ordinary allocation
+    // failure instead of crashing via TORCH_INTERNAL_ASSERT.
+    pool.heaps.insert(heap);
+    return false;
+  }
   // insert heap after a buffer was created on it to update the order of heap's set
   pool.heaps.insert(heap);
   params.buffer_block = new BufferBlock(params.size(), params.requested_size, buffer, heap);
@@ -286,6 +329,15 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
 BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usage) {
   TORCH_CHECK(size < m_max_buffer_size, "Invalid buffer size: ", format_size(size));
 
+  // Funnel point: resolve any SHARED/MANAGED request to whatever this device
+  // can actually back (SHARED on Apple Silicon, MANAGED everywhere else — see
+  // normalizeUsage() in the header). This is what prevents a Shared-storage
+  // heap from ever being requested on Intel/AMD Macs, regardless of which
+  // literal usage flag the caller passed in (the default c10 MPSAllocator is
+  // constructed with a compile-time-literal UsageFlags::SHARED, which gets
+  // remapped right here on non-Apple-Silicon devices).
+  usage = normalizeUsage(usage);
+
   size_t alloc_size = get_allocation_size(size, usage);
   auto& pool = get_pool(size, alloc_size, usage);
   AllocParams params(alloc_size, size, &pool);
@@ -324,6 +376,9 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   //   1- the High Watermark limit has been reached (if enabled)
   //   2- ran out of device memory, or the memory fragmentation is so high that a contiguous
   //      chunk of requested size couldn't be found.
+  // (this is also reached if Metal simply failed to back a heap/buffer at all,
+  //  which we now handle as a normal failure path instead of asserting/crashing
+  //  — see get_free_heap()/alloc_buffer() — so it surfaces here as a clean OOM error.)
   if (!block_found || !buffer_block) {
     if (m_high_watermark_ratio > 0.0) {
       TORCH_CHECK(
@@ -598,8 +653,10 @@ bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  // it's OK for the buffer_block to not exist yet
-  return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
+  // it's OK for the buffer_block to not exist yet. "Shared" here means
+  // "CPU-accessible" — Shared on Apple Silicon; always false on every other
+  // device, since general pools there are Private (see hostAccessibleUsage()).
+  return buffer_block && (buffer_block->heap->pool->usage & kHostAccessibleUsageMask);
 }
 
 id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size_t size) {
@@ -611,26 +668,72 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
     if (!buffer_block) {
       return nullptr;
     }
+  }
+  if (m_has_unified_memory) {
+    // Apple Silicon: the scalar pool is Shared, so the buffer has a directly
+    // writable CPU pointer.
     if (!buffer_block->cpu_ptr) {
       buffer_block->cpu_ptr = [buffer_block->buffer contents];
     }
+    TORCH_CHECK(buffer_block->cpu_ptr, "MPS allocator: scalar buffer unexpectedly has no CPU-visible memory");
+    // buffer is out of the pool, so no mutex lock is needed
+    memcpy(buffer_block->cpu_ptr, value, size);
+  } else {
+    // Non-Apple-Silicon: the scalar pool is Private (Heaps disallow Managed
+    // storage on every platform), so `buffer_block->buffer` has no CPU
+    // pointer at all. Get the value in via a standalone Managed staging
+    // buffer + blit instead.
+    uploadScalarViaBlit(buffer_block->buffer, value, size);
   }
-  // buffer is out of the pool, so no mutex lock is needed
-  memcpy(buffer_block->cpu_ptr, value, size);
   return buffer_block->buffer;
+}
+
+void MPSHeapAllocatorImpl::uploadScalarViaBlit(id<MTLBuffer> dst, const void* value, size_t size) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  if (!m_scalar_staging_buffer) {
+    m_scalar_staging_buffer = [m_device newBufferWithLength:kMaxScalarAlloc
+                                                      options:MTLResourceStorageModeManaged |
+                                                              MTLResourceCPUCacheModeDefaultCache];
+    TORCH_CHECK(m_scalar_staging_buffer, "MPS allocator: failed to create scalar staging buffer");
+  }
+  TORCH_INTERNAL_ASSERT(size <= kMaxScalarAlloc);
+  memcpy([m_scalar_staging_buffer contents], value, size);
+  // Managed storage: tell Metal the CPU side just changed so the driver
+  // re-syncs it before the GPU-side blit below reads it.
+  [m_scalar_staging_buffer didModifyRange:NSMakeRange(0, size)];
+
+  id<MTLCommandBuffer> cmdBuffer = m_stream->commandBuffer();
+  TORCH_CHECK(cmdBuffer, "MPS allocator: failed to obtain a command buffer to upload a scalar value");
+  id<MTLBlitCommandEncoder> blit = [cmdBuffer blitCommandEncoder];
+  TORCH_CHECK(blit, "MPS allocator: failed to create a blit encoder to upload a scalar value");
+  [blit copyFromBuffer:m_scalar_staging_buffer sourceOffset:0 toBuffer:dst destinationOffset:0 size:size];
+  [blit endEncoding];
+  // Block until the copy lands: callers expect `dst` to already contain the
+  // value once this function returns (mirrors the old memcpy's synchronous
+  // semantics on the Shared/Apple-Silicon path).
+  m_stream->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
 std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
-  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+  // return if buffer was not allocated on MPSAllocator or isn't a host-accessible (Shared/Managed) buffer
+  if (!buffer_block || !(buffer_block->heap->pool->usage & kHostAccessibleUsageMask)) {
     return {nullptr, 0};
   }
   if (!buffer_block->cpu_ptr) {
     buffer_block->cpu_ptr = [buffer_block->buffer contents];
   }
+  if (!buffer_block->cpu_ptr) {
+    // Defensive: shouldn't happen for a pool we already confirmed is
+    // host-accessible, but avoid handing back a dangling/garbage pointer.
+    return {nullptr, 0};
+  }
+  // On non-Apple-Silicon (Managed storage) make sure the CPU-visible copy
+  // reflects any GPU writes that may still be in flight before we hand the
+  // pointer back.
+  synchronizeManagedBuffer(buffer_block);
   return {buffer_block->cpu_ptr, buffer_block->retainCount()};
 }
 
@@ -652,12 +755,18 @@ c10::Storage MPSHeapAllocatorImpl::getHostAliasStorage(const c10::Storage& mps_s
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   BufferBlock* buffer_block = get_allocated_buffer_block(mps_storage.data());
   TORCH_CHECK(buffer_block, "getHostAliasStorage: storage was not allocated by the MPSAllocator");
-  TORCH_CHECK(buffer_block->heap->pool->usage & UsageFlags::SHARED,
-              "getHostAliasStorage: storage is not backed by a shared (unified) MTLBuffer");
+  TORCH_CHECK(buffer_block->heap->pool->usage & kHostAccessibleUsageMask,
+              "getHostAliasStorage: storage is not backed by a host-accessible (Shared/Managed) MTLBuffer");
 
   if (!buffer_block->cpu_ptr) {
     buffer_block->cpu_ptr = [buffer_block->buffer contents];
   }
+  TORCH_CHECK(buffer_block->cpu_ptr, "getHostAliasStorage: buffer unexpectedly has no CPU-visible memory");
+
+  // On non-Apple-Silicon (Managed storage), bring the CPU-visible copy up to
+  // date before handing out a raw alias to it; on Apple Silicon (Shared
+  // storage) this is a no-op, matching the original zero-cost behavior.
+  synchronizeManagedBuffer(buffer_block);
 
   // Retain the source MPS storage through the DataPtr's context so the
   // MTLBuffer cannot be recycled while the host alias is in use.
@@ -671,14 +780,33 @@ c10::Storage MPSHeapAllocatorImpl::getHostAliasStorage(const c10::Storage& mps_s
                       /*resizable=*/false);
 }
 
+void MPSHeapAllocatorImpl::synchronizeManagedBuffer(BufferBlock* buffer_block) {
+  if (m_has_unified_memory) {
+    return; // Shared storage is always coherent on Apple Silicon — nothing to do.
+  }
+  // Managed storage keeps separate CPU- and GPU-side copies of a buffer's
+  // contents. Blit-synchronize the CPU-visible copy with whatever the GPU last
+  // wrote, then wait for it to land before returning a pointer to the caller.
+  // This intentionally blocks: callers that read `cpu_ptr` need up-to-date
+  // data, and unlike Shared/unified memory there is no other way to guarantee
+  // that on non-Apple-Silicon devices.
+  id<MTLCommandBuffer> cmdBuffer = m_stream->commandBuffer();
+  TORCH_CHECK(cmdBuffer, "MPS allocator: failed to obtain a command buffer to sync a Managed buffer");
+  id<MTLBlitCommandEncoder> blit = [cmdBuffer blitCommandEncoder];
+  TORCH_CHECK(blit, "MPS allocator: failed to create a blit encoder to sync a Managed buffer");
+  [blit synchronizeResource:buffer_block->buffer];
+  [blit endEncoding];
+  m_stream->synchronize(SyncType::COMMIT_AND_WAIT);
+}
+
 bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
   bool recordedEvent = false;
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   for (const auto& buffer : buffers) {
     BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
-    // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
-    if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+    // return if buffer was not allocated on MPSAllocator or isn't a host-accessible buffer
+    if (buffer_block && (buffer_block->heap->pool->usage & kHostAccessibleUsageMask)) {
       if (!buffer_block->event) {
         buffer_block->event = m_event_pool->acquireEvent(false, nullptr);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
@@ -696,10 +824,10 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     for (const auto& buffer : buffers) {
       BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
-      // wait on event if "shared" buffer was allocated on MPSAllocator and
+      // wait on event if host-accessible buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
-      if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1 &&
-          buffer_block->event) {
+      if (buffer_block && (buffer_block->heap->pool->usage & kHostAccessibleUsageMask) &&
+          buffer_block->retainCount() > 1 && buffer_block->event) {
         buffer_blocks.push_back(buffer_block);
       }
     }
@@ -886,6 +1014,14 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   // Construction is intentionally cheap (no Metal access) so the allocator can
   // be registered with c10 at static-init time without forcing MPS/Metal
   // initialization in processes that never touch the MPS device.
+  //
+  // NOTE on `Usage`: this is only a *default label* for the allocate() path
+  // below. It is passed through MPSHeapAllocatorImpl::normalizeUsage() (see
+  // alloc_buffer_block()) before it ever reaches Metal, so even though the
+  // shared allocator instance is constructed with the literal
+  // UsageFlags::SHARED, it is automatically remapped to MANAGED on every
+  // non-Apple-Silicon device. It is therefore always safe to construct this
+  // with SHARED regardless of which Mac the process ends up running on.
   explicit MPSAllocator(uint32_t Usage) : m_usage(Usage) {}
 
   // No destructor: the underlying MPSHeapAllocatorImpl singleton empties its own
@@ -1106,8 +1242,12 @@ MPSPinnedAllocator& _getPinnedAllocator() {
 } // anonymous namespace
 
 IMPSAllocator* getIMPSAllocator() {
-  // MPS requires unified memory (enforced in MPSHeapAllocatorImpl::init_allocator),
-  // so the shared allocator is always usable.
+  // Note: the `Usage` passed into MPSAllocator's constructor (UsageFlags::SHARED
+  // above) only labels the *default* allocate() path, used e.g. by c10::SetAllocator.
+  // The actual storage mode for that path is decided per-pool inside
+  // MPSHeapAllocatorImpl (Shared on Apple Silicon, Managed on every other
+  // device) — see hostAccessibleUsage()/normalizeUsage() — so this works
+  // correctly regardless of which Mac the process runs on.
   return &_getSharedAllocator();
 }
 
@@ -1122,9 +1262,10 @@ void* getMPSPinnedMTLBuffer(const void* host_ptr) {
 }
 
 // torch.is_pinned() implementation
-// Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
-// will be able to use SharedStorageMode for MTLBuffer allocations. This will
-// avoid extra copies on DataLoading operations.
+// Pinned memory will be helpful on Apple Silicon Macs with Unified memory, and
+// approximated via Managed storage on Intel/AMD Macs, as we will be able to use a
+// host-accessible MTLBuffer for DataLoading operations without a plain `memcpy`
+// round-trip through ordinary heap memory.
 bool isMPSPinnedPtr(const void* data) {
   return MPSPinnedAllocator::isPinned(data) || at::mps::_getSharedAllocator().isSharedBuffer(data);
 }
