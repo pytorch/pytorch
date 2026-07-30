@@ -10,6 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import init_device_mesh
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -53,6 +54,18 @@ def requires_nvls():
     return skip_but_pass_in_sandcastle_if(
         not has_nvls_support(),
         "Test requires NVLink SHARP support",
+    )
+
+
+def skip_if_cuda_13_2():
+    """Skip dispatch-combine tests that hang/fail on CUDA 13.2 (B200/sm100).
+
+    See https://github.com/pytorch/pytorch/issues/191201
+    """
+    return skip_but_pass_in_sandcastle_if(
+        _get_torch_cuda_version() == (13, 2),
+        "Dispatch-combine hangs/fails on CUDA 13.2, "
+        "see https://github.com/pytorch/pytorch/issues/191201",
     )
 
 
@@ -783,6 +796,7 @@ class DispatchCombineTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
+    @skip_if_cuda_13_2()
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
         """
@@ -807,6 +821,7 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
+    @skip_if_cuda_13_2()
     @skip_if_lt_x_gpu(4)
     def test_dispatch_combine_subgroup(self) -> None:
         """

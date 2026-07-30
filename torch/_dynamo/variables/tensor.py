@@ -62,7 +62,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, TypeSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -699,7 +699,13 @@ class TensorVariable(VariableTracker):
                 )
 
         if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
+            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
+            # A sourced class self-guards when observed downstream (e.g.
+            # `w.__class__ is SomeType`), which keeps type observation sound even
+            # when the input's own class guard is relaxed (see
+            # VariableBuilder.wrap_tensor and ACT input polymorphism).
+            source = self.source and TypeSource(self.source)
+            return VariableTracker.build(tx, self.python_type(), source)
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -3475,6 +3481,7 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
         self.method_name = method_name
         self.tensor_version = from_tensor._get_fake_version()
+        self.storage_key = self._storage_key(from_tensor.as_proxy().node)
         self.storage_version = self.current_storage_version(
             storage_versions, from_tensor.as_proxy().node
         )
@@ -3503,7 +3510,7 @@ class DataPtrVariable(VariableTracker):
     def as_tensor_constructor_arg(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker:
-        if tx.output.export:
+        if tx.output.export or torch.compiler.is_exporting():
             unimplemented(
                 gb_type="data_ptr() in export",
                 context="data_ptr() was materialized as a graph value",
@@ -3574,6 +3581,18 @@ class DataPtrVariable(VariableTracker):
     ) -> None:
         key = cls._storage_key(node)
         storage_versions[key] = storage_versions.get(key, 0) + 1
+
+    def can_reconstruct_after_graph_break(
+        self, storage_versions: dict[tuple[bool, int], int]
+    ) -> bool:
+        node = self.from_tensor.as_proxy().node
+        return (
+            self.tensor_version is not None
+            and self.tensor_version == self.from_tensor._get_fake_version()
+            and self.storage_key == self._storage_key(node)
+            and self.storage_version
+            == self.current_storage_version(storage_versions, node)
+        )
 
     def _is_same_data_ptr(self, other: "VariableTracker") -> bool:
         if not isinstance(other, DataPtrVariable):

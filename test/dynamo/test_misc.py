@@ -10880,7 +10880,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend=counter)
         def fn(x):
-            return torch.ones(2) * x
+            return x * x
 
         fn(0)
         fn(1)
@@ -15670,6 +15670,27 @@ fn
         self.assertNotEqual(actual.item(), 0)
         self.assertEqual(backend.graphs, [])
 
+    def test_nested_live_data_ptr_skips_frame_with_graph_break(self):
+        class CaptureGraphs:
+            def __init__(self):
+                self.graphs = []
+
+            def __call__(self, gm, example_inputs):
+                self.graphs.append(gm)
+                return gm
+
+        def f(x):
+            tmp = x + 1
+            state = {"pointers": [tmp.data_ptr()]}
+            torch._dynamo.graph_break()
+            return torch.scalar_tensor(state["pointers"][0], dtype=torch.long)
+
+        backend = CaptureGraphs()
+        actual = torch.compile(f, backend=backend)(torch.randn(4))
+
+        self.assertNotEqual(actual.item(), 0)
+        self.assertEqual(backend.graphs, [])
+
     def test_data_ptr_rejected_in_higher_order_operator_subgraph(self):
         def true_fn(x):
             tmp = x + 1
@@ -15700,6 +15721,21 @@ fn
             r"data_ptr\(\) in export",
         ):
             torch._dynamo.export(f)(torch.randn(4))
+
+    def test_data_ptr_rejected_in_modern_export(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                tmp = x + 1
+                return torch.scalar_tensor(tmp.data_ptr(), dtype=torch.long)
+
+        with (
+            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                r"data_ptr\(\) in export",
+            ),
+        ):
+            torch.export.export(Model(), (torch.randn(4),), strict=True)
 
     def test_data_ptr_read_before_storage_mutation(self):
         class CaptureGraph:
