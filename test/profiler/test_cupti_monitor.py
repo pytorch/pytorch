@@ -413,6 +413,300 @@ class TestCuptiRecords(TestCase):
             json.loads(both["kernel"]["metadata"][0]), {"func": "ReduceScatter"}
         )
 
+    def test_order_event_nodes(self):
+        # Ordering the event-record nodes of a graph by dependency depth: a serial chain is
+        # totally ordered (returns tools_ids in order); concurrent event nodes at the same
+        # depth are ambiguous (None); no event nodes -> empty. Pure host-side.
+        from torch.profiler._cupti._event_nodes import order_event_nodes
+
+        def node(i, ntype, tid, deps):
+            return {
+                "index": i,
+                "node_type": ntype,
+                "tools_id": tid,
+                "dependencies": deps,
+            }
+
+        # kernel(0) -> event(1) -> kernel(2) -> event(3): depths 1 and 3 -> ordered.
+        serial = [
+            node(0, "kernel", 100, []),
+            node(1, "event_record", 111, [0]),
+            node(2, "kernel", 102, [1]),
+            node(3, "event_record", 133, [2]),
+        ]
+        self.assertEqual(order_event_nodes(serial), [111, 133])
+
+        # root(0) -> event(1), event(2): both depth 1 -> ambiguous.
+        concurrent = [
+            node(0, "kernel", 100, []),
+            node(1, "event_record", 111, [0]),
+            node(2, "event_record", 122, [0]),
+        ]
+        self.assertIsNone(order_event_nodes(concurrent))
+
+        # No event nodes -> empty list.
+        self.assertEqual(order_event_nodes([node(0, "kernel", 100, [])]), [])
+
+    def test_event_node_recorder_learn_resolve(self):
+        # The passive learner maps event_id -> graph_node_id by matching a launch's ordered
+        # event records to the graph's ordered event nodes; it refuses to learn on a count
+        # mismatch, an unknown graph, or an ambiguous (None) graph.
+        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+
+        r = _EventNodeRecorder()
+        r.graph_event_nodes = {7: [11, 13], 8: None}
+
+        r.learn(7, [5, 6])  # 2 records, 2 nodes -> learned in order
+        self.assertEqual(r.resolve(5), 11)
+        self.assertEqual(r.resolve(6), 13)
+
+        r.learn(7, [9])  # count mismatch -> ignored
+        self.assertIsNone(r.resolve(9))
+        r.learn(999, [1, 2])  # unknown graph -> ignored
+        self.assertIsNone(r.resolve(1))
+        r.learn(8, [1, 2])  # ambiguous graph -> ignored
+        self.assertIsNone(r.resolve(1))
+
+        # A learned event id is stable: relearning does not overwrite it.
+        r.learn(7, [5, 6])
+        self.assertEqual(r.resolve(5), 11)
+
+        # Purge drops a destroyed graph's nodes and their learned event ids.
+        r.purge_exec_ids({7})
+        self.assertNotIn(7, r.graph_event_nodes)
+        self.assertIsNone(r.resolve(5))
+
+    def test_learn_and_resolve_window(self):
+        # The window orchestration: keys each launch by correlation id -> exec graph id (from a
+        # graphed work record's graph_node_id), orders that launch's event records by sync id,
+        # learns, and resolves each event record to its node. Pure (no numpy/CUDA).
+        from torch.profiler._cupti._event_nodes import (
+            _EventNodeRecorder,
+            learn_and_resolve_window,
+        )
+
+        exec_id = 7
+        n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
+        r = _EventNodeRecorder()
+        r.graph_event_nodes = {exec_id: [n0, n1]}
+
+        corr_exec_pairs = [
+            (900, (exec_id << 32) | 55)
+        ]  # a graphed kernel in launch 900
+        # Two event records for launch 900, delivered out of sync-id order.
+        event_rows = [(900, 2, 6), (900, 1, 5)]
+        resolved = learn_and_resolve_window(r, corr_exec_pairs, event_rows)
+        self.assertEqual(resolved, [n1, n0])  # sync 2 -> node1, sync 1 -> node0
+
+        # A later window with no graphed work records but the same events still resolves them
+        # (already learned; object-keyed event ids are stable).
+        self.assertEqual(learn_and_resolve_window(r, [], [(0, 9, 5)]), [n0])
+
+        # An event id from an unlearned launch stays unresolved.
+        self.assertEqual(learn_and_resolve_window(r, [], [(0, 0, 404)]), [None])
+
+    def test_add_graph_event_node_spans(self):
+        # The window-bucketed event-node span frame keeps only rows resolved to a graph node
+        # (graph_node_id != 0) whose device timestamp is in [start, boundary), and builds point
+        # spans with graph_id = node_id >> 32. Pure host-side.
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import _add_graph_event_node_spans
+
+        node = (7 << 32) | 11
+        cols = {
+            "cuda_event": {
+                "event_id": np.array([5, 6, 7], dtype=np.int64),
+                # row 1 resolved+in-window; row 2 unresolved; row 3 resolved but out of window
+                "graph_node_id": np.array([node, 0, node], dtype=np.int64),
+                "start_ns": np.array([1500, 1500, 9999], dtype=np.int64),
+                "end_ns": np.array([1500, 1500, 9999], dtype=np.int64),
+                "device_id": np.array([0, 0, 0], dtype=np.int64),
+                "context_id": np.array([1, 1, 1], dtype=np.int64),
+                "stream_id": np.array([7, 7, 7], dtype=np.int64),
+                "correlation_id": np.array([900, 900, 901], dtype=np.int64),
+                "annotation": np.array([None, None, None], dtype=object),
+            }
+        }
+        _add_graph_event_node_spans(cols, start_ns=1000, boundary_ns=2000)
+        gen = cols["graph_event_node"]
+        self.assertEqual(
+            gen["graph_node_id"].tolist(), [node]
+        )  # only the first row survives
+        self.assertEqual(gen["graph_id"].tolist(), [7])
+        self.assertEqual(gen["start_ns"].tolist(), [1500])
+        self.assertEqual(gen["stream_id"].tolist(), [7])
+
+        # No resolved rows -> no frame added at all.
+        cols2 = {
+            "cuda_event": {
+                "graph_node_id": np.array([0], dtype=np.int64),
+                "start_ns": np.array([1500], dtype=np.int64),
+                "end_ns": np.array([1500], dtype=np.int64),
+                "device_id": np.array([0], dtype=np.int64),
+                "context_id": np.array([0], dtype=np.int64),
+                "stream_id": np.array([0], dtype=np.int64),
+                "correlation_id": np.array([0], dtype=np.int64),
+                "annotation": np.array([None], dtype=object),
+            }
+        }
+        _add_graph_event_node_spans(cols2, 1000, 2000)
+        self.assertNotIn("graph_event_node", cols2)
+
+    def test_graph_event_node_rendered_and_arrowed(self):
+        # A resolved graph event-record node renders as an "EventRecord" point span under cat
+        # "graph_event_node" on its stream lane, and (with graph_deps) is a dependency-arrow
+        # endpoint: an arrow flows from the producing kernel to the event node. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _FLOW_CATEGORY,
+            _trace_window_entries,
+        )
+
+        def i64(*v):
+            return np.array(v, dtype=np.int64)
+
+        KA = (1 << 32) | 101  # producing kernel node
+        EN = (1 << 32) | 102  # event-record node depending on it
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000),
+                "end_ns": i64(2000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(7),
+                "correlation_id": i64(11),
+                "graph_id": i64(1),
+                "graph_node_id": i64(KA),
+                "name": np.array(["producer"], dtype=object),
+                "annotation": np.array([None], dtype=object),
+                "grid_x": i64(1),
+                "grid_y": i64(1),
+                "grid_z": i64(1),
+                "block_x": i64(1),
+                "block_y": i64(1),
+                "block_z": i64(1),
+                "registers_per_thread": i64(0),
+                "static_shared_memory": i64(0),
+                "dynamic_shared_memory": i64(0),
+                "priority": i64(0),
+                "queued": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
+            },
+            "graph_event_node": {
+                "start_ns": i64(2500),
+                "end_ns": i64(2500),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(7),
+                "correlation_id": i64(11),
+                "graph_id": i64(1),
+                "graph_node_id": i64(EN),
+                "annotation": np.array([None], dtype=object),
+            },
+        }
+        window = {"columns": columns, "graph_deps": {EN: [KA]}}
+        _, events = _trace_window_entries(window, base_ns=0)
+        en = [e for e in events if e.get("cat") == "graph_event_node"]
+        self.assertEqual(len(en), 1)
+        self.assertEqual(en[0]["name"], "EventRecord")
+        self.assertEqual(en[0]["pid"], 0)  # device lane
+        self.assertEqual(en[0]["args"]["stream"], 7)
+        self.assertEqual(en[0]["args"]["graph node id"], 102)
+        # A dependency arrow terminates ON the event node: some flow-finish endpoint lands at
+        # the event node's start (kernel -> event_node). _FLOW_CATEGORY is shared by the
+        # CPU-launch and graph-dep flows, so match on the event node's timestamp.
+        finish_ts = {
+            e["ts"]
+            for e in events
+            if e.get("cat") == _FLOW_CATEGORY and e.get("ph") == "f"
+        }
+        self.assertIn(2500 / 1000.0, finish_ts)
+
+    def test_attach_event_node_ids(self):
+        # End-to-end host-side: given a window's kernel + cuda_event columns, learn the
+        # mapping (records ordered by sync id, launch keyed by correlation id -> exec graph id
+        # from the kernel's graph_node_id) and attach graph_node_id + annotation to the
+        # cuda_event frame.
+        import numpy as np
+
+        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+        from torch.profiler._cupti.observers.profiler import _attach_event_node_ids
+
+        exec_id = 7
+        n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
+        r = _EventNodeRecorder()
+        r.graph_event_nodes = {exec_id: [n0, n1]}
+
+        columns = {
+            "kernel": {
+                "correlation_id": np.array([900], dtype=np.int64),
+                "graph_node_id": np.array([(exec_id << 32) | 55], dtype=np.int64),
+            },
+            # Records delivered out of execution order: sorting by sync id recovers it.
+            "cuda_event": {
+                "event_id": np.array([6, 5], dtype=np.int64),
+                "correlation_id": np.array([900, 900], dtype=np.int64),
+                "cuda_event_sync_id": np.array([2, 1], dtype=np.int64),
+            },
+        }
+        _attach_event_node_ids(columns, r)
+        ce = columns["cuda_event"]
+        # event_id 5 (sync 1) -> first node n0; event_id 6 (sync 2) -> second node n1.
+        self.assertEqual(ce["graph_node_id"].tolist(), [n1, n0])
+        self.assertEqual(r.resolve(5), n0)
+        self.assertEqual(r.resolve(6), n1)
+        self.assertEqual(ce["annotation"].tolist(), [None, None])
+
+        # No recorder -> no-op (bridge disabled).
+        plain = {"cuda_event": {"event_id": np.array([1], dtype=np.int64)}}
+        _attach_event_node_ids(plain, None)
+        self.assertNotIn("graph_node_id", plain["cuda_event"])
+
+    def test_window_graph_deps_collapses_event_nodes(self):
+        # A dependency arrow must span a kernel -> event_record -> wait_event -> kernel chain
+        # (event/wait nodes never render as spans, so they can't be arrow endpoints). The window
+        # dep resolver collapses those non-present nodes to the nearest rendered ancestor.
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import (
+            _nearest_present_preds,
+            _window_graph_deps,
+        )
+
+        # kernelA -> event_record -> wait_event -> kernelB
+        KA, E, W, KB = 10, 11, 12, 13
+        # node -> predecessors, as the _graph_deps recorder stores them
+        raw = {E: [KA], W: [E], KB: [W]}
+        resolver = raw.get
+
+        # Direct: KB's predecessor collapses through W and E to the rendered kernel KA.
+        self.assertEqual(_nearest_present_preds(resolver, KB, {KA, KB}), [KA])
+        # A root kernel has no present predecessors.
+        self.assertEqual(_nearest_present_preds(resolver, KA, {KA, KB}), [])
+
+        # Through the window API: only kernels KA/KB are present (rendered); the arrow survives.
+        columns = {"kernel": {"graph_node_id": np.array([KA, KB], dtype=np.int64)}}
+        self.assertEqual(_window_graph_deps(resolver, columns), {KB: [KA]})
+
+        # Backward compat: a plain kernel->kernel edge (no event nodes) is unchanged.
+        self.assertEqual(
+            _window_graph_deps(
+                {KB: [KA]}.get,
+                {"kernel": {"graph_node_id": np.array([KA, KB], dtype=np.int64)}},
+            ),
+            {KB: [KA]},
+        )
+
+        # Fan-in: KB depends on two chains, each through an event node, to two kernels.
+        KA2 = 20
+        raw2 = {E: [KA], 21: [KA2], KB: [E, 21]}  # 21 is a second event_record
+        self.assertEqual(
+            sorted(_nearest_present_preds(raw2.get, KB, {KA, KA2, KB})), [KA, KA2]
+        )
+
     def test_metadata_blob_rendered_into_trace_args(self):
         # The comms descriptor blob attached as the "metadata" column is spread into the
         # chrome-trace kernel args (so func/count/... show up), the same way a dict

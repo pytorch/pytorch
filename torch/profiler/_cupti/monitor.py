@@ -15,7 +15,15 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 import torch
 
 from . import cupti_python
-from .records import Ctype, FIELD_CTYPE, FIELD_REGISTRY, Kernel, STRING_FIELDS, Sync
+from .records import (
+    Ctype,
+    CudaEvent,
+    FIELD_CTYPE,
+    FIELD_REGISTRY,
+    Kernel,
+    STRING_FIELDS,
+    Sync,
+)
 
 
 # A registration request: either a plain iterable of activity kinds (meaning "all
@@ -312,6 +320,7 @@ class CuptiMonitor:
         # The CUPTI subscriber handle.
         self._subscriber: int | None = None
         self._latency_enabled = False
+        self._device_ts_enabled = False
         # Layout state -- a function of registration, recomputed only when the
         # The fields enabled per kind on the subscriber (a function of the observer
         # field union, recomputed only on register/deregister, never per buffer). The
@@ -888,6 +897,15 @@ class CuptiMonitor:
             ):
                 self._cupti.enable_kernel_latency_timestamps(self._subscriber, True)
                 self._latency_enabled = True
+        # Device-side CUDA_EVENT timestamps (the deviceTimestamp field, off by default) are
+        # needed to place graph event-record nodes as spans. Enable once, iff an observer
+        # selected the CUDA_EVENT device-timestamp field.
+        if self._subscriber is not None and not self._device_ts_enabled:
+            if CudaEvent.DEVICE_TIMESTAMP.id in target.get(
+                int(ActivityKind.CUDA_EVENT), frozenset()
+            ):
+                self._cupti.enable_cuda_event_device_timestamps(self._subscriber, True)
+                self._device_ts_enabled = True
 
     def _reconfigure(self, target: dict[int, frozenset[int]]) -> None:
         # Reconcile the per-field selection to ``target`` with a minimal diff: only
