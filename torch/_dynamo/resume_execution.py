@@ -20,6 +20,8 @@ import dataclasses
 import sys
 from typing import Any, cast, TYPE_CHECKING
 
+from torch import Tensor
+
 from .bytecode_transformation import (
     add_push_null,
     bytecode_from_template,
@@ -33,7 +35,7 @@ from .bytecode_transformation import (
     transform_code_object,
     unique_id,
 )
-from .utils import ExactWeakKeyDictionary, istensor
+from .utils import ExactWeakKeyDictionary
 
 
 if TYPE_CHECKING:
@@ -88,7 +90,7 @@ def _boxed_resume_arg_indexes_to_clear(code: types.CodeType) -> tuple[int, ...]:
 
 
 def _maybe_clear_tensor_resume_arg(resume_args: list[Any], idx: int) -> None:
-    if idx < len(resume_args) and istensor(resume_args[idx]):
+    if idx < len(resume_args) and isinstance(resume_args[idx], Tensor):
         resume_args[idx] = None
 
 

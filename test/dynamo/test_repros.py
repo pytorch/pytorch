@@ -8496,6 +8496,126 @@ SavedForBackwardsAOTOutput(idx=5)""",
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(dual)
 
+    def test_swap_tensors_after_discarded_attempt(self):
+        # Issue #186796: a discarded restart/skip attempt fakifies the real
+        # params and builds guards on them, leaving weakrefs on the real params
+        # (guard TensorWeakRef, tensor_to_context WeakIdRef, fake-mode describer
+        # WeakIdRef) that block torch.utils.swap_tensors after compile.
+        # _cleanup_output_graph must drop those weakrefs.
+        def assert_swappable(param):
+            # Raises "Cannot swap ... has weakref" if any observational weakref
+            # is left on the real param.
+            torch.utils.swap_tensors(param, nn.Parameter(torch.zeros_like(param.data)))
+
+        # Axis 1: SpeculationRestartAnalysis - a graph break after the param is
+        # fakified discards the first attempt.
+        torch._dynamo.reset()
+
+        class RestartMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                y = x @ self.weight
+                torch._dynamo.graph_break()
+                return y + 1
+
+        m1 = RestartMod()
+        torch.compile(m1, backend="eager")(torch.randn(2, 4))
+        assert_swappable(m1.weight)
+
+        # Axis 2: SkipFrame - reading the param but tracing no ops skips the
+        # frame after the param is fakified.
+        torch._dynamo.reset()
+
+        class SkipMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.weight.shape[0]
+
+        m2 = SkipMod()
+        torch.compile(m2, backend="eager")(torch.randn(2, 4))
+        assert_swappable(m2.weight)
+
+        # Axis 3: TensorifyScalarRestartAnalysis (backend-raised restart). By
+        # the time cleanup runs, tracing_context.fake_mode has been swapped to a
+        # fresh backend fake_mode and the tracing describer holding the real
+        # params lives on _old_fake_mode, so cleanup must clear BOTH. We assert
+        # both describers are emptied on the discarded attempt: without clearing
+        # _old_fake_mode its describer still pins the real-param WeakIdRefs
+        # (whether they still block swap depends on non-deterministic GC).
+        import math
+
+        from torch._dynamo.output_graph import DynamoTracerOutput
+
+        records = []
+        orig_cleanup = DynamoTracerOutput._cleanup_output_graph
+
+        def recording_cleanup(tracer_self):
+            orig_cleanup(tracer_self)
+            og = tracer_self.output_graph_for_cleanup
+            if og is None:
+                return
+
+            def describer_len(fake_mode):
+                if fake_mode is None:
+                    return None
+                d = fake_mode.fake_tensor_converter.meta_converter.describer
+                return len(d.lookup_tensor) + len(d.lookup_storage)
+
+            old_fake_mode = getattr(og, "_old_fake_mode", None)
+            records.append(
+                (
+                    describer_len(og.tracing_context.fake_mode),
+                    describer_len(old_fake_mode),
+                )
+            )
+
+        class TensorifyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(8, 8))
+
+            def forward(self, x, y):
+                return math.floor(y**2) * (x @ self.weight)
+
+        torch._dynamo.reset()
+        m3 = TensorifyMod()
+        x = torch.randn(4, 8)
+        # specialize_float=False is required for the scalar-tensorify restart to
+        # fire: the dynamic-shapes test variant sets specialize_float=True, which
+        # constant-folds the float so no symfloat (and no tensorify restart) is
+        # produced. Pin it here so axis 3 deterministically triggers the restart
+        # under both the default config and the dynamic-shapes variant.
+        with (
+            torch._dynamo.config.patch(specialize_float=False),
+            mock.patch.object(
+                DynamoTracerOutput, "_cleanup_output_graph", recording_cleanup
+            ),
+        ):
+            cm3 = torch.compile(m3, backend="aot_eager")
+            cm3(x, 2.0)
+            cm3(x, 3.0)  # automatic dynamic -> symfloat -> tensorify restart
+            cm3(x, 4.0)
+
+        # At least one discarded attempt must have had _old_fake_mode set (the
+        # tensorify restart raised after the backend fake_mode swap).
+        self.assertTrue(
+            any(old is not None for _, old in records),
+            "expected a discarded attempt with _old_fake_mode set",
+        )
+        # Cleanup must empty BOTH describers on every discarded attempt.
+        for cur, old in records:
+            if cur is not None:
+                self.assertEqual(cur, 0)
+            if old is not None:
+                self.assertEqual(old, 0)
+        assert_swappable(m3.weight)
+
     def test_graph_break_resume_args_cleanup_not_duplicated(self):
         def graph(a):
             return a + 1, a + 2
@@ -8642,6 +8762,65 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertTrue(fn(x))
         self.assertTrue(opt_fn(x))
 
+    def test_graph_break_resume_args_releases_tensor_subclass_local(self):
+        refs = []
+        states = []
+
+        class MyTensor(torch.Tensor):
+            pass
+
+        @torch._dynamo.disable()
+        def make_ref(x):
+            refs.append(weakref.ref(x))
+
+        def backend(gm, _):
+            def run(*args):
+                gc.collect()
+                if refs:
+                    states.append(refs[-1]() is None)
+                return gm(*args)
+
+            return run
+
+        def fn(x):
+            y = x + 1
+            make_ref(y)
+            del y
+            return x * 2
+
+        x = torch.randn(3).as_subclass(MyTensor)
+        result = torch.compile(fn, backend=backend)(x)
+        self.assertEqual(states, [True])
+        self.assertEqual(result, x * 2)
+
+    def test_graph_break_resume_args_releases_tensor_subclass_stack(self):
+        ref = [None]
+        states = []
+
+        class MyTensor(torch.Tensor):
+            pass
+
+        @torch._dynamo.disable()
+        def make_y(x):
+            y = x + 1
+            ref[0] = weakref.ref(y)
+            return y
+
+        @torch._dynamo.disable()
+        def check_dead():
+            gc.collect()
+            states.append(ref[0]() is None)
+
+        def fn(x):
+            out = make_y(x) * 2
+            check_dead()
+            return out
+
+        x = torch.randn(3).as_subclass(MyTensor)
+        result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(states, [True])
+        self.assertEqual(result, (x + 1) * 2)
+
     def test_graph_break_boxed_aot_specialization(self):
         def fn(x, y):
             dead = x + 1
@@ -8673,47 +8852,27 @@ SavedForBackwardsAOTOutput(idx=5)""",
                     ):
                         self.assertEqual(fn(*args), opt_fn(*args))
 
-    def test_as_boxed_call_lazy_graph_module(self):
+    def test_as_boxed_call_graph_modules(self):
         def fn(x, y):
             return x + y
 
-        gm = torch.fx.symbolic_trace(fn)
-        lazy_gm = _LazyGraphModule.from_graphmodule(gm)
-        boxed = _as_boxed_call(lazy_gm.forward)
-        self.assertIsNotNone(boxed)
+        def check_boxed(candidate):
+            boxed = _as_boxed_call(candidate)
+            self.assertIsNotNone(boxed)
+            self.assertTrue(_uses_boxed_call(boxed))
+            if isinstance(candidate, torch.fx.GraphModule):
+                self.assertIs(boxed, candidate)
 
-        x = torch.randn(2)
-        y = torch.randn(2)
-        args = [x, y]
-        self.assertEqual(boxed(args), fn(x, y))
-        self.assertEqual(args, [])
+            x = torch.randn(2)
+            y = torch.randn(2)
+            args = [x, y]
+            self.assertEqual(boxed(args), fn(x, y))
+            self.assertEqual(args, [])
+
+        check_boxed(torch.fx.symbolic_trace(fn))
+        lazy_gm = _LazyGraphModule.from_graphmodule(torch.fx.symbolic_trace(fn))
+        check_boxed(lazy_gm.forward)
         self.assertTrue(_uses_boxed_call(lazy_gm.forward))
-
-    @torch._dynamo.config.patch(error_on_recompile=True)
-    def test_cov_dynamic(self):
-        compiled_unweighted = torch.compile(
-            torch.cov, backend="eager", dynamic=True, fullgraph=True
-        )
-
-        def weighted_cov(x, fweights, aweights):
-            return torch.cov(x, fweights=fweights, aweights=aweights)
-
-        compiled_weighted = torch.compile(
-            weighted_cov, backend="eager", dynamic=True, fullgraph=True
-        )
-        for observations in (3, 5):
-            x = torch.randn(2, observations)
-            fweights = torch.randint(1, 4, (observations,))
-            aweights = torch.rand(observations)
-            self.assertEqual(compiled_unweighted(x), torch.cov(x))
-            self.assertEqual(
-                compiled_weighted(x, fweights, aweights),
-                weighted_cov(x, fweights, aweights),
-            )
-
-        with self.assertWarnsRegex(UserWarning, "degrees of freedom is <= 0"):
-            result = torch.cov(torch.randn(2, 1))
-        self.assertTrue(result.isnan().all())
 
     def test_resume_args_name_collision(self):
         def user_arg_name(__resume_args):  # noqa: PYI063
@@ -10108,9 +10267,17 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             torch.cuda.empty_cache()
             return peak
 
+        def graph_module_backend(gm, _):
+            return gm
+
         n = 2048
         tensor_bytes = n * n * torch.empty((), dtype=torch.float32).element_size()
-        for backend in ("eager", "aot_eager"):
+        backends = (
+            ("eager", "eager"),
+            ("aot_eager", "aot_eager"),
+            ("graph_module", graph_module_backend),
+        )
+        for backend_name, backend in backends:
             for dynamic_sources in (None, "L['a']"):
                 ctx = (
                     contextlib.nullcontext()
@@ -10118,7 +10285,7 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
                     else torch.compiler.config.patch(dynamic_sources=dynamic_sources)
                 )
                 with (
-                    self.subTest(backend=backend, dynamic_sources=dynamic_sources),
+                    self.subTest(backend=backend_name, dynamic_sources=dynamic_sources),
                     ctx,
                 ):
                     no_graph_break_peak = measure_peak(no_graph_break, n, backend)

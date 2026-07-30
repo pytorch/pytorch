@@ -52,6 +52,7 @@ import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import (
+    FakeTensorObservedException,
     get_dynamo_observed_exception,
     ObservedException,
     TensorifyScalarRestartAnalysis,
@@ -198,13 +199,13 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
-    generic_bool,
-    generic_contains,
     generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_is_true,
     generic_setitem,
     pyiter_send,
+    pysequence_contains,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -962,7 +963,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():
                 if truth_fn(result.as_python_constant()):
                     if push:
@@ -1001,7 +1002,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif not value.is_tensor():
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if truth_fn(result):
                 if push:
                     self.push(value)
@@ -2879,6 +2880,20 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
+            if isinstance(raised_exception, FakeTensorObservedException):
+                from .exc import format_graph_break_message
+
+                msg = format_graph_break_message(
+                    "RuntimeError when making fake tensor call",
+                    "",
+                    str(raised_exception),
+                    [*graph_break_hints.USER_ERROR],
+                )
+                e = exc.TorchRuntimeError(
+                    msg, getattr(raised_exception, "real_stack", None)
+                )
+                raise e.with_traceback(raised_exception.__traceback__) from None
+
             curr_exc = self.exn_vt_stack.get_raised_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
@@ -2936,7 +2951,6 @@ class InstructionTranslatorBase(
                 block_stack_entry = self.block_stack.pop()
 
                 while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
-                    # TODO(anijain2305) - This is not tested .. unable to create a testcase
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
                     self.exn_vt_stack.pop()
@@ -2945,14 +2959,7 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            unimplemented(
-                                gb_type="Observed exception (EXCEPT_HANDLER)",
-                                context=str(raised_exception),
-                                explanation=observed_exn_gb_explanation
-                                + " This graph break is unexpected.",
-                                hints=[*graph_break_hints.DYNAMO_BUG],
-                                from_exc=raised_exception,
-                            )
+                            bubble_exception_to_interpreter()
 
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
@@ -3849,6 +3856,8 @@ class InstructionTranslatorBase(
         indexes_to_clear = set(_boxed_resume_arg_indexes_to_clear(self.f_code))
         for idx in reversed(range(len(resume_args))):
             if idx in indexes_to_clear:
+                # Dynamo consumes the original prologue while tracing, so the
+                # optimized resume must replay its carrier-slot clears.
                 insts.extend(create_clear_resume_arg(resume_args_varname, idx))
                 continue
             helper_cg = PyCodegen(self)
@@ -4533,7 +4542,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
+        self.push(pysequence_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 

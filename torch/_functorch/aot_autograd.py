@@ -1257,6 +1257,7 @@ def aot_module_simplified(
             )
     if compiled_fn is None:
         raise AssertionError("compiled_fn must not be None")
+    # See Note [Dynamo boxed graph call contract]
     dynamo_boxed_call = isinstance(mod, torch.fx.GraphModule) and mod.meta.get(
         "dynamo_use_boxed_call", False
     )

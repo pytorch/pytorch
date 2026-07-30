@@ -41,16 +41,7 @@ Tensor cov(
 
   // View input tensor as 2D (variables, observations)
   auto in = self.ndimension() < 2 ? self.view({1, -1}) : self;
-  const auto num_observations = in.sym_size(OBSERVATIONS_DIM);
-  // Fake or symbolic tensors only need shape propagation; real tensors still
-  // run value checks.
-  const auto can_check_values = [](const Tensor& tensor) {
-    return !tensor.is_fake() &&
-        !tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
-  };
-  const auto weight_numel = [](const Tensor& tensor) {
-    return tensor.ndimension() == 0 ? c10::SymInt(1) : tensor.sym_size(0);
-  };
+  const auto num_observations = in.size(OBSERVATIONS_DIM);
 
   // The product of frequencies (fweights) and weights (aweights).
   Tensor w;
@@ -68,14 +59,13 @@ Tensor cov(
         w.scalar_type(),
         " dtype");
     TORCH_CHECK(
-        weight_numel(w) == num_observations,
+        w.numel() == num_observations,
         "cov(): expected fweights to have the same numel as there are observations in the input but got ",
-        weight_numel(w),
+        w.numel(),
         " != ",
         num_observations);
     TORCH_CHECK(
-        !can_check_values(w) || num_observations == 0 ||
-            at::is_scalar_tensor_true(w.min().ge(0)),
+        num_observations == 0 || at::is_scalar_tensor_true(w.min().ge(0)),
         "cov(): fweights cannot be negative");
   }
 
@@ -92,14 +82,13 @@ Tensor cov(
         aw.scalar_type(),
         " dtype");
     TORCH_CHECK(
-        weight_numel(aw) == num_observations,
+        aw.numel() == num_observations,
         "cov(): expected aweights to have the same numel as there are observations in the input but got ",
-        weight_numel(aw),
+        aw.numel(),
         " != ",
         num_observations);
     TORCH_CHECK(
-        !can_check_values(aw) || num_observations == 0 ||
-            at::is_scalar_tensor_true(aw.min().ge(0)),
+        num_observations == 0 || at::is_scalar_tensor_true(aw.min().ge(0)),
         "cov(): aweights cannot be negative");
     w = w.defined() ? w * aw : aw;
   }
@@ -110,8 +99,7 @@ Tensor cov(
       : at::scalar_tensor(num_observations, in.options().dtype(kLong));
 
   TORCH_CHECK(
-      !w.defined() || !can_check_values(w) ||
-          at::is_scalar_tensor_true(w_sum.ne(0)),
+      !w.defined() || at::is_scalar_tensor_true(w_sum.ne(0)),
       "cov(): weights sum to zero, can't be normalized");
 
   const auto avg = (w.defined() ? in * w : in).sum(OBSERVATIONS_DIM) / w_sum;
@@ -137,10 +125,7 @@ Tensor cov(
     }
   }
 
-  const auto can_check_norm_factor =
-      w.defined() ? can_check_values(w) : can_check_values(in);
-  if (can_check_norm_factor &&
-      at::is_scalar_tensor_true(norm_factor.le(0))) {
+  if (at::is_scalar_tensor_true(norm_factor.le(0))) {
     TORCH_WARN("cov(): degrees of freedom is <= 0. Correction should be strictly less than the number of observations.");
     norm_factor.zero_();
   }
@@ -166,7 +151,7 @@ Tensor cov(
   // transpose, algebraically the imag part becomes 0, but in some cases the
   // imag part was non-zero but very small 1e-7, and dividing this by 0 caused
   // imag to be inf instead of nan (0/0). Zero out the imag part.
-  if (c.is_complex() && (in.sym_size(0) == 1 || in.sym_size(1) == 1)) {
+  if (c.is_complex() && (in.size(0) == 1 || in.size(1) == 1)) {
     auto re = at::real(c);
     auto im0 = at::zeros_like(re);
     c = at::complex(re, im0);

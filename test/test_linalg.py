@@ -5076,6 +5076,37 @@ class TestLinalg(TestCase):
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
+    @onlyCPU
+    @dtypes(torch.float)
+    @parametrize(
+        "shape, stride",
+        [
+            ((4, 1, 8), (8, 32, 1)),
+            ((1, 4, 8), (8, 8, 1)),
+        ],
+    )
+    def test_matmul_folds_viewable_size_one_dim(self, device, dtype, shape, stride):
+        x = torch.empty_strided(shape, stride, device=device, dtype=dtype).normal_()
+        y = torch.randn((8, 5), device=device, dtype=dtype)
+
+        self.assertEqual(x.shape, shape)
+        self.assertEqual(x.stride(), stride)
+        self.assertEqual(x.reshape(-1, x.shape[-1]).stride(), (8, 1))
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as prof:
+            result = torch.matmul(x, y)
+
+        expected = x.reshape(-1, x.shape[-1]).mm(y).reshape(
+            *x.shape[:-1], y.shape[-1]
+        )
+        self.assertEqual(result, expected)
+
+        op_names = {event.key for event in prof.key_averages()}
+        self.assertIn("aten::mm", op_names)
+        self.assertNotIn("aten::bmm", op_names)
+
     def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=4, batch_size=3):
         """
         Generates sequences of tuples (x, y) of with size(x) = x_dim and
