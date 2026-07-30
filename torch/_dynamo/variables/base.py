@@ -1599,6 +1599,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 tx, self.as_python_constant().__reduce_ex__(protocol)
             )
 
+        # Same idea as __reduce_ex__ above, for other C-level dunders that
+        # only depend on the real value (not on tracing anything): safe to
+        # constant-fold for any VT that is fully constant-representable.
+        # `hasattr` guards types that don't define the dunder at all (e.g.
+        # int has no __getnewargs__) so we fall through to unimplemented().
+        if (
+            name in ("__reduce__", "__sizeof__", "__getnewargs__")
+            and not args
+            and not kwargs
+            and self.is_python_constant()
+            and hasattr(self.as_python_constant(), name)
+        ):
+            return VariableTracker.build(tx, getattr(self.as_python_constant(), name)())
+
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
             "Please report an issue to PyTorch.",

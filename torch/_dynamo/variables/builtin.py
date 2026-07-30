@@ -68,17 +68,14 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
-    dict_methods,
     extract_fake_example_value,
     get_fake_value,
     is_tensor_getset_descriptor,
     istype,
-    list_methods,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
     specialize_symnode,
-    str_methods,
     tensortype_to_dtype,
     unpack_iterable,
 )
@@ -142,11 +139,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import (
-    UserDefinedListVariable,
-    UserDefinedObjectVariable,
-    UserDefinedVariable,
-)
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
@@ -443,6 +436,30 @@ class BaseBuiltinVariable(VariableTracker):
                         tx, type.__repr__(arg.as_python_constant())
                     )
             return generic_repr(tx, arg)
+
+        fn = self.as_python_constant()
+        if isinstance(fn, type) and args:
+            # Unbound call to a C-level method/wrapper descriptor via the
+            # class, e.g. list.append(a, 9), int.__add__(3, 2), or
+            # bytes.decode(b). CPython types expose such methods as
+            # wrapper_descriptor / method_descriptor objects living on the
+            # type (PyType_Type) -- unbound, not tied to any instance. Mirror
+            # that: resolve the real descriptor and split args[0] off as
+            # self, instead of forwarding the whole call into this VT's own
+            # call_method (which assumes bound-call semantics of exactly one
+            # "other" argument).
+            attr = inspect.getattr_static(fn, name, None)
+            if isinstance(
+                attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
+            ):
+                obj = args[0]
+                if (
+                    isinstance(obj, variables.UserDefinedObjectVariable)
+                    and obj._base_vt is not None
+                ):
+                    return obj._base_vt.call_method(tx, name, args[1:], kwargs)
+                return obj.call_method(tx, name, args[1:], kwargs)
+
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1780,30 +1797,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if self.fn in (set, frozenset, list, tuple):
-            if isinstance(args[0], variables.UserDefinedObjectVariable):
-                if args[0]._base_vt is None:
-                    raise AssertionError(
-                        "UserDefinedObjectVariable._base_vt must not be None"
-                    )
-                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
-            else:
-                return args[0].call_method(tx, name, args[1:], kwargs)
-
-        if self.fn is str and len(args) >= 1:
-            resolved_fn = getattr(self.fn, name, None)
-            if resolved_fn in str_methods:
-                # Only delegate to ConstantVariable, not other types that happen to be constants
-                if isinstance(args[0], ConstantVariable):
-                    return args[0].call_method(tx, name, args[1:], kwargs)
-
-        if self.fn is float and len(args) >= 1:
-            # Only delegate to ConstantVariable, not other types that happen to be constants
-            if isinstance(args[0], ConstantVariable):
-                return VariableTracker.build(
-                    tx, getattr(float, name)(args[0].as_python_constant())
-                )
-
         if name == "__len__" and len(args) == 1 and not kwargs:
             # type.__len__(instance) → len(instance)
             # e.g. list.__len__(my_list) → len(my_list)
@@ -3059,17 +3052,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 tx, dict, *args, **kwargs
             )
 
-        resolved_fn = getattr(dict, name, None)
-        if resolved_fn is not None and resolved_fn in dict_methods:
-            if isinstance(args[0], variables.UserDefinedDictVariable):
-                if args[0]._base_vt is None:
-                    raise AssertionError(
-                        "UserDefinedDictVariable._base_vt must not be None for dict method dispatch"
-                    )
-                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
-            elif isinstance(args[0], ConstDictVariable):
-                return args[0].call_method(tx, name, args[1:], kwargs)
-
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
@@ -3637,20 +3619,6 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     args[1:],
                     tx=tx,
                 )
-        elif args:
-            # Unbound list method called via the class, e.g. list.append(a, 9)
-            # or list.__len__(a). Mirrors DictBuiltinVariable's analogous
-            # fallback for dict.get(d, ...) etc.
-            resolved_fn = getattr(list, name, None)
-            if resolved_fn is not None and resolved_fn in list_methods:
-                if isinstance(args[0], UserDefinedListVariable):
-                    if args[0]._base_vt is None:
-                        raise AssertionError(
-                            "UserDefinedListVariable._base_vt must not be None for list method dispatch"
-                        )
-                    return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
-                elif isinstance(args[0], ListVariable):
-                    return args[0].call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 

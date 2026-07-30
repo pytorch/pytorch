@@ -381,9 +381,17 @@ class ConstantVariable(VariableTracker):
                         return ConstantVariable.create(op(self.value, add_target))
                     except Exception as e:
                         raise_observed_exception(type(e), tx, args=list(e.args))
-        elif isinstance(self.value, bytes) and name == "decode":
+        elif isinstance(self.value, bytes) and name in bytes.__dict__:
             method = getattr(self.value, name)
-            return ConstantVariable.create(method(*const_args, **const_kwargs))
+            try:
+                result = method(*const_args, **const_kwargs)
+            except Exception as e:
+                raise_observed_exception(type(e), tx)
+            # bytes.split/rsplit/splitlines return a fresh caller-owned list;
+            # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
+            if name in ("split", "rsplit", "splitlines"):
+                return ConstantVariable.create(result, mutation_type=ValueMutationNew())
+            return ConstantVariable.create(result)
         elif type(self.value) is complex and name in complex.__dict__:
             method = getattr(self.value, name)
             try:
