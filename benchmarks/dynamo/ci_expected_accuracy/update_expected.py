@@ -80,14 +80,14 @@ CSV_LINTER = str(
 
 # Integer dynamo metric columns saved to the reference CSVs, in output order.
 # Keep in sync with TRACKED_METRICS in benchmarks/dynamo/check_graph_breaks.py
-# (the CI checker). graph_breaks is always present; the coverage metrics
-# (calls_captured/unique_graphs/fallbacks_to_eager) appear only once the
-# benchmark run's get_dynamo_stats writes them, and check_graph_breaks skips any
-# metric absent from the baseline, so older CSVs stay valid.
+# (the CI checker). graph_breaks is always present; calls_captured and
+# fallbacks_to_eager appear only once the benchmark run's get_dynamo_stats writes
+# them, and check_graph_breaks skips any metric absent from the baseline, so
+# older CSVs stay valid. unique_graphs is deliberately not saved/gated -- a
+# change in it is ambiguous (fewer graphs can mean merging, not less capture).
 METRIC_COLUMNS = [
     "graph_breaks",
     "calls_captured",
-    "unique_graphs",
     "fallbacks_to_eager",
 ]
 
