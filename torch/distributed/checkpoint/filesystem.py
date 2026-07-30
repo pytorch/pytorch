@@ -715,49 +715,52 @@ class _FileSystemWriter(StorageWriter):
         file_queue: queue.Queue,
     ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
+        exception_queue: queue.Queue = queue.Queue()
+
+        def write_files() -> None:
+            try:
+                _write_files_from_queue(
+                    create_stream=self.fs.create_stream,
+                    file_queue=file_queue,
+                    result_queue=result_queue,
+                    planner=planner,
+                    transforms=self.transforms,
+                    inflight_threshhold=self.per_thread_copy_ahead,
+                    use_fsync=self.sync_files,
+                    thread_count=self.thread_count,
+                    serialization_format=self.serialization_format,
+                )
+            except Exception as e:
+                exception_queue.put(e)
 
         threads = []
         for _ in range(1, self.thread_count):
-            t = threading.Thread(
-                target=_write_files_from_queue,
-                args=(
-                    self.fs.create_stream,
-                    file_queue,
-                    result_queue,
-                    planner,
-                    self.transforms,
-                    self.per_thread_copy_ahead,
-                    self.sync_files,
-                    self.thread_count,
-                    self.serialization_format,
-                ),
-            )
+            t = threading.Thread(target=write_files)
             t.start()
             threads.append(t)
 
-        _write_files_from_queue(
-            create_stream=self.fs.create_stream,
-            file_queue=file_queue,
-            result_queue=result_queue,
-            planner=planner,
-            transforms=self.transforms,
-            inflight_threshhold=self.per_thread_copy_ahead,
-            use_fsync=self.sync_files,
-            thread_count=self.thread_count,
-            serialization_format=self.serialization_format,
-        )
+        write_files()
 
         for t in threads:
             t.join()
+
+        fut: Future[list[WriteResult]] = Future()
+
+        # A writer thread that died left its files unwritten, so the results in
+        # result_queue cover only part of the plan. Failing the future keeps the
+        # caller from publishing metadata for a partial checkpoint.
+        if not exception_queue.empty():
+            fut.set_exception(exception_queue.get_nowait())
+            return fut
 
         res = []
         try:
             while True:
                 res += result_queue.get_nowait()
         except queue.Empty:
-            fut: Future[list[WriteResult]] = Future()
-            fut.set_result(res)
-            return fut
+            pass
+        fut.set_result(res)
+        return fut
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         metadata.version = CURRENT_DCP_VERSION
