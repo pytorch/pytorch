@@ -5,8 +5,8 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
-from torch._inductor.kernel.gemm_epilogue import (
-    GemmReductionGeometry,
+from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known,
     statically_known_shape_equal,
 )
