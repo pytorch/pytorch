@@ -5720,12 +5720,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       "nccl:gather");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_single(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_single: " + msg);
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_into_tensor: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -5751,7 +5751,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_single(
       inputTensor, // inputTensors
       outputTensor, // outputTensors
       opts.rootRank, // root rank
-      "gather_single", // collective name
+      "gather_into_tensor", // collective name
       inputTensor.numel(), // inNelems
       inputTensor.numel() * this->getSize(), // outNelems
       inputTensor.scalar_type(), // dType
@@ -5807,7 +5807,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_single(
       },
       OpType::GATHER,
       opts.asyncOp,
-      "nccl:gather_single");
+      "nccl:gather_into_tensor");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
