@@ -862,7 +862,7 @@ using metadata_field_t = libkineto::MetadataField<T>;
 
 class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
  public:
-  typed_metadata_t takeMetadata() {
+  typed_metadata_t metadata() {
     return std::move(metadata_);
   }
 
@@ -937,7 +937,7 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
           [&](const auto& shapes) { inputs.emplace_back(shapes); },
           input);
     }
-    addValue(field.name, c10::IValue(std::move(inputs)));
+    addValue(field.name, c10::IValue(inputs));
   }
 
   void visitUnsupported(std::string_view /*name*/) override {}
@@ -949,7 +949,9 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
   void endDict() override {
     auto dict = std::move(dict_stack_.back());
     dict_stack_.pop_back();
-    addValue(dict.name_, c10::IValue(std::move(dict.values_)));
+    if (!dict.values_.empty()) {
+      addValue(dict.name_, c10::IValue(dict.values_));
+    }
   }
 
   typed_metadata_t metadata_;
@@ -1320,7 +1322,7 @@ class TransferEvents {
               [](auto&) { return; }));
           IValueMetadataVisitor visitor;
           activity->visitTypedMetadata(visitor);
-          auto typed_metadata = visitor.takeMetadata();
+          auto typed_metadata = visitor.metadata();
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
                 i.typed_metadata_ = std::move(typed_metadata);
