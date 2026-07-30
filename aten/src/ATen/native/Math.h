@@ -272,6 +272,10 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
     }
   }
 
+  if (std::isinf(q)) {
+    return zero;
+  }
+
   s = std::pow(q, -x);
   a = q;
   int i = 0;

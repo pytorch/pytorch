@@ -24,6 +24,7 @@ from torch.testing._internal.opinfo.core import (
     S,
     SampleInput,
     UnaryUfuncInfo,
+    reference_inputs_elementwise_binary,
 )
 from torch.testing._internal.opinfo.refs import (
     ElementwiseBinaryPythonRefInfo,
@@ -90,6 +91,23 @@ def reference_polygamma(x, n):
     if x.dtype == np.double:
         result_dtype = np.double
     return scipy.special.polygamma(n, x).astype(result_dtype)
+
+
+def reference_inputs_zeta(op, device, dtype, requires_grad, **kwargs):
+    yield from reference_inputs_elementwise_binary(
+        op, device, dtype, requires_grad, **kwargs
+    )
+    if dtype.is_floating_point:
+        # zeta(s, +inf) == 0 for s > 1; exercises the early-return guard
+        # against the 0 * inf NaN in the tail expansion.
+        s = torch.tensor([2.0, 3.0, 10.0], device=device, dtype=dtype)
+        q_inf = torch.full_like(s, float("inf"))
+        yield SampleInput(s, args=(q_inf,))
+
+        # mixed finite / +inf q
+        s_mix = torch.tensor([2.0, 2.0], device=device, dtype=dtype)
+        q_mix = torch.tensor([1.0, float("inf")], device=device, dtype=dtype)
+        yield SampleInput(s_mix, args=(q_mix,))
 
 
 def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
@@ -252,6 +270,7 @@ op_db: list[OpInfo] = [
         promotes_int_to_float=True,
         supports_autograd=False,
         supports_one_python_scalar=True,
+        reference_inputs_func=reference_inputs_zeta,
         skips=(
             # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),

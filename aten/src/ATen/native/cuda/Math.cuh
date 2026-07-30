@@ -342,6 +342,11 @@ const auto zeta_string = jiterator_stringify(
       }
     }
 
+    // Short-circuits q -> +infty: every term 1/(n+q)^x vanishes
+    if (isinf(q)) {
+      return zero;
+    }
+
     s = pow(q, -x);
     a = q;
     i = 0;
