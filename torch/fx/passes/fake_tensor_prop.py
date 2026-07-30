@@ -132,4 +132,7 @@ class FakeTensorProp(torch.fx.Interpreter):
                         # set_ also restores the storage, which a set_ in the
                         # graph may have swapped out for another input's.
                         with torch.no_grad():
+                            # set_ accepts a Tensor source, but only the Storage
+                            # overloads are in the generated stub.
+                            # pyrefly: ignore [bad-argument-type]
                             fake.set_(orig)
