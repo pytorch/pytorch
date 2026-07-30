@@ -29,6 +29,7 @@ except ImportError:
     import testing
 
 from torch.export import export
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 test_classes = {}
@@ -212,6 +213,7 @@ def make_dynamic_cls(cls, strict=False):
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
     test_class.__module__ = __name__
+    return test_class
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -413,6 +415,15 @@ if is_fbcode():
         make_dynamic_cls(test, strict=True)
         make_dynamic_cls(test, strict=False)
     del test
+
+    for cls, instantiate_kwargs in test_export.DEVICE_EXPORT_TEST_CLASSES:
+        instantiate_device_type_tests(
+            make_dynamic_cls(cls, strict=True), globals(), **instantiate_kwargs
+        )
+        instantiate_device_type_tests(
+            make_dynamic_cls(cls, strict=False), globals(), **instantiate_kwargs
+        )
+    del cls, instantiate_kwargs
 
 
 if __name__ == "__main__":

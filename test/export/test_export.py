@@ -19365,13 +19365,18 @@ class TestExportFlexAttention(TestCase):
         self.assertEqual(exported_out, eager_out)
 
 
-instantiate_device_type_tests(TestExportFlexAttention, globals())
+DEVICE_EXPORT_TEST_CLASSES = (
+    (TestExportFlexAttention, {}),
+    (TestExportAccelerator, {"except_for": "cpu"}),
+    (TestExportRNN, {"except_for": "cpu"}),
+    (TestExportTriton, {"except_for": "cpu"}),
+    (TestExportMoveToDeviceIndex, {"except_for": "cpu"}),
+    (TestExportAutocastException, {"except_for": "cpu"}),
+)
 
-instantiate_device_type_tests(TestExportAccelerator, globals(), except_for="cpu")
-instantiate_device_type_tests(TestExportRNN, globals(), except_for="cpu")
-instantiate_device_type_tests(TestExportTriton, globals(), except_for="cpu")
-instantiate_device_type_tests(TestExportMoveToDeviceIndex, globals(), except_for="cpu")
-instantiate_device_type_tests(TestExportAutocastException, globals(), except_for="cpu")
+for _cls, _kwargs in DEVICE_EXPORT_TEST_CLASSES:
+    instantiate_device_type_tests(_cls, globals(), **_kwargs)
+del _cls, _kwargs
 
 
 if __name__ == "__main__":
