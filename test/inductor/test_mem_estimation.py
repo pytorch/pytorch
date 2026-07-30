@@ -14,7 +14,6 @@ from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary
@@ -25,7 +24,11 @@ def tensor_storage_id(tensor):
 
 
 def device_filter(device):
-    return device.type == GPU_TYPE
+    if torch.accelerator.is_available():
+        dev_type = torch.accelerator.current_accelerator().type
+        return device.type == dev_type
+
+    return False
 
 
 class FakeTensorMemoryProfilerMode(TorchDispatchMode):
@@ -351,5 +354,4 @@ instantiate_device_type_tests(
 )
 
 if __name__ == "__main__":
-    if HAS_GPU:
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")
