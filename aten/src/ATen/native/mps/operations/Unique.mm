@@ -327,7 +327,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
           lib.getPipelineStateForFunc(fmt::format("unique_mark_boundaries_{}", type_name));
       getMPSProfiler().beginProfileKernel(pso, "unique_mark_boundaries", false);
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, sorted_values, mask, static_cast<uint64_t>(numel));
+      mtl_setArgs(encoder, sorted_values, mask);
       mtl_dispatch1DJob(encoder, pso, numel);
       getMPSProfiler().endProfileKernel(pso);
     }
@@ -360,7 +360,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
             lib.getPipelineStateForFunc(fmt::format("unique_emit_{}_{}", type_name, scan_suffix));
         getMPSProfiler().beginProfileKernel(pso, "unique_emit", false);
         [encoder setComputePipelineState:pso];
-        mtl_setArgs(encoder, sorted_values, mask, scan, unique_values, bound_pos, static_cast<uint64_t>(numel));
+        mtl_setArgs(encoder, sorted_values, mask, scan, unique_values, bound_pos);
         mtl_dispatch1DJob(encoder, pso, numel);
         getMPSProfiler().endProfileKernel(pso);
       }
@@ -381,7 +381,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
         id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(fmt::format("unique_inverse_{}", scan_suffix));
         getMPSProfiler().beginProfileKernel(pso, "unique_inverse", false);
         [encoder setComputePipelineState:pso];
-        mtl_setArgs(encoder, sort_idx, scan, inverse, static_cast<uint64_t>(numel));
+        mtl_setArgs(encoder, sort_idx, scan, inverse);
         mtl_dispatch1DJob(encoder, pso, numel);
         getMPSProfiler().endProfileKernel(pso);
       }
