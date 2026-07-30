@@ -1127,20 +1127,18 @@ class ProcessGroupXCCL(Backend):
     def _reset_fr_recording_xccl(self) -> None: ...
 
 class ProcessGroupNCCL2(Backend):
-    class Options(Backend.Options):
-        is_high_priority_stream: bool
-        abort_process_on_timeout_or_error: bool
-
-        def __init__(self, is_high_priority_stream: bool = False): ...
+    Options = ProcessGroupNCCL.Options
 
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-        options: Options,
+        options: ProcessGroupNCCL.Options,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
+    @property
+    def options(self) -> ProcessGroupNCCL.Options: ...
 
 class ProcessGroupNCCLLazy(Backend):
     def __init__(
@@ -1148,7 +1146,7 @@ class ProcessGroupNCCLLazy(Backend):
         store: Store,
         rank: int,
         size: int,
-        options: ProcessGroupNCCL2.Options,
+        options: ProcessGroupNCCL.Options,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
     def _num_active_channels(self) -> int: ...
