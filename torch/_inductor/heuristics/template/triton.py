@@ -361,6 +361,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Whether the heuristic is used for int8. Use this when the heuristic is int8 exclusive
         # but prefer the preprocess_mm_configs argument when it's used for both
         self.has_int8_tensor: bool = False
+        # Whether descriptor-specific TDM config filtering is active.
+        self.uses_tdm_configs: bool = False
         # Whether to scale configs at all
         # TODO(coconutruben): remove this once mm_plus_mm and tests support scaling
         self.should_scale_configs: bool = True
@@ -1619,7 +1621,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         super().__init__()
 
         self.default_num_stages = get_backend_num_stages()
-        self.uses_tdm_configs = False
 
         self.mm_configs: list[BaseConfig] = [
             ROCmGemmConfig(
@@ -2481,12 +2482,21 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             # Revalidate the reconstructed Origami tiles. The candidate pool was
             # filtered above, but selected results are rebuilt as GemmConfig objects.
             if self.uses_tdm_configs:
+                origami_config_count = len(origami_configs)
                 origami_configs = _filter_tdm_descriptor_block_configs(
                     origami_configs,
                     dtype.itemsize,
                     a_row_major=kwargs.get("tdm_a_row_major", True),
                     b_row_major=kwargs.get("tdm_b_row_major", True),
                 )
+                pruned = origami_config_count - len(origami_configs)
+                if pruned:
+                    log.debug(
+                        "Origami: pruned %d/%d selected configs failing "
+                        "TDM descriptor alignment",
+                        pruned,
+                        origami_config_count,
+                    )
 
             # Apply backend filters (max block size, memory constraints, etc.).
             # LDS-overflow prune already happened upstream against
@@ -2529,9 +2539,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     )
                     yield template_kwargs
             else:
-                # No origami configs returned (e.g., topk=0), fall back to regular generator
+                # No valid Origami configs remain; fall back to the regular generator.
                 log.warning(
-                    "Origami returned no configs, falling back to regular config generator"
+                    "No valid Origami configs remain, falling back to regular config generator"
                 )
                 for c in configs(
                     m,
