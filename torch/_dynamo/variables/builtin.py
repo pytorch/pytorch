@@ -76,7 +76,6 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
-    specialize_symnode,
     str_methods,
     tensortype_to_dtype,
     unpack_iterable,
@@ -88,11 +87,11 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
-    OrderedItemsDictVariable,
+    OrderedDictVariable,
 )
 from .hashable import is_hashable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
-from .misc import NullVariable, StringFormatVariable
+from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
     binary_iop,
@@ -115,6 +114,7 @@ from .object_protocol import (
     pynumber_absolute,
     pynumber_add,
     pynumber_float,
+    pynumber_index,
     pynumber_inplace_add,
     pynumber_inplace_matrix_multiply,
     pynumber_inplace_multiply,
@@ -1471,10 +1471,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
         cell_and_freevars = set(tx.cell_and_freevars())
         frame_locals = {}
-        for name, value in tx.symbolic_locals.items():
+        # symbolic_cellvars registers all of the frame's cells. Cells are listed first so that a colliding fast local of
+        # the same name shadows the cell, matching CPython (except for 3.12, which is backwards): the two share a name
+        # but not a localsplus slot, and the fast slot wins while it holds a value (an empty one is skipped below,
+        # leaving the cell contents visible).
+        if sys.version_info[:2] == (3, 12):
+            its = (tx.symbolic_locals.items(), tx.symbolic_cellvars.items())
+        else:
+            its = (tx.symbolic_cellvars.items(), tx.symbolic_locals.items())
+
+        for name, value in itertools.chain(*its):
             if name not in frame_local_names:
                 continue
-            if name in cell_and_freevars:
+            # Match on CellVariable, not name: a colliding fast local shares a
+            # cell's name but is not itself a cell.
+            if type.__instancecheck__(CellVariable, value):
                 value = tx.output.side_effects.load_cell(value)
             if type.__instancecheck__(NullVariable, value) or isinstance(
                 value, variables.DeletedVariable
@@ -2057,8 +2068,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         # Specialize SymNodeVariable to a constant first, matching CPython's
         # PyNumber_Index which forces a concrete int.
-        arg = specialize_symnode(arg)
-        return arg.nb_index_impl(tx)
+        return pynumber_index(tx, arg)
 
     def call_round(
         self,
@@ -2087,7 +2097,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_type_error(tx, "range expected at least 1 argument, got 0")
         if len(args) > 3:
             raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
-        args = tuple(VariableTracker.build(tx, arg.nb_index_impl(tx)) for arg in args)
+        args = tuple(pynumber_index(tx, arg) for arg in args)
         return variables.RangeVariable(list(args))
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
@@ -2358,6 +2368,32 @@ class BuiltinVariable(BaseBuiltinVariable):
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
         isinstance_type = isinstance_type_var.as_python_constant()
+        # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
+        # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
+        # ACT from the resolved plain Tensor. isinstance() observes the class and
+        # is constant-folded below, so reinstall the class guard -- but only when
+        # the result would actually differ between the ACT and the resolved
+        # Tensor. isinstance(w, ACT) discriminates and must recompile;
+        # isinstance(w, torch.Tensor) is True for both and must stay reusable.
+        if isinstance(arg, variables.TensorVariable) and arg.source is not None:
+            from torch._functorch._aot_autograd.utils import (
+                is_async_collective_tensor_type,
+            )
+
+            if is_async_collective_tensor_type(arg_type):
+                check_types = (
+                    isinstance_type
+                    if isinstance(isinstance_type, tuple)
+                    else (isinstance_type,)
+                )
+                # Guard if any checked type distinguishes ACT from torch.Tensor,
+                # or conservatively if a checked entry is not a plain class.
+                if any(
+                    not isinstance(ty, type)
+                    or issubclass(arg_type, ty) != issubclass(torch.Tensor, ty)
+                    for ty in check_types
+                ):
+                    install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
             if _uses_custom_classinfo_check(isinstance_type):
                 unimplemented(
@@ -3112,24 +3148,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             items: dict[VariableTracker, VariableTracker],
         ) -> VariableTracker:
             if user_cls is OrderedDict:
-                from .builder import SourcelessBuilder
-                from .user_defined import OrderedDictVariable
-
-                result = tx.output.side_effects.track_new_user_defined_object(
-                    SourcelessBuilder.create(tx, dict),
-                    SourcelessBuilder.create(tx, OrderedDict),
-                    [],
-                    tx=tx,
-                )
-                if not isinstance(result, OrderedDictVariable):
-                    raise AssertionError(
-                        f"Expected OrderedDictVariable, got {type(result)}"
-                    )
-                result._base_vt = OrderedItemsDictVariable(
-                    items,
-                    mutation_type=ValueMutationNew(),
-                )
-                return result
+                return OrderedDictVariable(items, mutation_type=ValueMutationNew())
             elif user_cls is defaultdict:
                 from .builder import SourcelessBuilder
                 from .user_defined import DefaultDictVariable
@@ -3385,6 +3404,17 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif (
+            not tx.output.side_effects.is_attribute_mutation(obj)
+            and obj.source is not None
+            and (underlying := obj.get_value_for_setattr()) is not None
+            and hasattr(underlying, "__dict__")
+            and name_var.is_python_constant()
+        ):
+            tx.output.side_effects.track_object_existing(underlying, obj)
+            name = name_var.as_python_constant()
+            tx.output.side_effects.store_attr(obj, name, val)
+            return val
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
