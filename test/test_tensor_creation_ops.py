@@ -1076,10 +1076,10 @@ class TestTensorCreation(TestCase):
         min = torch.finfo(torch.float).min
         max = torch.finfo(torch.float).max
 
-        # Note: CUDA max float -> integer conversion is divergent on some dtypes
+        # Note: CUDA/MTIA max float -> integer conversion is divergent on some dtypes
         vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
         refs = None
-        if self.device_type == 'cuda':
+        if self.device_type in ('cuda', 'mtia'):
             if torch.version.hip:
                 # HIP min float -> int64 conversion is divergent
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
