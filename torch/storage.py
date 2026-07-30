@@ -38,6 +38,15 @@ _share_memory_map: dict[int, threading.RLock] = {}
 T = TypeVar("T", bound="_StorageBase | TypedStorage")
 
 
+def _throws_on_data_ptr_access(storage: _StorageBase | TypedStorage) -> _bool:
+    # Whether storage.data_ptr() would raise (e.g. FakeTensor,
+    # FunctionalTensor, or a cudagraph-invalidated storage). Non-throwing
+    # replacement for wrapping data_ptr() in a try/except RuntimeError.
+    return torch._C._storage_throw_on_immutable_data_ptr(
+        storage._cdata
+    ) or torch._C._storage_throw_on_mutable_data_ptr(storage._cdata)
+
+
 class _StorageBase:
     _cdata: Any
     is_sparse: _bool = False

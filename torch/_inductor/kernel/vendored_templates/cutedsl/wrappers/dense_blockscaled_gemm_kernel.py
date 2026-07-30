@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import itertools
 import logging
 from collections.abc import Callable, Generator  # noqa: TC003
@@ -30,6 +31,28 @@ from cutlass.operators.utils.tensor import strides_to_layout_string
 log = logging.getLogger(__name__)
 
 
+_ONES_ALPHA: dict = {}
+
+
+def _ones_alpha():
+    """Cached per-device (4,)-ones alpha TensorWrapper (identity global scale).
+
+    The kernel always takes an alpha arg so its signature is consistent across
+    compile/run paths; when not fusing we pass ones (a no-op *1.0). Len is a
+    multiple of 4 (CuTeDSL requires the operand's last dim divisible by 4).
+    """
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    import torch
+
+    dev = torch.cuda.current_device()
+    tw = _ONES_ALPHA.get(dev)
+    if tw is None:
+        tw = TensorWrapper(torch.ones(4, dtype=torch.float32, device=f"cuda:{dev}"))
+        _ONES_ALPHA[dev] = tw
+    return tw
+
+
 try:
     from ..dense_blockscaled_gemm_persistent import (  # pyrefly: ignore[missing-import]
         Sm100BlockScaledPersistentDenseGemmKernel as BlockScaledGemmKernelImpl,
@@ -54,10 +77,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             metadata.design.cluster_shape[1],
         )
 
+        import os
+
         self.impl = BlockScaledGemmKernelImpl(  # pyrefly: ignore[not-callable]
             self.sf_vec_size,
             mma_tiler_mn,
             cluster_shape_mn,
+            use_prefetch=os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0") == "1",
         )
         self.cluster_shape_mn = cluster_shape_mn
 
@@ -94,6 +120,30 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             self.cluster_shape_mn
         )
 
+        # Fused global scale: alpha is ALWAYS threaded as a trailing kernel arg
+        # (ones when not fusing) so the kernel signature is consistent across all
+        # compile/run paths -- a None alpha is not reliably dropped from the
+        # runtime signature. args.alpha (a TensorWrapper, len multiple-of-4) is
+        # applied elementwise in the epilogue; closure capture cannot read a
+        # runtime tensor there.
+        alpha = getattr(args, "alpha", None)
+        if alpha is None:
+            alpha = _ones_alpha()
+
+        def epilogue_op(v):
+            return v
+
+        if getattr(args, "epilogue", None) is not None:
+            epilogue_op = args.epilogue.epilogue_fn
+            if isinstance(epilogue_op, str):
+                fn_name = next(
+                    node.name
+                    for node in ast.parse(epilogue_op).body
+                    if isinstance(node, ast.FunctionDef)
+                )
+                scope = {}
+                exec(epilogue_op, {}, scope)
+                epilogue_op = scope[fn_name]
         return self.cute_compile(
             self.impl,
             args.A.tensor,
@@ -103,6 +153,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args.out.tensor,
             max_active_clusters,
             stream,
+            epilogue_op,
+            alpha,
             target_sm=target_sm,
         )
 
@@ -122,6 +174,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if isinstance(stream, int):
             stream = torch.cuda.ExternalStream(stream)
 
+        # Runtime arg list must match _compile: alpha always trails stream.
+        alpha = getattr(args, "alpha", None)
+        if alpha is None:
+            alpha = _ones_alpha()
+
         self.cute_run(  # pyrefly: ignore[missing-attribute]
             compiled_gemm,
             args.A.tensor,
@@ -130,6 +187,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             args.B.scale.tensor,
             args.out.tensor,
             stream,
+            alpha,
         )
 
     def _supports(
@@ -321,8 +379,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     accumulator_type=cutlass.Float32,
                 )
 
-    @staticmethod
-    def _valid_metadata(metadata: OperatorMetadata) -> bool:
+    @classmethod
+    def _valid_metadata(cls, metadata: OperatorMetadata) -> bool:
         scale_vec = metadata.operands.A.mode
 
         if len(scale_vec) > 1:
@@ -360,7 +418,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if use_2cta and cm % 2 != 0:
             return False
 
-        if metadata.epilogue is not None:
+        if metadata.epilogue is not None and "EFC" not in cls.__name__:
             return False
 
         return True
@@ -399,7 +457,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 design = Sm100DesignMetadata(**dict(zip(param_names, values)))
 
                 operator_name = (
-                    "inductor_vendored.DenseBlockScaledGemmKernel_sm100_"
+                    f"inductor_vendored.{cls.__name__}_sm100_"
                     "{layout}_A{A}_B{B}_out{out}_SFA{SFA}_SFB{SFB}_"
                     "acc{acc}_scale{scale_mode}_swizzle{scale_swizzle}_"
                     "{num_cta}cta_cluster{cluster}_tile{tile}"
@@ -444,8 +502,18 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         return operator_list
 
 
+class VendoredDenseBlockScaledGemmEFC(VendoredDenseBlockScaledGemmKernel):
+    """Block-scaled provider variant using the kernel's unary epilogue hook."""
+
+    supported_args_type = GemmArguments
+    designed_for_min_cc = 100
+
+
 # Only register if kernel implementation is available
 if BlockScaledGemmKernelImpl is not None:
     cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
         VendoredDenseBlockScaledGemmKernel
+    )
+    cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
+        VendoredDenseBlockScaledGemmEFC
     )

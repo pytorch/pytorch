@@ -681,6 +681,24 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(result, gen(key, shape))
         self.assertLess(extra, 1.5 * out_bytes)  # no extra full-size clone
 
+    @onlyAccelerator
+    def test_generation_no_corruption_from_buffer_reuse(self, device):
+        # Regression test for Inductor buffer reuse corrupting generation.
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        # Keep all generations live until the final sum, exercising whether
+        # Inductor reuses an in-place generation's buffer while it is still live.
+        def f(key, x):
+            rs = [random.uniform(random.fold_in(key, i), x.shape) for i in range(4)]
+            for r in rs:
+                x = x + r
+            return x
+
+        key = random.key(0, device=device)
+        x = torch.randn(16, device=device)
+        self.assertEqual(torch.compile(f, dynamic=False)(key, x), f(key, x))
+
 
 instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestStatelessRNGKeySplit, globals(), only_for=("cuda",))

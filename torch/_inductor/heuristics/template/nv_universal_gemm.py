@@ -217,6 +217,20 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (256, 256, 8, 2),
                     (256, 128, 2, 1),
                     (256, 128, 2, 2),
+                    # NVFP4 oracle-best configs (per-shape autotune winners over
+                    # an 83-shape LLM sweep) that nvMatmulHeuristics does not
+                    # propose; adding them lets autotune reach the oracle-best
+                    # config on 73/83 of those shapes.
+                    (128, 64, 1, 2),
+                    (128, 128, 1, 1),
+                    (128, 128, 1, 4),
+                    (128, 256, 1, 1),
+                    (256, 64, 2, 1),
+                    (256, 128, 4, 1),
+                    (256, 192, 2, 2),
+                    (256, 192, 4, 1),
+                    (256, 192, 4, 2),
+                    (256, 256, 4, 1),
                 ]
             )
             selected_keys = OrderedSet(

@@ -346,8 +346,52 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
         torch.save(tensor, f"{directory_path}/tensor_{index}.pt")
 
 
+def _combo_has_reduction_subkernel(inductor_meta: InductorMeta) -> bool:
+    combo_meta = inductor_meta.get("combo_grid_meta")
+    if combo_meta is None or "heuristic_0" not in combo_meta:
+        return False
+    # Stitched combos fix the reduction blocks at codegen time: no-bench uses a
+    # single config, compile-time autotune passes the chosen blocks via
+    # default_config and only autotunes launch candidates. Neither runtime-scales
+    # rblock, so don't add scaling candidates for them.
+    if "stitched_num_warps" in combo_meta or "stitched_launch_candidates" in combo_meta:
+        return False
+    return any(
+        combo_meta.get(f"heuristic_{i}") == "reduction"
+        for i in range(combo_meta["num_kernels"])
+    )
+
+
+def _could_dynamic_scale_rblock(
+    *,
+    size_hints: list[int] | None,
+    heuristic_type: HeuristicType,
+    device_prop: DeviceProperties | None,
+    inductor_meta: InductorMeta,
+) -> bool:
+    return (
+        device_prop is not None
+        and not inductor_meta.get("deterministic", False)
+        and inductor_meta.get("dynamic_scale_rblock", True)
+        and not inductor_meta.get("persistent_reduction")
+        and heuristic_type == HeuristicType.REDUCTION
+        # Combo kernels with per-subkernel blocks set size_hints=None but
+        # carry per-subkernel size hints in combo_grid_meta.
+        and (size_hints is not None or _combo_has_reduction_subkernel(inductor_meta))
+        # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
+        and device_prop.type in ["cuda", "hip"]
+        and bool(device_prop.major)
+        and (device_prop.major >= 8 or torch.version.hip)
+        and device_prop.regs_per_multiprocessor is not None
+        and device_prop.warp_size is not None
+    )
+
+
 def check_autotune_cache(
-    configs: list[Config], filename: str | None, inductor_meta: InductorMeta
+    configs: list[Config],
+    filename: str | None,
+    inductor_meta: InductorMeta,
+    dynamic_scale_rblock_eligible: bool = False,
 ) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
@@ -358,7 +402,11 @@ def check_autotune_cache(
     if (
         not disabled
         and filename is not None
-        and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
+        and (
+            len(configs) > 1
+            or inductor_meta.get("coordinate_descent_tuning")
+            or dynamic_scale_rblock_eligible
+        )
         and os.environ.get("TRITON_INTERPRET", "0") != "1"
     ):
         configs_hash = hash_configs(configs)
@@ -683,7 +731,10 @@ class CachingAutotuner(KernelInterface):
         configs = [result.config for result in self.compile_results]
 
         (cached_configs, _, autotune_cache_info) = check_autotune_cache(
-            configs, self.filename, self.inductor_meta
+            configs,
+            self.filename,
+            self.inductor_meta,
+            dynamic_scale_rblock_eligible=self._could_rblock_scale,
         )
         self.autotune_cache_info = autotune_cache_info
         # I.e. there was an autotune cache hit
@@ -773,38 +824,18 @@ class CachingAutotuner(KernelInterface):
         """Whether ``_dynamic_scale_rblock`` should attempt occupancy-
         driven rblock halving for this autotuner.
         """
-        device_prop = self.device_props
-        return (
-            not self.deterministic_mode
-            and self.inductor_meta.get("dynamic_scale_rblock", True)
-            and not self.inductor_meta.get("persistent_reduction")
-            and self.heuristic_type == HeuristicType.REDUCTION
-            # Combo kernels with per-subkernel blocks set size_hints=None but
-            # carry per-subkernel size hints in combo_grid_meta.
-            and (self.size_hints is not None or self._combo_has_reduction_subkernel)
-            # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
-            and device_prop.type in ["cuda", "hip"]
-            and bool(device_prop.major)
-            and (device_prop.major >= 8 or torch.version.hip)
-            and device_prop.regs_per_multiprocessor is not None
-            and device_prop.warp_size is not None
+        return _could_dynamic_scale_rblock(
+            size_hints=self.size_hints,
+            heuristic_type=self.heuristic_type,
+            device_prop=self.device_props,
+            inductor_meta=self.inductor_meta,
         )
 
     @functools.cached_property
     def _combo_has_reduction_subkernel(self) -> bool:
         """True for a combo kernel (per-subkernel blocks) with a non-persistent
         reduction sub-kernel; these carry size_hints=None at the autotuner level."""
-        combo_meta = self.inductor_meta.get("combo_grid_meta")
-        if combo_meta is None or "heuristic_0" not in combo_meta:
-            return False
-        # No-bench stitched combos use a single fixed config and don't autotune;
-        # don't add scaling candidates for them.
-        if "stitched_num_warps" in combo_meta:
-            return False
-        return any(
-            combo_meta.get(f"heuristic_{i}") == "reduction"
-            for i in range(combo_meta["num_kernels"])
-        )
+        return _combo_has_reduction_subkernel(self.inductor_meta)
 
     def _iter_rblock_scale_candidates(self):
         """Yield new configs with halved rblock for occupancy improvement.
@@ -2554,6 +2585,12 @@ class CachingAutotuner(KernelInterface):
         ):
             return None
 
+        # The _FastCudaLauncher vectorcall bypasses run(), so it can't do the
+        # variable-length TMA descriptor expansion; fall back to the regular
+        # (still static) launcher.
+        if self.inductor_meta.get("host_tma_descriptor_args"):
+            return None
+
         # _FastCudaLauncher binds CUDA/HIP function pointers; XPU static
         # launchers use SYCL kernels stored in PyCapsules.
         if self.device_props.type not in ("cuda", "hip"):
@@ -2709,6 +2746,45 @@ class CompileResult(Generic[_T]):
         self.inductor_meta = inductor_meta
 
     def make_launcher(self) -> LauncherType: ...
+
+    def _host_tma_pre_runner_lines(
+        self, runner_args: list[str], call_args: list[str]
+    ) -> tuple[list[str], list[str]]:
+        """Build host-side TMA descriptors in the launcher and swap them in for
+        the raw tensor args. Shared by the dynamic and static launchers."""
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        pre_runner_lines: list[str] = []
+        if not host_tma_args:
+            return pre_runner_lines, runner_args
+        if not has_triton_stable_tma_api():
+            raise RuntimeError(
+                "host-side TMA requires a Triton with the stable TMA API "
+                "(triton.tools.tensor_descriptor.TensorDescriptor)"
+            )
+        cfg_kwargs = self.config.kwargs
+        all_constants = self.compile_meta["constants"]
+        for inner_name, desc_info in host_tma_args.items():
+            if inner_name not in call_args or not isinstance(desc_info, dict):
+                continue
+            block_shape_vals = _resolve_dims(
+                desc_info["block_shape"], cfg_kwargs, all_constants
+            )
+            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
+            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
+            if block_shape_vals is None or shape_vals is None or stride_vals is None:
+                continue
+            desc_var = f"{inner_name}_host_tma_desc"
+            aligned_var = f"{inner_name}_aligned"
+            # _host_tma_aligned clones (warning once) only if misaligned.
+            pre_runner_lines.append(
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+            )
+            pre_runner_lines.append(
+                f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
+                f" {stride_vals}, {block_shape_vals})"
+            )
+            runner_args = [desc_var if a == inner_name else a for a in runner_args]
+        return pre_runner_lines, runner_args
 
     def _gen_launcher_code(
         self, scope, def_args, runner_args, pre_runner_lines=None
@@ -2979,7 +3055,18 @@ class StaticTritonCompileResult(CompileResult[_T]):
 
         # StaticallyLaunchedCudaKernel.run takes in order grid_0, grid_1, grid_2, stream, and call_args
         runner_args = ["grid_0", "grid_1", "grid_2", "stream", *call_args]
-        launcher = self._gen_launcher_code(scope, def_args, runner_args)
+        pre_runner_lines, runner_args = self._host_tma_pre_runner_lines(
+            runner_args, call_args
+        )
+        if self.inductor_meta.get("host_tma_descriptor_args"):
+            # _host_tma_pre_runner_lines already validated the stable TMA API.
+            from triton.tools.tensor_descriptor import TensorDescriptor
+
+            scope["_host_tma_aligned"] = _host_tma_aligned
+            scope["TensorDescriptor"] = TensorDescriptor
+        launcher = self._gen_launcher_code(
+            scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
+        )
         launcher.config = self.config  # type: ignore[attr-defined]
         launcher.n_regs = self.kernel.n_regs  # type: ignore[attr-defined]
         launcher.n_spills = self.kernel.n_spills  # type: ignore[attr-defined]
@@ -3177,49 +3264,15 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 *call_args,
             ]
 
-        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
-        pre_runner_lines: list[str] = []
-        if host_tma_args:
-            if not has_triton_stable_tma_api():
-                raise RuntimeError(
-                    "host-side TMA requires a Triton with the stable TMA API "
-                    "(triton.tools.tensor_descriptor.TensorDescriptor)"
-                )
+        pre_runner_lines, runner_args = self._host_tma_pre_runner_lines(
+            runner_args, call_args
+        )
+        if self.inductor_meta.get("host_tma_descriptor_args"):
+            # _host_tma_pre_runner_lines already validated the stable TMA API.
             from triton.tools.tensor_descriptor import TensorDescriptor
 
             scope["_host_tma_aligned"] = _host_tma_aligned
             scope["TensorDescriptor"] = TensorDescriptor
-            cfg_kwargs = cfg.kwargs
-            all_constants = compile_meta["constants"]
-
-            for inner_name, desc_info in host_tma_args.items():
-                if inner_name not in call_args or not isinstance(desc_info, dict):
-                    continue
-                block_shape_vals = _resolve_dims(
-                    desc_info["block_shape"], cfg_kwargs, all_constants
-                )
-                shape_vals = _resolve_dims(
-                    desc_info["shape"], cfg_kwargs, all_constants
-                )
-                stride_vals = _resolve_dims(
-                    desc_info["strides"], cfg_kwargs, all_constants
-                )
-                if (
-                    block_shape_vals is None
-                    or shape_vals is None
-                    or stride_vals is None
-                ):
-                    continue
-                desc_var = f"{inner_name}_host_tma_desc"
-                aligned_var = f"{inner_name}_aligned"
-                pre_runner_lines.append(
-                    f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
-                )
-                pre_runner_lines.append(
-                    f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
-                    f" {stride_vals}, {block_shape_vals})"
-                )
-                runner_args = [desc_var if a == inner_name else a for a in runner_args]
 
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
@@ -3450,8 +3503,20 @@ def cached_autotune(
     if len(configs) != 1 and not filename:
         raise AssertionError("filename required when multiple configs are provided")
 
+    device_prop = triton_meta.get("device")
+    if not isinstance(device_prop, DeviceProperties):
+        device_prop = None
+    dynamic_scale_rblock_eligible = _could_dynamic_scale_rblock(
+        size_hints=size_hints,
+        heuristic_type=heuristic_type,
+        device_prop=device_prop,
+        inductor_meta=inductor_meta,
+    )
     configs, autotune_cache, autotune_cache_info = check_autotune_cache(
-        configs, filename, inductor_meta
+        configs,
+        filename,
+        inductor_meta,
+        dynamic_scale_rblock_eligible=dynamic_scale_rblock_eligible,
     )
     mutated_arg_names = cast("list[str]", inductor_meta.pop("mutated_arg_names", ()))
     optimize_mem = inductor_meta.pop("optimize_mem", True)
@@ -4044,7 +4109,19 @@ def _handle_combo_kernel_per_subkernel_blocks(
     # default_config holds BLOCK keys for the grid lambda; backend kwargs
     # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
     stitched_warps = combo_meta.get("stitched_num_warps")
-    if stitched_warps is not None:
+    if "stitched_launch_candidates" in combo_meta or stitched_warps is not None:
+        # Compile-time autotune emits the distinct winner launch configs (kwargs, num_warps,
+        # num_stages) -> combo autotunes kernel-level knobs over them; the chosen block sizes
+        # are passed as args via default_config. No-bench mode has no candidates and bakes its
+        # blocks into the body, so its config carries only backend kwargs (no block args).
+        # Must use the same key-presence check as _combo_has_reduction_subkernel.
+        if "stitched_launch_candidates" in combo_meta:
+            launch_candidates = combo_meta["stitched_launch_candidates"]
+            block_config = combo_meta.get("default_config") or {}
+            return [
+                triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
+                for kwargs, nw, ns in launch_candidates
+            ]
         return [
             triton.Config(
                 combo_meta["stitched_backend_kwargs"],
@@ -4087,9 +4164,11 @@ def _handle_combo_kernel_per_subkernel_blocks(
             cfgs = pointwise(
                 size_hints_i,
                 triton_meta=triton_meta,
-                tile_hint=TileHint.SQUARE
-                if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
-                else TileHint.DEFAULT,
+                tile_hint=(
+                    TileHint.SQUARE
+                    if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
+                    else TileHint.DEFAULT
+                ),
                 filename=filename,
                 min_elem_per_thread=min_elem_per_thread,
                 inductor_meta=inductor_meta_i,
