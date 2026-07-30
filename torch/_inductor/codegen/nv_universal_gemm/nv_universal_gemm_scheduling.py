@@ -269,6 +269,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 store,
                 gemm_node.get_name(),
                 group,
+                gemm_node.get_dtype(),
             )
             if store is not None
             else None

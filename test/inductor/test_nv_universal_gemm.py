@@ -796,6 +796,34 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
+    def test_grouped_reduction_checks_all_reductions(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        unrelated = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("x", 0, None))),
+        )
+        source = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
+        )
+        store = GemmEpilogueIRStore(0, Expr("add", (unrelated, source)))
+        self.assertEqual(
+            grouped_reduction_ir(store, "gemm", 4, torch.float32),
+            ("sum", "identity"),
+        )
+
+    def test_epilogue_ir_preserves_empty_tuple_argument(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import GemmEpilogueIRExpression
+
+        expression = GemmEpilogueIRExpression("reshape", ("value", ()))
+        self.assertEqual(expression.args, ("value", ()))
+        self.assertEqual(expression.kwargs, ())
+
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
         kernel = MagicMock()
