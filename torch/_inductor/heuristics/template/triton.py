@@ -3323,6 +3323,8 @@ class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
 
     def __init__(self) -> None:
         super().__init__()
+        # This shared GemmConfig pool is intentional: ROCm finalization supplies
+        # AMD kernarg defaults, including an architecture-aware kpack when absent.
         self.mm_configs = self.scaled_persistent_mm_configs
         self.uses_tdm_configs = True
 
