@@ -1117,13 +1117,6 @@ if(USE_ROCM)
       caffe2_update_option(USE_HIPSPARSELT OFF)
     endif()
 
-    # ROCM-SMI needed to support symmetric memory
-    if(USE_DISTRIBUTED AND UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        rocm_smi64
-      )
-    endif()
-
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
     # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
@@ -1202,6 +1195,11 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
+if(USE_CUDA AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-deprecated-literal-operator")
+endif()
+
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
@@ -1221,6 +1219,11 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    # tensorpipe_cuda pulls in the same libnop headers via the host compiler and
+    # is only built under USE_CUDA, so it needs the same suppression.
+    if(USE_CUDA)
+      target_compile_options_if_supported(tensorpipe_cuda -Wno-missing-template-arg-list-after-template-kw)
+    endif()
     # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
     # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
     # But are used only once during shutdown
@@ -1447,6 +1450,7 @@ if(NOT INTERN_BUILD_MOBILE)
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")

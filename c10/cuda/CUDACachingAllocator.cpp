@@ -711,6 +711,8 @@ struct ExpandableSegment {
           "The kernel on this machine does not support the pidfd_open syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
           "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
       TORCH_CHECK(pidfd != -1, "pidfd_open:", c10::utils::str_error(errno));
+      auto close_pidfd =
+          c10::make_scope_exit([&pidfd]() { close(static_cast<int>(pidfd)); });
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
         int fd = 0;
@@ -718,24 +720,15 @@ struct ExpandableSegment {
         auto myfd = syscall(SYS_pidfd_getfd, pidfd, fd, 0);
         if (myfd == -1) {
           auto err = errno;
-          close(static_cast<int>(pidfd));
-          for (auto& h : segment->handles_) {
-            TORCH_INTERNAL_ASSERT(h.has_value());
-            const Handle& handle = *h;
-#ifdef USE_ROCM
-            C10_CUDA_CHECK(hipMemRelease(handle.handle));
-#else
-            C10_CUDA_DRIVER_CHECK(
-                DriverAPI::get()->cuMemRelease_(handle.handle));
-#endif
-            h = std::nullopt;
-          }
           TORCH_CHECK(
               err != ENOSYS,
               "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
               "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
           TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
         }
+        // close myfd on every path, including the import throwing below
+        auto close_myfd =
+            c10::make_scope_exit([&myfd]() { close(static_cast<int>(myfd)); });
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70100
@@ -758,10 +751,8 @@ struct ExpandableSegment {
             "}");
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
-        close(static_cast<int>(myfd));
         segment->handles_.emplace_back(handle);
       }
-      close(static_cast<int>(pidfd));
 #endif // !_WIN32
     } else {
 #ifdef USE_ROCM
@@ -919,6 +910,7 @@ struct ExpandableSegment {
           maybe_handle->handle,
           0ULL));
 #endif
+      maybe_handle->mapped = true;
     }
     mapped_size_ += (end - begin) * segment_size_;
     setAccess(device_, begin, end);
@@ -946,15 +938,21 @@ struct ExpandableSegment {
       TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
       Handle h = *maybe_handle;
       maybe_handle = std::nullopt;
+      if (h.mapped) {
 #ifdef USE_ROCM
-      C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
+        C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
 #else
-      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
-          ptr_ + segment_size_ * i, segment_size_));
+        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
+            ptr_ + segment_size_ * i, segment_size_));
 #endif
+      }
       if (h.shareable_handle) {
 #ifndef _WIN32
-        close(std::get<int>(*h.shareable_handle));
+        // shareable_handle also holds CUmemFabricHandle for fabric segments;
+        // std::get_if skips those (no fd to close) instead of throwing.
+        if (auto* fd = std::get_if<int>(&*h.shareable_handle)) {
+          close(*fd);
+        }
 #endif
       }
 #ifdef USE_ROCM
@@ -1006,6 +1004,9 @@ struct ExpandableSegment {
   struct Handle {
     CUmemGenericAllocationHandle handle;
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
+    // False for handles imported via fromShared but not yet cuMemMap'd, so
+    // unmapHandles can skip cuMemUnmap on ranges that were never mapped.
+    bool mapped = false;
   };
   struct ShareHeader {
     // All fields have in-class default initializers so that
@@ -1341,9 +1342,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     return "";
   }
   static bool nvml_init [[maybe_unused]] = []() {
-    TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
-    return true;
+    return NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_();
   }();
+  if (!nvml_init) {
+    TORCH_WARN_ONCE(
+        "nvmlInit_v2 failed; omitting per-process memory info from CUDA "
+        "out-of-memory messages.");
+    return "";
+  }
 
   // NOLINTNEXTLINE(*-c-arrays)
   char pci_id[80];
@@ -1356,10 +1362,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
       prop.pciDeviceID);
 
   nvmlDevice_t nvml_device = nullptr;
-  TORCH_INTERNAL_ASSERT(
-      NVML_SUCCESS ==
+  if (NVML_SUCCESS !=
       DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
-          pci_id, &nvml_device));
+          pci_id, &nvml_device)) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetHandleByPciBusId failed; omitting per-process memory "
+        "info from CUDA out-of-memory messages.");
+    return "";
+  }
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
@@ -1369,9 +1379,15 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
+  if (NVML_SUCCESS != r) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetComputeRunningProcesses failed; omitting per-process "
+        "memory info from CUDA out-of-memory messages. This is expected on "
+        "platforms with partial NVML support such as Tegra/Jetson.");
+    return "";
+  }
   unsigned int self_pid = get_self_pid();
   std::stringstream ss;
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
   for (auto i : c10::irange(size)) {
     auto& proc = procs[i];
@@ -1930,10 +1946,12 @@ class DeviceCachingAllocator {
           format_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
-          " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
-          " fragmentation.  See documentation for Memory Management "
-          " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
+          CUDAAllocatorConfig::expandable_segments()
+              ? ""
+              : " If reserved but unallocated memory is large try setting"
+                " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+                " fragmentation.  See documentation for Memory Management "
+                " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
     }
 
     bool split_remainder = should_split(
