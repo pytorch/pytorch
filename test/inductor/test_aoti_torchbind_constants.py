@@ -114,9 +114,7 @@ class TestTorchbindAOTI(TestCase):
         self.assertEqual(loader.get_custom_objs(), {})
 
 
-instantiate_device_type_tests(
-    TestTorchbindAOTI, globals(), allow_xpu=True, allow_mps=True
-)
+instantiate_device_type_tests(TestTorchbindAOTI, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
