@@ -3939,13 +3939,13 @@ class GraphModule(torch.nn.Module):
         def fn():
             return operator.concat((1, 2, 3), (4, 5, 6))
 
-        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        opt_fn = torch.compile(fn, fullgraph=True)
         self.assertEqual(opt_fn(), (1, 2, 3, 4, 5, 6))
 
         def fn_list_const():
             return operator.concat([1, 2], [3, 4])
 
-        opt_fn_list = torch.compile(fn_list_const, fullgraph=True, backend="eager")
+        opt_fn_list = torch.compile(fn_list_const, fullgraph=True)
         self.assertEqual(opt_fn_list(), [1, 2, 3, 4])
 
     def test_operator_iconcat_tuple(self):
@@ -3976,7 +3976,7 @@ class GraphModule(torch.nn.Module):
 
         for fn in (concat_empty, iconcat_empty_left, iconcat_empty_right):
             with self.subTest(fn=fn.__name__):
-                opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+                opt_fn = torch.compile(fn, fullgraph=True)
                 self.assertEqual(opt_fn(), fn())
 
     def test_attrgetter(self):
