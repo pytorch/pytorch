@@ -2592,6 +2592,161 @@ class TestOptimRenewed(TestCase):
 
 
 class TestMuonBatchedMatrices(TestCase):
+    class _EagerStepExecutor:
+        def __init__(self, units_per_bucket):
+            self.units_per_bucket = units_per_bucket
+            self.begin_count = 0
+            self.end_count = 0
+
+        def execute(self, optimizer, ops, closure=None):
+            loss = None
+            if closure is not None:
+                with torch.enable_grad():
+                    loss = closure()
+
+            context = ops.begin_step(optimizer)
+            self.begin_count += 1
+            try:
+                units = ops.optimization_units(optimizer)
+                units = [unit for unit in units if unit.gradient is not None]
+                for bucket_start in range(0, len(units), self.units_per_bucket):
+                    bucket = units[
+                        bucket_start : bucket_start + self.units_per_bucket
+                    ]
+                    for unit in bucket:
+                        prepared = {
+                            name: torch.empty_like(unit.parameter)
+                            for name in unit.compute_requirements
+                        }
+                        update = {
+                            name: torch.empty_like(unit.parameter)
+                            for name in unit.compute_requirements
+                        }
+                        ops.prepare(unit, out=prepared)
+                        ops.compute(unit.metadata, prepared, out=update)
+                        ops.apply_updates(unit, update)
+            finally:
+                ops.end_step(context)
+                self.end_count += 1
+            return loss
+
+    def test_muon_step_executor_preserves_hooks_and_closure(self):
+        param = Parameter(torch.randn((3, 5), dtype=torch.bfloat16))
+        param.grad = torch.randn_like(param)
+        optimizer = torch.optim.Muon([param])
+        events = []
+
+        class RecordingExecutor:
+            def execute(inner_self, received_optimizer, ops, closure=None):
+                events.append("execute")
+                self.assertIs(received_optimizer, optimizer)
+                self.assertIs(ops, optimizer._step_ops)
+                if closure is None:
+                    return None
+                with torch.enable_grad():
+                    return closure()
+
+        optimizer.register_step_pre_hook(
+            lambda optimizer, args, kwargs: events.append("pre")
+        )
+        optimizer.register_step_post_hook(
+            lambda optimizer, args, kwargs: events.append("post")
+        )
+        optimizer.set_step_executor(RecordingExecutor())
+
+        def closure():
+            events.append("closure")
+            return 3.0
+
+        result = optimizer.step(closure)
+
+        self.assertEqual(result, 3.0)
+        self.assertEqual(events, ["pre", "execute", "closure", "post"])
+
+    def test_muon_step_ops_are_bucket_partition_invariant(self):
+        torch.manual_seed(2)
+        initial_params = [
+            torch.randn((3, 5), dtype=torch.bfloat16),
+            torch.randn((4, 6), dtype=torch.bfloat16),
+            torch.randn((2, 3, 5), dtype=torch.bfloat16),
+            torch.randn((0, 5), dtype=torch.bfloat16),
+        ]
+        parameter_sets = [
+            [Parameter(value.clone()) for value in initial_params]
+            for _ in range(3)
+        ]
+        optimizer_kwargs = {
+            "lr": torch.tensor(0.03),
+            "weight_decay": 0.2,
+            "momentum": 0.8,
+            "nesterov": True,
+            "ns_steps": 3,
+        }
+        eager_optimizer = torch.optim.Muon(parameter_sets[0], **optimizer_kwargs)
+        one_unit_executor = self._EagerStepExecutor(units_per_bucket=1)
+        one_unit_optimizer = torch.optim.Muon(parameter_sets[1], **optimizer_kwargs)
+        one_unit_optimizer.set_step_executor(one_unit_executor)
+        two_unit_executor = self._EagerStepExecutor(units_per_bucket=2)
+        two_unit_optimizer = torch.optim.Muon(parameter_sets[2], **optimizer_kwargs)
+        two_unit_optimizer.set_step_executor(two_unit_executor)
+
+        for _ in range(2):
+            grads = [torch.randn_like(value) for value in initial_params]
+            for params in parameter_sets:
+                for param, grad in zip(params, grads):
+                    param.grad = grad.clone()
+            eager_optimizer.step()
+            one_unit_optimizer.step()
+            two_unit_optimizer.step()
+
+        for eager_param, one_unit_param, two_unit_param in zip(*parameter_sets):
+            self.assertEqual(one_unit_param, eager_param)
+            self.assertEqual(two_unit_param, eager_param)
+            self.assertEqual(
+                one_unit_optimizer.state[one_unit_param]["momentum_buffer"],
+                eager_optimizer.state[eager_param]["momentum_buffer"],
+            )
+            self.assertEqual(
+                two_unit_optimizer.state[two_unit_param]["momentum_buffer"],
+                eager_optimizer.state[eager_param]["momentum_buffer"],
+            )
+        self.assertEqual(one_unit_executor.begin_count, 2)
+        self.assertEqual(one_unit_executor.end_count, 2)
+        self.assertEqual(two_unit_executor.begin_count, 2)
+        self.assertEqual(two_unit_executor.end_count, 2)
+
+    def test_muon_step_executor_initializes_only_active_state(self):
+        active = Parameter(torch.randn((3, 5), dtype=torch.bfloat16))
+        skipped = Parameter(torch.randn((4, 6), dtype=torch.bfloat16))
+        optimizer = torch.optim.Muon([active, skipped])
+        optimizer.set_step_executor(self._EagerStepExecutor(units_per_bucket=1))
+
+        self.assertEqual(len(optimizer.state), 0)
+
+        def closure():
+            active.grad = torch.randn_like(active)
+            return 1.0
+
+        self.assertEqual(optimizer.step(closure), 1.0)
+        self.assertIn(active, optimizer.state)
+        self.assertNotIn(skipped, optimizer.state)
+
+    def test_step_executor_is_runtime_only_and_freezes_param_groups(self):
+        param = Parameter(torch.randn((3, 5), dtype=torch.bfloat16))
+        optimizer = torch.optim.Muon([param])
+        executor = self._EagerStepExecutor(units_per_bucket=1)
+        optimizer.set_step_executor(executor)
+
+        state_dict = optimizer.state_dict()
+        self.assertNotIn("step_executor", state_dict)
+        optimizer.load_state_dict(state_dict)
+        self.assertIs(optimizer._step_executor, executor)
+        self.assertIsNone(deepcopy(optimizer)._step_executor)
+        with self.assertRaisesRegex(RuntimeError, "after installing a step executor"):
+            optimizer.add_param_group(
+                {"params": [Parameter(torch.randn((4, 6), dtype=torch.bfloat16))]}
+            )
+
     def test_compute_muon_update_matches_optimizer_step(self, device):
         torch.manual_seed(2)
         lr = 0.03

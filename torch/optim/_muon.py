@@ -3,7 +3,9 @@
 """Implementation of the Muon optimizer."""
 
 import math
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -12,7 +14,9 @@ from .optimizer import (
     _disable_dynamo_if_unsupported,
     _params_doc,
     _to_scalar,
+    OptimizationUnit,
     Optimizer,
+    OptimizerStepOps,
     ParamsT,
 )
 
@@ -26,6 +30,7 @@ DEFAULT_A = 3.4445
 DEFAULT_B = -4.7750
 DEFAULT_C = 2.0315
 DEFAULT_NS_STEPS = 5
+_UPDATE = "update"
 
 
 def _zeropower_via_newtonschulz(
@@ -125,7 +130,117 @@ def _compute_muon_update(
     return direction, adjusted_lr
 
 
+@dataclass(frozen=True, slots=True)
+class _MuonUnitMetadata:
+    parameter_shape: torch.Size
+    parameter_group: MutableMapping
+
+
+@dataclass(frozen=True, slots=True)
+class _MuonStepContext:
+    pass
+
+
+class _MuonStepOps:
+    """Distribution-agnostic Muon operations for scheduled execution."""
+
+    def optimization_units(
+        self, optimizer: Optimizer
+    ) -> tuple[OptimizationUnit, ...]:
+        muon_optimizer = cast("Muon", optimizer)
+        units: list[OptimizationUnit] = []
+        for group in muon_optimizer.param_groups:
+            names = group.get("param_names")
+            if names is None:
+                names = [None] * len(group["params"])
+            for param, name in zip(group["params"], names):
+                units.append(
+                    OptimizationUnit(
+                        parameter=param,
+                        parameter_group=group,
+                        state=muon_optimizer.state.get(param, {}),
+                        gradient=param.grad,
+                        name=name,
+                        metadata=_MuonUnitMetadata(
+                            parameter_shape=param.shape,
+                            parameter_group=group,
+                        ),
+                        compute_requirements={_UPDATE: None},
+                    )
+                )
+        return tuple(units)
+
+    def begin_step(self, optimizer: Optimizer) -> _MuonStepContext:
+        muon_optimizer = cast("Muon", optimizer)
+        for group in muon_optimizer.param_groups:
+            muon_optimizer._init_group(group, [], [], [])
+        return _MuonStepContext()
+
+    def prepare(self, unit: OptimizationUnit, *, out: dict[str, Tensor]) -> None:
+        metadata = cast(_MuonUnitMetadata, unit.metadata)
+        group = metadata.parameter_group
+        grad = unit.gradient
+        if grad is None:
+            raise RuntimeError("cannot prepare a Muon unit without a gradient")
+        momentum_buffer = unit.state["momentum_buffer"]
+        momentum_buffer.lerp_(
+            grad,
+            1 - group["momentum"],
+        )
+        if group["nesterov"]:
+            torch.lerp(
+                grad,
+                momentum_buffer,
+                group["momentum"],
+                out=out[_UPDATE],
+            )
+        else:
+            out[_UPDATE].copy_(momentum_buffer)
+
+    def compute(
+        self,
+        unit_metadata: _MuonUnitMetadata,
+        inputs: Mapping[str, Tensor],
+        *,
+        out: dict[str, Tensor],
+    ) -> None:
+        compute_input = inputs[_UPDATE]
+        compute_output = out[_UPDATE]
+        if compute_input.numel() == 0:
+            compute_output.copy_(compute_input)
+            return
+        group = unit_metadata.parameter_group
+        direction, adjusted_lr = _compute_muon_update(
+            compute_input,
+            unit_metadata.parameter_shape,
+            lr=_to_scalar(group["lr"]),
+            ns_coefficients=group["ns_coefficients"],
+            ns_steps=group["ns_steps"],
+            eps=group["eps"],
+            adjust_lr_fn=group["adjust_lr_fn"],
+        )
+        compute_output.zero_()
+        if isinstance(adjusted_lr, Tensor):
+            direction.mul_(-adjusted_lr)
+            compute_output.add_(direction)
+        else:
+            compute_output.add_(direction, alpha=-adjusted_lr)
+
+    def apply_updates(
+        self, unit: OptimizationUnit, updates: Mapping[str, Tensor]
+    ) -> None:
+        group = unit.parameter_group
+        lr = _to_scalar(group["lr"])
+        unit.parameter.mul_(1 - lr * group["weight_decay"])
+        unit.parameter.add_(updates[_UPDATE])
+
+    def end_step(self, context: _MuonStepContext) -> None:
+        pass
+
+
 class Muon(Optimizer):
+    _step_ops: OptimizerStepOps[_MuonStepContext] = _MuonStepOps()
+
     def __init__(
         self,
         params: ParamsT,
@@ -210,6 +325,9 @@ class Muon(Optimizer):
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step."""
+        if self._step_executor is not None:
+            return self._execute_step_ops(self._step_ops, closure)
+
         loss = None
         if closure is not None:
             with torch.enable_grad():

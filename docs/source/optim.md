@@ -149,6 +149,19 @@ for input, target in dataset:
     Optimizer.zero_grad
 ```
 
+## Schedulable optimizer steps
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    OptimizationUnit
+    OptimizerStepOps
+    OptimizerStepExecutor
+    StepContext
+```
+
 ## Module-level hooks
 
 ```{eval-rst}
