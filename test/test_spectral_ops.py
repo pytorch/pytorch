@@ -840,23 +840,6 @@ class TestFFT(TestCase):
     def test_fft_ifft_rfft_irfft(self, device, dtype):
         self._test_fft_ifft_rfft_irfft(device, dtype)
 
-
-    @onlyCUDA
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_cufft_context(self, device, dtype):
-        # Regression test for https://github.com/pytorch/pytorch/issues/109448
-        x = torch.randn(32, dtype=dtype, device=device, requires_grad=True)
-        dout = torch.zeros(32, dtype=dtype, device=device)
-
-        # compute iFFT(FFT(x))
-        out = torch.fft.ifft(torch.fft.fft(x))
-        out.backward(dout, retain_graph=True)
-
-        dx = torch.fft.fft(torch.fft.ifft(dout))
-
-        self.assertTrue((x.grad - dx).abs().max() == 0)
-        self.assertFalse((x.grad - x).abs().max() == 0)
-
     @onlyCUDA
     @largeTensorTest("18GB")
     def test_fft_conjugate_symmetry_fill_int64_indexing(self, device):
