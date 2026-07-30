@@ -24,30 +24,47 @@ def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
         return None
 
 
-# Dynamo metrics tracked against the expected-accuracy baselines, and whether
-# higher or lower is better. A regression is a move in the "bad" direction:
-#   lower_is_better=True  -> regression when actual > expected (e.g. graph breaks,
-#                            eager fallbacks)
-#   lower_is_better=False -> regression when actual < expected (e.g. ops/graphs
-#                            captured -- capturing less is the regression)
+# Dynamo metrics tracked against the expected-accuracy baselines, and how each is
+# compared. A regression is a move in the "bad" direction:
+#   "exact_lower" -- lower-is-better, EXACT match: any change flags (regression
+#     when actual > expected, improvement when actual < expected). For small,
+#     stable signals (graph breaks, eager fallbacks).
+#   "drop_threshold" -- higher-is-better coverage count (ops captured). Only a
+#     DROP beyond COVERAGE_DROP_TOL is a regression; equal, small drops, and any
+#     increase are PASS. calls_captured is a large, fine-grained count that
+#     drifts on routine decomp/lowering changes, so exact-matching it would
+#     churn the baselines constantly (and even bump on benign increases) -- the
+#     threshold keeps it as a capture-collapse guard without the noise.
+# `unique_graphs` is intentionally NOT tracked: a change is ambiguous in both
+# directions (fewer graphs can mean graphs were merged / fewer breaks -- an
+# improvement -- not less capture; more can mean fragmentation), and it is
+# already covered indirectly by graph_breaks (fragmentation) and calls_captured
+# (how much is captured). It is still read from the actual CSV below for the
+# dynamo_called check, just not gated.
 # A metric is only checked for models whose expected baseline has that column,
 # so baselines predating a metric are silently skipped until regenerated.
 # Keep in sync with METRIC_COLUMNS in ci_expected_accuracy/update_expected.py
 # (the baseline writer).
+COVERAGE_DROP_TOL = 0.05  # a >5% drop in captured ops is a regression
 TRACKED_METRICS = {
-    "graph_breaks": True,
-    "calls_captured": False,  # ops captured
-    "unique_graphs": False,  # graphs captured
-    "fallbacks_to_eager": True,
+    "graph_breaks": "exact_lower",
+    "calls_captured": "drop_threshold",  # ops captured
+    "fallbacks_to_eager": "exact_lower",
 }
 
 
-def _classify(actual: Any, expected: Any, lower_is_better: bool) -> str:
-    """Return "PASS" / "FAIL" / "IMPROVED" for one metric."""
-    if actual == expected:
+def _classify(actual: Any, expected: Any, mode: str) -> str:
+    """Return "PASS" / "FAIL" / "IMPROVED" for one metric per its `mode`."""
+    if mode == "exact_lower":
+        if actual == expected:
+            return "PASS"
+        return "FAIL" if actual > expected else "IMPROVED"
+    # "drop_threshold": higher is better; only a drop past the tolerance is a
+    # regression. Increases and small drops are absorbed as PASS so benign
+    # drift does not force baseline bumps.
+    if actual >= expected:
         return "PASS"
-    worse = actual > expected if lower_is_better else actual < expected
-    return "FAIL" if worse else "IMPROVED"
+    return "FAIL" if actual < expected * (1 - COVERAGE_DROP_TOL) else "PASS"
 
 
 def check_graph_breaks(
@@ -115,7 +132,7 @@ def check_graph_breaks(
         model_failed = False
         model_improved = False
         printed_detail = False
-        for field, lower_is_better in TRACKED_METRICS.items():
+        for field, mode in TRACKED_METRICS.items():
             expected = get_field(expected_csv, model, field)
             actual = get_field(actual_csv, model, field)
             # Skip a metric absent from this baseline or the output, or whose
@@ -128,7 +145,7 @@ def check_graph_breaks(
                 or pd.isna(actual)
             ):
                 continue
-            result = _classify(actual, expected, lower_is_better)
+            result = _classify(actual, expected, mode)
             if result == "PASS":
                 continue
             if flaky:
