@@ -998,22 +998,36 @@ def _parse_backend_string(
 def _get_default_backend_type_for_backend_config(
     backend_config: BackendConfig,
 ) -> ProcessGroup.BackendType:
-    if Backend.NCCL in backend_config.device_backend_map.values():
-        return ProcessGroup.BackendType.NCCL
+    def _resolve(backend: str) -> ProcessGroup.BackendType:
+        # Must mirror _new_process_group_helper's per-device
+        # `backend_type_map.get(backend_str, CUSTOM)`, or the default type
+        # names a backend that never gets registered.
+        known_type = Backend.backend_type_map.get(backend)
+        if known_type is not None:
+            return known_type
+        if _is_torchcomms_backend(backend):
+            return ProcessGroup.BackendType.CUSTOM
+        return ProcessGroup.BackendType.GLOO
 
-    custom_backend = next(
-        (
-            backend
-            for backend in backend_config.device_backend_map.values()
-            if Backend.backend_type_map.get(str(backend))
-            == ProcessGroup.BackendType.CUSTOM
-            or _is_torchcomms_backend(str(backend))
-        ),
-        None,
-    )
-    if custom_backend is not None:
-        return ProcessGroup.BackendType.CUSTOM
-    return ProcessGroup.BackendType.GLOO
+    resolved = [
+        _resolve(str(backend))
+        for backend in backend_config.device_backend_map.values()
+    ]
+    # Only pick a type that a backend will actually be registered under,
+    # otherwise ``ProcessGroup::getDefaultBackend()`` raises "Could not find the
+    # default backend type N" on the first ``pg.rank()``.
+    # XCCL ranks alongside NCCL so that a mixed "cpu:gloo,xpu:xccl" PG gets an
+    # accelerator barrier from ``ProcessGroup::barrier()`` rather than a CPU one.
+    for preferred in (
+        ProcessGroup.BackendType.NCCL,
+        ProcessGroup.BackendType.XCCL,
+        ProcessGroup.BackendType.CUSTOM,
+        ProcessGroup.BackendType.GLOO,
+    ):
+        if preferred in resolved:
+            return preferred
+    # Use the first registered backend rather than a GLOO backend that does not exist.
+    return resolved[0] if resolved else ProcessGroup.BackendType.GLOO
 
 
 class _reduce_op:
