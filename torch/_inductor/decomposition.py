@@ -146,6 +146,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    aten.special_log_ndtr,  # native lowering preserves -0.0 signbit; decomp loses it under -fno-signed-zeros (#187336)
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)

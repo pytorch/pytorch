@@ -17194,6 +17194,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with ctx:
             self.common(fn, args, check_lowp=check_lowp, atol=1e-4, rtol=1e-4)
 
+    def test_log_ndtr_signbit(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/187336.
+
+        log_ndtr(x) is always non-positive.  For large x the result is -0.0,
+        and the signbit must be preserved even under Inductor compilation.
+        The fix excludes special_log_ndtr from Inductor's decomposition table
+        so the native calc_log_ndtr lowering is used instead of the _refs
+        decomposition, which loses the signbit under -fno-signed-zeros.
+        """
+        def fn(x):
+            return torch.special.log_ndtr(x)
+
+        for dtype in [torch.float32, torch.float64]:
+            x = torch.tensor([100.0], dtype=dtype, device=self.device)
+
+            expected = fn(x)
+            actual = torch.compile(fn, backend="inductor")(x)
+
+            # Value must match eager
+            self.assertEqual(actual, expected)
+            # Signbit must be set (result is -0.0, not +0.0)
+            self.assertTrue(
+                torch.signbit(actual).item(),
+                f"log_ndtr(100.0) signbit lost for {dtype} on {self.device}",
+            )
+
     # codegen test fails with no dynamic for loop in dynamic shape tests
     @expectedFailureCodegenDynamic
     def test_view_uint8_through_differing_bitwidths(self):
