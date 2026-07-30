@@ -704,16 +704,16 @@ _parse_output_grad_dtypes(
   }
   THPFunction_assert(
       PyTuple_Check(dtypes),
-      "set_output_grad_dtype expects the declarations to be a tuple but got ",
+      "set_output_grad_dtype expects the declarations to be a tuple, but got: "
+      "%s",
       THPUtils_typename(dtypes));
   THPFunction_assert(
       PyTuple_GET_SIZE(dtypes) == num_outputs,
-      "set_output_grad_dtype expected one declaration per output: the "
-      "Function returned ",
+      "set_output_grad_dtype expected the number of declarations to match the "
+      "number of outputs: the Function returned %zd values but %zd "
+      "declarations were provided",
       num_outputs,
-      " values but ",
-      PyTuple_GET_SIZE(dtypes),
-      " declarations were provided");
+      PyTuple_GET_SIZE(dtypes));
   std::vector<std::optional<at::ScalarType>> result;
   result.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
@@ -724,8 +724,8 @@ _parse_output_grad_dtypes(
     }
     THPFunction_assert(
         THPDtype_Check(d),
-        "set_output_grad_dtype expects each declaration to be a torch.dtype "
-        "or None, but got ",
+        "set_output_grad_dtype expects each declaration to be a torch.dtype or "
+        "None, but got %s",
         THPUtils_typename(d));
     const auto& raw_output_var = raw_output_vars[i];
     THPFunction_assert(
@@ -733,8 +733,11 @@ _parse_output_grad_dtypes(
             non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
                 0 &&
             isDifferentiableType(raw_output_var->scalar_type()),
-        "set_output_grad_dtype only accepts a concrete dtype for a "
-        "differentiable tensor output; pass None for output ",
+        "set_output_grad_dtype: got a concrete dtype for output %zd, but that "
+        "output is not a differentiable tensor (it is a non-tensor, was marked "
+        "non-differentiable, or has a non-differentiable dtype). Pass None for "
+        "output %zd instead.",
+        i,
         i);
     result.emplace_back(reinterpret_cast<THPDtype*>(d)->scalar_type);
   }
@@ -892,10 +895,15 @@ static void _wrap_outputs(
         // If one of the grad outputs is undefined, a correctly-shaped zeros
         // should be used instead. To construct these for NJT, zeros_like() must
         // be used until we have factory function support.
+        //
+        // Match differentiability to what mark_non_differentiable recorded,
+        // which is keyed on the raw output's TensorImpl.
+        const auto& raw_output_var = raw_output_vars[i];
+        TORCH_INTERNAL_ASSERT(raw_output_var.has_value());
         bool is_differentiable =
-            (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
-                 0 &&
-             isDifferentiableType(wrapped_output->scalar_type()));
+            non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
+                0 &&
+            isDifferentiableType(raw_output_var->scalar_type());
         bool use_zeros_like =
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);

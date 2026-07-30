@@ -234,40 +234,41 @@ class FunctionCtx:
     def set_output_grad_dtype(self, *dtypes: "torch.dtype | None") -> None:
         r"""Declare the gradient dtype for each of this Function's outputs.
 
-        This should be called from either the :func:`setup_context` or
-        :func:`forward` methods. If called more than once, only the last call
-        takes effect; each call overwrites the declarations from the previous
-        one. Each argument corresponds positionally to the value this Function
-        returns at the same index, so the number of declarations must match the
-        number of returned values. This lets a Function define the dtype
-        contract for gradients entering its output slots independently of the
-        outputs' storage dtypes.
+        This should be called at most once, from either the
+        :func:`setup_context` or :func:`forward` methods. The number of
+        declarations must match the number of returned values, and each argument
+        corresponds positionally to the output at the same index.
 
-        For each output slot the declaration means:
+        For each output, pass the dtype your backward should receive its
+        gradient in:
 
-        - a concrete :class:`torch.dtype` (only valid for a differentiable
-          Tensor output): the incoming gradient is converted to that dtype.
-        - ``None``: no conversion is performed. For a differentiable Tensor the
-          gradient passes through as-is; for a non-Tensor or non-differentiable
-          output there is no gradient, so ``None`` is the only valid choice.
+        - Pass a :class:`torch.dtype` and the engine guarantees the gradient
+          handed to backward has that dtype. This is only valid for a
+          differentiable Tensor output.
+        - Pass ``None`` and the gradient is handed to backward with whatever
+          dtype it already has. This is also the only valid choice for a
+          non-Tensor or non-differentiable output, which has no gradient.
+        - Omit this call (or pass the output's own dtype) and the gradient is
+          handed to backward in the output's dtype, which is the default.
 
-        If this method is not called, every output keeps the default behavior of
-        converting the incoming gradient to that output's storage dtype. To
-        request that default explicitly when calling this method, pass the
-        output's own ``dtype`` for its slot.
-
-        For example, casting the first output's gradient to ``float32``, letting
-        the second output's gradient pass through uncast (``None``), and using
-        ``None`` for the trailing non-Tensor output that has no gradient::
+        For example::
 
             >>> # xdoctest: +SKIP
             >>> @staticmethod
             >>> def forward(ctx, x):
             >>>     t1 = x.sin()
             >>>     t2 = x.cos()
-            >>>     ctx.set_output_grad_dtype(torch.float32, None, None)
-            >>>     return t1, t2, "not a tensor"
+            >>>     t3 = x.tan()
+            >>>     ctx.set_output_grad_dtype(torch.float32, t2.dtype, None, None)
+            >>>     return t1, t2, t3, "not a tensor"
+
+        casts ``t1``'s gradient to ``float32``, requests the default explicitly
+        for ``t2`` via ``t2.dtype``, leaves the differentiable ``t3``'s gradient
+        uncast with ``None``, and uses ``None`` as the placeholder for the
+        trailing non-Tensor output.
         """
+        if self.output_grad_dtypes is not None:
+            raise RuntimeError("set_output_grad_dtype can only be called once")
         self.output_grad_dtypes = dtypes
 
     def set_materialize_grads(self, value: bool):
