@@ -1376,7 +1376,7 @@ class FlexGemmEpilogueEmitter:
             return False
         source = node.all_input_nodes[0]
         normalized = self.normalized_nodes.get(source)
-        if not isinstance(normalized, FlexGemmNormalizedReduction):
+        if not isinstance(normalized, NormalizedReduction):
             return False
         reduction_input = normalized.source
         layout = self.grouped_tensors.get(reduction_input)
