@@ -660,21 +660,39 @@ class ExceptionVariable(VariableTracker):
     ) -> VariableTracker:
         if name == "__setattr__":
             attr = args[0].as_python_constant()
-            # Writable attributes route through their tp_getset/tp_members setter.
+            # Writable attributes route through their tp_getset/tp_members
+            # setter. Anything else becomes a custom instance-dict attribute.
             getset = self.lookup_tp_getset_member(attr)
             if getset is not None and getset.setter is not None:
                 result = getset.setter(self, tx, args[1])
                 if result is not None:
                     return result
-            unimplemented(
-                gb_type="Unsupported attribute assignment on Exception object",
-                context=f"call_setattr {self} {attr}",
-                explanation="Dynamo does not support setting the attribute "
-                f"'{attr}' on tracked exception objects. Only `__context__`, "
-                "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            else:
+                # Arbitrary user attribute -> store in the instance __dict__
+                # via the side effects table.
+                se = tx.output.side_effects
+                if not se.is_attribute_mutation(self):
+                    se.track_attribute_mutation_new(self)
+                se.store_instance_dict_attr(self, attr, args[1])
+            return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        try:
+            # Custom attributes are stored in the side effects instance dict and
+            # resolved by generic_getattr before reaching here, so a fall-through
+            # to the generic lookup that finds nothing means the attribute is
+            # genuinely absent -- match CPython's BaseException tp_getattro
+            # (PyObject_GenericGetAttr) and raise AttributeError.
+            return super().getattro_impl(tx, name)
+        except NotImplementedError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'{self.exc_type.__name__}' object has no attribute '{name}'"],
+            )
 
     def _set_context(self, tx: "InstructionTranslatorBase", val):
         # Constant can be either an Exception or None
@@ -689,7 +707,9 @@ class ExceptionVariable(VariableTracker):
                 ),
             )
         ):
-            raise AssertionError(f"{val} is not a valid exception context")
+            raise_type_error(
+                tx, "exception context must be None or derive from BaseException"
+            )
         self.set_context(val)
         return variables.ConstantVariable.create(None)
 
@@ -722,7 +742,7 @@ class ExceptionVariable(VariableTracker):
 
     def _set_traceback(self, tx: "InstructionTranslatorBase", val):
         if not TracebackVariable.is_valid_traceback(val):
-            raise_type_error(tx, "__traceback__ must be a traceback object or None")
+            raise_type_error(tx, "__traceback__ must be a traceback or None")
         self.__traceback__ = val
         return variables.ConstantVariable.create(None)
 
@@ -732,14 +752,42 @@ class ExceptionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if len(args) != 1:
+            raise_type_error(
+                tx,
+                f"with_traceback() takes exactly one argument ({len(args)} given)",
+            )
         [tb] = args
         if not TracebackVariable.is_valid_traceback(tb):
-            raise_type_error(tx, "__traceback__ must be a traceback object or None")
+            raise_type_error(tx, "__traceback__ must be a traceback or None")
         self.__traceback__ = tb
         return self
 
+    def setstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) != 1:
+            raise_type_error(
+                tx, f"__setstate__() takes exactly one argument ({len(args)} given)"
+            )
+        [state] = args
+        # BaseException.__setstate__(None) is a documented no-op.
+        if state.is_constant_none():
+            return variables.ConstantVariable.create(None)
+        if not isinstance(state, variables.ConstDictVariable):
+            raise_type_error(tx, "state is not a dictionary")
+        for key, value in state.keys_as_python_constant().items():
+            self.call_method(
+                tx, "__setattr__", [ConstantVariable.create(key), value], {}
+            )
+        return variables.ConstantVariable.create(None)
+
     tp_methods = {
         "with_traceback": Method(with_traceback),
+        "__setstate__": Method(setstate),
     }
 
     def _get_args(self, tx: "InstructionTranslatorBase"):
@@ -749,12 +797,17 @@ class ExceptionVariable(VariableTracker):
             source=self.source and AttrSource(self.source, "args"),
         )
 
+    def _set_args(self, tx: "InstructionTranslatorBase", val):
+        # CPython coerces any iterable to a tuple (PySequence_Tuple).
+        self.args = unpack_iterable(tx, val)
+        return variables.ConstantVariable.create(None)
+
     tp_getset = {
         "__class__": GetSet(getset_build(lambda s: s.exc_type)),
         "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
         "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
         "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
-        "args": GetSet(_get_args, None),
+        "args": GetSet(_get_args, _set_args),
     }
     # __suppress_context__ is a writable PyMemberDef on BaseException, not a
     # getset, so it lives in tp_members.
@@ -1320,7 +1373,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         value_type: type | None = None,
         inference: bool = False,
         saved_tensors: Any | None = None,
-        needs_input_grad: tuple[bool, ...] | None = None,
         non_differentiable: Any | None = None,
         dirty_tensors: list[VariableTracker] | None = None,
         **kwargs: Any,
@@ -1328,7 +1380,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
         self.saved_tensors = saved_tensors
-        self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
 
@@ -1338,10 +1389,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: list[VariableTracker] | None = None,
         kwargs: dict[str, VariableTracker] | None = None,
     ) -> VariableTracker:
-        needs_input_grad = None
-        if args and not kwargs:
-            # type: ignore[attr-defined]
-            needs_input_grad = tuple(x.is_tensor() and x.requires_grad for x in args)
         out = tx.output.side_effects.track_object_new(
             None,
             torch.autograd.function.FunctionCtx,
@@ -1349,10 +1396,18 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 AutogradFunctionContextVariable,
                 inference=True,
                 saved_tensors=SavedTensorBox(),
-                needs_input_grad=needs_input_grad,
             ),
             {},
         )
+        if args and not kwargs:
+            # The real apply() populates ctx.needs_input_grad; mirror it as a
+            # regular attribute store so reads and user writes both flow
+            # through the generic side_effects machinery.
+            # pyrefly: ignore [missing-attribute]
+            needs_input_grad = tuple(x.is_tensor() and x.requires_grad for x in args)
+            tx.output.side_effects.store_instance_dict_attr(
+                out, "needs_input_grad", ConstantVariable.create(needs_input_grad)
+            )
         return out
 
     def as_proxy(self) -> Any:
@@ -1450,13 +1505,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return variables.TupleVariable(list(self.dirty_tensors))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
-        if name == "needs_input_grad":
-            if self.needs_input_grad is not None:
-                return variables.ConstantVariable.create(self.needs_input_grad)
-            if self.source:
-                source = AttrSource(self.source, "needs_input_grad")
-                # type: ignore[attr-defined]
-                return VariableTracker.build(tx, self.value.needs_input_grad, source)
 
         return super().getattro_impl(tx, name)
 
