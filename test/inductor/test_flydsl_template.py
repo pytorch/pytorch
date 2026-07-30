@@ -3,19 +3,17 @@ import os
 from unittest import mock
 
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
-from torch._inductor.codegen.flydsl.flydsl_scheduling import (
-    _get_flydsl_device_arch,
-    FlyDSLScheduling,
-)
+from torch._inductor.codegen.flydsl.flydsl_scheduling import FlyDSLScheduling
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
+from torch._native.flydsl_utils import _resolve_rocm_arch
 
 
 class TestFlyDSLTemplate(TestCase):
     def setUp(self):
         super().setUp()
-        _get_flydsl_device_arch.cache_clear()
+        _resolve_rocm_arch.cache_clear()
 
     def test_gen_imports(self):
         kernel = FlyDSLTemplateKernel(

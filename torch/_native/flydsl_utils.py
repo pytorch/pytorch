@@ -29,11 +29,11 @@ log = logging.getLogger(__name__)
 
 _FLYDSL_DSL_NAME = "flydsl"
 
-# The vendored kernels are validated against the FlyDSL 0.3.0 API. 0.3.0
+# The vendored kernels are validated against the FlyDSL 0.3.x API. 0.3.0
 # removed flydsl.expr.vector, which the RMSNorm kernel imported from, so
 # earlier versions cannot load it at all. They fall back to ATen unless a
 # developer explicitly sets TORCH_NATIVE_SKIP_VERSION_CHECK=1.
-_FLYDSL_MINIMUM_VERSION = Version("0.3.0")
+_FLYDSL_SUPPORTED_RELEASE = (0, 3)
 
 
 def _flydsl_runtime_unavailable_reason() -> None | str:
@@ -58,6 +58,7 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
     if not _cuda.is_built():
         return False, None
 
+    # FlyDSL targets ROCm only; CUDA builds use the ATen implementation.
     import torch
 
     if torch.version.hip is None:
@@ -85,17 +86,16 @@ def _version_is_ok() -> bool:
     _, version = _check_runtime_available()
     if check_native_version_skip():
         return True
-    # Compare on base_version so dev builds count as their target release.
-    # FlyDSL currently ships as dev tags (0.3.0.dev765 at the time of writing),
-    # and PEP 440 sorts those below 0.3.0, so a plain >= would reject them.
-    if version is not None and Version(version.base_version) >= _FLYDSL_MINIMUM_VERSION:
+    # FlyDSL currently ships as dev tags (0.3.0.dev765 at the time of writing).
+    # Its 0.3.x line is API-compatible with these vendored kernels.
+    if version is not None and version.release[:2] == _FLYDSL_SUPPORTED_RELEASE:
         return True
 
     log.info(
-        "FlyDSL version %s is not sufficient (>= %s); "
+        "FlyDSL version %s is not supported (expected %s.x); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,
-        _FLYDSL_MINIMUM_VERSION,
+        ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE)),
     )
     return False
 
@@ -119,7 +119,7 @@ def _arch_from_hsa_override(value: str) -> str | None:
 
 
 @functools.lru_cache
-def _resolve_rocm_arch(device_index: int) -> str:
+def _resolve_rocm_arch(device_index: int) -> str | None:
     """Return the gfx name FlyDSL should compile for on ``device_index``.
 
     Shared so the eager overrides and the Inductor FlyDSL templates cannot
@@ -141,7 +141,14 @@ def _resolve_rocm_arch(device_index: int) -> str:
     import torch
 
     # gcnArchName carries feature flags, e.g. "gfx950:sramecc+:xnack-".
-    return torch.cuda.get_device_properties(device_index).gcnArchName.split(":", 1)[0]
+    if not torch.cuda.is_available():
+        return None
+    try:
+        props = torch.cuda.get_device_properties(device_index)
+        return props.gcnArchName.split(":", 1)[0]
+    except Exception:
+        log.debug("Could not determine FlyDSL GPU arch", exc_info=True)
+        return None
 
 
 def deregister_op_overrides() -> None:
