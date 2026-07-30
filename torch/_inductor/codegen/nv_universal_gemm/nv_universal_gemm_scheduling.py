@@ -27,7 +27,11 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
+from ...kernel.gemm_epilogue import (
+    GemmReductionConfig,
+    GemmReductionGeometry,
+    GemmReductionPlan,
+)
 from ...kernel.gemm_epilogue_ir import (
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
