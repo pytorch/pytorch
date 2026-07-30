@@ -76,8 +76,10 @@ __global__ void cftPutKernel(uint32_t leId, size_t leOffset, uint32_t base) {
 
   cft.put(coop, leId, leOffset, payload, kSlotBytes);
   cft.submit(coop);
+  // flushSmem waits only until the fabric engine has read `payload`; flush
+  // waits for the transfer to land. Both are cheap here (one put, no buffer
+  // reuse) and together they document the two distinct dependencies.
   cft.flushSmem(coop);
-  coop.sync();
   cft.flush(coop);
 #endif
 }

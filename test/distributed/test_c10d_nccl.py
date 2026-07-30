@@ -4811,12 +4811,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     )
     @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_config_host_cft_mode(self):
-        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
-        if not hasattr(nccl_cfg, "host_cft_mode"):
-            raise SkipTest(
-                "host_cft_mode binding absent (PyTorch might be built against NCCL < 2.31)"
-            )
         pg_opts = c10d.ProcessGroupNCCL.Options()
+        # The binding is gated on the same NCCL version as the decorator above.
+        self.assertTrue(hasattr(pg_opts.config, "host_cft_mode"))
         # ncclHostCftFallback: create the CFT logical endpoints if possible,
         # silently disable host-side CFT if the hardware can't.
         pg_opts.config.host_cft_mode = 3
