@@ -4222,13 +4222,17 @@ def _get_fake_value_impl(
             tx, node.target
         ):
             # A custom op was defined and register_fake'd inside the compiled
-            # function, then called. register_fake's mutation of _abstract_fn is
-            # still a pending Dynamo side effect (not yet applied to the real
-            # op), so its fake kernel raises "no fake impl registered". Graph
-            # break: the definition (and register_fake) run eagerly and the op
-            # call itself falls back to eager -- it is not captured into the
-            # resumed graph. Unlike the generic RuntimeError below this is
-            # recoverable, so do NOT wrap it as a hard TorchRuntimeError.
+            # function, then called. Under nested graph breaks Dynamo traces
+            # into the inlined op definition, so register_fake's mutation of
+            # _abstract_fn is recorded as a pending side effect rather than run
+            # eagerly; it is not yet applied to the real op when the op is called
+            # here, so its fake kernel raises "no fake impl registered". (Without
+            # nested graph breaks the definition graph-breaks and the op is fully
+            # registered before the call, so this path is not hit.) Graph break:
+            # the definition (and register_fake) run eagerly and the op call
+            # itself falls back to eager -- it is not captured into the resumed
+            # graph. Unlike the generic RuntimeError below this is recoverable,
+            # so do NOT wrap it as a hard TorchRuntimeError.
             # NB: gated on a pending _abstract_fn mutation so a genuinely
             # unregistered op still hard-errors below with actionable guidance.
             unimplemented(
