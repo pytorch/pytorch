@@ -280,8 +280,8 @@ class _TestMathOps(torch.nn.Module):
         others = [x.to(self.device) for i in range(10)]
         clamp_input = [x.clamp(min=-1000.1, max=1000.1) for x in inputs]
         clamp_other = [x.clamp(min=-1000.1, max=1000.1) for x in others]
-        nan_to_num_input = [torch.nan_to_num(x, 0.0) for x in clamp_input]
-        nan_to_num_other = [torch.nan_to_num(x, 0.0) for x in clamp_other]
+        nan_to_num_input = [torch.nan_to_num(x, 7.0) for x in clamp_input]
+        nan_to_num_other = [torch.nan_to_num(x, 7.0) for x in clamp_other]
         detach_input = [x.detach() for x in nan_to_num_input]
         detach_other = [x.detach() for x in nan_to_num_other]
         stack_input = torch.stack(detach_input, dim=0)
@@ -758,6 +758,24 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["unbind_stack_to_slices_pass"], 2)
         self.assertEqual(counters["inductor"]["unbind_stack_pass"], 2)
         self.assertTrue(torch.allclose(ref, res))
+        counters.clear()
+
+    @config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={"batch_clamp": {}},
+    )
+    def test_math_op_fusion_predispatch_positional_args(self):
+        counters.clear()
+
+        def fn(x):
+            return torch.stack(
+                [torch.clamp(x + i, -1.0, 1.0) for i in range(5)]
+                + [torch.clamp(x + i, 0.0, 2.0) for i in range(5, 10)]
+            )
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), torch.compile(fn, fullgraph=True)(x))
+        self.assertEqual(counters["inductor"]["batch_clamp"], 2)
         counters.clear()
 
     @requires_gpu()
