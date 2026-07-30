@@ -5,6 +5,16 @@ import torch
 from torch.autograd import Function
 from torch.distributed.pipelining import pipe_split, SplitPoint
 from torch.distributed.tensor import DTensor
+from torch.nn.attention.flex_attention import BlockMask, flex_attention
+
+
+_compiled_flex_attention = torch.compile(flex_attention)
+_flex_attention_kernel_options = {
+    "BACKEND": "TRITON",
+    "PRESCALE_QK": False,
+    "ROWS_GUARANTEED_SAFE": True,
+    "BLOCKS_ARE_CONTIGUOUS": True,
+}
 
 
 class ExampleCode(torch.nn.Module):
@@ -233,6 +243,71 @@ class MultiMLPKwargs(torch.nn.Module):
             # else:
             #     x = layer(x)
             x = layer(x)
+        return x
+
+
+class FlexAttentionTransformerBlock(torch.nn.Module):
+    def __init__(self, model_dim: int, num_heads: int, ffn_dim: int):
+        super().__init__()
+        if model_dim % num_heads != 0:
+            raise ValueError(
+                f"model_dim ({model_dim}) must be divisible by num_heads ({num_heads})"
+            )
+        self.num_heads = num_heads
+        self.head_dim = model_dim // num_heads
+        self.attention_norm = torch.nn.LayerNorm(model_dim)
+        self.q_proj = torch.nn.Linear(model_dim, model_dim, bias=False)
+        self.k_proj = torch.nn.Linear(model_dim, model_dim, bias=False)
+        self.v_proj = torch.nn.Linear(model_dim, model_dim, bias=False)
+        self.output_proj = torch.nn.Linear(model_dim, model_dim, bias=False)
+        self.ffn_norm = torch.nn.LayerNorm(model_dim)
+        self.feed_forward = torch.nn.Sequential(
+            torch.nn.Linear(model_dim, ffn_dim, bias=False),
+            torch.nn.GELU(),
+            torch.nn.Linear(ffn_dim, model_dim, bias=False),
+        )
+
+    def forward(self, x: torch.Tensor, *, block_mask: BlockMask) -> torch.Tensor:
+        batch_size, seq_len, model_dim = x.shape
+        normalized = self.attention_norm(x)
+
+        def project(projection: torch.nn.Linear) -> torch.Tensor:
+            return (
+                projection(normalized)
+                .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                .transpose(1, 2)
+            )
+
+        attention = _compiled_flex_attention(
+            project(self.q_proj),
+            project(self.k_proj),
+            project(self.v_proj),
+            block_mask=block_mask,
+            kernel_options=_flex_attention_kernel_options,
+        )
+        attention = (
+            attention.transpose(1, 2).contiguous().view(batch_size, seq_len, model_dim)
+        )
+        x = x + self.output_proj(attention)
+        return x + self.feed_forward(self.ffn_norm(x))
+
+
+class FlexAttentionTransformer(torch.nn.Module):
+    def __init__(self, model_dim: int, num_heads: int, ffn_dim: int, n_layers: int):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                FlexAttentionTransformerBlock(model_dim, num_heads, ffn_dim)
+                for _ in range(n_layers)
+            ]
+        )
+        self.split_spec = {
+            f"layers.{i}": SplitPoint.BEGINNING for i in range(1, n_layers)
+        }
+
+    def forward(self, x: torch.Tensor, *, block_mask: BlockMask) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x, block_mask=block_mask)
         return x
 
 
