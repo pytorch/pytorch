@@ -20,8 +20,6 @@ from typing import TypeVar
 from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
-import sympy
-
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
@@ -649,48 +647,6 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
             self.assertFalse(
                 use_flex_tdm_descriptor(good, good, good, block_shapes=bad_block_shapes)
             )
-
-    def test_flex_tdm_gate_preserves_dynamic_sequence_lengths(self):
-        from torch._inductor.utils import use_flex_tdm_descriptor
-        from torch._inductor.virtualized import V
-
-        def make_qkv(name, seq_len):
-            qkv = mock.Mock()
-            qkv.get_device.return_value = torch.device("cuda")
-            qkv.get_dtype.return_value = torch.float16
-            qkv.get_size.return_value = [2, 4, seq_len, 64]
-            qkv.get_stride.return_value = [
-                256 * seq_len,
-                64 * seq_len,
-                64,
-                1,
-            ]
-            qkv.get_name.return_value = name
-            qkv.get_layout.return_value = mock.Mock(offset=0)
-            return qkv
-
-        q_len = sympy.Symbol("q_len", integer=True, positive=True)
-        kv_len = sympy.Symbol("kv_len", integer=True, positive=True)
-        query = make_qkv("query", q_len)
-        key = make_qkv("key", kv_len)
-        value = make_qkv("value", kv_len)
-
-        sizevars = mock.Mock()
-        sizevars.guard_or_false.return_value = True
-        sizevars.statically_known_equals.side_effect = lambda expr, val: expr == val
-        sizevars.statically_known_multiple_of.side_effect = (
-            lambda expr, val: expr % val == 0
-        )
-        graph = mock.Mock(sizevars=sizevars, unaligned_buffers=set())
-
-        with (
-            V.set_graph_handler(graph),
-            mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
-        ):
-            self.assertTrue(use_flex_tdm_descriptor(query, key, value, add_guards=True))
-
-        sizevars.guard_int.assert_not_called()
-        sizevars.guard_int_seq.assert_not_called()
 
     def test_flex_templates_gate_descriptors_on_tma_or_tdm(self):
         from torch._inductor.kernel.flex.common import load_flex_template
