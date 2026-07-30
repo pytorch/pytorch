@@ -2108,9 +2108,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             type_attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
         ) or (
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
-            and not isinstance(
-                inspect.getattr_static(type_attr, "__func__", None), types.FunctionType
-            )
+            and not isinstance(getattr(type_attr, "__func__", None), types.FunctionType)
         )
         if is_c_special_method:
             if not (

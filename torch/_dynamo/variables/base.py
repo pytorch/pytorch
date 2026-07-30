@@ -1596,11 +1596,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     return table[name]
         return None
 
-    def lookup_tp_getset(self, name: str) -> GetSet | None:
-        return self._lookup_tp_table(name, "tp_getset")
-
-    def lookup_tp_member(self, name: str) -> Member | None:
-        return self._lookup_tp_table(name, "tp_members")
+    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
+        return self._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
@@ -1924,7 +1921,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         # tp_getset/tp_members are data descriptors: resolve ahead of the
         # object-protocol walk. A getter returning None declines.
-        getset = self.lookup_tp_getset(name)
+        getset = self.lookup_tp_getset_member(name)
         if getset is not None:
             result = getset.getter(self, tx)
             if result is not None:
