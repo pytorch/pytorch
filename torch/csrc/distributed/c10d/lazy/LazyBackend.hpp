@@ -297,6 +297,21 @@ class LazyBackend : public Backend {
     return work;
   }
 
+  // ---- Splitting: split the collective (primary) comm only ----
+  bool supportsSplitting() const override {
+    return primary_->supportsSplitting();
+  }
+  // Split just the primary comm; the child is a bare backend for the subgroup.
+  // We deliberately don't split the P2P pair comms: like a reconfigure, they
+  // encode the parent membership's global ranks and can't be carried into the
+  // child, so the child rebuilds its own pair comms lazily on first send/recv.
+  c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Options>& opts) override {
+    return primary_->split(store, ranks, opts);
+  }
+
   // ---- Test / introspection helpers ----
   c10::intrusive_ptr<T> getPrimary() const {
     return primary_;
