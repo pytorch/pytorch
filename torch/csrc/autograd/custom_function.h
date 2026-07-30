@@ -269,7 +269,7 @@ inline variable_list CppNode_apply_functional(
           ", std the corresponding forward input was not a Variable");
       continue;
     }
-    results.emplace_back(outputs[i]);
+    results.emplace_back(std::move(outputs[i]));
   }
 
   return results;
