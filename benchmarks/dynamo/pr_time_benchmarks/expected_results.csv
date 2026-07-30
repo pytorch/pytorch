@@ -42,11 +42,11 @@ sum_floordiv_regression,compile_time_instruction_count,3947000000,0.1
 
 
 
-symint_sum,compile_time_instruction_count,3556000000,0.1
+symint_sum,compile_time_instruction_count,4125000000,0.1
 
 
 
-symint_sum_loop,compile_time_instruction_count,8822000000,0.1
+symint_sum_loop,compile_time_instruction_count,9407000000,0.1
 
 
 
@@ -90,11 +90,11 @@ basic_InlineMod_eager,compile_time_instruction_count,7964000000,0.1
 
 
 
-dtensor_dispatch_detach,instruction_count,58820,0.1
+dtensor_dispatch_detach,instruction_count,57250,0.1
 
 
 
-dtensor_dispatch_to_from_local,instruction_count,197400,0.1
+dtensor_dispatch_to_from_local,instruction_count,197800,0.1
 
 
 
@@ -110,7 +110,7 @@ dtensor_dispatch_inplace,instruction_count,59860,0.1
 
 
 
-dtensor_dispatch_view,instruction_count,67940,0.1
+dtensor_dispatch_view,instruction_count,66880,0.1
 
 
 
@@ -118,7 +118,7 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,36750,0.1
+dtensor_dispatch_custom_handler,instruction_count,35970,0.1
 
 
 
