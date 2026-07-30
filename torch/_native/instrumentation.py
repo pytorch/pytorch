@@ -31,8 +31,8 @@ counter advanced. They differ only in how a snapshot is sampled:
   otherwise the key was served from the in-memory or on-disk ``.o`` cache.
 
 * :func:`instrument_flydsl_compile` -- for FlyDSL, stacked *above* the
-  vendored ``@jit_cache`` decorator, exactly like the CuTeDSL entry point.
-  FlyDSL's cache wrapper exposes the same ``cache_info()`` shape, so the two
+  ``@flydsl_jit_cache`` decorator, exactly like the CuTeDSL entry point.
+  Both cache wrappers expose ``cache_info().hits`` and ``.misses``, so they
   share a sampler and differ only in the reported DSL name.
 
 * :func:`instrument_triton_kernel` -- for Triton ``@triton.jit`` kernels,
@@ -268,27 +268,14 @@ def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
     return sample
 
 
-def instrument_cutedsl_compile(
+def _instrument_cached_compile(
     op: str,
+    dsl: str,
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
-    """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
-
-    Args:
-        op: Operator symbol being compiled for, e.g. ``"aten::topk"``.
-        key_fn: Optional callable with the wrapped function's signature
-            returning a short string describing the compile key for logs.
-            Defaults to a repr of the args/kwargs.
-
-    Returns a decorator. The decorated function behaves identically to the
-    original (same return value, same caching); it only adds a log line and
-    a tlparse artifact per call. Errors raised by the wrapped compile are
-    timed, reported with ``outcome="error"``, and re-raised unchanged.
-    """
-
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
-        wrapper = _make_wrapper(fn, op, "cutedsl", key_fn, _cache_info_sampler(fn))
+        wrapper = _make_wrapper(fn, op, dsl, key_fn, _cache_info_sampler(fn))
         # Forward jit_cache's bespoke attributes (functools.wraps doesn't copy
         # them) so the instrumented function stays a drop-in for callers that
         # introspect the cache.
@@ -300,6 +287,20 @@ def instrument_cutedsl_compile(
     return decorator
 
 
+def instrument_cutedsl_compile(
+    op: str,
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
+
+    The decorated function preserves the wrapped function's return value,
+    caching interface, and exceptions while reporting compile events.
+    """
+
+    return _instrument_cached_compile(op, "cutedsl", key_fn=key_fn)
+
+
 def instrument_flydsl_compile(
     op: str,
     *,
@@ -307,19 +308,11 @@ def instrument_flydsl_compile(
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
     """Instrument a FlyDSL (``@jit_cache``-decorated) compile function.
 
-    Same contract as :func:`instrument_cutedsl_compile`, including the
-    forwarding of the cache attributes, which callers use to clear the cache
-    and read its counters. Only the DSL name reported in the event differs.
+    Same contract as :func:`instrument_cutedsl_compile`; only the DSL name
+    reported in the event differs.
     """
 
-    def decorator(fn: Callable[..., R]) -> Callable[..., R]:
-        wrapper = _make_wrapper(fn, op, "flydsl", key_fn, _cache_info_sampler(fn))
-        for attr in ("cache", "cache_clear", "cache_info"):
-            if hasattr(fn, attr):
-                setattr(wrapper, attr, getattr(fn, attr))
-        return wrapper
-
-    return decorator
+    return _instrument_cached_compile(op, "flydsl", key_fn=key_fn)
 
 
 def _triton_cache_size(kernel: Any) -> int | None:
@@ -528,14 +521,12 @@ def instrumented_flydsl_cache(
             return flyc.compile(...)
 
     Equivalent to ``instrument_flydsl_compile(op)`` stacked above
-    ``@jit_cache``. Preferred over that stack because ``jit_cache`` is also the
-    name CuTeDSL's vendored cache goes by, and the instrumentation coverage
-    scan attributes compile sites by decorator name.
+    ``@flydsl_jit_cache``.
     """
-    from torch._native.flydsl_cache import jit_cache
+    from torch._native.flydsl.cache import flydsl_jit_cache
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
-        return instrument_flydsl_compile(op, key_fn=key_fn)(jit_cache(fn))
+        return instrument_flydsl_compile(op, key_fn=key_fn)(flydsl_jit_cache(fn))
 
     return decorator
 
