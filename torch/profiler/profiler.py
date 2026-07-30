@@ -164,6 +164,8 @@ class _KinetoProfile:
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -292,6 +294,16 @@ class _KinetoProfile:
             self._cupti_async_export = bool(
                 self._custom_profiler_config.get("cupti_monitor_async_export", False)
             )
+            # Arm graph-dependency recording now, at profiler construction -- before the
+            # training loop captures its CUDA graphs. The recording hook must observe each
+            # graph's one-time instantiate(); the per-window ProfilerObserver registers it
+            # too late (at prepare_trace, after warm-up capture) to catch replay-only graphs.
+            if self._custom_profiler_config.get("enable_graph_dependencies"):
+                from torch.profiler._cupti._graph_deps import (
+                    arm_graph_dependency_recording,
+                )
+
+                arm_graph_dependency_recording()
         elif "cupti_monitor_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cupti_monitor_async_export is only supported with the cupti_monitor "
@@ -352,6 +364,11 @@ class _KinetoProfile:
                     self._custom_profiler_config.get("enable_pm_sampling")
                 ),
                 pm_metrics=self._custom_profiler_config.get("pm_metrics"),
+                # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
+                # instantiate + arrow rendering); off unless the config requests them.
+                enable_graph_dependencies=bool(
+                    self._custom_profiler_config.get("enable_graph_dependencies")
+                ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )
@@ -848,6 +865,8 @@ class profile(_KinetoProfile):
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable invoked at the end of each profiling cycle

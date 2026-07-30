@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/SequenceNumber.h>
@@ -439,10 +440,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("config"),
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
-  m.def(
-      "_disable_profiler",
-      disableProfiler,
-      py::call_guard<py::gil_scoped_release>());
+  m.def("_disable_profiler", disableProfiler);
   m.def(
       "_prepare_profiler",
       prepareProfiler,
@@ -609,6 +607,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       }
 
   );
+
+  m.def("_push_node_creation_hook", [](py::function& hook) {
+    at::impl::NodeCreationHooks::push_hook(
+        c10::SafePyObject(hook.release().ptr(), getPyInterpreter()));
+  });
+  m.def("_pop_node_creation_hook", []() {
+    at::impl::NodeCreationHooks::pop_hook();
+  });
 
   m.def("_get_creation_meta", [](const at::Tensor& t) {
     auto* meta = torch::autograd::impl::get_view_autograd_meta(t);

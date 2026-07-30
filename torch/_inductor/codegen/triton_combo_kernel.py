@@ -67,7 +67,7 @@ DEFAULT_COMBO_BLOCK_SIZE_2D = 32
 
 log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
-LARGE_NUMELS = 512e5
+LARGE_NUMELS = 51_200_000
 BLOCK_UTILIZATION = 0.8
 
 
@@ -215,7 +215,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             and V.graph.sizevars.optimization_hint(
                 node_info_map[n].tiling["x"], fallback=1
             )
-            > LARGE_NUMELS  # type: ignore[arg-type]
+            > LARGE_NUMELS
         ]
         if large_pointwise:
             companion_nodes = [n for n in not_reduction if n not in large_pointwise]
@@ -262,7 +262,7 @@ def set_custom_combo_kernel_horizontal_partition(
 ) -> None:
     """Sets the algorithm used to partition nodes into horizontal partitions. Nodes in different partitions
     are implemented in different combo kernels. Nodes in the same partition are likely to be implemented
-    in the same combo kernel, but subject to subsequent restricts like CUDA limits for number of args.
+    in the same combo kernel, but subject to subsequent restrictions like CUDA limits for number of args.
 
     The algorithm should take a list of nodes and return a list of list of nodes.
 
@@ -302,6 +302,13 @@ class SharedBody:
     placeholder_names: list[str]
     args_by_subkernel: list[list[str]]
     setup_lhs_names: list[str]
+
+
+@dataclass
+class ComboLaunchConfig:
+    kwargs: dict[str, int]
+    num_warps: int
+    num_stages: int
 
 
 class ComboKernel(Kernel):
@@ -605,6 +612,18 @@ class ComboKernel(Kernel):
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
         self.no_bench_stitched_config: triton.Config | None = None
+        self.combo_compile_time_autotune = False
+        # Compile-time autotune: per-subkernel winning block sizes (XBLOCK_0, ...), passed as args.
+        self.stitched_block_config: dict[str, int] | None = None
+        # Distinct winner launch configs across the subkernels; seeds the combo's kernel-level autotune.
+        self.combo_launch_candidates: list[ComboLaunchConfig] = []
+
+    @property
+    def bake_blocks(self) -> bool:
+        """Bake block sizes as constexpr in the body (only the no-autotune path, which has no
+        autotuner to pass a config through). Otherwise blocks are args; compile-time autotune
+        supplies the chosen blocks via the config (default_config)."""
+        return not self.enable_autotune
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -954,7 +973,9 @@ class ComboKernel(Kernel):
                 @triton.jit
             """
         elif sub_kernel.inside_reduction:
-            reduction_hint = sub_kernel.features.get_reduction_hint()
+            reduction_hint = sub_kernel.features.get_reduction_hint(
+                sub_kernel.tiling_scores
+            )
             heuristics_line = f"""
                 @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},
@@ -1450,7 +1471,7 @@ class ComboKernel(Kernel):
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
         block_args = self.get_block_args()
-        if self.enable_autotune:
+        if not self.bake_blocks:
             argdefs.extend([ArgName(x.name, is_constexpr=True) for x in block_args])
             if triton_version_uses_attrs_dict():
                 signature.extend(block_args)
@@ -1475,7 +1496,7 @@ class ComboKernel(Kernel):
             if config.triton.proton_profiling:
                 code.writeline(f'pl.enter_scope("{kernel_name}")')
             code.splice("pid = tl.program_id(0)")
-            if not self.enable_autotune:
+            if self.bake_blocks:
                 self.codegen_blocks(code)
 
             sub_kernel_codes = self._codegen_sub_kernel_bodies()
@@ -1605,13 +1626,15 @@ class ComboKernel(Kernel):
         return result
 
     def imports_for_benchmark_kernel(self) -> str:
+        # Dedent BEFORE substituting get_raw_stream: a multi-line override would
+        # otherwise collapse dedent's common prefix and misindent the imports.
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
-        )
+            """
+        ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
 
     def uniquify_block_sizes(
         self, code: IndentedBuffer, num_kernel: int, uniquify: list[str]
@@ -1677,9 +1700,23 @@ class ComboKernel(Kernel):
             "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
 
-        if not self.enable_autotune:
+        if self.bake_blocks or self.combo_compile_time_autotune:
             default_config: dict[str, int] = {}
-            if self.no_bench_stitched_config is not None:
+            if self.combo_compile_time_autotune:
+                # Compile-time autotune: per-subkernel winning block sizes are passed as args;
+                # num_warps / num_stages / backend kwargs are autotuned over the distinct winner
+                # launch candidates (flattened to tuples so the meta stays repr-serializable).
+                if not self.combo_launch_candidates:
+                    raise AssertionError(
+                        "compile-time autotune requires at least one launch candidate"
+                    )
+                if self.stitched_block_config is not None:
+                    default_config = dict(self.stitched_block_config)
+                meta["stitched_launch_candidates"] = [
+                    (c.kwargs, c.num_warps, c.num_stages)
+                    for c in self.combo_launch_candidates
+                ]
+            elif self.no_bench_stitched_config is not None:
                 stitched = self.no_bench_stitched_config
                 default_config = {
                     k: int(v) for k, v in stitched.kwargs.items() if "BLOCK" in k
