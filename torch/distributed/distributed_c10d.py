@@ -998,7 +998,7 @@ def _parse_backend_string(
 def _get_default_backend_type_for_backend_config(
     backend_config: BackendConfig,
 ) -> ProcessGroup.BackendType:
-    def _resolve(backend: str) -> ProcessGroup.BackendType:
+    def _resolve_backend_type(backend: str) -> ProcessGroup.BackendType:
         # Must mirror _new_process_group_helper's per-device
         # `backend_type_map.get(backend_str, CUSTOM)`, or the default type
         # names a backend that never gets registered.
@@ -1010,7 +1010,7 @@ def _get_default_backend_type_for_backend_config(
         return ProcessGroup.BackendType.GLOO
 
     resolved = [
-        _resolve(str(backend))
+        _resolve_backend_type(str(backend))
         for backend in backend_config.device_backend_map.values()
     ]
     # Only pick a type that a backend will actually be registered under,
