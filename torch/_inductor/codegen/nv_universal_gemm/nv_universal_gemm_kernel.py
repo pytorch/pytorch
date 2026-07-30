@@ -9,6 +9,7 @@ generated wrapper at runtime, keeping the generated code thin.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import hashlib
 import importlib
@@ -472,59 +473,35 @@ def _create_gemm_arguments(
     scale_mode_b: Any | None = None,
     swizzle_mode_b: Any | None = None,
     epilogue: Any | None = None,
-    local_reduce_out: Any | None = None,
-    local_reduce_feed_out: Any | None = None,
-    local_reduce_secondary_feed_out: Any | None = None,
-    local_reduce_secondary_feed_type: str | None = None,
-    local_reduce_group: int = 0,
-    local_reduce_axis: int = 1,
-    local_reduce_type: str = "sum",
-    local_reduce_source: str = "identity",
-    local_reduce_feeds_main: bool = False,
+    local_reduce: GemmReductionArguments | None = None,
 ):
     import cutlass.operators
 
-    has_local_reduce = (
-        local_reduce_out is not None
-        or local_reduce_feed_out is not None
-        or local_reduce_secondary_feed_out is not None
-        or local_reduce_feeds_main
-    )
+    local_reduce = local_reduce or GemmReductionArguments()
+    has_local_reduce = local_reduce.enabled
     if has_local_reduce and variant_name not in ("GEMM", "SCALED_GEMM"):
         raise NotImplementedError("NVGEMM local reductions require dense GEMM")
     if has_local_reduce and (
-        local_reduce_axis not in (0, 1) or local_reduce_group <= 1
+        local_reduce.axis not in (0, 1) or local_reduce.group <= 1
     ):
         raise NotImplementedError(
             "NVGEMM local reductions require an M- or N-axis group greater than 1"
         )
 
     def with_local_reduce(args):
-        if not has_local_reduce:
-            return args
         from cutlass.operators.utils.tensor import TensorWrapper
 
-        args.local_reduce_out = (
-            TensorWrapper(local_reduce_out, alignment_bytes=4)
-            if local_reduce_out is not None
-            else None
+        def wrap(output):
+            return (
+                TensorWrapper(output, alignment_bytes=4) if output is not None else None
+            )
+
+        args.local_reduce = dataclasses.replace(
+            local_reduce,
+            output=wrap(local_reduce.output),
+            feed_output=wrap(local_reduce.feed_output),
+            secondary_feed_output=wrap(local_reduce.secondary_feed_output),
         )
-        args.local_reduce_feed_out = (
-            TensorWrapper(local_reduce_feed_out, alignment_bytes=4)
-            if local_reduce_feed_out is not None
-            else None
-        )
-        args.local_reduce_secondary_feed_out = (
-            TensorWrapper(local_reduce_secondary_feed_out, alignment_bytes=4)
-            if local_reduce_secondary_feed_out is not None
-            else None
-        )
-        args.local_reduce_secondary_feed_type = local_reduce_secondary_feed_type
-        args.local_reduce_group = local_reduce_group
-        args.local_reduce_axis = local_reduce_axis
-        args.local_reduce_type = local_reduce_type
-        args.local_reduce_source = local_reduce_source
-        args.local_reduce_feeds_main = local_reduce_feeds_main
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
@@ -630,25 +607,20 @@ def _tensor_sig(t):
 
 
 def _local_reduce_specialization(variant_kwargs: dict | None) -> tuple:
-    if variant_kwargs is None:
+    if variant_kwargs is None or not (reduction := variant_kwargs.get("local_reduce")):
         return ()
     specialization = tuple(
-        (key, variant_kwargs[key])
-        for key in GemmReductionArguments.SPECIALIZATION_KEYS
-        if key in variant_kwargs
+        (field, getattr(reduction, field))
+        for field in GemmReductionArguments.SPECIALIZATION_FIELDS
     )
     tensor_specialization = tuple(
         (
-            key,
+            field,
             None
-            if (tensor := variant_kwargs.get(key)) is None
+            if (tensor := getattr(reduction, field)) is None
             else _tensor_sig(tensor),
         )
-        for key in (
-            "local_reduce_out",
-            "local_reduce_feed_out",
-            "local_reduce_secondary_feed_out",
-        )
+        for field in ("output", "feed_output", "secondary_feed_output")
     )
     return specialization + tensor_specialization
 
@@ -767,15 +739,12 @@ def _update_reuse_args_tensors(
         for name, wrapper in epilogue.tensors.items():
             val = epilogue_args.tensors[name]
             wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
-    for name in (
-        "local_reduce_out",
-        "local_reduce_feed_out",
-        "local_reduce_secondary_feed_out",
-    ):
-        local_reduce = getattr(args, name, None)
-        if local_reduce is not None:
-            assert isinstance(args_kwargs, dict)  # noqa: S101
-            local_reduce._runtime_tensor = args_kwargs[name]
+    runtime_reduce = args_kwargs.get("local_reduce") if args_kwargs else None
+    for field in ("output", "feed_output", "secondary_feed_output"):
+        output = getattr(args.local_reduce, field)
+        if output is not None:
+            assert runtime_reduce is not None  # noqa: S101
+            output._runtime_tensor = getattr(runtime_reduce, field)
     return True
 
 
@@ -816,14 +785,13 @@ def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
                     example_inputs[name] = torch.empty_strided(
                         val.shape, val.stride(), dtype=val.dtype, device="meta"
                     )
-    for name in (
-        "local_reduce_out",
-        "local_reduce_feed_out",
-        "local_reduce_secondary_feed_out",
+    for output in (
+        args.local_reduce.output,
+        args.local_reduce.feed_output,
+        args.local_reduce.secondary_feed_output,
     ):
-        local_reduce = getattr(args, name, None)
-        if local_reduce is not None:
-            local_reduce._runtime_tensor = None
+        if output is not None:
+            output._runtime_tensor = None
 
 
 def _nvgemm_run(
@@ -1262,6 +1230,7 @@ class NVUniversalGemmKernel(Kernel):
                     self.epilogue_writes,
                     self.epilogue_var_renames,
                 ) = _build_bias_epilogue(bias_node.get_name(), output_node.get_name())
+                self.epilogue_is_cutedsl = True
             else:
                 (
                     self.epilogue_fn_code,
@@ -1343,6 +1312,10 @@ class NVUniversalGemmKernel(Kernel):
         code.writeline("_ensure_fp4_dtype_registered()")
         if variant_extra_imports:
             code.writeline(variant_extra_imports)
+        if self.local_reduce is not None:
+            code.writeline(
+                "from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments"
+            )
         if has_epilogue:
             if self.epilogue_is_cutedsl:
                 code.writeline(
@@ -1455,15 +1428,16 @@ class NVUniversalGemmKernel(Kernel):
                 secondary_feed_ptr = feed_output_ptr(reduction.secondary_feed_output)
                 run_variant_kwargs = (
                     "(_VARIANT_KWARGS or {}) | {"
-                    f"'local_reduce_out': {reduce_ptr}, "
-                    f"'local_reduce_group': {reduction.group}, "
-                    f"'local_reduce_axis': {reduction.axis}, "
-                    f"'local_reduce_type': {reduction.reduction_type!r}, "
-                    f"'local_reduce_source': {reduction.source_type!r}"
-                    f", 'local_reduce_feeds_main': {feed_main!r}, "
-                    f"'local_reduce_feed_out': {feed_ptr}, "
-                    f"'local_reduce_secondary_feed_out': {secondary_feed_ptr}, "
-                    f"'local_reduce_secondary_feed_type': {reduction.secondary_feed_type!r}"
+                    "'local_reduce': GemmReductionArguments("
+                    f"output={reduce_ptr}, "
+                    f"feed_output={feed_ptr}, "
+                    f"secondary_feed_output={secondary_feed_ptr}, "
+                    f"secondary_feed_type={reduction.secondary_feed_type!r}, "
+                    f"group={reduction.group}, "
+                    f"axis={reduction.axis}, "
+                    f"reduction_type={reduction.reduction_type!r}, "
+                    f"source_type={reduction.source_type!r}, "
+                    f"feeds_main={feed_main!r})"
                     "}"
                 )
                 aux_tensors.extend(
