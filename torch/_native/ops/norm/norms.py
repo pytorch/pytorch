@@ -68,10 +68,13 @@ def _const_data_ptr(t: torch.Tensor) -> int:
 def _read_only(t: torch.Tensor | None):  # type: ignore[no-untyped-def]
     if t is None:
         return None
+    from cutlass.cute.runtime import from_dlpack
+
     from torch.utils.dlpack import ReadOnlyTensorWrapper
 
     with torch._C.DisableTorchFunctionSubclass():
-        return ReadOnlyTensorWrapper(t)
+        t = ReadOnlyTensorWrapper(t)
+    return from_dlpack(t, enable_tvm_ffi=True)
 
 
 def _reshape_2d(t: torch.Tensor, M: int, N: int) -> torch.Tensor:
