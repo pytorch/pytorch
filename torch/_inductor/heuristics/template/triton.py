@@ -3319,8 +3319,11 @@ class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
 class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
     """Shared stable-descriptor options for gfx1250 scaled TDM templates."""
 
+    scaled_persistent_mm_configs: list[BaseConfig]
+
     def __init__(self) -> None:
         super().__init__()
+        self.mm_configs = self.scaled_persistent_mm_configs
         self.uses_tdm_configs = True
 
     def _get_template_configs_impl(

@@ -2293,8 +2293,12 @@ class TestTDMScaled(TestCase):
             ):
                 heuristic = heuristic_cls()
             self.assertTrue(heuristic.uses_tdm_configs)
+            self.assertIs(
+                heuristic.mm_configs, heuristic.scaled_persistent_mm_configs
+            )
+            configs = heuristic._filter_configs(heuristic.mm_configs)
             self.assertTrue(
-                all(config.num_stages == 2 for config in heuristic.mm_configs)
+                all(config.num_stages == 2 for config in configs)
             )
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
