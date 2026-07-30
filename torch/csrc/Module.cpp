@@ -3082,7 +3082,8 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "BlockWise128x128",
           at::blas::ScalingType::BlockWise128x128,
-          "Scale per 128x128 tile");
+          "Scale per 128x128 tile")
+      .value("GroupWise", at::blas::ScalingType::GroupWise, "Scale per group");
 
   py::enum_<at::blas::SwizzleType>(
       py_module, "_SwizzleType", "Supported scale swizzle types")
