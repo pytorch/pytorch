@@ -84,7 +84,9 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
+def _adjust_lr(
+    lr: float | Tensor, adjust_lr_fn: str | None, param_shape: torch.Size
+) -> float | Tensor:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[-2:]
 
@@ -98,6 +100,29 @@ def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> 
     else:
         adjusted_ratio = 1.0
     return lr * adjusted_ratio
+
+
+def _compute_muon_update(
+    update: Tensor,
+    param_shape: torch.Size,
+    *,
+    lr: float | Tensor,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+) -> tuple[Tensor, float | Tensor]:
+    """Return the direction and adjusted LR for a prepared Muon update.
+
+    ``lr`` must already be normalized to a Python scalar or zero-dimensional
+    tensor. This internal helper does not update momentum, apply weight decay,
+    or mutate its input.
+    """
+    direction = _zeropower_via_newtonschulz(
+        update, ns_coefficients, ns_steps, eps
+    )
+    adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param_shape)
+    return direction, adjusted_lr
 
 
 class Muon(Optimizer):
@@ -363,11 +388,22 @@ def _single_tensor_muon(
 
         if param.numel() == 0:
             continue
-        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
-        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
+        direction, adjusted_lr = _compute_muon_update(
+            update,
+            param.shape,
+            lr=lr,
+            ns_coefficients=ns_coefficients,
+            ns_steps=ns_steps,
+            eps=eps,
+            adjust_lr_fn=adjust_lr_fn,
+        )
 
         param.mul_(1 - lr * weight_decay)
-        param.add_(update, alpha=-adjusted_lr)
+        if isinstance(adjusted_lr, Tensor):
+            direction.mul_(-adjusted_lr)
+            param.add_(direction)
+        else:
+            param.add_(direction, alpha=-adjusted_lr)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)
