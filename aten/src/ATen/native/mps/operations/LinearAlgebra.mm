@@ -271,9 +271,10 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self_, other_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self_.size(0)),
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(self_.size(0)),
                                        static_cast<uint32_t>(self_.size(1)),
-                                       static_cast<uint32_t>(output.size(1))};
+                                       static_cast<uint32_t>(output.size(1)),
+                                       0};
       std::array<int64_t, 6> strides = {
           self_.stride(0), self_.stride(1), other_.stride(0), other_.stride(1), output.stride(0), output.stride(1)};
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
@@ -354,9 +355,10 @@ Tensor& do_metal_addmm(const Tensor& self,
       getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self_, other_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self_.size(0)),
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(self_.size(0)),
                                        static_cast<uint32_t>(self_.size(1)),
-                                       static_cast<uint32_t>(output.size(1))};
+                                       static_cast<uint32_t>(output.size(1)),
+                                       0};
       std::array<int64_t, 8> strides = {self_.stride(0),
                                         self_.stride(1),
                                         other_.stride(0),

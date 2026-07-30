@@ -207,7 +207,7 @@ static void sort_radix(const Tensor& input,
         const Tensor& k_out_buf = ping ? keys_0 : keys_1;
         const Tensor& i_out_buf = ping ? idxs_0 : idxs_1;
 
-        const auto dims = std::array<int32_t, 3>{sort_size, n_blocks, shift};
+        const auto dims = std::array<int32_t, 4>{sort_size, n_blocks, shift, 0};
         const auto flags = std::array<uint8_t, 2>{static_cast<uint8_t>(descending), static_cast<uint8_t>(first_pass)};
 
         if (use_fused_count_scan) {
@@ -401,7 +401,7 @@ static void sort_multi_block(const Tensor& input,
           const bool stage_desc = (keyed && !is_last) ? false : descending;
           getMPSProfiler().beginProfileKernel(pso, is_last ? final_fn : merge_fn, {v_in});
           [enc setComputePipelineState:pso];
-          const auto dims = std::array<int32_t, 3>{sort_size, merge_tiles, n_blocks};
+          const auto dims = std::array<int32_t, 4>{sort_size, merge_tiles, n_blocks, 0};
           if (is_last && sel_mode) {
             mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc, std::array<int32_t, 2>{sel.offset, sel.count});
           } else {
