@@ -1776,7 +1776,7 @@ class TestMkldnnDevice(TestCase):
 
 
 instantiate_parametrized_tests(TestMkldnn)
-instantiate_device_type_tests(TestMkldnnDevice, globals())
+instantiate_device_type_tests(TestMkldnnDevice, globals(), allow_xpu=True)
 
 
 if __name__ == '__main__':
