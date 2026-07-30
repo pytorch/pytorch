@@ -71,12 +71,7 @@ using at::blas::SwizzleType;
 namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-#ifdef USE_ROCM
-using scaled_blas::rocm_scaled_mm_arch_allowed;
-#else
-using scaled_blas::cuda_scaled_mm_arch_allowed;
-using scaled_blas::CudaScaledMmArch;
-#endif
+using scaled_blas::scaled_mm_arch_allowed;
 
 namespace at::native {
 
@@ -508,11 +503,8 @@ _scaled_grouped_mm_cuda(
         const std::optional<at::Tensor>& scale_result,
         std::optional<c10::ScalarType> out_dtype,
         bool use_fast_accum) {
-#ifdef USE_ROCM
-  bool allowed_device = rocm_scaled_mm_arch_allowed();
-#else
-  bool allowed_device = cuda_scaled_mm_arch_allowed({CudaScaledMmArch::Sm90, CudaScaledMmArch::Sm100});
-#endif
+  // On ROCm, sm90_only/sm100_only are ignored.
+  bool allowed_device = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
@@ -632,11 +624,8 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           IntArrayRef contraction_dim,
           bool use_fast_accum,
           const Tensor& out) {
-#ifdef USE_ROCM
-  bool allowed_device = rocm_scaled_mm_arch_allowed();
-#else
-  bool allowed_device = cuda_scaled_mm_arch_allowed({CudaScaledMmArch::Sm90, CudaScaledMmArch::Sm100});
-#endif
+  // On ROCm, sm90_only/sm100_only are ignored.
+  bool allowed_device = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
@@ -773,8 +762,7 @@ std::optional<c10::ScalarType> out_dtype) {
     out_dtype.value_or(at::kBFloat16) == at::kBFloat16
   );
 #ifndef USE_ROCM
-  bool sm90_or_sm100 = cuda_scaled_mm_arch_allowed({CudaScaledMmArch::Sm90, CudaScaledMmArch::Sm100});
-  bool use_fast_path = sm90_or_sm100 && a_b_and_out_are_bf16;
+  bool use_fast_path = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true) && a_b_and_out_are_bf16;
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
