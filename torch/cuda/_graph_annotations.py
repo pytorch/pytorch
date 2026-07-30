@@ -288,7 +288,14 @@ _pending_scopes: list[tuple[Any, list[int]]] = []
 
 # node.metadata key under which a hooked node's scope annotations collect
 # (outermost first); the node's single backward hook pair reads the list.
-_NODE_ANNOTATIONS_KEY = "_mark_kernels_annotations"
+# An identity sentinel so no other metadata user can collide with it.
+_NODE_ANNOTATIONS_KEY: Any = object()
+
+# Bumped by clear_kernel_annotations. Node hooks record only while the
+# generation they were created under is current, so clearing revokes
+# recording from every scope opened before the clear (the hooks stay on
+# the graph but become inert) without mutating live autograd graphs.
+_annotation_generation: int = 0
 
 
 class _KernelScope(NamedTuple):
@@ -365,7 +372,45 @@ class _BracketState(threading.local):
         self.stack: list[_KernelScope | None] = []
 
 
-def _attach_backward_hooks(node: Any, annotations: list[dict[str, Any]]) -> None:
+# Bracket-stack marker for "prehook did nothing": distinct from None, which
+# means the creation hook was pushed but no capture was active (the posthook
+# must still pop).
+_SKIPPED: Any = object()
+
+
+def _collect_node_annotations(
+    node: Any, annotations: list[dict[str, Any]], generation: int
+) -> None:
+    """Add ``annotations`` to ``node``'s collection, hooking it on first touch.
+
+    Called by the creation hooks of every enclosing ``mark_kernels`` scope
+    (and, during backward, of every executing hooked node propagating its
+    inherited annotations): they fire for a new node in one synchronous
+    burst, dynamically outermost first. The first call stashes the
+    collection in ``node.metadata`` -- keying the burst to the node itself
+    -- and installs the node's single backward hook pair; later calls in
+    the burst just extend it, keeping the list ordered outermost-first.
+
+    AccumulateGrad is always excluded: a leaf's node is created once and
+    cached (possibly during warmup), so which scope would own it is an
+    accident of first use, and its work (the ``.grad`` accumulation)
+    belongs to the leaf rather than to any forward region. If accumulation
+    ever needs annotation it should get a dedicated leaf-accumulation
+    region, not first-use assignment.
+    """
+    if isinstance(node, torch._C._functions.AccumulateGrad):
+        return
+    collected = node.metadata.get(_NODE_ANNOTATIONS_KEY)
+    if collected is None:
+        node.metadata[_NODE_ANNOTATIONS_KEY] = list(annotations)
+        _attach_backward_hooks(node, node.metadata[_NODE_ANNOTATIONS_KEY], generation)
+    else:
+        collected.extend(annotations)
+
+
+def _attach_backward_hooks(
+    node: Any, annotations: list[dict[str, Any]], generation: int
+) -> None:
     """Register one pre/post hook pair bracketing ``node``'s backward execution.
 
     ``annotations`` holds the annotations of every scope that was open when
@@ -383,17 +428,42 @@ def _attach_backward_hooks(node: Any, annotations: list[dict[str, Any]]) -> None
     recomputation) closes earlier and outranks these; a ``mark_kernels``
     enclosing the whole ``backward()`` call closes later and is outranked;
     nested forward scopes keep inner-over-outer among themselves.
+
+    While the node executes, a node creation hook carrying ``annotations``
+    is pushed so autograd nodes created during its backward (e.g. with
+    ``create_graph=True``) inherit the forward region's ownership; a later
+    grad-of-grad pass then attributes their kernels to the same scopes.
+    The pop is exception-safe without a finally: each engine task runs
+    under an ``at::ThreadLocalStateGuard`` that restores the creation-hook
+    TLS even when the node throws.
+
+    ``generation`` is the annotation generation the owning scope was opened
+    under; the bracket only records (and only propagates to created nodes)
+    while it is current, so ``clear_kernel_annotations`` makes stale hooks
+    inert.
     """
     state = _BracketState()
 
+    def creation_hook(child: Any) -> None:
+        _collect_node_annotations(child, annotations, generation)
+
     def prehook(_grad_outputs: Any) -> None:
-        if not _annotations_enabled or _is_tools_id_unavailable():
-            state.stack.append(None)
+        if generation != _annotation_generation or _is_tools_id_unavailable():
+            state.stack.append(_SKIPPED)
             return
-        state.stack.append(_begin_kernel_scope())
+        # Propagate ownership to nodes created during execution even when
+        # this backward is not itself captured: their kernels may be
+        # captured by a later (e.g. second-order) annotated capture.
+        torch._C._autograd._push_node_creation_hook(creation_hook)
+        state.stack.append(_begin_kernel_scope() if _annotations_enabled else None)
 
     def posthook(_grad_inputs: Any, _grad_outputs: Any) -> None:
-        scope = state.stack.pop() if state.stack else None
+        if not state.stack:
+            return
+        scope = state.stack.pop()
+        if scope is _SKIPPED:
+            return
+        torch._C._autograd._pop_node_creation_hook()
         if scope is None:
             return
         tools_ids = _end_kernel_scope(scope)
@@ -430,7 +500,10 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
     are tagged with the same annotation, plus an ``"autograd_phase":
     "backward"`` key marking them as backward work (``"autograd_phase"``
     is therefore reserved: backward annotation overwrites it). When
-    backward runs outside a capture the hooks are a no-op.
+    backward runs outside a capture the hooks are a no-op. Ownership
+    extends to higher-order gradients: nodes created while a hooked node
+    executes (``create_graph=True``, checkpoint recomputation) inherit its
+    annotations, so a later grad-of-grad capture is attributed too.
     ``AccumulateGrad`` nodes are never annotated: a leaf's node is created
     once and cached, so scope ownership would be an accident of first use.
     Pass ``backward=False`` to annotate only the forward work, e.g. when a
@@ -481,27 +554,10 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         yield
         return
 
+    generation = _annotation_generation
+
     def creation_hook(node: Any) -> None:
-        # AccumulateGrad is always excluded: a leaf's node is created once
-        # and cached (possibly during warmup), so which scope would own it
-        # is an accident of first use, and its work (the .grad
-        # accumulation) belongs to the leaf rather than to any forward
-        # region. If accumulation ever needs annotation it should get a
-        # dedicated leaf-accumulation region, not first-use assignment.
-        if isinstance(node, torch._C._functions.AccumulateGrad):
-            return
-        # Nested scopes' creation hooks fire for this node in one burst,
-        # outermost first: the outermost starts the node's annotation
-        # collection (stashed in node.metadata so the burst is keyed to the
-        # node itself) and installs the single hook pair; inner scopes'
-        # hooks just append, leaving the list ordered outermost-first.
-        collected = node.metadata.get(_NODE_ANNOTATIONS_KEY)
-        if collected is None:
-            collected = [annotation]
-            node.metadata[_NODE_ANNOTATIONS_KEY] = collected
-            _attach_backward_hooks(node, collected)
-        else:
-            collected.append(annotation)
+        _collect_node_annotations(node, [annotation], generation)
 
     if backward:
         with torch.autograd.graph.node_creation_hook(creation_hook):
@@ -694,20 +750,18 @@ def clear_kernel_annotations() -> None:
     it once recorded annotations have been consumed (e.g. after saving
     them alongside a profiler trace).
 
-    This clears recorded results, not the backward hooks that
-    :func:`mark_kernels` attached to autograd nodes: those live on the
-    autograd graph and record whenever the node executes under a capture.
-    If a retained graph's backward is captured again after a clear, its
-    kernels are re-recorded into the fresh registry -- each capture's
-    annotations stand on their own. Avoid calling this between a hooked
-    node's backward capture and that capture's resolution (i.e. mid
-    ``torch.cuda.graph`` region), where it would drop half a scope.
+    Clearing forgets everything recorded so far and revokes recording from
+    every scope opened before the clear: backward hooks that
+    :func:`mark_kernels` attached to existing autograd nodes stay on the
+    graph but become inert. Scopes opened after the clear record normally.
 
     .. warning::
         This API is in prototype and may change in future releases.
     """
+    global _annotation_generation
     _kernel_annotations.clear()
     _pending_scopes.clear()
+    _annotation_generation += 1
 
 
 # Counter-based stream ID registry. IDs start at 60 (above the highest

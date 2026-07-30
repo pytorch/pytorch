@@ -825,8 +825,9 @@ class TestMarkKernels(TestCase):
         self.assertGreaterEqual(bwd, 1)
 
     def test_backward_clear_then_retained_backward(self):
-        """clear_kernel_annotations drops results but not node hooks: a
-        retained graph's backward captured after a clear re-records."""
+        """clear_kernel_annotations revokes recording from scopes opened
+        before the clear: hooks on a retained graph become inert, so a
+        backward captured after the clear records nothing."""
         graph_fwd = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda", requires_grad=True)
         with torch.cuda.graph(graph_fwd, enable_annotations=True):
@@ -841,8 +842,28 @@ class TestMarkKernels(TestCase):
         with torch.cuda.graph(graph_bwd, enable_annotations=True):
             _ = torch.autograd.grad(y, x, grad_outputs=grad_out, retain_graph=True)
 
-        fwd, bwd = self._count_phases("scope")
-        self.assertEqual(fwd, 0)  # forward records were cleared
+        self.assertEqual(len(get_kernel_annotations()), 0)
+
+    def test_backward_scope_after_clear_records(self):
+        """A scope opened after a clear records normally (fresh generation),
+        including backward of nodes created under it."""
+        graph1 = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        with torch.cuda.graph(graph1, enable_annotations=True):
+            with mark_kernels("old"):
+                _ = (x * 2).sin()
+
+        clear_kernel_annotations()
+
+        graph2 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph2, enable_annotations=True):
+            with mark_kernels("new"):
+                y = (x * 3).cos()
+            _ = torch.autograd.grad(y.sum(), x)
+
+        self.assertEqual(self._count_phases("old"), (0, 0))
+        fwd, bwd = self._count_phases("new")
+        self.assertEqual(fwd, 2)
         self.assertGreaterEqual(bwd, 2)
 
     def test_backward_accumulate_grad_excluded(self):
@@ -870,6 +891,222 @@ class TestMarkKernels(TestCase):
             bwd_counts[mode] = bwd
 
         self.assertEqual(bwd_counts["backward"], bwd_counts["grad"])
+
+    def test_backward_shared_nonleaf_multi_consumer(self):
+        """A shared non-leaf feeding two marked regions: gradient
+        aggregation for the shared producer (InputBuffer, outside any
+        node's brackets) must not be attributed to either region, so each
+        region's counts match the single-consumer baseline."""
+        counts = {}
+        for consumers in (1, 2):
+            clear_kernel_annotations()
+            graph = torch.cuda.CUDAGraph()
+            x = torch.randn(8, device="cuda", requires_grad=True)
+
+            with torch.cuda.graph(graph, enable_annotations=True):
+                base = x * 2  # shared non-leaf producer, unmarked
+                with mark_kernels("region_a"):
+                    out = base.sin()
+                if consumers == 2:
+                    with mark_kernels("region_b"):
+                        out = out + base.cos()
+                _ = torch.autograd.grad(out.sum(), x)
+
+            counts[consumers] = self._count_phases("region_a")
+
+        # region_a's attribution must not absorb the shared producer's
+        # gradient aggregation work that appears with the second consumer.
+        self.assertEqual(counts[2], counts[1])
+        fwd_b, bwd_b = self._count_phases("region_b")
+        self.assertEqual(fwd_b, 2)  # cos + add
+        self.assertGreaterEqual(bwd_b, 1)
+
+    def test_backward_nested_backward_inside_custom_backward(self):
+        """A custom backward that itself calls torch.autograd.grad: nodes
+        of the inner graph built there are owned by the scope opened inside
+        the custom backward."""
+
+        class InnerGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                with mark_kernels("inner_bwd"):
+                    with torch.enable_grad():
+                        t = x.detach().requires_grad_()
+                        z = (t * 3).cos()
+                        (gt,) = torch.autograd.grad(z.sum(), t)
+                return grad_out * gt
+
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("fwd"):
+                y = InnerGrad.apply(x)
+            _ = torch.autograd.grad(y.sum(), x)
+
+        fwd, bwd = self._count_phases("inner_bwd")
+        # The scope's lexical kernels during backward count as its forward
+        # work; the nested backward of nodes created under it counts as
+        # backward work owned by it.
+        self.assertGreaterEqual(fwd + bwd, 3)
+        for anns in get_kernel_annotations().values():
+            for ann in anns:
+                if ann.get("name") == "inner_bwd":
+                    self.assertNotEqual(ann.get("who"), "outer")
+
+    def test_backward_mark_stream_differentiable(self):
+        """mark_stream around differentiable work: the stream id recorded
+        for forward lane assignment also propagates into backward tags."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        side = torch.cuda.Stream()
+
+        capture_stream = torch.cuda.Stream()
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.graph(graph, stream=capture_stream, enable_annotations=True):
+            fork = torch.cuda.Event()
+            fork = capture_stream.record_event()
+            side.wait_event(fork)
+            with mark_stream(side, "lane"):
+                y = (x * 2).sin()
+            capture_stream.wait_stream(side)
+            _ = torch.autograd.grad(y.sum(), x)
+
+        fwd = bwd = 0
+        stream_ids = set()
+        for anns in get_kernel_annotations().values():
+            for ann in anns:
+                if ann.get("name") != "lane":
+                    continue
+                if ann.get("autograd_phase") == "backward":
+                    bwd += 1
+                else:
+                    fwd += 1
+                    stream_ids.add(ann.get("stream"))
+        self.assertEqual(fwd, 2)
+        self.assertGreaterEqual(bwd, 2)
+        self.assertEqual(len(stream_ids), 1)
+
+    def test_backward_nested_dict_annotations_without_name(self):
+        """Nested dict scopes need no "name" key; backward merge still
+        applies inner-wins on common keys and unions the rest."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels({"layer": 1, "kind": "outer"}):
+                with mark_kernels({"kind": "inner", "extra": True}):
+                    y = (x * 2).sin()
+            _ = torch.autograd.grad(y.sum(), x)
+
+        bwd = 0
+        for anns in get_kernel_annotations().values():
+            for ann in anns:
+                if ann.get("autograd_phase") == "backward":
+                    self.assertEqual(ann["kind"], "inner")
+                    self.assertEqual(ann["layer"], 1)
+                    self.assertTrue(ann["extra"])
+                    bwd += 1
+        self.assertGreaterEqual(bwd, 2)
+
+    def test_backward_node_after_inner_scope_exit(self):
+        """A node created after an inner scope exits, while the outer is
+        still open, inherits only the outer annotation."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("outer"):
+                with mark_kernels("inner"):
+                    y = x.sin()
+                z = y * 3  # created under outer only
+            _ = torch.autograd.grad(z.sum(), x)
+
+        fwd_i, bwd_i = self._count_phases("inner")
+        fwd_o, bwd_o = self._count_phases("outer")
+        # sin: forward tagged inner (inner wins merge), backward inherits
+        # both (inner wins). mul: forward and backward tagged outer only.
+        self.assertEqual((fwd_i, fwd_o), (1, 1))
+        self.assertGreaterEqual(bwd_i, 1)
+        self.assertGreaterEqual(bwd_o, 1)
+
+    def test_backward_explicit_backward_entry_point(self):
+        """torch.autograd.backward(...) (not Tensor.backward) also runs the
+        brackets."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        x.grad = torch.zeros_like(x)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("scope"):
+                y = (x * 2).sin()
+            torch.autograd.backward((y,), (torch.ones_like(y),))
+
+        fwd, bwd = self._count_phases("scope")
+        self.assertEqual(fwd, 2)
+        self.assertGreaterEqual(bwd, 2)
+
+    def test_backward_create_graph_second_order_attributed(self):
+        """Nodes created during a create_graph backward inherit the forward
+        scope's annotations, so a second-order backward is attributed too."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("L"):
+                y = (x * 2).sin()
+            (gx,) = torch.autograd.grad(y.sum(), x, create_graph=True)
+            _ = torch.autograd.grad(gx.sum(), x)
+
+        fwd, bwd = self._count_phases("L")
+        self.assertEqual(fwd, 2)
+        # First-order backward kernels (>=2) plus second-order kernels from
+        # nodes created during the first backward.
+        self.assertGreaterEqual(bwd, 4)
+
+    def test_backward_second_order_through_uncaptured_first(self):
+        """Ownership propagates even when the first backward runs eagerly:
+        only the second-order backward is captured, and it is attributed."""
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        graph_fwd = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph_fwd, enable_annotations=True):
+            with mark_kernels("L"):
+                y = (x * 2).sin()
+
+        (gx,) = torch.autograd.grad(y.sum(), x, create_graph=True)
+
+        graph_bwd2 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph_bwd2, enable_annotations=True):
+            _ = torch.autograd.grad(gx.sum(), x)
+
+        _fwd, bwd = self._count_phases("L")
+        self.assertGreaterEqual(bwd, 1)
+
+    def test_backward_checkpoint_recompute_attributed(self):
+        """Checkpoint recomputation during backward creates fresh nodes;
+        scopes inside the recomputed forward still own the recompute work."""
+
+        def fn(x):
+            with mark_kernels("ckpt"):
+                return (x * 2).sin()
+
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        with torch.cuda.graph(graph, enable_annotations=True):
+            y = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
+            _ = torch.autograd.grad(y.sum(), x)
+
+        fwd, bwd = self._count_phases("ckpt")
+        # The scope tags its original forward kernels, the recomputed
+        # forward kernels (created during backward), and the backward
+        # kernels of the recomputed nodes.
+        self.assertGreaterEqual(fwd, 2)
+        self.assertGreaterEqual(bwd, 2)
 
     def test_make_graphed_callables_annotations(self):
         """make_graphed_callables(enable_annotations=True) records marks from
