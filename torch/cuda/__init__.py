@@ -43,6 +43,18 @@ from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
 
+if TYPE_CHECKING:
+    # Forwarded lazily from the piecewise-cuda-graphs package (see __getattr__ at
+    # module end and _piecewise_graphs.py); declared here so type checkers and
+    # IDEs see the names.
+    from ._piecewise_graphs import (
+        CUDAGraphSequence,
+        force_no_graph,
+        no_graph,
+        piecewise_graph,
+    )
+
+
 try:
     from torch._C import _cudart  # type: ignore[attr-defined]
 except ImportError:
@@ -2135,6 +2147,7 @@ __all__ = [
     # pyrefly: ignore [bad-dunder-all]
     "ShortTensor",
     "CUDAGraph",
+    "CUDAGraphSequence",
     "CudaError",
     "DeferredCudaCallError",
     "Event",
@@ -2181,6 +2194,9 @@ __all__ = [
     "graph_annotations",
     "graph_pool_handle",
     "graphs",
+    "piecewise_graph",
+    "no_graph",
+    "force_no_graph",
     "has_half",
     "has_magma",
     "host_memory_stats",
@@ -2241,3 +2257,19 @@ __all__ = [
     "tunable",
     "utilization",
 ]
+
+
+_PIECEWISE_GRAPH_NAMES = frozenset(
+    {"CUDAGraphSequence", "piecewise_graph", "no_graph", "force_no_graph"}
+)
+
+
+def __getattr__(name: str) -> Any:
+    # Forward the piecewise-cuda-graphs public API lazily (see
+    # torch/cuda/_piecewise_graphs.py). Kept out of the eager import list so a
+    # torch.cuda import does not pull in the optional package.
+    if name in _PIECEWISE_GRAPH_NAMES:
+        from torch.cuda import _piecewise_graphs
+
+        return getattr(_piecewise_graphs, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
