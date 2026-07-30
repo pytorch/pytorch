@@ -26,9 +26,9 @@ from torch.testing._internal.common_utils import TestCase, \
     parametrize, instantiate_parametrized_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
-
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
@@ -1754,19 +1754,21 @@ class TestMkldnn(TestCase):
 
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnnDevice(TestCase):
-    def test_unsupported(self):
+    @onlyAccelerator
+    def test_unsupported(self, device):
         # unsupported types and unsupported types with gpu
         for dtype in [torch.double, torch.uint8, torch.int8,
                       torch.short, torch.int, torch.long]:
             with self.assertRaises(RuntimeError):
                 torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
-            if torch.cuda.is_available():
-                with self.assertRaises(RuntimeError):
-                    torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cuda')).to_mkldnn()
-        # supported type with gpu
-        if torch.cuda.is_available():
+
             with self.assertRaises(RuntimeError):
-                torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
+                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device(device)).to_mkldnn()
+
+        # supported type with gpu
+        with self.assertRaises(RuntimeError):
+            torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device(device)).to_mkldnn()
+
         # some factory functions
         for creator in [torch.ones, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError):
@@ -1774,7 +1776,7 @@ class TestMkldnnDevice(TestCase):
 
 
 instantiate_parametrized_tests(TestMkldnn)
-instantiate_device_type_tests(TestMkldnnDevice, globals(), only_for=('cpu',))
+instantiate_device_type_tests(TestMkldnnDevice, globals())
 
 
 if __name__ == '__main__':
