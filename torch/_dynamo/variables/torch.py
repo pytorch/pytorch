@@ -3043,17 +3043,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             from .. import compiled_autograd
             from .builder import wrap_fx_proxy
-            from .constant import ConstantVariable
             from .dicts import ConstDictVariable
             from .lists import BaseListVariable
             from .tensor import TensorVariable
 
+            retain_graph = args[3] if len(args) > 3 else kwargs.get("retain_graph")
             create_graph = args[4] if len(args) > 4 else kwargs.get("create_graph")
-            if (
-                not config.trace_autograd_ops
-                and isinstance(create_graph, ConstantVariable)
-                and bool(create_graph.value)
-            ):
+            if retain_graph is not None and not retain_graph.is_python_constant():
+                unimplemented(
+                    gb_type="torch.autograd.grad with non-constant retain_graph",
+                    context=f"retain_graph={retain_graph}",
+                    explanation=(
+                        "The retain_graph argument to torch.autograd.grad must be "
+                        "a Python constant when tracing with Dynamo."
+                    ),
+                    hints=[
+                        "Pass a Python bool for retain_graph.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            if create_graph is not None and not create_graph.is_python_constant():
+                unimplemented(
+                    gb_type="torch.autograd.grad with non-constant create_graph",
+                    context=f"create_graph={create_graph}",
+                    explanation=(
+                        "The create_graph argument to torch.autograd.grad must be "
+                        "a Python constant when tracing with Dynamo."
+                    ),
+                    hints=[
+                        "Pass a Python bool for create_graph.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
+            create_graph_value = (
+                create_graph.as_python_constant() if create_graph is not None else False
+            )
+            create_graph_enabled = bool(create_graph_value)
+            if not config.trace_autograd_ops and create_graph_enabled:
                 unimplemented(
                     gb_type="using `torch.autograd.grad(create_graph=True)` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",
@@ -3089,6 +3116,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ],
                     )
                 tracer = tracer.parent
+
+            if (
+                not config.trace_autograd_ops
+                and tx.output.current_tracer.parent is not None
+            ):
+                unimplemented(
+                    gb_type="autograd.grad inside a higher-order operator",
+                    context="higher-order operator subgraph",
+                    explanation=(
+                        "torch.autograd.grad() cannot be safely captured by default "
+                        "inside a higher-order operator. Higher-order operator "
+                        "subgraphs may manage autograd or dispatch modes that do not "
+                        "preserve the inner autograd graph."
+                    ),
+                    hints=[
+                        "Move the autograd.grad() call outside the higher-order operator.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
             # Graph break if we detected on a previous attempt that autograd.grad
             # consumed grad_fns of returned tensors. This gives better compile
@@ -3224,15 +3270,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             # Track consumed grad_fns for later validation
             # (to detect returning tensors whose grad_fn was consumed by autograd.grad)
-            # Skip if retain_graph=True or create_graph=True since the graph is not
-            # consumed in those cases and can be traversed again.
-            retain_graph = args[3] if len(args) > 3 else kwargs.get("retain_graph")
+            # retain_graph defaults to create_graph only when it is omitted or None.
+            retain_graph_value = (
+                retain_graph.as_python_constant() if retain_graph is not None else None
+            )
             graph_preserved = (
-                isinstance(retain_graph, ConstantVariable)
-                and retain_graph.value is True
-            ) or (
-                isinstance(create_graph, ConstantVariable)
-                and create_graph.value is True
+                create_graph_enabled
+                if retain_graph_value is None
+                else bool(retain_graph_value)
             )
             if not graph_preserved:
                 # Filter out AccumulateGrad nodes - they're never actually "consumed"
@@ -3855,6 +3900,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             torch._dynamo.exc.Unsupported,
             # From `flat_apply` assert on output type.
             torch._dynamo.exc.TorchRuntimeError,
+            # From fake tensor eval in _get_fake_value_impl.
+            torch._dynamo.exc.FakeTensorObservedException,
         ):
             unimplemented(
                 gb_type="Unsupported output type for nonstrict_trace-ed function",
