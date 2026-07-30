@@ -11,10 +11,10 @@
 #include <ATen/ops/combinations_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
-#include <ATen/ops/meshgrid.h>
-#include <ATen/ops/stack.h>
 #include <ATen/ops/index.h>
+#include <ATen/ops/meshgrid.h>
 #include <ATen/ops/nonzero_static.h>
+#include <ATen/ops/stack.h>
 #endif
 
 #include <vector>
@@ -24,12 +24,11 @@ namespace {
 using namespace at;
 
 c10::SymInt calculate_num_combinations(c10::SymInt n, int64_t r, bool with_replacement) {
-  // Helper to compute the number of combinations (binomial coefficient)
+  if (r < 0) return 0;
+  if (r == 0) return 1;
   if (with_replacement) {
     n = n + r - 1;
   }
-  if (r < 0) return 0;
-  if (r == 0) return 1;
   c10::SymInt res = 1;
   for (int64_t i = 1; i <= r; ++i) {
     res = res * (n - r + i) / i;

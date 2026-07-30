@@ -14,7 +14,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
-#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/sum_cuda_dispatch.h>
 #include <ATen/ops/multilabel_margin_loss.h>
 #endif
@@ -433,7 +433,7 @@ Tensor multilabel_margin_loss_backward_cuda(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
-  auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   multilabel_margin_loss_backward_cuda_out_template(
       grad_output, self, target, reduction, is_target, grad_input);
   return grad_input;

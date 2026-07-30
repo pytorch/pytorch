@@ -98,6 +98,10 @@ C10_XPU_API void endAllocateToPool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
 
+C10_XPU_API void markCaptureBegin(c10::DeviceIndex device);
+
+C10_XPU_API void markCaptureEnd(c10::DeviceIndex device);
+
 C10_XPU_API void releasePool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);

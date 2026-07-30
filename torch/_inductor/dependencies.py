@@ -121,9 +121,9 @@ class MemoryDep(Dep):
         # For size == 0, it's an empty tensor, any strides for that dimension
         # are equivalent. Skip for simplicity and it may not matter that much.
         #
-        # For size == 1, it cause cause tie for strides of different dimensions.
+        # For size == 1, it cause tie for strides of different dimensions.
         # Also when we first time create LoopBody in ComputedBuffer.simplify_and_reorder
-        # we can dependencies.index_vars_squeeze which should already sqeeuze
+        # we can dependencies.index_vars_squeeze which should already squeeze
         # the size == 1 dimensions.
         if any(s == 0 or s == 1 for s in itertools.chain(self.size, other.size)):
             return None

@@ -918,6 +918,9 @@ class AOTInductorModelBase {
       delete *run_finished_;
       run_finished_.reset();
     }
+    if (stream == nullptr) {
+      aoti_torch_get_current_xpu_stream(this->device_idx_, (void**)&stream);
+    }
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = false;
 #endif
@@ -926,22 +929,38 @@ class AOTInductorModelBase {
     auto folded_constants =
         model->const_run_impl(stream, proxy_executor, initialization);
 
+    // const_run_impl returns owning raw AtenTensorHandles in the map. The
+    // fallible calls below (cudaEventRecord / XPU barrier /
+    // wait_for_completion) can throw; without cleanup the map's destructor
+    // drops those raw handles without freeing the underlying tensors, leaking
+    // folded-constant GPU memory (the container catches and keeps serving, so
+    // it accumulates). Free the still-owned handles on the error path only.
+    // This header is compiled into model.so, so use only the stable C ABI (no
+    // c10 scope-guard).
+    try {
 #ifdef USE_CUDA
-    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
-    // sycl::queue* queue_ptr = nullptr;
-    // aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
-    run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
-        static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
+      run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
+          static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
 
 #else // !USE_CUDA && !USE_XPU
-    run_finished_ = true;
+      run_finished_ = true;
 #endif // USE_CUDA
 
-    // Wait for the constant folding kernels to complete. The folded
-    // constants may be read by inference on a different stream after
-    // swap_constant_buffer(), which has no GPU synchronization.
-    wait_for_completion();
+      // Wait for the constant folding kernels to complete. The folded
+      // constants may be read by inference on a different stream after
+      // swap_constant_buffer(), which has no GPU synchronization.
+      wait_for_completion();
+    } catch (...) {
+      for (auto& kv : folded_constants) {
+        if (kv.second != nullptr) {
+          (void)aoti_torch_delete_tensor_object(kv.second);
+          kv.second = nullptr;
+        }
+      }
+      throw;
+    }
 
     return folded_constants;
   }
@@ -954,6 +973,7 @@ class AOTInductorModelBase {
   }
 
   void load_constants(bool force = false) {
+    did_call_load_constants_ = true;
     size_t num_constants = this->num_constants();
     size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
@@ -1113,11 +1133,21 @@ class AOTInductorModelBase {
     }
   }
 
-  RAIIDataPtr&& release_constant_blob() {
+  void set_constant_blob_releasable(bool releasable) {
+    constant_blob_releasable_ = releasable;
+  }
+
+  RAIIDataPtr release_constant_blob() {
+    if (!constant_blob_releasable_) {
+      return RAIIDataPtr{};
+    }
     return std::move(constant_blob_);
   }
 
-  RAIIDataPtr&& release_aux_cpu_constant_blob() {
+  RAIIDataPtr release_aux_cpu_constant_blob() {
+    if (!constant_blob_releasable_) {
+      return RAIIDataPtr{};
+    }
     return std::move(aux_cpu_constant_blob_);
   }
 
@@ -1321,6 +1351,10 @@ class AOTInductorModelBase {
 #endif
   }
 
+  bool did_call_load_constants() const {
+    return did_call_load_constants_;
+  }
+
   void update_constants_array_from_map() {
     if (!constants_map_) {
       throw std::runtime_error{
@@ -1517,6 +1551,10 @@ class AOTInductorModelBase {
   // If True, we would prepare the weight when loading the model, otherwise the
   // model will be loaded without weights, and need to be provided by the user.
   bool include_weights;
+  bool did_call_load_constants_{false};
+  // External-constants containers borrow tensor handles from the caller; their
+  // release_* calls intentionally return empty handles.
+  bool constant_blob_releasable_{true};
 
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can reuse this instance.

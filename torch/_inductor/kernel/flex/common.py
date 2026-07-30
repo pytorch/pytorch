@@ -13,6 +13,7 @@ import torch
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._sympy.functions import Mod
 
 
 if TYPE_CHECKING:
@@ -47,6 +48,24 @@ from ...utils import load_template
 
 
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
+
+
+def can_skip_boundary_checks(seq_len, sparse_block_size) -> bool:
+    """True when per-tile bounds masking can be skipped along this dim.
+
+    This is decided before a config is chosen, so divisibility is checked
+    against 128, the max (and LCM) of all candidate pow2 tile sizes for
+    inner block_m/n.
+    """
+    return V.graph.sizevars.statically_known_true(
+        sympy.And(
+            sympy.Eq(Mod(seq_len, 128), 0),
+            sympy.Or(
+                sympy.Eq(Mod(seq_len, sparse_block_size), 0),
+                sympy.Ge(sparse_block_size, seq_len),
+            ),
+        )
+    )
 
 
 def is_tensor_ir_node(node: object) -> bool:

@@ -21,8 +21,8 @@ class AOTIDelegateExecutor : public ETDelegateExecutor {
       const MakeProxyExecutorFn& makeProxyExecutorFunc);
   ~AOTIDelegateExecutor() override = default;
 
-  void processWeights(std::shared_ptr<Weights> weights) override;
-  void initWeights(std::shared_ptr<Weights> weights) override;
+  void processWeights(const std::shared_ptr<Weights>& weights) override;
+  void initWeights(const std::shared_ptr<Weights>& weights) override;
   void commitWeights() override;
 
   std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs) override;

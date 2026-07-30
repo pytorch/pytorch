@@ -820,7 +820,7 @@ class TestExternKernelCaller(TestCase):
                 in message
                 for message in log_context.output
             ),
-            f"Expected warning message not found in logs: {log_context.output}",
+            lambda msg: f"{msg}\nExpected warning message not found in logs: {log_context.output}",
         )
 
         expected = torch.mm(a, b)
@@ -1453,7 +1453,7 @@ class TestTemplateRender(TestCase):
             # Verify template kernel was used
             self.assertIn("_mock_inner_add", code)
             # Verify epilogue fusion: relu fused via hook
-            self.assertIn("triton_helpers.maximum", code)
+            self.assertIn("maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
 

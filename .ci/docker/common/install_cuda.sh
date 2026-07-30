@@ -11,6 +11,7 @@ else
 fi
 
 NVSHMEM_VERSION=3.4.5
+CUDA_CUPTI_VERSION=13.3.75
 
 function install_cuda {
   version=$1
@@ -80,6 +81,32 @@ function install_nvshmem {
   echo "nvSHMEM ${nvshmem_version} for CUDA ${cuda_major_version} (${arch_path}) installed."
 }
 
+function install_cupti_headers {
+  cupti_version=$1                  # e.g. "13.3.75"
+  major_minor=${cupti_version%.*}   # e.g. "13.3"
+  target_dir="/usr/local/cupti-headers-${major_minor}"
+
+  # The CUDA toolkit runfile ships an older CUPTI than the standalone redist
+  # archive, so stage the newer headers in a non-default location where they are
+  # available for inspection without poisoning the build's include search path.
+  # Staged for every CUDA version so the binary-build Dockerfiles can COPY the
+  # directory unconditionally. The headers are architecture independent, so
+  # always grab the x86_64 archive.
+  redist_url="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cupti/linux-x86_64"
+  archive="cuda_cupti-linux-x86_64-${cupti_version}-archive"
+
+  tmp_dir=$(mktemp -d)
+  pushd "${tmp_dir}"
+  wget -q "${redist_url}/${archive}.tar.xz"
+  tar xf "${archive}.tar.xz"
+  mkdir -p "${target_dir}"
+  cp -a "${archive}/include/"* "${target_dir}/"
+  popd
+
+  rm -rf "${tmp_dir}"
+  echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
+}
+
 function install_124 {
   CUDNN_VERSION=9.1.0.70
   CUSPARSELT_VERSION=0.6.2.3
@@ -113,7 +140,7 @@ function install_126 {
 }
 
 function install_129 {
-  CUDNN_VERSION=9.23.1.3
+  CUDNN_VERSION=9.24.0.43
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 12.9.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.9.1 in the same container
@@ -132,7 +159,7 @@ function install_129 {
 }
 
 function install_128 {
-  CUDNN_VERSION=9.23.1.3
+  CUDNN_VERSION=9.24.0.43
   CUSPARSELT_VERSION=0.7.1.0
   echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.8.1 in the same container
@@ -151,7 +178,7 @@ function install_128 {
 }
 
 function install_130 {
-  CUDNN_VERSION=9.23.1.3
+  CUDNN_VERSION=9.24.0.43
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.0 in the same container
@@ -170,7 +197,7 @@ function install_130 {
 }
 
 function install_132 {
-  CUDNN_VERSION=9.23.1.3
+  CUDNN_VERSION=9.24.0.43
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.2 in the same container
@@ -184,6 +211,44 @@ function install_132 {
   CUDA_VERSION=13.2 bash install_nccl.sh
 
   CUDA_VERSION=13.2 bash install_cusparselt.sh $CUSPARSELT_VERSION
+
+  ldconfig
+}
+
+function install_134 {
+  CUDNN_VERSION=9.24.0.43
+  CUSPARSELT_VERSION=0.8.1.1
+  echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
+  # CUDA 13.4 ships no runfile-local installer yet, so install the toolkit from
+  # the NVIDIA preview network repo (https://packages.nvidia.com).
+  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+  case "$ID" in
+    ubuntu)
+      codename=$(grep -oP '(?<=^VERSION_CODENAME=).+' /etc/os-release | tr -d '"')
+      wget -q https://packages.nvidia.com/${codename}/nvidia-preview-keyring.deb
+      dpkg -i nvidia-preview-keyring.deb
+      apt-get update
+      apt-get -y install cuda-toolkit-13-4
+      rm -f nvidia-preview-keyring.deb
+      ;;
+    almalinux|rhel|centos)
+      wget -q https://packages.nvidia.com/el8/nvidia-preview-keyring.rpm
+      rpm -i nvidia-preview-keyring.rpm
+      dnf clean all
+      dnf -y install cuda-toolkit-13-4
+      rm -f nvidia-preview-keyring.rpm
+      ;;
+    *) echo "install_134: unsupported OS '$ID'"; exit 1 ;;
+  esac
+
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  install_cudnn 13 $CUDNN_VERSION
+
+  install_nvshmem 13 $NVSHMEM_VERSION
+
+  CUDA_VERSION=13.4 bash install_nccl.sh
+
+  CUDA_VERSION=13.4 bash install_cusparselt.sh $CUSPARSELT_VERSION
 
   ldconfig
 }
@@ -204,8 +269,11 @@ do
         ;;
     13.2|13.2.*) install_132;
         ;;
+    13.4|13.4.*) install_134;
+        ;;
     *) echo "bad argument $1"; exit 1
         ;;
     esac
+    install_cupti_headers $CUDA_CUPTI_VERSION
     shift
 done

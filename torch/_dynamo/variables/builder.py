@@ -20,6 +20,7 @@ VariableTracker instances based on their type and usage context.
 import abc
 import collections
 import contextlib
+import contextvars
 import copy
 import dataclasses
 import enum
@@ -59,6 +60,7 @@ from torch._dynamo.utils import (
     normalize_count_iter,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -73,6 +75,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     is_fake,
+    is_fake_tensor,
     maybe_get_fake_mode,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
@@ -160,6 +163,7 @@ from ..source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -218,7 +222,7 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
+from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -254,6 +258,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .memory import CUDAMemPoolVariable
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
@@ -290,6 +295,7 @@ from .sets import (
     FrozensetVariable,
     OrderedSetClassVariable,
     OrderedSetVariable,
+    SetVariable,
 )
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
@@ -319,7 +325,6 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
-    OrderedDictVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -1228,14 +1233,10 @@ class VariableBuilder:
                 )
                 return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
-                dict_vt = ConstDictVariable(
+                result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
-                    user_cls=collections.OrderedDict,
-                    mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-                return self.tx.output.side_effects.track_object_existing(value, result)
             else:
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
@@ -1577,6 +1578,17 @@ class VariableBuilder:
                 stream_proxy, value, source=self.source, user_object_index=index
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
+        elif isinstance(value, torch.cuda.MemPool):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
+            mempool_proxy = self.tx.output.create_proxy(
+                "call_function", get_external_object_by_index, (index,), {}
+            )
+            set_example_value(mempool_proxy.node, value)
+            var = CUDAMemPoolVariable(
+                mempool_proxy, value, source=self.source, user_object_index=index
+            )
+            return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
@@ -1859,6 +1871,11 @@ class VariableBuilder:
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
+            from torch.utils import _config_module
+
+            if isinstance(value, _config_module.ConfigModule):
+                self.install_guards(GuardBuilder.MODULE_MATCH)
+                return UserDefinedObjectVariable(value, source=self.source)
             self.install_guards(GuardBuilder.MODULE_MATCH)
             result = PythonModuleVariable(
                 # type: ignore[arg-type]
@@ -1885,6 +1902,14 @@ class VariableBuilder:
             ]
             genfn = LocalGeneratorFunctionVariable(VariableTracker.build(self.tx, fn))
             return genfn.call_function(self.tx, args, {})
+        elif isinstance(value, contextvars.ContextVar):
+            from .misc import ContextVarVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ContextVarVariable(
+                cv_obj=value,
+                source=self.source,
+            )
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
@@ -1917,6 +1942,7 @@ class VariableBuilder:
                 torch.utils.hooks.BackwardHook,
                 torch.nn.Parameter,
                 torch.nn.Buffer,
+                torch.backends.cuda.SDPAParams,
             ):
                 # TODO(jansel): combine this case with the one above
                 # type: ignore[attr-defined]
@@ -2136,10 +2162,13 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            is_ordered_dict = isinstance(value, collections.OrderedDict)
-            dict_vt = ConstDictVariable(
+            dict_vt_cls = (
+                OrderedDictVariable
+                if isinstance(value, collections.OrderedDict)
+                else ConstDictVariable
+            )
+            dict_vt = dict_vt_cls(
                 result,
-                user_cls=(collections.OrderedDict if is_ordered_dict else dict),
                 mutation_type=ValueMutationExisting(),
                 source=self.source,
             )
@@ -2147,12 +2176,7 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            if is_ordered_dict:
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-            else:
-                result = UserDefinedDictVariable(
-                    value, dict_vt=dict_vt, source=self.source
-                )
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -2581,13 +2605,13 @@ class VariableBuilder:
                 ],
             )
 
-        if getattr(value, "_is_fsdp_managed_module", False):
+        if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            if not getattr(value, "_fsdp_use_orig_params", False):
+            if not inspect.getattr_static(value, "_fsdp_use_orig_params", False):
                 unimplemented(
                     gb_type="FSDP with use_orig_params=False",
                     context="",
@@ -2981,6 +3005,24 @@ class VariableBuilder:
             )
 
         if (
+            isinstance(value, torch.Tensor)
+            and torch._C._functorch.peek_interpreter_stack() is None
+        ):
+            try:
+                tangent = torch.autograd.forward_ad.unpack_dual(value).tangent
+            except RuntimeError:
+                tangent = None
+            if tangent is not None:
+                unimplemented(
+                    gb_type="Attempted to wrap a dual tensor input",
+                    context="",
+                    explanation="torch.compile does not support input tensors that "
+                    "carry a forward-mode AD tangent; compiled code would silently "
+                    "drop the tangent.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        if (
             safe_has_grad(value)
             and safe_grad(value) is not None
             # type: ignore[attr-defined]
@@ -3051,7 +3093,28 @@ class VariableBuilder:
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
         )
-        if not is_dtensor:
+
+        # An AsyncCollectiveTensor (ACT) flattens to a single inner tensor whose
+        # metadata mirrors the wrapper, and the AOTAutograd runtime wrapper
+        # unwraps ACT inputs before the compiled graph. So a graph traced on an
+        # ACT is equivalent to one traced on its resolved plain Tensor. Guard on
+        # the unwrapped inner tensor (via UnwrapCollectiveTensorSource) instead
+        # of the ACT-locked type/metadata guards, so the ACT class no longer
+        # forces a recompile when the runtime value alternates between an
+        # un-awaited ACT and an awaited Tensor. Type-introspecting code stays
+        # sound because observation sites reinstall the class guard on demand
+        # (see BuiltinVariable.call_isinstance and TensorVariable.var_getattr).
+        # Caveat: ACT-only member access (e.g. w.wait()) is not a class-observation
+        # channel and does not reinstall the guard, so such code reuses the
+        # ACT-traced graph for a resolved plain Tensor. It stays numerically
+        # correct (ACT desugars ops to the inner tensor), but a compiled region
+        # can succeed where eager would raise AttributeError on the plain Tensor;
+        # that only bites user code already broken in eager on the resolved input.
+        is_polymorphic_act = not is_dtensor and is_async_collective_tensor_type(
+            type(value)
+        )
+
+        if not is_dtensor and not is_polymorphic_act:
             # We guard on the _local_tensor and the _spec, and therefore we don't
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -3103,6 +3166,11 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+            elif is_polymorphic_act:
+                # Guard only on the unwrapped inner tensor (inner_source below).
+                # Installing no type/metadata guard on the ACT wrapper is what
+                # lets the resolved plain Tensor reuse this cache entry.
+                pass
             else:
                 self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
                 self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -3111,6 +3179,16 @@ class VariableBuilder:
                 )
 
             attrs, _ = value.__tensor_flatten__()
+            if is_polymorphic_act and attrs != ["elem"]:
+                # The unwrap accessor below assumes ACT's single inner tensor.
+                # Unreachable today (ACT always flattens to ["elem"]); if that
+                # ever changes we fail hard rather than misguard -- the wrapper's
+                # type/metadata guards were already skipped above, so there is no
+                # safe fallback left at this point.
+                raise RuntimeError(
+                    f"Expected AsyncCollectiveTensor to flatten to ['elem'], "
+                    f"got {attrs}"
+                )
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 # FakeScriptObject wraps the real opaque object during
@@ -3130,7 +3208,13 @@ class VariableBuilder:
                         "Only tensors and reference-type opaques are allowed "
                         "in tensor attrs."
                     )
-                inner_source = AttrSource(self.source, attr)
+                if is_polymorphic_act:
+                    # ACT flattens to the single attr "elem"; guard it through
+                    # an unwrap accessor so a plain Tensor at runtime (the
+                    # resolved collective) matches the same guard.
+                    inner_source = UnwrapCollectiveTensorSource(self.source)
+                else:
+                    inner_source = AttrSource(self.source, attr)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )
@@ -3631,7 +3715,7 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
-            isinstance(value, FakeTensor)
+            is_fake_tensor(value)
             or (
                 # Is functional tensor fakeified by this instance of Dynamo
                 torch._is_functional_tensor(value)
@@ -4205,8 +4289,8 @@ def get_specialized_props(
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
+        is_fake_tensor(example_value)
+        and maybe_get_fake_mode(example_value) is tx.fake_mode
     ):
         if subclass_type:
             tensor_type = subclass_type
@@ -4871,7 +4955,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if (
             source is not None
-            and isinstance(fake_e, FakeTensor)
+            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             and (sym_val := fake_e.item_memo) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
@@ -5166,7 +5250,6 @@ class SourcelessBuilder:
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
-            type(value),
             mutation_type=ValueMutationNew(),
         )
         handlers[list] = lambda tx, value: ListVariable(
@@ -5178,7 +5261,11 @@ class SourcelessBuilder:
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
         )
-        handlers[collections.OrderedDict] = handlers[dict]
+        handlers[collections.OrderedDict] = lambda tx, value: OrderedDictVariable(
+            {create(tx, k): create(tx, v) for k, v in value.items()},
+            mutation_type=ValueMutationNew(),
+        )
+        # immutable_dict is a dict subclass; represent it as a plain dict VT.
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
         # Sourceless MappingProxyType object can be encountered while tracing
@@ -5186,7 +5273,6 @@ class SourcelessBuilder:
         handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
             ConstDictVariable(
                 {create(tx, k): create(tx, v) for k, v in value.items()},
-                dict,
                 mutation_type=ValueMutationNew(),
             ),
         )

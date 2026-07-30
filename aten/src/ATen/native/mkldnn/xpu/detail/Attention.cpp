@@ -102,14 +102,14 @@ struct SDPALogicalParams {
       // [batch_size, num_head_q / num_head_kv, num_head_kv, seq_len_q,
       // head_dim_qk]. Please refer to
       // https://uxlfoundation.github.io/oneDNN/dev_guide_graph_gqa.html#gqa-pattern
-      reshaped_query = query_.view(
+      reshaped_query = reshaped_query.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
-      reshaped_key = key_.unsqueeze(2);
-      reshaped_value = value_.unsqueeze(2);
-      reshaped_attention = attention_.view(
+      reshaped_key = reshaped_key.unsqueeze(2);
+      reshaped_value = reshaped_value.unsqueeze(2);
+      reshaped_attention = reshaped_attention.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_v});
       if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
-        reshaped_attn_mask = attn_mask_.value().unsqueeze(2);
+        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
       }
     }
 
