@@ -72,33 +72,97 @@ def _layouts_serveable(ins) -> bool:
     return all(K._row_gap_view(t) in gaps for t in ins)
 
 
+def _is_wrapped_scalar(t) -> bool:
+    # A 0-d CPU tensor standing in for a python number, as produced by the registry's
+    # _scalar_arg_coercer for `x * 2.0`. Its dtype is already aten's weak-promotion
+    # result, so it needs no dtype fixup -- only a device transfer.
+    return isinstance(t, torch.Tensor) and t.dim() == 0 and t.device.type == "cpu"
+
+
+def _localize_scalars(ins):
+    # Move coerced-number operands onto the tensor operands' device. Cheap (a 4/8-byte
+    # H2D of a 0-d tensor) and done once per call, before the kernel wraps operands.
+    dev = next((t.device for t in ins if not _is_wrapped_scalar(t)), None)
+    if dev is None:
+        return ins
+    return tuple(t.to(dev) if _is_wrapped_scalar(t) else t for t in ins)
+
+
 def _supported(t, dtypes) -> bool:
     # COW is not gated: inputs export read-only (launch._ro / ReadOnlyTensorWrapper),
     # so a COW input flows through the kernel without materializing.
+    #
+    # A NEG or CONJ bit must decline. The bit is lazy metadata, not data: the buffer
+    # holds unnegated/unconjugated values, so reading it through dlpack would silently
+    # compute on the wrong sign. Worse, it cannot be resolved here -- aten materializes
+    # a neg/conj view BY CALLING copy_, which our own copy_ override intercepts, so
+    # resolving in the cond recurses until the stack blows (a plain torch.sin on a
+    # _neg_view() input hit RecursionError). Declining lets aten resolve it normally.
     return (
         isinstance(t, torch.Tensor)
         and t.dtype in dtypes
         and _layout_ok(t)
         and t.numel() > 0
+        and not t.is_neg()
+        and not t.is_conj()
         and not cap.is_traced(t)
     )
 
 
-def _scalars(row: PointwiseDef, args, kwargs):
+def _scalars(row: PointwiseDef, args, kwargs, compute=None):
     # Resolve the row's named scalar args, which the caller may pass either
     # positionally (after the nin tensors) or by keyword (e.g. torch.add(x, y,
     # alpha=2)). Missing -> the row's aten default (row.scalar_defaults, aligned with
     # row.scalars; unset -> 1, the add/sub-alpha convention). Tuple in row.scalars order.
+    #
+    # OPTIONAL scalars (row.optional_scalars) may be omitted or passed as None
+    # independently, and their fill-in comes from row.optional_defaults[name](compute)
+    # because it depends on the compute dtype (an omitted nan_to_num posinf is that
+    # dtype's max, an omitted clamp bound its infinity). `compute` is None while the
+    # cond runs (promotion is not resolved yet); an optional slot then reports None,
+    # which the cond only needs for its is-it-complex check.
     pos = args[row.nin :]
     out = []
     for i, name in enumerate(row.scalars):
-        if name in kwargs:
+        if name in kwargs and kwargs[name] is not None:
             out.append(kwargs[name])
-        elif i < len(pos):
+            continue
+        if i < len(pos) and pos[i] is not None:
             out.append(pos[i])
-        else:
-            out.append(row.scalar_defaults[i] if row.scalar_defaults else 1)
+            continue
+        if name in row.optional_scalars:
+            fill = (row.optional_defaults or {}).get(name)
+            out.append(fill(compute) if (fill and compute is not None) else None)
+            continue
+        out.append(row.scalar_defaults[i] if row.scalar_defaults else 1)
     return tuple(out)
+
+
+def _mode_of(row: PointwiseDef, args, kwargs):
+    # The row's mode-kwarg VALUE for this call (gelu's approximate, div's
+    # rounding_mode). aten allows it positionally too, after the tensors and any
+    # numeric scalars, so fall back to scanning the positional tail for a str/None.
+    if row.mode_kwarg in kwargs:
+        return kwargs[row.mode_kwarg]
+    tail = args[row.nin + len(row.scalars) :]
+    return tail[0] if tail else None
+
+
+def _mode_fn_and_promotion(row: PointwiseDef, args, kwargs, int_compute=False):
+    # (fn name, promotion kind) for a mode-selected row, or (None, None) if the mode
+    # is one aten accepts but we do not serve -- the cond then declines and aten runs
+    # (or raises for a genuinely invalid mode). int_compute picks the mode's integer
+    # variant (mode_int_fns) where the integer math differs.
+    mode = _mode_of(row, args, kwargs)
+    fns = row.mode_fns or {}
+    if mode not in fns:
+        return None, None
+    promo = (row.mode_promotion or {}).get(mode, row.promotion)
+    if int_compute:
+        fn = (row.mode_int_fns or {}).get(mode, fns[mode])
+    else:
+        fn = fns[mode]
+    return fn, promo
 
 
 # (promotion kind, input dtypes) -> (compute dtype, functional result dtype). Memoized
@@ -109,13 +173,16 @@ def _scalars(row: PointwiseDef, args, kwargs):
 _promo_cache: dict = {}
 
 
-def _result_dtypes(row: PointwiseDef, in_dtypes):
-    got = _promo_cache.get((row.promotion, in_dtypes))
+def _result_dtypes(row: PointwiseDef, in_dtypes, promotion=None):
+    # promotion overrides row.promotion for mode-selected rows (div's rounding_mode
+    # changes the rule: None is true division -> INT_TO_FLOAT, floor/trunc -> DEFAULT).
+    promotion = row.promotion if promotion is None else promotion
+    got = _promo_cache.get((promotion, in_dtypes))
     if got is None:
         probes = [torch.empty(0, dtype=d, device="cuda") for d in in_dtypes]
-        compute, result = elementwise_dtypes(*probes, type_promotion_kind=row.promotion)
+        compute, result = elementwise_dtypes(*probes, type_promotion_kind=promotion)
         got = (compute, result)
-        _promo_cache[(row.promotion, in_dtypes)] = got
+        _promo_cache[(promotion, in_dtypes)] = got
     return got
 
 
@@ -159,7 +226,18 @@ def _make_cond(row: PointwiseDef, variant):
             return False
         if any(isinstance(s, complex) for s in _scalars(row, args, kwargs)):
             return False
-        if any(t.device != ins[0].device for t in ins[1:]):
+        promotion = None
+        if row.mode_kwarg is not None:
+            fn_name, promotion = _mode_fn_and_promotion(row, args, kwargs)
+            if fn_name is None:
+                return False  # mode we do not serve (or invalid) -> aten
+        # A 0-d CPU operand is aten's coerced python number (registry's
+        # _scalar_arg_coercer wraps x*2.0's 2.0 at the weak-promotion dtype); the impl
+        # moves it onto the device. A dim>0 CPU tensor is a genuine cross-device call
+        # and still declines.
+        if any(
+            t.device != ins[0].device and not _is_wrapped_scalar(t) for t in ins[1:]
+        ):
             return False
         if not _layouts_serveable(ins):
             return False  # gapped operand set the rowvec path can't serve -> aten
@@ -169,15 +247,26 @@ def _make_cond(row: PointwiseDef, variant):
             return False  # incompatible -> aten raises the precise size-mismatch error
         tgt = _out_tensor(variant, row, args, kwargs)
         if variant.out_from != "alloc":
+            # 16-byte alignment is required of the TARGET as well as the inputs: the
+            # vec/rowvec wraps promise assumed_align=16 and from_dlpack VALIDATES it
+            # ("Misaligned Tensor data on mOuts[0]"). _build_plan compiles against a
+            # freshly allocated (always aligned) seed output and CACHES the plan, so a
+            # later call reusing that plan with a misaligned out=/self view would raise
+            # at launch. A view into a base is easily misaligned (base[1:] on fp64 is
+            # 8 B in), so gate it here rather than in the kernel's path picker, which
+            # never sees the caller's target.
             if not (
                 isinstance(tgt, torch.Tensor)
                 and tgt.is_contiguous()
                 and tgt.device == ins[0].device
+                and K._is_16b_aligned(tgt)
                 and not cap.is_traced(tgt)
             ):
                 return False
             # Safe-cast gate: promotion result must fit the target dtype (else aten raises).
-            _, result_dtype = _result_dtypes(row, tuple(t.dtype for t in ins))
+            _, result_dtype = _result_dtypes(
+                row, tuple(t.dtype for t in ins), promotion
+            )
             if not torch.can_cast(result_dtype, tgt.dtype):
                 return False
         if variant.shape_rule == "eq_self":
@@ -189,34 +278,45 @@ def _make_cond(row: PointwiseDef, variant):
 
 
 def _make_impl(row: PointwiseDef, variant):
-    def _promo(in_dtypes):
+    def _promo(in_dtypes, promotion=None):
         # compute + functional output dtypes for this input-dtype tuple, off the shared
         # _result_dtypes memo. out_dtypes applies the row's escape hatch (e.g. frexp ->
         # [float, int32]); the common case is [result] * nout.
-        compute, result = _result_dtypes(row, in_dtypes)
+        compute, result = _result_dtypes(row, in_dtypes, promotion)
         out_dtypes = row.out_dtypes(result) if row.out_dtypes else [result] * row.nout
         return _L.torch2cute[compute], compute, tuple(out_dtypes)
 
-    def _run_into(targets, ins, scalars, in_dtypes):
+    def _run_into(targets, ins, scalars, in_dtypes, fn_override=None, promotion=None):
         # THE canonical kernel (mirrors aten's structured .out kernel): compute row.fn
         # over the broadcast of `ins` and write into `targets`, casting each element to
         # the TARGET tensor's own dtype. Every variant funnels through here -- they
         # differ ONLY in how `targets` is chosen (below). out_dtypes = the targets'
         # dtypes (NOT the promotion result): .out keeps the out= tensor's dtype and
         # in-place keeps self's, both of which aten casts the compute result into.
-        ct, compute, _ = _promo(in_dtypes)
+        ct, compute, _ = _promo(in_dtypes, promotion)
         consts = tuple(ct(s) for s in scalars)
         out_dtypes = tuple(t.dtype for t in targets)
         # Layout + out dtype are baked into the compiled kernel -> in the cache key.
         # Variant is NOT keyed: two variants with the same operand layout and target
         # dtype compile the identical kernel (the target tensor is a runtime arg), so
         # they correctly share one plan.
+        # 16-byte alignment must be part of the key, not just of path selection: two
+        # calls with identical shape/stride can differ in alignment (base[0:16] vs
+        # base[1:17].view(...)), and the vec/rowvec paths the aligned call picks bake
+        # assumed_align=16. Without this, the misaligned call reuses the aligned plan
+        # and from_dlpack raises "Misaligned Tensor data on mIns[0]" at launch. The
+        # TARGETS are keyed too (mOuts[0] in that message): _build_plan compiles against
+        # a freshly allocated, always-aligned seed output, so only the caller's .out /
+        # in-place tensor can be misaligned, and it arrives as a runtime arg.
+        aligned = tuple(K._is_16b_aligned(t) for t in (*ins, *targets))
         key = (
             row.aten,
             in_dtypes,
             tuple((t.shape, t.stride()) for t in ins),
             out_dtypes,
             scalars,
+            fn_override,  # mode-selected fn (gelu tanh vs erf, div floor vs trunc)
+            aligned,
         )
         # int_fn: the Int-compute variant of the math for ops whose integer semantics
         # differ from float (fmod/remainder/floor_divide -- truncating int division vs
@@ -224,7 +324,7 @@ def _make_impl(row: PointwiseDef, variant):
         fn_name = (
             row.int_fn
             if row.int_fn is not None and not compute.is_floating_point
-            else row.fn
+            else (fn_override or row.fn)
         )
         K.run(
             ops.get_fn(fn_name),
@@ -239,7 +339,7 @@ def _make_impl(row: PointwiseDef, variant):
             out=targets,
         )
 
-    def _targets(args, kwargs, ins, in_dtypes):
+    def _targets(args, kwargs, ins, in_dtypes, promotion=None):
         # Choose the tensors _run_into writes to, per variant.out_from (DATA):
         #   alloc  (functional): fresh contiguous tensors of the PROMOTION out dtypes,
         #                        broadcast shape.
@@ -248,7 +348,7 @@ def _make_impl(row: PointwiseDef, variant):
         #   self   (in-place): operand 0 (its shape already == broadcast shape via cond).
         bshape = torch.broadcast_shapes(*(t.shape for t in ins))
         if variant.out_from == "alloc":
-            _, _, promo_out = _promo(in_dtypes)
+            _, _, promo_out = _promo(in_dtypes, promotion)
             return [
                 torch.empty(bshape, device=ins[0].device, dtype=d) for d in promo_out
             ]
@@ -276,11 +376,27 @@ def _make_impl(row: PointwiseDef, variant):
         return [args[0]]  # self
 
     def impl(*args, **kwargs):
-        ins = list(args[: row.nin])
+        ins = _localize_scalars(args[: row.nin])
         in_dtypes = tuple(t.dtype for t in ins)
-        scalars = _scalars(row, args, kwargs)
-        targets = _targets(args, kwargs, ins, in_dtypes)
-        _run_into(targets, ins, scalars, in_dtypes)
+        # Mode rows pick their fn (and possibly promotion) from a string kwarg; the
+        # cond already verified the mode is one we serve.
+        fn_override, promotion = (
+            _mode_fn_and_promotion(row, args, kwargs)
+            if row.mode_kwarg is not None
+            else (None, None)
+        )
+        # Optional scalars fill in from the RESULT dtype, so resolve promotion first.
+        # Result, not compute: aten saturates nan_to_num at the OUTPUT dtype's finite
+        # max (fp16 -> 65504), while compute for a half input is fp32, whose max would
+        # overflow back to inf on the store.
+        compute, result = _result_dtypes(row, in_dtypes, promotion)
+        if row.mode_kwarg is not None and not compute.is_floating_point:
+            fn_override, promotion = _mode_fn_and_promotion(
+                row, args, kwargs, int_compute=True
+            )
+        scalars = _scalars(row, args, kwargs, result)
+        targets = _targets(args, kwargs, ins, in_dtypes, promotion)
+        _run_into(targets, ins, scalars, in_dtypes, fn_override, promotion)
         return targets[0] if row.nout == 1 else tuple(targets)
 
     return impl
@@ -386,6 +502,9 @@ def _run_conversion(aten_name, src, target):
     # f32->int8 share (src, layout, target-int8) but need different fn/compute --
     # without these fields the two would collide on one cached plan (a real bug:
     # the full-matrix sweep caught f32->bool serving f32->int8's identity kernel).
+    # Alignment is in the key for the same reason as in _run_into: identical shape and
+    # stride can still differ in 16-byte alignment, and the vec/rowvec wraps this path
+    # picks bake assumed_align=16 (a narrow()/slice source is easily 8 B in).
     key = (
         aten_name,
         (src.dtype,),
@@ -394,6 +513,7 @@ def _run_conversion(aten_name, src, target):
         (),
         compute,
         to_bool,
+        (K._is_16b_aligned(src), K._is_16b_aligned(target)),
     )
     K.run(
         ops.get_fn("_to_bool" if to_bool else "_identity"),
@@ -450,7 +570,19 @@ def _copy_cond(self, src, non_blocking=False):
         return False
     if not (_conv_serveable(src, self.dtype) and self.is_contiguous()):
         return False
-    if cap.is_traced(self):
+    # The DESTINATION must be 16-byte aligned too: the conversion kernel compiles
+    # against a wrap that promises assumed_align=16 and from_dlpack validates it
+    # ("Misaligned Tensor data on mOuts[0]"), and unlike _to_copy -- which allocates its
+    # own always-aligned output -- copy_ writes into whatever view the caller passed.
+    if cap.is_traced(self) or self.is_neg() or self.is_conj():
+        return False
+    if not K._is_16b_aligned(self):
+        return False
+    # An EMPTY destination is a no-op for aten but a zero-element grid for us
+    # (cudaErrorInvalidConfiguration, or an invalid cute layout when the shape has a 0
+    # extent). _conv_serveable only rejects an empty SOURCE, and copy_ broadcasts, so a
+    # 1-element src into a (0, 2) dst reaches here with a perfectly valid source.
+    if self.numel() == 0:
         return False
     try:
         bshape = torch.broadcast_shapes(self.shape, src.shape)

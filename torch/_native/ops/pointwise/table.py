@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import NamedTuple, TYPE_CHECKING
 
 import torch
@@ -84,6 +85,32 @@ class PointwiseDef(NamedTuple):
     # cond runs, so it cannot be declined in Python -- the overload must not be
     # registered at all. Functional and in-place still are.
     skip_out_variant: bool = False
+    # OPTIONAL scalars: names in `scalars` that aten declares `Scalar?`/`float?` and the
+    # caller may omit INDEPENDENTLY (clamp's min/max, nan_to_num's nan/posinf/neginf).
+    # Distinct from scalar_defaults, which is a fixed value per slot: an optional
+    # scalar's fill-in can depend on the COMPUTE DTYPE, so it is a callable
+    # `(compute_torch_dtype) -> value` in `optional_defaults` instead. Verified against
+    # aten: an omitted nan_to_num posinf is numeric_limits<dtype>::max() (fp16 65504,
+    # fp32 3.4e38, fp64 1.8e308), and an omitted clamp bound is the corresponding
+    # infinity, so the one NaN-propagating formula covers every arity.
+    optional_scalars: tuple[str, ...] = ()
+    optional_defaults: dict | None = None
+    # Select the ops.py fn by a STRING kwarg rather than by dtype (int_fn's axis).
+    # aten spells two distinct kernels as one overload plus a mode string: gelu's
+    # `approximate` in {"none","tanh"} and div's `rounding_mode` in {None,"floor",
+    # "trunc"}. Maps kwarg VALUE -> fn name; the kwarg's own name is `mode_kwarg`.
+    # A value absent from the map declines (aten validates it and raises).
+    mode_kwarg: str | None = None
+    mode_fns: dict | None = None
+    # Per-mode promotion override, for ops whose mode changes the type-promotion rule:
+    # div(rounding_mode=None) is true division (INT_TO_FLOAT) while the floor/trunc
+    # modes keep integers integral (DEFAULT). Maps mode value -> PromotionKind; unset
+    # modes use `promotion`.
+    mode_promotion: dict | None = None
+    # int_fn's per-mode counterpart: the Int-compute fn for a mode whose integer math
+    # differs from its float math (div floor/trunc -- the DSL's `//` floors, and
+    # cute.math.floor rejects Int). Maps mode value -> fn name; falls back to mode_fns.
+    mode_int_fns: dict | None = None
 
 
 _DEFAULT = PromotionKind.DEFAULT
@@ -95,6 +122,15 @@ _BOOL = PromotionKind.ALWAYS_BOOL
 # arithmetic is excluded (aten's neg(bool) even raises), so we stay on the two integer
 # widths the kernel + launch glue already support.
 _INT_DTYPES = (torch.int32, torch.int64)
+
+
+def _lowest(dt):
+    # An omitted clamp lower bound: -inf for float, the type minimum for int.
+    return -math.inf if dt.is_floating_point else torch.iinfo(dt).min
+
+
+def _highest(dt):
+    return math.inf if dt.is_floating_point else torch.iinfo(dt).max
 
 
 class PointwiseVariant(NamedTuple):
@@ -314,6 +350,83 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         # extraction (deferred). fp64 falls back to aten.
         dtypes=(torch.float16, torch.bfloat16, torch.float32),
     ),
+    # --- trivial additions (math in ops.py; semantics verified against aten) ---
+    # sgn on REAL input is bit-identical to sign (aten routes real sgn to sign_stub and
+    # only special-cases complex), so it reuses the existing fn -- no new math.
+    PointwiseDef("sgn", 1, "_sign", int_dtypes=_INT_DTYPES),
+    PointwiseDef("angle", 1, "_angle", promotion=_INT2FLOAT),
+    PointwiseDef("isposinf", 1, "_isposinf", promotion=_BOOL),
+    PointwiseDef("isneginf", 1, "_isneginf", promotion=_BOOL),
+    # aten's sinc also accepts complex (we have no DSL complex), so pin the served
+    # dtypes to the float set + ints-via-float rather than inheriting the default.
+    PointwiseDef("sinc", 1, "_sinc", promotion=_INT2FLOAT, int_via_float=True),
+    PointwiseDef("heaviside", 2, "_heaviside", int_dtypes=_INT_DTYPES),
+    PointwiseDef("logaddexp2", 2, "_logaddexp2"),
+    PointwiseDef("special_entr", 1, "_entr", promotion=_INT2FLOAT),
+    PointwiseDef("special_xlog1py", 2, "_xlog1py", int_via_float=True),
+    PointwiseDef("hardswish", 1, "_hardswish"),
+    # aten's default negative_slope is 0.01: without scalar_defaults a defaulted call
+    # would bake 1 and compute plain identity.
+    PointwiseDef(
+        "leaky_relu",
+        1,
+        "_leaky_relu",
+        scalars=("negative_slope",),
+        scalar_defaults=(0.01,),
+    ),
+    # aten REJECTS integer addcdiv ("Integer division with addcdiv is no longer
+    # supported"), so this must NOT opt into int inputs -- int_via_float would serve
+    # what aten errors on. Float-only, unlike its addcmul twin.
+    PointwiseDef("addcdiv", 3, "_addcdiv", scalars=("value",)),
+    # --- easy tier: mode-selected fn / optional scalars (new PointwiseDef fields) ---
+    # gelu is ONE aten overload wrapping TWO kernels, chosen by a string kwarg.
+    PointwiseDef(
+        "gelu",
+        1,
+        "_gelu_erf",  # the mode map supplies the real fn; this is the "none" default
+        mode_kwarg="approximate",
+        mode_fns={None: "_gelu_erf", "none": "_gelu_erf", "tanh": "_gelu_tanh"},
+    ),
+    # div's rounding_mode selects the fn AND changes promotion: None is true division
+    # (int -> float), floor/trunc keep integers integral. All three fns already exist.
+    PointwiseDef(
+        "div.Tensor_mode",
+        2,
+        "_div",
+        mode_kwarg="rounding_mode",
+        mode_fns={None: "_div", "floor": "_floor_divide", "trunc": "_div_trunc"},
+        mode_int_fns={"floor": "_floor_divide_int", "trunc": "_div_trunc_int"},
+        mode_promotion={None: _INT2FLOAT, "floor": _DEFAULT, "trunc": _DEFAULT},
+        int_dtypes=_INT_DTYPES,
+    ),
+    # clamp: BOTH bounds optional and independently omittable. An omitted bound fills
+    # with the matching infinity, so the one NaN-propagating formula covers every arity.
+    PointwiseDef(
+        "clamp",
+        1,
+        "_clamp",
+        scalars=("min", "max"),
+        optional_scalars=("min", "max"),
+        optional_defaults={"min": _lowest, "max": _highest},
+        int_dtypes=_INT_DTYPES,
+    ),
+    # nan_to_num: three optional floats whose defaults are DTYPE-dependent (an omitted
+    # posinf is that dtype's finite max -- fp16 65504, fp32 3.4e38), which fixed
+    # scalar_defaults cannot express.
+    PointwiseDef(
+        "nan_to_num",
+        1,
+        "_nan_to_num",
+        scalars=("nan", "posinf", "neginf"),
+        optional_scalars=("nan", "posinf", "neginf"),
+        optional_defaults={
+            "nan": lambda dt: 0.0,
+            "posinf": lambda dt: torch.finfo(dt).max,
+            "neginf": lambda dt: -torch.finfo(dt).max,
+        },
+    ),
+    PointwiseDef("lerp.Scalar", 2, "_lerp", scalars=("weight",)),
+    PointwiseDef("lerp.Tensor", 3, "_lerp"),
 )
 
 

@@ -13,6 +13,7 @@
 # fallback), that the capability `cond` declines unsupported inputs and lets aten
 # serve them, and that the kernels capture into CUDA graphs.
 
+import math
 import unittest
 
 import torch
@@ -193,6 +194,53 @@ class TestCuTeDSLReductionWiring(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
 
+    def test_scalar_operand_is_served(self):
+        # aten's unboxed parser turns `x * 2.0` into mul.Tensor(Tensor, Scalar) and
+        # dispatches THAT overload -- the number never reaches aten::mul.Scalar. The
+        # router now coerces the number to a 0-d tensor BEFORE the cond (it used to do
+        # so only on the fallback path), and the cond treats a 0-d CPU operand as that
+        # coerced number, so scalar calls are served instead of always declining.
+        from torch._native.ops.pointwise import kernel as K
+
+        def fired(fn):
+            # Count real kernel launches -- plan-cache growth is not a liveness signal
+            # once the cache is warm from an earlier identical call.
+            orig, n = K.run, [0]
+
+            def counting(*a, **k):
+                n[0] += 1
+                return orig(*a, **k)
+
+            K.run = counting
+            try:
+                fn()
+            finally:
+                K.run = orig
+            return n[0]
+
+        x = torch.randn(1024, device="cuda")
+        for fn in (
+            lambda: x * 2.0,
+            lambda: x + 2.0,
+            lambda: x - 2.0,
+            lambda: x / 2.0,
+            lambda: torch.fmod(x, 2.0),
+        ):
+            got = fn()
+            with _disabled():
+                ref = fn()
+            self.assertEqual(got, ref)
+            self.assertEqual(fired(fn), 1, "scalar call should route to our kernel")
+        # WEAK promotion must survive: a python number never widens the tensor dtype.
+        b = torch.randn(64, device="cuda", dtype=torch.bfloat16)
+        self.assertEqual((b * 2.0).dtype, torch.bfloat16)
+        i = torch.randint(0, 9, (64,), device="cuda", dtype=torch.int32)
+        self.assertEqual((i * 2).dtype, torch.int32)  # int stays int
+        self.assertEqual((i + 0.5).dtype, torch.float32)  # float promotes the category
+        # A dim>0 CPU tensor is a genuine cross-device call, not a scalar -> aten raises.
+        with self.assertRaises(RuntimeError):
+            x + torch.randn(1024)
+
     def test_pow_scalar_base_on_cuda(self):
         # REGRESSION: aten's pow_Scalar_out builds a wrapped_scalar_tensor on the
         # EXPONENT's device and redispatches to pow_out (Pow.cpp), so a CUDA
@@ -224,6 +272,144 @@ class TestCuTeDSLReductionWiring(TestCase):
                 torch.sum(x, dim=1), x.double().sum(dim=1).float(), atol=1e-3, rtol=1e-3
             )
             torch.linalg.vector_norm(x, 2, dim=1)  # same reduce path, must not raise
+
+    def test_strided_single_element_view_is_served(self):
+        # REGRESSION: is_contiguous() is True for ANY single-element tensor whatever its
+        # stride (with one element the stride is unobservable -- every stride addresses
+        # the same element), so a.diagonal(offset=2) on (5,3) is a contiguous shape-(1,)
+        # tensor that still declares stride (4,). The DSL compares the declared stride
+        # against stride_order and rejected it ("The stride_order is not consistent with
+        # the layout") -- a hard error on an ordinary sum, not a fallback. The wrap now
+        # restrides such a tensor to the canonical form, so these are SERVED (declining
+        # would give up coverage for a difference that cannot be observed).
+        a = torch.randn(5, 3, device="cuda", dtype=torch.float64)
+        d = a.diagonal(offset=2)
+        self.assertEqual(d.shape, torch.Size([1]))
+        self.assertNotEqual(d.stride(), (1,))  # the leftover stride is the whole point
+        for fn in (lambda z: z.sum(), lambda z: z.mean()):
+            with _disabled():
+                ref = fn(d)
+            self.assertEqual(fn(d), ref)
+
+    def test_misaligned_and_lazy_metadata_inputs_decline(self):
+        # Two cond gates that cannot be expressed as numerics:
+        #   - A base pointer that is not 16-byte aligned: the row/col/xcta wraps claim an
+        #     N-derived alignment that from_dlpack VALIDATES, and the compiled kernel
+        #     BAKES its load width, so a plan built for an aligned call cannot serve a
+        #     misaligned one (clamping the claim per call is not enough). Raised
+        #     "Misaligned Tensor data" mid-call on an ordinary sum over a slice.
+        #   - A NEG/CONJ bit: lazy metadata, so the exported buffer holds the UNNEGATED
+        #     values. It must not be resolved in a cond either, since aten materializes
+        #     such a view by CALLING copy_ -- any override of copy_ is then re-entered.
+        base = torch.arange(4096, device="cuda", dtype=torch.float64) + 1
+        for off in (0, 1, 2, 3):
+            t = base[off : off + 512].view(256, 2)
+            for fn in (
+                lambda z: z.sum(dim=0),
+                lambda z: z.sum(dim=1),
+                lambda z: z.sum(),
+            ):
+                with _disabled():
+                    ref = fn(t)
+                self.assertEqual(fn(t), ref, f"off={off}")
+        n = torch.randn(64, device="cuda", dtype=torch.float64)._neg_view()
+        self.assertTrue(n.is_neg())
+        for fn in (lambda z: z.sum(dim=0), lambda z: z.sum(), lambda z: z.mean()):
+            with _disabled():
+                ref = fn(n)
+            self.assertEqual(fn(n), ref)
+
+    def test_large_scalar_arg_compiles_and_is_not_baked(self):
+        # REGRESSION: the DSL mangles every non-IR jit argument's VALUE into the
+        # generated MLIR symbol name. Python's repr switches to exponent form at 1e16
+        # ("1e+16") and the mangler does not strip "+", so the symbol was unparsable
+        # and the compile died with an ICE ("expected '('"). That made any op taking a
+        # large scalar fail -- including nan_to_num's DEFAULT posinf, which is the
+        # dtype's finite max (3.4e38 for fp32, 1.8e308 for fp64). The kernel takes the
+        # scalar as a runtime arg, so it now compiles against a placeholder value.
+        from torch._native.ops.pointwise import kernel as K
+
+        x = torch.randn(1024, device="cuda")
+        for v in (1e16, 1e20, 3.4e38, -1e20, 1e-20, 2.5):
+            got = torch.nn.functional.leaky_relu(x, negative_slope=v)
+            with _disabled():
+                ref = torch.nn.functional.leaky_relu(x, negative_slope=v)
+            self.assertEqual(got, ref)
+        # Scalars are runtime args, so many distinct VALUES must share one compile.
+        n = len(K._KERNELS)
+        for v in (3.0, 4.0, 5.0, 1e17, 1e18):
+            torch.nn.functional.leaky_relu(x, negative_slope=v)
+        self.assertEqual(len(K._KERNELS), n, "scalar value must not key the kernel")
+        # nan_to_num's omitted bounds saturate at the OUTPUT dtype's max, not the fp32
+        # compute dtype's (fp16 -> 65504); a wrong fill overflows back to inf.
+        vals = [float("nan"), float("inf"), float("-inf"), 1.5]
+        sp = torch.tensor(vals, device="cuda")
+        for dt in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            t = sp.to(dt)
+            with _disabled():
+                ref = torch.nan_to_num(t)
+            self.assertEqual(torch.nan_to_num(t), ref)
+
+    def test_misaligned_view_shares_no_plan_with_aligned(self):
+        # REGRESSION: the plan cache keyed on (shape, stride) but NOT on 16-byte
+        # alignment, so base[0:16] and base[1:17].view(16, 2) -- same shape AND stride,
+        # different alignment -- shared one plan. The aligned call picks the vec path,
+        # which bakes assumed_align=16, so the misaligned call reusing that plan died in
+        # from_dlpack with "Misaligned Tensor data on mIns[0]". Alignment is now part of
+        # the key, and an out=/in-place target is alignment-gated in the cond too (the
+        # kernel compiles against a fresh, always-aligned seed output).
+        for dt in (torch.float64, torch.float32, torch.float16, torch.int32):
+            base = torch.arange(4096, device="cuda").to(dt) + 1
+            for off in (0, 1, 2, 4, 7, 8):
+                for shape in ((512,), (256, 2), (64, 8)):
+                    n = math.prod(shape)
+                    t = base[off : off + n].view(shape)
+                    for fn in (lambda z: z * z, lambda z: -z, torch.sigmoid):
+                        with _disabled():
+                            ref = fn(t)
+                        self.assertEqual(fn(t), ref, f"{dt} off={off} shape={shape}")
+
+    def test_empty_copy_destination_falls_back(self):
+        # REGRESSION: copy_ BROADCASTS src up to self, so a 1-element source into an
+        # EMPTY destination reached the kernel with a perfectly valid source (the
+        # conversion gate only rejects an empty SOURCE). aten treats that as a no-op; for
+        # us it is a zero-element grid -> "CUDA Error: cudaErrorInvalidConfiguration", or
+        # an invalid cute layout when a shape extent is 0. Reached in practice via
+        # linalg.matrix_power(torch.empty(0, 2, 2), 0), which fills an identity.
+        dst = torch.empty(0, 2, device="cuda", dtype=torch.float64)
+        dst.copy_(torch.ones(1, device="cuda", dtype=torch.float64))  # must not raise
+        e = torch.empty(0, 2, 2, device="cuda", dtype=torch.float64)
+        with _disabled():
+            ref = torch.linalg.matrix_power(e, 0)
+        self.assertEqual(torch.linalg.matrix_power(e, 0), ref)
+
+    def test_pointwise_neg_and_conj_views_decline(self):
+        # REGRESSION: a neg/conj bit is LAZY metadata -- the buffer holds the UNNEGATED
+        # values -- and aten materializes such a view BY CALLING copy_, which THIS
+        # commit's copy_ override intercepts. Resolving it inside a cond therefore
+        # recursed until the stack blew: a plain torch.sin on a _neg_view() input raised
+        # RecursionError (also relu, mul, clone, and every reduction, since they all
+        # funnel through the same copy_). Declining lets aten resolve the bit.
+        x = torch.randn(64, device="cuda", dtype=torch.float64)
+        n = x._neg_view()
+        self.assertTrue(n.is_neg())
+        for fn in (
+            torch.sin,
+            torch.relu,
+            torch.nan_to_num,
+            lambda t: t * 2.0,
+            lambda t: torch.clamp(t, -1.0, 1.0),
+            lambda t: t.clone(),
+            lambda t: t.float(),
+        ):
+            with _disabled():
+                ref = fn(n)
+            self.assertEqual(fn(n), ref)  # must not raise RecursionError
+        # A conj view of a complex tensor is likewise declined rather than misread.
+        c = torch.randn(64, device="cuda", dtype=torch.complex64).conj()
+        with _disabled():
+            ref = torch.real(c)
+        self.assertEqual(torch.real(c), ref)
 
 
 if __name__ == "__main__":
