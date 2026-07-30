@@ -1280,6 +1280,8 @@ extra_meta_t KinetoEvent::extraMeta() const {
   return out;
 }
 
+// Collective metadata is stored on TorchOp results, while native Kineto event
+// metadata is captured from the activity's typed visitor.
 const typed_metadata_t& KinetoEvent::typedMetadata() const {
   const auto* metadata = result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::TorchOp>& e) {
