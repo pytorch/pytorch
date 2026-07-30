@@ -336,7 +336,8 @@ def _check_method_arity(
 _METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
 
 
-@functools.cache
+# Not memoized: a type-keyed cache keeps locally-defined classes (and whatever
+# their methods close over) alive, leaking memory. Recompute instead.
 def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
     """Arity convention for `python_type.name`, read from its CPython
     PyMethodDef.ml_flags. Falls back to VARARGS|KEYWORDS when python_type has no
@@ -614,7 +615,7 @@ def _fill(group: SlotGroup, masks: tuple[int, int, int, int]) -> dict[str, Any]:
     }
 
 
-@functools.cache
+# Not memoized (see _flags_from_ml_flags): avoids retaining types.
 def _tp_type(obj_type: type) -> PyTypeObject:
     # obj_type's whole slot table (PyTypeObject-like).  Independent of _tp_dict's
     # cross-group collapse, so a type with both sq_length and mp_length shows up in

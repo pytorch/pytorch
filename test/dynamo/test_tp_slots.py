@@ -355,5 +355,36 @@ class TestTypeHasDict(TestCase):
         self.assertTrue(type_has_dict(BaseException))
 
 
+class TestTypeCacheRetention(TestCase):
+    """Type-keyed caches in the object protocol must not strongly retain the
+    type. A strong ref keeps a locally-defined class alive, and with it
+    anything the class's methods close over (tensors, modules, parameters) --
+    a memory leak (see test_misc.test_parameter_free / _outside_linear_module_free).
+    """
+
+    def _retains_type(self, populate):
+        import gc
+        import weakref
+
+        class Local:
+            pass
+
+        ref = weakref.ref(Local)
+        populate(Local)
+        del Local
+        gc.collect()
+        return ref() is not None
+
+    def test_tp_type_no_type_retention(self):
+        from torch._dynamo.variables.base import _tp_type
+
+        self.assertFalse(self._retains_type(_tp_type))
+
+    def test_flags_from_ml_flags_no_type_retention(self):
+        from torch._dynamo.variables.base import _flags_from_ml_flags
+
+        self.assertFalse(self._retains_type(lambda t: _flags_from_ml_flags(t, "foo")))
+
+
 if __name__ == "__main__":
     run_tests()
