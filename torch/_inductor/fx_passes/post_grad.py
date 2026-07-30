@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -739,6 +740,17 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 additional_inputs,
             ) = pytree.tree_unflatten(args, tree_spec)
             scan_length = xs[0].size(0)
+            if scan_length == 0:
+                empty_ys = [
+                    torch.empty(
+                        [0] + list(ys_out.shape[1:]),
+                        dtype=ys_out.dtype,
+                        device=ys_out.device,
+                    )
+                    for ys_out in ys_outputs
+                ]
+                return list(init) + empty_ys
+
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
             # NOTE [Pre-allocate scan's output buffer]
@@ -1830,6 +1842,8 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
     mat1, mat2 = match.args
     inp_val = inp.meta["val"]
     mat1_val = mat1.meta["val"]
@@ -1853,6 +1867,8 @@ def should_prefer_unfused_addmm(match):
 def should_prefer_unfused_baddbmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
+        return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
         return False
 
     output = match.output_node()
@@ -1953,6 +1969,12 @@ def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, be
 
 
 def is_valid_addmm_fusion(match):
+    if any(
+        node.target is aten.mm.default and node.meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP)
+        for node in match.nodes
+    ):
+        return False
+
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
