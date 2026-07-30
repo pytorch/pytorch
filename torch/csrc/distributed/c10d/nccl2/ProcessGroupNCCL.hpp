@@ -208,8 +208,20 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsCoalescing() const override {
     return true;
   }
+  bool supportsSplitting() const override {
+    return true;
+  }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
+
+  // Create a child backend over `ranks` (a subset of this group's ranks) via
+  // ncclCommSplit. Collective over the parent communicator: every parent rank
+  // must call it (members with their color, non-members with
+  // NCCL_SPLIT_NOCOLOR) in the same order. Non-members get an empty pointer.
+  c10::intrusive_ptr<::c10d::Backend> split(
+      const c10::intrusive_ptr<::c10d::Store>& store,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<::c10d::Backend::Options>& opts) override;
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
@@ -365,6 +377,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void init(at::Device device);
   void finalize();
   void initNcclResources();
+  // Adopt a communicator created by ncclCommSplit and bring this backend to the
+  // INITIALIZED state, sharing the parent's NcclApi (port of TorchCommNCCL's
+  // split() child construction).
+  void initFromSplitComm(
+      ncclComm_t comm,
+      at::Device device,
+      std::shared_ptr<NcclApi> nccl_api);
 
   // Internal NCCL engine helpers (port of TorchCommNCCL). These take c10d
   // option fields directly (c10d::ReduceOp + resolved timeout/root/async),
