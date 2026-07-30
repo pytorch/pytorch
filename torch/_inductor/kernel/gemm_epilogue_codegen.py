@@ -146,19 +146,6 @@ class GemmEpilogueIRCodegen:
             )
         return self.input_values[name]
 
-    @staticmethod
-    def args_kwargs(args: tuple[Any, ...]) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        if (
-            args
-            and isinstance(args[-1], tuple)
-            and all(
-                isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str)
-                for item in args[-1]
-            )
-        ):
-            return args[:-1], dict(args[-1])
-        return args, {}
-
     def lower(self, value: Any) -> Any:
         if not isinstance(value, GemmEpilogueIRExpression):
             if isinstance(value, tuple):
@@ -173,9 +160,8 @@ class GemmEpilogueIRCodegen:
             raise NotImplementedError(
                 f"CuTeDSL GEMM epilogue does not support {value.op}"
             )
-        args, kwargs = self.args_kwargs(value.args)
-        lowered_args = tuple(self.lower(arg) for arg in args)
-        lowered_kwargs = {key: self.lower(arg) for key, arg in kwargs.items()}
+        lowered_args = tuple(self.lower(arg) for arg in value.args)
+        lowered_kwargs = {key: self.lower(arg) for key, arg in value.kwargs}
         op = getattr(GemmEpilogueCuteDSLOpOverrides, value.op, None)
         if op is None:
             raise NotImplementedError(
