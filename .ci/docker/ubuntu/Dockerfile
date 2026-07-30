@@ -186,6 +186,14 @@ RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
 RUN rm install_openblas.sh
 ENV INSTALLED_OPENBLAS=${OPENBLAS}
 
+# Install Rust toolchain (needed to build the torch._rust extension).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh

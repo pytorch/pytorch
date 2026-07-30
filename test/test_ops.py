@@ -25,9 +25,10 @@ from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
-    onlyAccelerator,
     onlyCPU,
+    onlyCUDA,
     onlyNativeDeviceTypesAnd,
+    onlyOn,
     OpDTypes,
     ops,
     skip,
@@ -66,7 +67,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     set_default_dtype,
-    skipIfMPS,
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
@@ -238,21 +238,21 @@ class TestCommon(TestCase):
                 raise AssertionError(err_msg)
 
     # Validates that each OpInfo works correctly on different CUDA devices
-    @onlyAccelerator
+    @onlyOn(["cuda", "xpu"])
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
     def test_multiple_devices(self, devices, dtype, op):
-        for device_str in devices:
-            device = torch.device(device_str)
+        for cuda_device_str in devices:
+            cuda_device = torch.device(cuda_device_str)
             # NOTE: only tests on first sample
-            samples = op.sample_inputs(device, dtype)
+            samples = op.sample_inputs(cuda_device, dtype)
             sample = first_sample(self, samples)
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             if isinstance(result, torch.Tensor):
-                self.assertTrue(result.device == device)
+                self.assertTrue(result.device == cuda_device)
             elif is_iterable_of_tensors(result):
-                self.assertTrue(all(t.device == device for t in result))
+                self.assertTrue(all(t.device == cuda_device for t in result))
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
@@ -484,8 +484,7 @@ class TestCommon(TestCase):
                 )
 
     # Tests that the cpu and gpu results are consistent
-    @onlyAccelerator
-    @skipIfMPS
+    @onlyOn(["cuda", "xpu"])
     @suppress_warnings
     @skipCUDAIfNotRocm
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
@@ -499,7 +498,7 @@ class TestCommon(TestCase):
 
         for sample in samples:
             cpu_sample = sample.transform(to_cpu)
-            device_results = op(sample.input, *sample.args, **sample.kwargs)
+            cuda_results = op(sample.input, *sample.args, **sample.kwargs)
             cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
             # output_process_fn_grad has a very unfortunate name
@@ -507,14 +506,14 @@ class TestCommon(TestCase):
             # that are not completely well-defined. Think svd and multiplying the singular vectors by -1.
             # CPU and CUDA implementations of the SVD can return valid SVDs that are different.
             # We use this function to compare them.
-            device_results = sample.output_process_fn_grad(device_results)
+            cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
             atol = None if torch.xpu.is_available() else 0
             rtol = None if torch.xpu.is_available() else 0
             if dtype.is_floating_point or dtype.is_complex:
                 atol, rtol = 1e-3, 1e-3
-            self.assertEqual(device_results, cpu_results, atol=atol, rtol=rtol)
+            self.assertEqual(cuda_results, cpu_results, atol=atol, rtol=rtol)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
@@ -751,7 +750,7 @@ class TestCommon(TestCase):
             )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @onlyAccelerator
+    @onlyCUDA
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
@@ -2488,6 +2487,7 @@ class _TestTagsMode(TorchDispatchMode):
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
+    @onlyCPU
     @skipOps(
         {
             skip("sparse.sampled_addmm"),
@@ -3070,19 +3070,17 @@ class TestFakeTensor(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
-    @onlyAccelerator
+    @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(fake_backward_xfails | {skip("sparse.sampled_addmm")})
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @onlyAccelerator
+    @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
-        self._test_fake_crossref_helper(
-            device, dtype, op, partial(torch.amp.autocast, device_type=device)
-        )
+        self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
     @ops([op for op in ops_and_refs if op.is_factory_function])
     def test_strided_layout(self, device, dtype, op):
@@ -3142,7 +3140,7 @@ instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensor, globals())
-instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
+instantiate_device_type_tests(TestTags, globals())
 instantiate_device_type_tests(TestForwardADWithScalars, globals())
 
 if __name__ == "__main__":
