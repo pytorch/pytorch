@@ -603,10 +603,6 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
 
         class FakeSizeVars:
             @staticmethod
-            def replace_backed_symbols_with_hints(expr):
-                return expr
-
-            @staticmethod
             def statically_known_equals(expr, val):
                 return expr == val
 
