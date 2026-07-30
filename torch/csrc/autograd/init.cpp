@@ -336,9 +336,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
       .def("typed_metadata", [](const KinetoEvent& e) {
-        std::unordered_map<std::string, py::object> metadata;
+        py::dict metadata;
         for (const auto& [key, value] : e.typedMetadata()) {
-          metadata.emplace(key, torch::jit::toPyObject(value));
+          metadata[py::str(key)] = torch::jit::toPyObject(value);
         }
         return metadata;
       })

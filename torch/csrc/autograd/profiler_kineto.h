@@ -74,7 +74,7 @@ struct TORCH_API KinetoEvent {
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
   extra_meta_t extraMeta() const;
-  typed_metadata_t typedMetadata() const;
+  const typed_metadata_t& typedMetadata() const;
   std::string metadataJson() const;
 
   const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()

@@ -1280,17 +1280,17 @@ extra_meta_t KinetoEvent::extraMeta() const {
   return out;
 }
 
-typed_metadata_t KinetoEvent::typedMetadata() const {
-  typed_metadata_t out;
-  result_->visit(c10::overloaded(
-      [&](const ExtraFields<EventType::TorchOp>& e) {
-        out = e.typed_metadata_;
+const typed_metadata_t& KinetoEvent::typedMetadata() const {
+  const auto* metadata = result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) {
+        return &e.collective_meta_;
       },
-      [&](const ExtraFields<EventType::Kineto>& e) {
-        out = e.typed_metadata_;
+      [](const ExtraFields<EventType::Kineto>& e) {
+        return &e.typed_metadata_;
       },
-      [](const auto&) {}));
-  return out;
+      [](const auto&) -> const typed_metadata_t* { return nullptr; }));
+  static const typed_metadata_t empty;
+  return metadata ? *metadata : empty;
 }
 
 TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)

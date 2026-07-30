@@ -1318,19 +1318,11 @@ class TransferEvents {
               [&](ExtraFields<EventType::Kineto>& i) {
                 i.metadata_json_ = metadata_json;
                 i.extra_meta_ = metadataFromJson(metadata_json);
+                IValueMetadataVisitor visitor;
+                activity->visitTypedMetadata(visitor);
+                i.typed_metadata_ = visitor.metadata();
               },
               [](auto&) { return; }));
-          IValueMetadataVisitor visitor;
-          activity->visitTypedMetadata(visitor);
-          auto typed_metadata = visitor.metadata();
-          e->visit(c10::overloaded(
-              [&](ExtraFields<EventType::TorchOp>& i) {
-                i.typed_metadata_ = std::move(typed_metadata);
-              },
-              [&](ExtraFields<EventType::Kineto>& i) {
-                i.typed_metadata_ = std::move(typed_metadata);
-              },
-              [](auto&) {}));
         }
         const auto* linked_activity = activity->linkedActivity();
         if (linked_activity) {

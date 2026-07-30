@@ -203,7 +203,6 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
   std::string metadata_json_;
-  typed_metadata_t typed_metadata_;
   Flow flow;
 };
 
