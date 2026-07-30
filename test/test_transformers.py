@@ -3929,23 +3929,30 @@ class TestSDPACudaOnly(NNTestCase):
         make_tensor = partial(torch.randn, device=device, dtype=dtype, requires_grad=True)
         shape = SdpaShape(batch, num_heads, seq_len, head_dim)
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
-        # one logical mask, expressed in both dtypes with identical values and strides
         mask = torch.randn(batch, 1, seq_len, seq_len, device=device, dtype=dtype)
-        other = mask.float() if mask_dtype is torch.float32 else mask
-        self.assertEqual(mask.stride(), other.stride())
+        if mask_dtype is None:
+            masks = (mask,)   # control: the matched-dtype path must stay correct
+        else:
+            # the same logical mask in the other dtype, with identical sizes and strides, so
+            # before the dtype entered the key these two shared one cached plan. Alternate them
+            # so both orders are exercised regardless of the order pytest runs the variants in.
+            other = mask.to(mask_dtype)
+            self.assertEqual(mask.stride(), other.stride())
+            masks = (mask, other, mask, other)
 
         atol, rtol = (5e-3, 5e-3) if dtype == torch.float16 else (2e-2, 2e-2)
         with sdpa_kernel(SDPBackend.MATH):
             ref = F.scaled_dot_product_attention(query, key, value, attn_mask=mask)
 
-        # alternate the dtypes so the cached plan is exercised in both orders, independently of
-        # the order pytest happens to run the parametrized variants in
-        for m in (mask, other, mask, other):
+        for m in masks:
             with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
                 out = F.scaled_dot_product_attention(query, key, value, attn_mask=m)
             self.assertTrue(out.isfinite().all(), f"non-finite output for a {m.dtype} mask")
             self.assertEqual(out, ref, atol=atol, rtol=rtol, msg=f"wrong result for a {m.dtype} mask")
 
+        # autograd.grad is intentionally outside the sdpa_kernel context: the backward op is fixed
+        # by the autograd node recorded during the forward, so it still dispatches to
+        # _scaled_dot_product_cudnn_attention_backward.
         grad_out = torch.randn_like(out)
         grads = torch.autograd.grad(out, (query, key, value), grad_out)
         grads_ref = torch.autograd.grad(ref, (query, key, value), grad_out)

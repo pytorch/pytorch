@@ -231,7 +231,7 @@ int roundup_power2(int dim) {
 // query (validate_sdpa_input allows float or query.dtype; bool masks are
 // converted to query.dtype before we get here), so the bias cannot inherit the
 // graph-wide io data type.
-fe::DataType_t bias_data_type(const Tensor& attn_bias) {
+static fe::DataType_t bias_data_type(const Tensor& attn_bias) {
   switch (attn_bias.scalar_type()) {
     case kHalf:
       return fe::DataType_t::HALF;
