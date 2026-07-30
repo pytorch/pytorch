@@ -468,6 +468,67 @@ def _count_nonzero_cond(self, dim):
     return _base_cond(self, dim)
 
 
+# --- Group D: two-output VALUE reductions (both outputs float, input dtype).
+# var_mean / std_mean (Welford -> (var|std, mean)) and aminmax (-> (min, max)).
+# Same reduce_dim2 path as max.dim/min.dim but both outputs are values, not an
+# index, so they cast to the input dtype rather than int64. ---
+
+
+def _run_dim2_vals(make_trait, key, self, dim, keepdim):
+    # Two FLOAT-output reduction. dim None -> reduce-all (scalar pair); else reduce
+    # that axis set. reduce_dim2 takes dims=None directly for reduce-all. Both
+    # outputs cast to the input dtype.
+    acc, kout = _acc_policy()[self.dtype]
+    red = _normalize_dims(dim, self.dim())
+    dims = None if red is None else sorted(red)
+    o0, o1 = kg.reduce_dim2(make_trait(acc), key, self, dims, [kout, kout])
+    o0 = _keepdim_reshape(o0, self.shape, red, keepdim).to(self.dtype)
+    o1 = _keepdim_reshape(o1, self.shape, red, keepdim).to(self.dtype)
+    return o0, o1
+
+
+def _var_mean_impl(self, dim=None, *, correction=None, keepdim=False):
+    c = _correction(correction)
+    return _run_dim2_vals(
+        lambda acc: T.VarMeanOps(correction=c, acc=acc),
+        f"varmean{c}",
+        self,
+        dim,
+        keepdim,
+    )
+
+
+def _std_mean_impl(self, dim=None, *, correction=None, keepdim=False):
+    c = _correction(correction)
+    return _run_dim2_vals(
+        lambda acc: T.VarMeanOps(correction=c, take_sqrt=True, acc=acc),
+        f"stdmean{c}",
+        self,
+        dim,
+        keepdim,
+    )
+
+
+def _aminmax_impl(self, *, dim=None, keepdim=False):
+    return _run_dim2_vals(
+        lambda acc: T.AMinMaxOps(acc=acc), "aminmax", self, dim, keepdim
+    )
+
+
+def _var_mean_cond(self, dim=None, *, correction=None, keepdim=False):
+    return _base_cond(self, dim, nouts=2)
+
+
+def _std_mean_cond(self, dim=None, *, correction=None, keepdim=False):
+    return _base_cond(self, dim, nouts=2)
+
+
+def _aminmax_cond(self, *, dim=None, keepdim=False):
+    # aminmax with dim=None reduces ALL dims to a scalar pair; _dims_ok handles
+    # None (reduce-all) and declines scalars / bad dims.
+    return _base_cond(self, dim, nouts=2)
+
+
 def register_reduction_overrides() -> None:
     # CUDA overrides; cu.register_op_override short-circuits when the CuteDSL
     # runtime is unavailable, so this is safe to call unconditionally at import.
@@ -519,4 +580,22 @@ def register_reduction_overrides() -> None:
         "CUDA",
         cond=_count_nonzero_cond,
         impl=_count_nonzero_impl,
+    )
+    # Group D: var_mean / std_mean (correction) and aminmax -- two float outputs.
+    cu.register_op_override(
+        "aten",
+        "var_mean.correction",
+        "CUDA",
+        cond=_var_mean_cond,
+        impl=_var_mean_impl,
+    )
+    cu.register_op_override(
+        "aten",
+        "std_mean.correction",
+        "CUDA",
+        cond=_std_mean_cond,
+        impl=_std_mean_impl,
+    )
+    cu.register_op_override(
+        "aten", "aminmax", "CUDA", cond=_aminmax_cond, impl=_aminmax_impl
     )
