@@ -19365,7 +19365,24 @@ class TestExportFlexAttention(TestCase):
         self.assertEqual(exported_out, eager_out)
 
 
-DEVICE_EXPORT_TEST_CLASSES = (
+# Split out of TestExport for device-agnostic coverage. Wrapper suites
+# (strict/serdes/retrace/...) only clone TestExport; they must also mock +
+# instantiate these via this list, or those cases silently drop.
+# instantiate_device_type_tests deletes test_* from the class it instantiates,
+# so keep pristine clones here for the wrappers and instantiate the originals.
+def _clone_export_device_test_class(cls):
+    return type(
+        cls.__name__,
+        cls.__bases__,
+        {
+            k: v
+            for k, v in cls.__dict__.items()
+            if k not in ("__dict__", "__weakref__")
+        },
+    )
+
+
+_DEVICE_EXPORT_TEST_SPECS = (
     (TestExportFlexAttention, {}),
     (TestExportAccelerator, {"except_for": "cpu"}),
     (TestExportRNN, {"except_for": "cpu"}),
@@ -19374,9 +19391,16 @@ DEVICE_EXPORT_TEST_CLASSES = (
     (TestExportAutocastException, {"except_for": "cpu"}),
 )
 
-for _cls, _kwargs in DEVICE_EXPORT_TEST_CLASSES:
+DEVICE_EXPORT_TEST_CLASSES = tuple(
+    (_clone_export_device_test_class(cls), kwargs)
+    for cls, kwargs in _DEVICE_EXPORT_TEST_SPECS
+)
+
+for _cls, _kwargs in _DEVICE_EXPORT_TEST_SPECS:
     instantiate_device_type_tests(_cls, globals(), **_kwargs)
 del _cls, _kwargs
+del _DEVICE_EXPORT_TEST_SPECS
+del _clone_export_device_test_class
 
 
 if __name__ == "__main__":
