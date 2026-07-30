@@ -4034,28 +4034,29 @@ class SIMDScheduling(BaseScheduling):
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
                     continue
-                no_bench_mode = (
-                    per_subkernel_blocks
-                    and not enable_autotune
-                    and not only_gen_src_code
-                )
+                no_bench_mode = per_subkernel_blocks and not enable_autotune
                 fusion_pns: list[Any] = []
                 fusion_configs: list[Any] = []
                 carve_out_pns: list[Any] = []
                 if no_bench_mode:
-                    for pn in node_group:
-                        configs, probe_kernel = self._probe_subkernel_heuristic(
-                            node_schedule_map[pn]
-                        )
-                        if torch.version.hip or torch.xpu.is_available():
-                            fuse_ok = configs and not probe_kernel.autotune_hints
-                        else:
-                            fuse_ok = configs and len(configs) <= 2
-                        if fuse_ok:
-                            fusion_pns.append(pn)
-                            fusion_configs.append(configs[0])
-                        else:
-                            carve_out_pns.append(pn)
+                    old_kernel_count = metrics.generated_kernel_count
+                    try:
+                        for pn in node_group:
+                            configs, probe_kernel = self._probe_subkernel_heuristic(
+                                node_schedule_map[pn]
+                            )
+                            if torch.version.hip or torch.xpu.is_available():
+                                fuse_ok = configs and not probe_kernel.autotune_hints
+                            else:
+                                fuse_ok = configs and len(configs) <= 2
+                            if fuse_ok:
+                                fusion_pns.append(pn)
+                                fusion_configs.append(configs[0])
+                            else:
+                                carve_out_pns.append(pn)
+                    finally:
+                        if only_gen_src_code:
+                            metrics.generated_kernel_count = old_kernel_count
                     if len(fusion_pns) < 2:
                         fusion_pns = []
                         fusion_configs = []
