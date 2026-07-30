@@ -964,6 +964,16 @@ bool Context::allowFP16ReductionCPU() const {
   return allow_fp16_reduction_cpu;
 }
 
+bool Context::allowNativeAot() const {
+  // Relaxed: an independent on/off flag consulted per op call; no data
+  // is published under it (the stub registration has its own fences).
+  return allow_native_aot.load(std::memory_order_relaxed);
+}
+
+void Context::setAllowNativeAot(bool b) {
+  allow_native_aot.store(b, std::memory_order_relaxed);
+}
+
 void Context::setAllowFP16ReductionCPU(bool b) {
   if ( b && !allow_fp16_reduction_cpu) {
     // Check that CPU supports fp16 reductions
