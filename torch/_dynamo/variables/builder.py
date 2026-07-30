@@ -18,6 +18,7 @@ VariableTracker instances based on their type and usage context.
 """
 
 import abc
+import builtins
 import collections
 import contextlib
 import contextvars
@@ -222,7 +223,7 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable, OrderedItemsDictVariable
+from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -282,6 +283,11 @@ from .misc import (
     TypingVariable,
     WeakRefVariable,
 )
+
+
+if sys.version_info >= (3, 15):
+    from .misc import SentinelVariable
+
 from .nn_module import (
     FSDPManagedNNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
@@ -325,7 +331,6 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
-    OrderedDictVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -1234,13 +1239,10 @@ class VariableBuilder:
                 )
                 return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
-                dict_vt = OrderedItemsDictVariable(
+                result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
-                    mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-                return self.tx.output.side_effects.track_object_existing(value, result)
             else:
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
@@ -2003,7 +2005,7 @@ class VariableBuilder:
             # and source chains through C-level descriptors break guard
             # evaluation.
             mod = getattr(value, "__module__", None) or ""
-            if not mod.startswith(("torch.", "torch_")):
+            if mod != "torch" and not mod.startswith(("torch.", "torch_")):
                 if value not in self.tx.output.side_effects:
                     return self.tx.output.side_effects.track_object_existing(
                         value, result
@@ -2166,9 +2168,10 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            is_ordered_dict = isinstance(value, collections.OrderedDict)
             dict_vt_cls = (
-                OrderedItemsDictVariable if is_ordered_dict else ConstDictVariable
+                OrderedDictVariable
+                if isinstance(value, collections.OrderedDict)
+                else ConstDictVariable
             )
             dict_vt = dict_vt_cls(
                 result,
@@ -2179,12 +2182,7 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            if is_ordered_dict:
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-            else:
-                result = UserDefinedDictVariable(
-                    value, dict_vt=dict_vt, source=self.source
-                )
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -2344,6 +2342,12 @@ class VariableBuilder:
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return ObjectVariable(value, source=self.source)
+        elif (
+            sys.version_info >= (3, 15)
+            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
+        ):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return SentinelVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -5227,6 +5231,11 @@ class SourcelessBuilder:
             return UnspecializedNNModuleVariable(value)
         elif istype(value, object):
             return ObjectVariable(value)
+        elif (
+            sys.version_info >= (3, 15)
+            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
+        ):
+            return SentinelVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
@@ -5269,7 +5278,7 @@ class SourcelessBuilder:
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
         )
-        handlers[collections.OrderedDict] = lambda tx, value: OrderedItemsDictVariable(
+        handlers[collections.OrderedDict] = lambda tx, value: OrderedDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
             mutation_type=ValueMutationNew(),
         )
