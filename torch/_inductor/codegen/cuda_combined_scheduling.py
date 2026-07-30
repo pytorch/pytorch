@@ -110,6 +110,11 @@ class CUDACombinedScheduling(BaseScheduling):
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        if any(
+            self._nv_universal_gemm_scheduling.has_bool_output(node)
+            for node in (node1, node2)
+        ):
+            return False
         for node in (node1, node2):
             if self._cutlass_scheduling.is_cutlass_template(node):
                 return self._cutlass_scheduling.can_fuse_horizontal(
@@ -141,6 +146,21 @@ class CUDACombinedScheduling(BaseScheduling):
                 node1, node2
             )
         return False
+
+    def can_fuse_reduction_chain(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return self._nv_universal_gemm_scheduling.can_fuse_reduction_chain(node1, node2)
+
+    def get_fusion_pair_priority(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        priority = self._nv_universal_gemm_scheduling.get_fusion_pair_priority(
+            node1, node2
+        )
+        if priority < 2:
+            return priority
+        return self._triton_scheduling.get_fusion_pair_priority(node1, node2) + 2
 
     def group_fn(
         self, sizes: Sequence[Sequence[_IntLike]]
