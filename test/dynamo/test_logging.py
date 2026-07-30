@@ -1060,6 +1060,18 @@ Mutating object of type dict (source name: L['mod']._buffers)
 
         self.assertTrue(found_funcname)
 
+    def test_flex_gemm_log_levels(self):
+        from torch._logging._internal import _parse_log_settings
+
+        log_name = "torch._inductor.kernel.flex_gemm.debug"
+        concise = _parse_log_settings("flex_gemm")
+        verbose = _parse_log_settings("+flex_gemm")
+
+        self.assertEqual(concise.log_qname_to_level[log_name], logging.INFO)
+        self.assertEqual(verbose.log_qname_to_level[log_name], logging.DEBUG)
+        self.assertEqual(concise.artifact_names, set())
+        self.assertEqual(verbose.artifact_names, set())
+
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
