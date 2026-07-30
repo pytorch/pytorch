@@ -935,6 +935,34 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
+    def test_grouped_reduction_checks_all_reductions(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        unrelated = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("x", 0, None))),
+        )
+        source = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
+        )
+        store = GemmEpilogueIRStore(0, Expr("add", (unrelated, source)))
+        self.assertEqual(
+            grouped_reduction_ir(store, "gemm", 4, torch.float32),
+            ("sum", "identity"),
+        )
+
+    def test_epilogue_ir_preserves_empty_tuple_argument(self):
+        from torch._inductor.kernel.gemm_epilogue_ir import GemmEpilogueIRExpression
+
+        expression = GemmEpilogueIRExpression("reshape", ("value", ()))
+        self.assertEqual(expression.args, ("value", ()))
+        self.assertEqual(expression.kwargs, ())
+
     def test_local_reduce_cache_specialization(self):
         import dataclasses
 
@@ -997,8 +1025,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
         expression = GemmReductionDescriptor.parse("mean_linear:1:2:3")
         self.assertEqual(expression.serialize(), "mean_linear:1:2:3")
-        with self.assertRaisesRegex(ValueError, "expects 3"):
-            GemmReductionDescriptor.parse("mean_linear:1:2")
+        expression = GemmReductionDescriptor.parse("custom_reduction:1:2")
+        self.assertEqual(expression.serialize(), "custom_reduction:1:2")
 
     def test_reduction_pattern_near_misses(self):
         from torch._inductor.kernel.gemm_epilogue_ir import (
@@ -2261,6 +2289,46 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
         self.assertIn("out_ptr2", code)
+
+    def test_scaled_mm_large_epilogue_fusion(self):
+        m, n, k = self.M, self.N, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        biases = tuple(
+            torch.randn(n, device="cuda", dtype=torch.bfloat16) for _ in range(5)
+        )
+
+        def fn(a, b, scale_a, scale_b, *biases):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            values = tuple(result + bias for bias in biases)
+            return result, *values
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b, *biases
+        )
+        self.assertEqual(result, fn(a, b, scale_a, scale_b, *biases))
+        self.assertTrue(epilogue_fused)
+        for index in range(1, 6):
+            self.assertIn(f"out_ptr{index}", code)
 
     def test_scaled_mm_dynamic_epilogue_fusion(self):
         m, n, k = 128, 128, 512
