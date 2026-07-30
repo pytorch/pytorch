@@ -13069,6 +13069,19 @@ class TestSDPA(TestCaseMPS):
             attn_mask[..., 0, 0] = float("-inf")
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [80, 128])
+    @parametrize("scale", [1.0, 3.7, 0.1234567, 1e-3], name_fn=lambda s: str(s).replace(".", "p"))
+    def test_prefill_attention_scale(self, dtype, head_dim, scale):
+        # Max relative error rather than the mean _run_prefill_test uses: rounding
+        # the scale into Q in the input dtype moves a few rows a lot, and a mean
+        # washes that out well below these tolerances.
+        q, k, v = self._prefill_qkv(1, 2, 2, 128, 128, head_dim, "contiguous", dtype)
+        ref = F.scaled_dot_product_attention(q.cpu().float(), k.cpu().float(), v.cpu().float(), scale=scale)
+        got = F.scaled_dot_product_attention(q, k, v, scale=scale).cpu().float()
+        tol = {torch.float32: 5e-5, torch.float16: 2e-3, torch.bfloat16: 8e-3}[dtype]
+        self.assertLess(((got - ref).abs().max() / ref.abs().max()).item(), tol)
+
     def test_caching_scale(self):
         # TODO remove this test once sdpa_general becomes a metal kernel
         torch.manual_seed(42)
