@@ -10,7 +10,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
-#include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -2462,22 +2461,8 @@ Arguments:
 
               See :func:`torch.distributed.gather` for more details.)")
           .def(
-              "gather_single",
-              &::c10d::ProcessGroup::gather_single,
-              py::arg("output"),
-              py::arg("input"),
-              py::arg("opts") = ::c10d::GatherOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Gathers the input tensor from all processes into a single
-              output tensor on the root rank.
-
-              See :func:`torch.distributed.gather_single` for more details.)")
-          // Deprecated alias of gather_single, kept for backward
-          // compatibility. Bound to gather_single to avoid referencing the
-          // deprecated C++ method.
-          .def(
               "gather_into_tensor",
-              &::c10d::ProcessGroup::gather_single,
+              &::c10d::ProcessGroup::gather_into_tensor,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -2485,7 +2470,7 @@ Arguments:
               R"(Gathers the input tensor from all processes into a single
               output tensor on the root rank.
 
-              See :func:`torch.distributed.gather_single` for more details.)")
+              See :func:`torch.distributed.gather_into_tensor` for more details.)")
           .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
@@ -3241,18 +3226,8 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "gather_single",
-              &::c10d::Backend::gather_single,
-              py::arg("output"),
-              py::arg("input"),
-              py::arg("opts") = ::c10d::GatherOptions(),
-              py::call_guard<py::gil_scoped_release>())
-          // Deprecated alias of gather_single, kept for backward
-          // compatibility. Bound to gather_single to avoid referencing the
-          // deprecated C++ method.
-          .def(
               "gather_into_tensor",
-              &::c10d::Backend::gather_single,
+              &::c10d::Backend::gather_into_tensor,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -3597,6 +3572,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           "_set_default_timeout",
           &::c10d::ProcessGroupGloo::setTimeout,
           py::arg("timeout"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_error",
+          &::c10d::ProcessGroupGloo::getError,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
@@ -4076,7 +4055,15 @@ Returns:
           .def(
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "options",
+              [](::c10d::nccl2::ProcessGroupNCCL& self) {
+                return c10::static_intrusive_pointer_cast<
+                    ::c10d::nccl2::ProcessGroupNCCL::Options>(
+                    self.getBackendOptions());
+              },
+              R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
 
   intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
       processGroupNCCL2, "Options", backendOptions)
@@ -4087,7 +4074,19 @@ Returns:
       .def_readwrite(
           "abort_process_on_timeout_or_error",
           &::c10d::nccl2::ProcessGroupNCCL::Options::
-              abort_process_on_timeout_or_error);
+              abort_process_on_timeout_or_error)
+      .def(
+          "__copy__",
+          [](const ::c10d::nccl2::ProcessGroupNCCL::Options& self) {
+            return ::c10d::nccl2::ProcessGroupNCCL::Options(self);
+          })
+      .def(
+          "__deepcopy__",
+          [](const ::c10d::nccl2::ProcessGroupNCCL::Options& self,
+             const py::dict& memo) {
+            return ::c10d::nccl2::ProcessGroupNCCL::Options(self);
+          },
+          py::arg("memo"));
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)
@@ -4127,7 +4126,15 @@ Returns:
       .def(
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly(
+          "options",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return c10::static_intrusive_pointer_cast<
+                ::c10d::nccl2::ProcessGroupNCCL::Options>(
+                self.getBackendOptions());
+          },
+          R"(Return the options used to create this ProcessGroupNCCLLazy instance.)");
 #endif
 
 #ifdef USE_C10D_UCC
@@ -4381,15 +4388,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
               .. warning ::
                   This API only works for NCCL backend for now and must set
                   TORCH_NCCL_ENABLE_TIMING environment variable.
-            )")
-          .def(
-              "_get_sequence_number",
-              &::c10d::Work::getSequencenumber,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-              Returns:
-                  The process group collective sequence number of the
-                  corresponding collective communication.
             )")
           .def(
               "boxed",
@@ -4746,22 +4744,6 @@ with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
 backend has native FlightRecorder support. The hook detaches when remove()
 is called or the returned handle is garbage collected.)")
       .def("remove", &::c10d::FlightRecorderHook::remove);
-
-  py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
-      module, "NanCheckHook")
-      .def_static(
-          "attach",
-          &::c10d::NanCheckHook::attach,
-          py::arg("pg"),
-          R"(
-Attach a NaN check hook to a process group. Input (send) buffers of
-collectives issued through the group are checked for NaNs, regardless of
-whether the backend has a native NaN checker (ProcessGroupNCCL's
-TORCH_NCCL_NAN_CHECK). Receive buffers are not checked. On CPU a NaN raises
-a RuntimeError; on CUDA it triggers a device-side assert. The process group
-owns the hook, so the returned handle only has to be kept if the check should
-be removed again via remove().)")
-      .def("remove", &::c10d::NanCheckHook::remove);
 
   module.def(
       "_dump_fr_trace_json",
