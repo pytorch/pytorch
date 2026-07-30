@@ -3797,6 +3797,14 @@ for details.
             self.commName = strdup(tmp);
           })
 #endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+      // ncclHostCftMode_t: 1 = enable, 2 = disable, 3 = fallback (try to
+      // create the CFT logical endpoints, disable host-side CFT on error).
+      // Opt-in: NCCL leaves host-side CFT off unless this is set, since the
+      // endpoints are a limited per-device resource. Must be identical on
+      // every rank of a communicator.
+      .def_readwrite("host_cft_mode", &ncclConfig_t::hostCftMode)
+#endif
       .def(
           "unsafe_get_ptr",
           [](const ncclConfig_t& self) {
