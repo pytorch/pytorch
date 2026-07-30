@@ -9,6 +9,22 @@ namespace symmetric_memory {
 
 class NCCLPeerAllocInfo;
 
+// Host-side CFT (Compute Fabric Transport) logical-endpoint coordinates.
+// `(le_id, le_offset)` is exactly the pair that the device-side `ncclCft`
+// put/get/red family takes, so a custom kernel can address peer memory over
+// CFT without building a `ncclDevComm`. `le_offset` is a plain byte offset:
+// advancing into the buffer is just `le_offset + n`.
+//
+// A handle is only valid for the group its NCCLSymmetricMemory belongs to.
+// Every process group registers its own window over the allocation and owns a
+// separate set of logical endpoints, so rendezvousing one tensor with two
+// groups yields two unrelated handles. Nothing checks this at use time --
+// crossing them silently addresses the wrong memory.
+struct NCCLCftHandle {
+  uint32_t le_id;
+  size_t le_offset;
+};
+
 class NCCLSymmetricMemory : public SymmetricMemory {
  public:
   NCCLSymmetricMemory(c10::intrusive_ptr<NCCLPeerAllocInfo> pai, size_t offset);
@@ -44,6 +60,17 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   c10::Device get_device() override;
 
   ncclWindow_t get_window();
+
+  // CFT handle addressing `peer`'s copy of this buffer. Requires the group's
+  // communicator to have been created with `hostCftMode` enabled and the peer
+  // to be inside the flat CFT team.
+  NCCLCftHandle get_handler(int peer);
+
+  // CFT handle addressing the multicast (multimem) view of this buffer, for
+  // the `putMultimem` / `redMultimem` device ops. Unlike `get_handler`, the
+  // first call is collective over the group unless the multicast endpoint was
+  // already created at window-registration time (i.e. `hostCftMode` on).
+  NCCLCftHandle get_multimem_handler();
 
   size_t get_offset() override;
 

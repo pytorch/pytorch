@@ -4806,6 +4806,25 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.comm_name, comm_name.decode())
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 31), "Need NCCL 2.31+ for testing host_cft_mode in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_host_cft_mode(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "host_cft_mode"):
+            raise SkipTest(
+                "host_cft_mode binding absent (PyTorch might be built against NCCL < 2.31)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        # ncclHostCftFallback: create the CFT logical endpoints if possible,
+        # silently disable host-side CFT if the hardware can't.
+        pg_opts.config.host_cft_mode = 3
+        self.assertEqual(pg_opts.config.host_cft_mode, 3)
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
