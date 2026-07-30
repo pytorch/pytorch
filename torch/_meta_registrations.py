@@ -603,11 +603,8 @@ def meta_philox_key_fold_in_tensor(key, data):
         data.dtype == torch.uint64,
         lambda: f"_philox_key_fold_in: data must have dtype uint64, got {data.dtype}",
     )
-    torch._check(
-        data.numel() == 1,
-        lambda: f"_philox_key_fold_in: data must be a single value, got {data.numel()} elements",
-    )
-    return torch.empty_like(key)
+    batch_shape = _broadcast_shapes(key.shape[:-1], data.shape)
+    return key.new_empty((*batch_shape, 2))
 
 
 def _check_philox_distribution_args(op_name, self, key):
