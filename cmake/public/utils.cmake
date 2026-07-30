@@ -390,6 +390,8 @@ function(torch_compile_options libname)
       else()
         # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
         list(APPEND private_compile_options -Wno-deprecated-copy)
+        # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
+        list(APPEND private_compile_options -Wno-deprecated-literal-operator)
       endif()
       list(APPEND private_compile_options -Wmove)
     else()
