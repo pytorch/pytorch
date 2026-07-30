@@ -318,10 +318,15 @@ def summarize_xml_files(args):
     # test file level running time: ROCm and CUDA
     test_file_level_ROCm: Dict[Tuple[str], float] = {}
     test_file_level_CUDA: Dict[Tuple[str], float] = {}
+    test_file_shards_ROCm: Dict[Tuple[str], set] = {}
+    test_file_shards_CUDA: Dict[Tuple[str], set] = {}
     for (k,v) in list(test_cases_set1_running_time.items()):
           test_file_name = k[0]
           test_config_name = k[2]
           tar_tup_rocm = (test_file_name, test_config_name,)
+          test_file_shards_ROCm.setdefault(tar_tup_rocm, set())
+          if v.get("shard"):
+              test_file_shards_ROCm[tar_tup_rocm].add(v["shard"])
           if test_file_level_ROCm.get(tar_tup_rocm) == None:
               test_file_level_ROCm[ ( test_file_name, test_config_name ) ] = v["running_time_xml"]
           else:
@@ -330,6 +335,9 @@ def summarize_xml_files(args):
           test_file_name = k[0]
           test_config_name = k[2]
           tar_tup_cuda = (test_file_name, test_config_name)
+          test_file_shards_CUDA.setdefault(tar_tup_cuda, set())
+          if v.get("shard"):
+              test_file_shards_CUDA[tar_tup_cuda].add(v["shard"])
           if test_file_level_CUDA.get(tar_tup_cuda) == None:
               test_file_level_CUDA[ ( test_file_name, test_config_name ) ] = v["running_time_xml"]
           else:
@@ -615,24 +623,35 @@ def summarize_xml_files(args):
 
     # write test file running time to file
     test_file_running_time_for_csv = {}
+    set1_running_time_col = f"{set1_name}_running_time"
+    set2_running_time_col = f"{set2_name}_running_time"
+    set1_tests_run_col = f"{set1_name}_tests_run"
+    set2_tests_run_col = f"{set2_name}_tests_run"
+    set1_test_shards_col = f"{set1_name}_test_shards"
+    set2_test_shards_col = f"{set2_name}_test_shards"
+    set1_passed_col = f"{set1_name}_passed"
+    set1_skipped_col = f"{set1_name}_skipped"
+    set1_missed_col = f"{set1_name}_missed"
     for key_rocm in test_file_level_ROCm.keys():
         item_values = {}
         item_values["test_file"] = key_rocm[0]
         item_values["test_config"] = key_rocm[1]
-        item_values["rocm_running_time"] = test_file_level_ROCm[key_rocm]
-        item_values["cuda_running_time"] = 0.0
+        item_values[set1_running_time_col] = test_file_level_ROCm[key_rocm]
+        item_values[set2_running_time_col] = 0.0
         if key_rocm in test_file_level_CUDA.keys():
-            item_values["cuda_running_time"] = test_file_level_CUDA[key_rocm]
-        item_values["abs_time_diff"] = item_values["rocm_running_time"] - item_values["cuda_running_time"]
+            item_values[set2_running_time_col] = test_file_level_CUDA[key_rocm]
+        item_values["abs_time_diff"] = item_values[set1_running_time_col] - item_values[set2_running_time_col]
         item_values["relative_time_diff"] = 0.0
-        if item_values["cuda_running_time"] != 0.0:
-            item_values["relative_time_diff"] = 100 * (item_values["rocm_running_time"] - item_values["cuda_running_time"]) / item_values["cuda_running_time"]
+        if item_values[set2_running_time_col] != 0.0:
+            item_values["relative_time_diff"] = 100 * (item_values[set1_running_time_col] - item_values[set2_running_time_col]) / item_values[set2_running_time_col]
         # Add test counts
-        item_values["rocm_tests_run"] = test_file_counts_ROCm.get(key_rocm, {}).get('tests_run', 0)
-        item_values["cuda_tests_run"] = test_file_counts_CUDA.get(key_rocm, 0)
-        item_values["rocm_passed"] = test_file_counts_ROCm.get(key_rocm, {}).get('passed', 0)
-        item_values["rocm_skipped"] = test_file_counts_ROCm.get(key_rocm, {}).get('skipped', 0)
-        item_values["rocm_missed"] = test_file_counts_ROCm.get(key_rocm, {}).get('missed', 0)
+        item_values[set1_tests_run_col] = test_file_counts_ROCm.get(key_rocm, {}).get('tests_run', 0)
+        item_values[set2_tests_run_col] = test_file_counts_CUDA.get(key_rocm, 0)
+        item_values[set1_test_shards_col] = len(test_file_shards_ROCm.get(key_rocm, set()))
+        item_values[set2_test_shards_col] = len(test_file_shards_CUDA.get(key_rocm, set()))
+        item_values[set1_passed_col] = test_file_counts_ROCm.get(key_rocm, {}).get('passed', 0)
+        item_values[set1_skipped_col] = test_file_counts_ROCm.get(key_rocm, {}).get('skipped', 0)
+        item_values[set1_missed_col] = test_file_counts_ROCm.get(key_rocm, {}).get('missed', 0)
         test_file_running_time_for_csv[key_rocm] = item_values
 
     for key_cuda in test_file_level_CUDA.keys():
@@ -640,18 +659,20 @@ def summarize_xml_files(args):
             item_values = {}
             item_values["test_file"] = key_cuda[0]
             item_values["test_config"] = key_cuda[1]
-            item_values["rocm_running_time"] = 0.0
-            item_values["cuda_running_time"] = test_file_level_CUDA[key_cuda]
-            item_values["abs_time_diff"] = item_values["rocm_running_time"] - item_values["cuda_running_time"]
+            item_values[set1_running_time_col] = 0.0
+            item_values[set2_running_time_col] = test_file_level_CUDA[key_cuda]
+            item_values["abs_time_diff"] = item_values[set1_running_time_col] - item_values[set2_running_time_col]
             item_values["relative_time_diff"] = 0.0
-            if item_values["cuda_running_time"] != 0.0:
-                item_values["relative_time_diff"] = 100 * (item_values["rocm_running_time"] - item_values["cuda_running_time"]) / item_values["cuda_running_time"]
+            if item_values[set2_running_time_col] != 0.0:
+                item_values["relative_time_diff"] = 100 * (item_values[set1_running_time_col] - item_values[set2_running_time_col]) / item_values[set2_running_time_col]
             # Add test counts
-            item_values["rocm_tests_run"] = test_file_counts_ROCm.get(key_cuda, {}).get('tests_run', 0)
-            item_values["cuda_tests_run"] = test_file_counts_CUDA.get(key_cuda, 0)
-            item_values["rocm_passed"] = test_file_counts_ROCm.get(key_cuda, {}).get('passed', 0)
-            item_values["rocm_skipped"] = test_file_counts_ROCm.get(key_cuda, {}).get('skipped', 0)
-            item_values["rocm_missed"] = test_file_counts_ROCm.get(key_cuda, {}).get('missed', 0)
+            item_values[set1_tests_run_col] = test_file_counts_ROCm.get(key_cuda, {}).get('tests_run', 0)
+            item_values[set2_tests_run_col] = test_file_counts_CUDA.get(key_cuda, 0)
+            item_values[set1_test_shards_col] = len(test_file_shards_ROCm.get(key_cuda, set()))
+            item_values[set2_test_shards_col] = len(test_file_shards_CUDA.get(key_cuda, set()))
+            item_values[set1_passed_col] = test_file_counts_ROCm.get(key_cuda, {}).get('passed', 0)
+            item_values[set1_skipped_col] = test_file_counts_ROCm.get(key_cuda, {}).get('skipped', 0)
+            item_values[set1_missed_col] = test_file_counts_ROCm.get(key_cuda, {}).get('missed', 0)
             test_file_running_time_for_csv[key_cuda] = item_values
 
     test_file_running_time_for_csv = dict(sorted(test_file_running_time_for_csv.items()))
@@ -661,24 +682,28 @@ def summarize_xml_files(args):
           return 0
         elif e == "test_config":
           return 1
-        elif e == "rocm_running_time":
+        elif e == set1_running_time_col:
           return 2
-        elif e == "cuda_running_time":
+        elif e == set2_running_time_col:
           return 3
         elif e == "abs_time_diff":
           return 4
         elif e == "relative_time_diff":
           return 5
-        elif e == "rocm_tests_run":
+        elif e == set1_tests_run_col:
           return 6
-        elif e == "cuda_tests_run":
+        elif e == set2_tests_run_col:
           return 7
-        elif e == "rocm_passed":
+        elif e == set1_test_shards_col:
           return 8
-        elif e == "rocm_skipped":
+        elif e == set2_test_shards_col:
           return 9
-        elif e == "rocm_missed":
+        elif e == set1_passed_col:
           return 10
+        elif e == set1_skipped_col:
+          return 11
+        elif e == set1_missed_col:
+          return 12
         else:
           return 100
 
@@ -690,20 +715,25 @@ def summarize_xml_files(args):
          writer.writerows(test_file_running_time_for_csv.values())
 
     # print summary
+    # User-facing labels follow the same set1/set2 naming as the CSV columns
+    # (set1_name/set2_name default to rocm/cuda, or are commit SHAs in
+    # commit-vs-commit mode) so the printed summary stays consistent with them.
+    set1_disp = set1_name.upper()
+    set2_disp = set2_name.upper()
     print( " " )
     print( "_____________________________________" )
     print( "Test-results" )
     print( " " )
     print( "=====Single GPU Number=====" )
-    print( "SKIPPED_DEFAULT, MISSED_DEFAULT, ROCMONLY_DEFAULT, CUDA_DEFAULT, ROCM_DEFAULT" )
+    print( f"SKIPPED_DEFAULT, MISSED_DEFAULT, {set1_disp}ONLY_DEFAULT, {set2_disp}_DEFAULT, {set1_disp}_DEFAULT" )
     print( str(SKIPPED_DEFAULT) + ", " + str(MISSED_DEFAULT) + ", " + str(ROCMONLY_DEFAULT) + ", " + str(CUDA_DEFAULT) + ", " + str(ROCM_DEFAULT) )
     print( " " )
     print( "=====Distributed GPU Number=====" )
-    print( "SKIPPED_DISTRIBUTED, MISSED_DISTRIBUTED, ROCMONLY_DISTRIBUTED, CUDA_DISTRIBUTED, ROCM_DISTRIBUTED" )
+    print( f"SKIPPED_DISTRIBUTED, MISSED_DISTRIBUTED, {set1_disp}ONLY_DISTRIBUTED, {set2_disp}_DISTRIBUTED, {set1_disp}_DISTRIBUTED" )
     print( str(SKIPPED_DISTRIBUTED) + ", " + str(MISSED_DISTRIBUTED) + ", " + str(ROCMONLY_DISTRIBUTED) + ", " + str(CUDA_DISTRIBUTED) + ", " + str(ROCM_DISTRIBUTED) )
     print( " " )
     print( "=====Inductor GPU Number=====" )
-    print( "SKIPPED_INDUCTOR, MISSED_INDUCTOR, ROCMONLY_INDUCTOR, CUDA_INDUCTOR, ROCM_INDUCTOR" )
+    print( f"SKIPPED_INDUCTOR, MISSED_INDUCTOR, {set1_disp}ONLY_INDUCTOR, {set2_disp}_INDUCTOR, {set1_disp}_INDUCTOR" )
     print( str(SKIPPED_INDUCTOR) + ", " + str(MISSED_INDUCTOR) + ", " + str(ROCMONLY_INDUCTOR) + ", " + str(CUDA_INDUCTOR) + ", " + str(ROCM_INDUCTOR) )
     print( " " )
     print( "SELECTED CAUSES SUMMARY" )
@@ -728,7 +758,7 @@ def summarize_xml_files(args):
     print( " " )
     print( "=====================" )
     print( "Time statistics" )
-    print( "ROCM_RUNNING_TIME, CUDA_RUNNING_TIME" )
+    print( f"{set1_disp}_RUNNING_TIME, {set2_disp}_RUNNING_TIME" )
     print( str(TOTAL_ROCM_RUNNING_TIME) + ", " + str(TOTAL_CUDA_RUNNING_TIME) )
     #print( "ROCm test file level time statistics" )
     #for (k,v) in list(test_file_level_ROCm.items()):
