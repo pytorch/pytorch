@@ -3645,7 +3645,7 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
 
     for return_idx in (True, False):
         yield SampleInput(
-            make_arg((2, 3, 7, 7), memory_format=torch.channels_last),
+            make_arg((2, 3, 8, 8), memory_format=torch.channels_last),
             args=((4, 4), return_idx),
         )
 
