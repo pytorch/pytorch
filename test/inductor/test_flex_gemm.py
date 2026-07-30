@@ -2965,10 +2965,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
-        with (
-            mock.patch.object(sys.stderr, "isatty", return_value=True),
-            self.assertLogs(flex_gemm_log, level="DEBUG") as records,
-        ):
+        with self.assertLogs(flex_gemm_log, level="DEBUG") as records:
             actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
         self.assertEqual(actual, torch.relu(a @ b))
@@ -2990,7 +2987,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertNotIn("normalized_nodes:", report)
         self.assertNotIn("GENERATED EPILOGUE", report)
         self.assertNotIn("CONFIG CANDIDATES", report)
-        self.assertIn("\x1b[", report)
+        self.assertNotIn("\x1b[", report)
         self.assertIn("FLEXGEMM LOWERING [flex_gemm_body_graph_", report)
         self.assertIn("mode: fixed", report)
         self.assertIn("lowering_approved_candidates: 1", report)
