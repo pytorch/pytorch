@@ -242,7 +242,7 @@ void AutogradMeta::set_fw_grad(
             }
 
             new_fw_grad_value.copy_(new_grad);
-            new_grad = new_fw_grad_value;
+            new_grad = std::move(new_fw_grad_value);
           }
 
           base._set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
@@ -262,10 +262,10 @@ void AutogradMeta::set_fw_grad(
       res._set_conj(self.is_conj());
       res._set_neg(self.is_neg());
       res.copy_(new_grad);
-      new_grad = res;
+      new_grad = std::move(res);
     }
 
-    fw_grad_->set_value(new_grad, level);
+    fw_grad_->set_value(std::move(new_grad), level);
   }
 }
 
@@ -308,7 +308,7 @@ const Variable& AutogradMeta::fw_grad(
               self.sizes(), self.strides(), self.storage_offset());
         }
 
-        const_view_meta->fw_grad_->set_value(new_val, level);
+        const_view_meta->fw_grad_->set_value(std::move(new_val), level);
         return const_view_meta->fw_grad_->value(level);
       }
     }
