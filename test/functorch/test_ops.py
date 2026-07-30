@@ -990,9 +990,6 @@ class TestOperators(TestCase):
                 xfail(
                     "nn.functional.layer_norm"
                 ),  # vmap: inplace into a regular tensor
-                # RuntimeError: NYI: querying is_contiguous inside of vmap
-                # for memory_format other than torch.contiguous_formats
-                xfail("nn.functional.max_pool2d"),
                 # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
                 # supported with memory_format torch.preserve_format or
                 # torch.contiguous_format (got ChannelsLast)

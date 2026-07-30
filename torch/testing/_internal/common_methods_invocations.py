@@ -3643,6 +3643,12 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         # Unbatched
         yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
 
+    for return_idx in (True, False):
+        yield SampleInput(
+            make_arg((2, 3, 7, 7), memory_format=torch.channels_last),
+            args=((4, 4), return_idx),
+        )
+
 def error_inputs_adaptive_max_pool2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
@@ -16673,8 +16679,6 @@ op_db: list[OpInfo] = [
            aten_name='max_pool2d',
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
-           # Vmap is not happy with non-contiguous (channels_last) inputs
-           check_batched_gradgrad=False,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
