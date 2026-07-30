@@ -1,5 +1,6 @@
 # Copyright (c) 2025 - 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
+# ruff: noqa: S101
 
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -27,6 +28,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+import dataclasses
 from typing import Tuple, Type, Union
 
 import cuda.bindings.driver as cuda
@@ -43,6 +45,29 @@ from cutlass.cute.runtime import from_dlpack
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 import torch
+from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
+from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
+    get_lane_warp_layouts,
+    partition_for_epilogue,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class EpilogueInput:
+    tensor: cute.Tensor
+    kind: cutlass.Constexpr
+
+
+@dataclasses.dataclass(frozen=True)
+class EpilogueInputPack:
+    values: tuple
+
+
+@dataclasses.dataclass(frozen=True)
+class EpilogueOutputPack:
+    tensors: tuple
+    count: cutlass.Constexpr
+    primary: cutlass.Constexpr
 
 
 """
@@ -416,7 +441,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         max_active_clusters: cutlass.Constexpr,
         stream: cuda.CUstream,
         epilogue_op: cutlass.Constexpr = lambda x: x,
+        epilogue_input_dtype: cutlass.Constexpr = cutlass.Float32,
         alpha_tensor: cute.Tensor = None,
+        epilogue_inputs: EpilogueInputPack = EpilogueInputPack(()),
+        epilogue_outputs: EpilogueOutputPack = EpilogueOutputPack((), 1, 0),
+        local_reduce_tensor: cute.Tensor = None,
+        local_reduce_feed_tensor: cute.Tensor = None,
+        local_reduce_config: cutlass.Constexpr = None,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -444,6 +475,31 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         :raises TypeError: If input data types are incompatible with the MMA instruction.
         """
 
+        if cutlass.const_expr(local_reduce_config is None):
+            local_reduce_group = 0
+            local_reduce_axis = 1
+            local_reduce_type = "sum"
+            local_reduce_source = "identity"
+            local_reduce_feeds_main = False
+            local_reduce_op = cute.ReductionOp.ADD
+            local_reduce_init = 0.0
+            local_reduce_combine = lambda lhs, rhs: lhs + rhs
+            local_reduce_source_op = lambda value: value
+            local_reduce_finalize = lambda value, group: value
+        else:
+            (
+                local_reduce_group,
+                local_reduce_axis,
+                local_reduce_type,
+                local_reduce_source,
+                local_reduce_feeds_main,
+                local_reduce_op,
+                local_reduce_init,
+                local_reduce_combine,
+                local_reduce_source_op,
+                local_reduce_finalize,
+            ) = local_reduce_config
+
         # Convert from torch convention to CuTe convention.
         # CUTLASS API passes tensors as A:(L,M,K) B:(L,K,N) C:(L,M,N)
         # but CuTe DSL kernels expect A:(M,K,L) B:(N,K,L) C:(M,N,L).
@@ -456,6 +512,64 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         a_tensor = add_batch_mode(a_tensor)
         b_tensor = add_batch_mode(b_tensor)
         c_tensor = add_batch_mode(c_tensor)
+        if cutlass.const_expr(local_reduce_tensor is not None):
+            local_reduce_tensor = add_batch_mode(local_reduce_tensor)
+
+        self.local_reduce_group = local_reduce_group
+        self.local_reduce_axis = local_reduce_axis
+        self.local_reduce_input_coefficient = 1.0
+        self.local_reduce_result_coefficient = 0.0
+        self.local_reduce_bias = 0.0
+        self.local_reduce_affine_scale = 1.0
+        self.local_reduce_affine_bias = 0.0
+        self.local_reduce_denominator_scale = 1.0
+        self.local_reduce_denominator_bias = 0.0
+        reduction_expression = GemmReductionDescriptor.parse(local_reduce_type)
+        local_reduce_type = reduction_expression.kind
+        if cutlass.const_expr(local_reduce_type == "mean_linear"):
+            input_coefficient, result_coefficient, bias = (
+                reduction_expression.parameters
+            )
+            self.local_reduce_input_coefficient = float(input_coefficient)
+            self.local_reduce_result_coefficient = float(result_coefficient)
+            self.local_reduce_bias = float(bias)
+        if cutlass.const_expr(local_reduce_type == "normalize_sum_affine"):
+            (
+                affine_scale,
+                affine_bias,
+                denominator_scale,
+                denominator_bias,
+            ) = reduction_expression.parameters
+            local_reduce_type = "normalize_sum"
+            self.local_reduce_affine_scale = float(affine_scale)
+            self.local_reduce_affine_bias = float(affine_bias)
+            self.local_reduce_denominator_scale = float(denominator_scale)
+            self.local_reduce_denominator_bias = float(denominator_bias)
+        if cutlass.const_expr(local_reduce_type == "normalize_sum_reverse_affine"):
+            (
+                affine_scale,
+                affine_bias,
+                denominator_scale,
+                denominator_bias,
+            ) = reduction_expression.parameters
+            local_reduce_type = "normalize_sum_reverse"
+            self.local_reduce_affine_scale = float(affine_scale)
+            self.local_reduce_affine_bias = float(affine_bias)
+            self.local_reduce_denominator_scale = float(denominator_scale)
+            self.local_reduce_denominator_bias = float(denominator_bias)
+        self.local_reduce_type = local_reduce_type
+        self.local_reduce_source = local_reduce_source
+        self.local_reduce_feeds_main = local_reduce_feeds_main
+        self.local_reduce_op = local_reduce_op
+        self.local_reduce_init = local_reduce_init
+        self.local_reduce_combine = local_reduce_combine
+        self.local_reduce_source_op = local_reduce_source_op
+        self.local_reduce_finalize = local_reduce_finalize
+        self.has_cross_warp_local_reduce = cutlass.const_expr(
+            local_reduce_tensor is not None
+            and local_reduce_axis == 0
+            and local_reduce_group > 4
+        )
 
         a_tensor = cute.make_tensor(
             a_tensor.iterator, cute.select(a_tensor.layout, [1, 2, 0])
@@ -466,6 +580,31 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         c_tensor = cute.make_tensor(
             c_tensor.iterator, cute.select(c_tensor.layout, [1, 2, 0])
         )
+
+        def epilogue_tensor_to_mnl(tensor: cute.Tensor) -> cute.Tensor:
+            tensor = add_batch_mode(tensor)
+            return cute.make_tensor(
+                tensor.iterator, cute.select(tensor.layout, [1, 2, 0])
+            )
+
+        epilogue_inputs = EpilogueInputPack(
+            tuple(
+                EpilogueInput(epilogue_tensor_to_mnl(value.tensor), value.kind)
+                for value in epilogue_inputs.values
+            )
+        )
+        epilogue_outputs = EpilogueOutputPack(
+            tuple(
+                epilogue_tensor_to_mnl(tensor) for tensor in epilogue_outputs.tensors
+            ),
+            epilogue_outputs.count,
+            epilogue_outputs.primary,
+        )
+        if cutlass.const_expr(local_reduce_feed_tensor is not None):
+            local_reduce_feed_tensor = epilogue_tensor_to_mnl(local_reduce_feed_tensor)
+
+        self.epilogue_output_count = epilogue_outputs.count
+        self.primary_epilogue_output = epilogue_outputs.primary
 
         # Setup static attributes before smem/grid/tma computation
         self.a_dtype: Type[cutlass.Numeric] = a_tensor.element_type
@@ -672,6 +811,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 ],
                 self.buffer_align_bytes,
             ]
+            sLocalReduce: cute.struct.Align[
+                cute.struct.MemRange[
+                    cutlass.Float32,
+                    self.cta_tile_shape_mnk[1] * 3
+                    if self.has_cross_warp_local_reduce
+                    else 1,
+                ],
+                16,
+            ]
 
         self.shared_storage = SharedStorage
 
@@ -699,7 +847,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             self.epi_tile,
             self.tile_sched_params,
             epilogue_op,
+            epilogue_input_dtype,
             alpha_tensor,
+            epilogue_inputs,
+            epilogue_outputs,
+            local_reduce_tensor,
+            local_reduce_feed_tensor,
         ).launch(
             grid=grid,
             block=[self.threads_per_cta, 1, 1],
@@ -735,7 +888,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epi_tile: cute.Tile,
         tile_sched_params: utils.PersistentTileSchedulerParams,
         epilogue_op: cutlass.Constexpr,
+        epilogue_input_dtype: cutlass.Constexpr,
         alpha_tensor: cute.Tensor,
+        epilogue_inputs: EpilogueInputPack,
+        epilogue_outputs: EpilogueOutputPack,
+        local_reduce_tensor: cute.Tensor,
+        local_reduce_feed_tensor: cute.Tensor,
     ):
         """
         GPU device kernel performing the Persistent batched GEMM computation.
@@ -779,6 +937,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         smem = utils.SmemAllocator()
         storage = smem.allocate(self.shared_storage)
+        sLocalReduce = storage.sLocalReduce.get_tensor(
+            cute.make_layout((self.cta_tile_shape_mnk[1], 3))
+            if self.has_cross_warp_local_reduce
+            else cute.make_layout(1)
+        )
 
         # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
@@ -1231,6 +1394,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 )
 
                 # Get accumulator stage index
+                reverse_subtile = cutlass.Boolean(False)
                 if cutlass.const_expr(self.overlapping_accum):
                     acc_stage_index = acc_producer_state.phase ^ 1
                 else:
@@ -1498,6 +1662,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 #
                 subtile_cnt = cute.size(tTR_tAcc.shape, mode=[3])
                 num_prev_subtiles = tile_sched.num_tiles_executed * subtile_cnt
+                local_reduce_partial = None
+                if cutlass.const_expr(
+                    (local_reduce_tensor is not None or self.local_reduce_feeds_main)
+                    and self.local_reduce_axis == 1
+                    and self.local_reduce_group > self.epi_tile_n
+                ):
+                    local_reduce_partial = cute.make_rmem_tensor(
+                        ((1, self.epi_tile_n, 1), 1, 1), self.acc_dtype
+                    )
                 for subtile_idx in cutlass.range(subtile_cnt):
                     real_subtile_idx = subtile_idx
                     if cutlass.const_expr(self.overlapping_accum):
@@ -1539,8 +1712,548 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # alpha_tensor is None) rather than device control flow.
                     if cutlass.const_expr(alpha_tensor is not None):
                         acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
-                    acc_vec = epilogue_op(acc_vec.to(self.c_dtype)).to(self.c_dtype)
-                    tRS_rC.store(acc_vec)
+                    has_epilogue_tensors = cutlass.const_expr(
+                        len(epilogue_inputs.values) > 0
+                    )
+                    has_epilogue_outputs = cutlass.const_expr(
+                        self.epilogue_output_count > 1
+                    )
+                    if cutlass.const_expr(
+                        has_epilogue_tensors
+                        or has_epilogue_outputs
+                        or local_reduce_tensor is not None
+                        or local_reduce_feed_tensor is not None
+                        or self.local_reduce_feeds_main
+                    ):
+                        tDcC = partition_for_epilogue(
+                            cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
+                            epi_tile=epi_tile,
+                            tiled_copy=tiled_copy_t2r,
+                            tidx=epi_tidx,
+                            reference_src=False,
+                        )
+                        tDcC = tDcC[(None, None, None, 0, real_subtile_idx)]
+                        coord_flt = cute.filter_zeros(tDcC)
+
+                    epilogue_values = []
+                    if cutlass.const_expr(
+                        has_epilogue_tensors
+                        or has_epilogue_outputs
+                        or local_reduce_feed_tensor is not None
+                    ):
+                        output_m = cute.size(mC_mnl, mode=[0])
+                        output_n = cute.size(mC_mnl, mode=[1])
+                    if cutlass.const_expr(has_epilogue_tensors):
+                        for value in epilogue_inputs.values:
+                            tensor = value.tensor
+                            kind = value.kind
+                            fragment = cute.make_rmem_tensor_like(
+                                acc_vec, tensor.element_type
+                            )
+                            for i in cutlass.range(
+                                cute.size(fragment), unroll_full=True
+                            ):
+                                row_idx = coord_flt[i][0]
+                                col_idx = coord_flt[i][1]
+                                global_m = (
+                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                    + row_idx
+                                )
+                                global_n = (
+                                    mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
+                                    + col_idx
+                                )
+                                tensor_m = (
+                                    0 if cutlass.const_expr(kind == 2) else global_m
+                                )
+                                tensor_n = (
+                                    0 if cutlass.const_expr(kind == 3) else global_n
+                                )
+                                fragment[i] = tensor[0, 0, 0]
+                                if global_m < output_m and global_n < output_n:
+                                    fragment[i] = tensor[
+                                        tensor_m,
+                                        tensor_n,
+                                        mma_tile_coord_mnl[2],
+                                    ]
+                            epilogue_values.append(fragment.load())
+                    if cutlass.const_expr(
+                        local_reduce_tensor is not None or self.local_reduce_feeds_main
+                    ):
+                        local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
+                            self.acc_dtype
+                        )
+                        local_reduce_vec = self.local_reduce_source_op(local_reduce_vec)
+                    if cutlass.const_expr(self.local_reduce_feeds_main):
+                        group = cutlass.const_expr(self.local_reduce_group)
+                        if cutlass.const_expr(
+                            self.local_reduce_axis == 1
+                            and self.local_reduce_type
+                            in (
+                                "normalize_absmax",
+                                "normalize_sum",
+                                "normalize_sum_reverse",
+                                "online_softmax",
+                            )
+                        ):
+                            fragment_n = cutlass.const_expr(
+                                cute.size(local_reduce_vec.shape, mode=[0])
+                            )
+                            assert fragment_n % group == 0
+                            repeats = cutlass.const_expr(fragment_n // group)
+                            grouped = local_reduce_vec.reshape(
+                                ((1, group, repeats), 1, 1)
+                            )
+                            numerator = grouped
+                            if cutlass.const_expr(
+                                self.local_reduce_type == "normalize_absmax"
+                            ):
+                                numerator = acc_vec.to(epilogue_input_dtype).reshape(
+                                    grouped.shape
+                                )
+                            if cutlass.const_expr(
+                                self.local_reduce_type == "online_softmax"
+                            ):
+                                max_value = grouped.reduce(
+                                    cute.ReductionOp.MAX,
+                                    init_val=-cutlass.Float32.inf,
+                                    reduction_profile=((None, 1, None), 1, 1),
+                                ).reshape(((1, 1, repeats), 1, 1))
+                                max_value = max_value.broadcast_to(grouped.shape)
+                                numerator = cute.math.exp(grouped - max_value)
+                            denominator_input = (
+                                grouped
+                                if cutlass.const_expr(
+                                    self.local_reduce_type == "normalize_absmax"
+                                )
+                                else numerator
+                            )
+                            denominator_op = (
+                                cute.ReductionOp.MAX
+                                if cutlass.const_expr(
+                                    self.local_reduce_type == "normalize_absmax"
+                                )
+                                else cute.ReductionOp.ADD
+                            )
+                            denominator_init = (
+                                -cutlass.Float32.inf
+                                if cutlass.const_expr(
+                                    self.local_reduce_type == "normalize_absmax"
+                                )
+                                else 0.0
+                            )
+                            denominator = denominator_input.reduce(
+                                denominator_op,
+                                init_val=denominator_init,
+                                reduction_profile=((None, 1, None), 1, 1),
+                            ).reshape(((1, 1, repeats), 1, 1))
+                            denominator = denominator.broadcast_to(grouped.shape)
+                            if cutlass.const_expr(
+                                self.local_reduce_type
+                                in ("normalize_sum", "normalize_sum_reverse")
+                            ):
+                                denominator = (
+                                    denominator * self.local_reduce_denominator_scale
+                                    + self.local_reduce_denominator_bias
+                                )
+                            if cutlass.const_expr(
+                                self.local_reduce_type == "normalize_sum_reverse"
+                            ):
+                                epilogue_result = (denominator / numerator).reshape(
+                                    local_reduce_vec.shape
+                                )
+                            else:
+                                epilogue_result = (numerator / denominator).reshape(
+                                    local_reduce_vec.shape
+                                )
+                            if cutlass.const_expr(
+                                self.local_reduce_type
+                                in ("normalize_sum", "normalize_sum_reverse")
+                            ):
+                                epilogue_result = (
+                                    epilogue_result * self.local_reduce_affine_scale
+                                    + self.local_reduce_affine_bias
+                                )
+                        else:
+                            assert self.local_reduce_axis == 0
+                            epilogue_result = acc_vec.to(epilogue_input_dtype)
+                    else:
+                        epilogue_result = epilogue_op(
+                            acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
+                        )
+                    if cutlass.const_expr(
+                        local_reduce_feed_tensor is not None
+                        and self.local_reduce_axis == 1
+                    ):
+                        feed_vec = epilogue_result.to(
+                            local_reduce_feed_tensor.element_type
+                        )
+                        feed_fragment = cute.make_rmem_tensor_like(
+                            feed_vec, local_reduce_feed_tensor.element_type
+                        )
+                        feed_fragment.store(feed_vec)
+                        feed_fragment_flt = cute.filter_zeros(feed_fragment)
+                        for i in cutlass.range(
+                            cute.size(feed_fragment_flt), unroll_full=True
+                        ):
+                            row_idx = coord_flt[i][0]
+                            col_idx = coord_flt[i][1]
+                            global_m = (
+                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                + row_idx
+                            )
+                            global_n = (
+                                mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
+                                + col_idx
+                            )
+                            if global_m < output_m and global_n < output_n:
+                                local_reduce_feed_tensor[
+                                    global_m,
+                                    global_n,
+                                    mma_tile_coord_mnl[2],
+                                ] = feed_fragment_flt[i]
+                    if cutlass.const_expr(has_epilogue_outputs):
+                        for output_index, tensor in enumerate(epilogue_outputs.tensors):
+                            result_index = cutlass.const_expr(
+                                output_index
+                                if output_index < self.primary_epilogue_output
+                                else output_index + 1
+                            )
+                            output_vec = epilogue_result[result_index].to(
+                                tensor.element_type
+                            )
+                            fragment = cute.make_rmem_tensor_like(
+                                output_vec, tensor.element_type
+                            )
+                            fragment.store(output_vec)
+                            fragment_flt = cute.filter_zeros(fragment)
+                            for i in cutlass.range(
+                                cute.size(fragment_flt), unroll_full=True
+                            ):
+                                row_idx = coord_flt[i][0]
+                                col_idx = coord_flt[i][1]
+                                global_m = (
+                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                    + row_idx
+                                )
+                                global_n = (
+                                    mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
+                                    + col_idx
+                                )
+                                if global_m < output_m and global_n < output_n:
+                                    tensor[
+                                        global_m,
+                                        global_n,
+                                        mma_tile_coord_mnl[2],
+                                    ] = fragment_flt[i]
+                        acc_vec = epilogue_result[self.primary_epilogue_output].to(
+                            self.c_dtype
+                        )
+                    else:
+                        acc_vec = epilogue_result.to(self.c_dtype)
+
+                    if cutlass.const_expr(
+                        local_reduce_tensor is not None
+                        or (
+                            self.local_reduce_feeds_main and self.local_reduce_axis == 0
+                        )
+                    ):
+                        group = cutlass.const_expr(self.local_reduce_group)
+                        mReduce = None
+                        if cutlass.const_expr(local_reduce_tensor is not None):
+                            mReduce = local_reduce_tensor[
+                                mma_tile_coord_mnl[2], None, None
+                            ]
+                        if cutlass.const_expr(self.local_reduce_axis == 1):
+                            fragment_n = cutlass.const_expr(
+                                cute.size(acc_vec.shape, mode=[0])
+                            )
+                            assert group > 1 and group <= self.cta_tile_shape_mnk[1]
+                            fragment_group = cutlass.const_expr(min(group, fragment_n))
+                            assert group % fragment_group == 0
+                            assert fragment_n % fragment_group == 0
+                            repeats = cutlass.const_expr(fragment_n // fragment_group)
+                            grouped = local_reduce_vec.reshape(
+                                ((1, fragment_group, repeats), 1, 1)
+                            )
+                            reduced = grouped.reduce(
+                                self.local_reduce_op,
+                                init_val=self.local_reduce_init,
+                                reduction_profile=((None, 1, None), 1, 1),
+                            )
+                            if cutlass.const_expr(group <= fragment_n):
+                                reduced = self.local_reduce_finalize(reduced, group)
+                            reduced = reduced.reshape(((1, 1, repeats), 1, 1))
+                            reduced = reduced.broadcast_to(grouped.shape)
+                            should_store = cutlass.Boolean(True)
+                            store_offset = cutlass.Int32(0)
+                            if cutlass.const_expr(group > fragment_n):
+                                fragments_per_group = cutlass.const_expr(
+                                    group // fragment_n
+                                )
+                                partial = local_reduce_partial.load()
+                                if subtile_idx % fragments_per_group == 0:
+                                    partial = reduced
+                                else:
+                                    partial = self.local_reduce_combine(
+                                        partial, reduced
+                                    )
+                                local_reduce_partial.store(partial)
+                                should_store = (
+                                    subtile_idx % fragments_per_group
+                                    == fragments_per_group - 1
+                                )
+                                if should_store:
+                                    reduced = partial
+                                    reduced = self.local_reduce_finalize(reduced, group)
+                                    store_offset = (
+                                        real_subtile_idx * self.epi_tile_n
+                                    ) % group
+                            tDrReduce = cute.make_rmem_tensor(
+                                reduced.shape, self.acc_dtype
+                            )
+                            tDrReduce.store(reduced)
+                            reduced_flt = cute.filter_zeros(tDrReduce)
+                            groups_per_cta = cutlass.const_expr(
+                                self.cta_tile_shape_mnk[1] // group
+                            )
+                            gReduce = cute.local_tile(
+                                mReduce,
+                                (self.cta_tile_shape_mnk[0], groups_per_cta),
+                                mma_tile_coord_mnl[:2],
+                            )
+                            limit_m = min(
+                                cute.size(local_reduce_tensor, mode=[1])
+                                - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
+                                self.cta_tile_shape_mnk[0],
+                            )
+                            limit_groups = cute.size(local_reduce_tensor, mode=[2])
+                            for i in cutlass.range(
+                                cute.size(reduced_flt), unroll_full=True
+                            ):
+                                row_idx = coord_flt[i][0]
+                                n_idx = coord_flt[i][1]
+                                group_idx = n_idx // group
+                                global_group_idx = (
+                                    mma_tile_coord_mnl[1] * groups_per_cta + group_idx
+                                )
+                                if (
+                                    should_store
+                                    and n_idx % group == store_offset
+                                    and row_idx < limit_m
+                                    and global_group_idx < limit_groups
+                                ):
+                                    gReduce[row_idx, group_idx] = reduced_flt[i]
+                        else:
+                            tDrReduce = cute.make_rmem_tensor_like(
+                                local_reduce_vec, self.acc_dtype
+                            )
+                            tDrReduce.store(local_reduce_vec)
+                            reduced_flt = cute.filter_zeros(tDrReduce)
+                            lane_layout_mn, warp_layout_mn = get_lane_warp_layouts(
+                                tiled_copy_t2r, reference_src=False
+                            )
+                            lanes_in_m = cutlass.const_expr(
+                                cute.size(lane_layout_mn, mode=[0])
+                            )
+                            assert group > 1 and group <= self.cta_tile_shape_mnk[0]
+                            reduction_group = cutlass.const_expr(min(group, lanes_in_m))
+                            assert group % reduction_group == 0
+                            assert lanes_in_m % reduction_group == 0
+                            for i in cutlass.range(
+                                cute.size(reduced_flt), unroll_full=True
+                            ):
+                                rows = reduction_group // 2
+                                while rows > 0:
+                                    other = cute.arch.shuffle_sync_bfly(
+                                        reduced_flt[i],
+                                        offset=cute.crd2idx((rows, 0), lane_layout_mn),
+                                    )
+                                    reduced_flt[i] = self.local_reduce_combine(
+                                        reduced_flt[i], other
+                                    )
+                                    rows = rows // 2
+                                reduced_flt[i] = self.local_reduce_finalize(
+                                    reduced_flt[i], group
+                                )
+                            groups_per_cta = cutlass.const_expr(
+                                self.cta_tile_shape_mnk[0] // group
+                            )
+                            gReduce = None
+                            limit_n = 0
+                            limit_groups = 0
+                            if cutlass.const_expr(local_reduce_tensor is not None):
+                                gReduce = cute.local_tile(
+                                    mReduce,
+                                    (groups_per_cta, self.cta_tile_shape_mnk[1]),
+                                    mma_tile_coord_mnl[:2],
+                                )
+                                limit_n = min(
+                                    cute.size(local_reduce_tensor, mode=[2])
+                                    - mma_tile_coord_mnl[1]
+                                    * self.cta_tile_shape_mnk[1],
+                                    self.cta_tile_shape_mnk[1],
+                                )
+                                limit_groups = cute.size(local_reduce_tensor, mode=[1])
+                            group_warps = cutlass.const_expr(group // lanes_in_m)
+                            warp_m = warp_layout_mn[0]
+                            warps_in_m = cutlass.const_expr(cute.size(warp_m))
+                            assert group_warps <= warps_in_m
+                            warp_idx = cute.arch.make_warp_uniform(
+                                epi_tidx // cute.arch.WARP_SIZE
+                            )
+                            warp_m_idx = warp_layout_mn.get_hier_coord(warp_idx)[0]
+                            if cutlass.const_expr(group > lanes_in_m):
+                                for i in cutlass.range(
+                                    cute.size(reduced_flt), unroll_full=True
+                                ):
+                                    row_idx = coord_flt[i][0]
+                                    n_idx = coord_flt[i][1]
+                                    group_idx = row_idx // group
+                                    group_warp_start = group_idx * group_warps
+                                    group_warp_idx = warp_m_idx - group_warp_start
+                                    if (
+                                        row_idx % lanes_in_m == 0
+                                        and group_warp_idx > 0
+                                        and group_warp_idx < group_warps
+                                    ):
+                                        sLocalReduce[
+                                            n_idx, warp_m_idx - group_idx - 1
+                                        ] = reduced_flt[i]
+                                self.epilog_sync_barrier.arrive_and_wait()
+                            for i in cutlass.range(
+                                cute.size(reduced_flt), unroll_full=True
+                            ):
+                                row_idx = coord_flt[i][0]
+                                n_idx = coord_flt[i][1]
+                                group_idx = row_idx // group
+                                global_group_idx = (
+                                    mma_tile_coord_mnl[0] * groups_per_cta + group_idx
+                                )
+                                group_value = reduced_flt[i]
+                                group_warp_start = group_idx * group_warps
+                                if cutlass.const_expr(group > lanes_in_m):
+                                    if (
+                                        row_idx % group == 0
+                                        and warp_m_idx == group_warp_start
+                                    ):
+                                        for warp_offset in cutlass.range_constexpr(
+                                            1, group_warps
+                                        ):
+                                            other = sLocalReduce[
+                                                n_idx,
+                                                group_warp_start
+                                                + warp_offset
+                                                - group_idx
+                                                - 1,
+                                            ]
+                                            group_value = self.local_reduce_combine(
+                                                group_value, other
+                                            )
+                                        if cutlass.const_expr(
+                                            self.local_reduce_feeds_main
+                                        ):
+                                            sLocalReduce[n_idx, group_idx] = group_value
+                                if cutlass.const_expr(local_reduce_tensor is not None):
+                                    if (
+                                        row_idx % group == 0
+                                        and n_idx < limit_n
+                                        and global_group_idx < limit_groups
+                                    ):
+                                        gReduce[group_idx, n_idx] = group_value
+                            if cutlass.const_expr(group > lanes_in_m):
+                                self.epilog_sync_barrier.arrive_and_wait()
+                            if cutlass.const_expr(self.local_reduce_feeds_main):
+                                if cutlass.const_expr(
+                                    local_reduce_feed_tensor is not None
+                                ):
+                                    primary_acc_vec = acc_vec
+                                if cutlass.const_expr(group > lanes_in_m):
+                                    for i in cutlass.range(
+                                        cute.size(reduced_flt), unroll_full=True
+                                    ):
+                                        row_idx = coord_flt[i][0]
+                                        n_idx = coord_flt[i][1]
+                                        reduced_flt[i] = sLocalReduce[
+                                            n_idx, row_idx // group
+                                        ]
+                                    self.epilog_sync_barrier.arrive_and_wait()
+                                if cutlass.const_expr(
+                                    self.local_reduce_type == "normalize_sum"
+                                ):
+                                    acc_vec = (
+                                        acc_vec.to(self.acc_dtype)
+                                        / (
+                                            tDrReduce.load()
+                                            * self.local_reduce_denominator_scale
+                                            + self.local_reduce_denominator_bias
+                                        )
+                                        * self.local_reduce_affine_scale
+                                        + self.local_reduce_affine_bias
+                                    )
+                                elif cutlass.const_expr(
+                                    self.local_reduce_type == "normalize_sum_reverse"
+                                ):
+                                    acc_vec = (
+                                        (
+                                            tDrReduce.load()
+                                            * self.local_reduce_denominator_scale
+                                            + self.local_reduce_denominator_bias
+                                        )
+                                        / acc_vec.to(self.acc_dtype)
+                                        * self.local_reduce_affine_scale
+                                        + self.local_reduce_affine_bias
+                                    )
+                                elif cutlass.const_expr(
+                                    self.local_reduce_type == "mean_linear"
+                                ):
+                                    acc_vec = (
+                                        acc_vec.to(self.acc_dtype)
+                                        * self.local_reduce_input_coefficient
+                                        + tDrReduce.load()
+                                        * self.local_reduce_result_coefficient
+                                        + self.local_reduce_bias
+                                    )
+                                else:
+                                    assert self.local_reduce_type == "mean"
+                                    acc_vec = (
+                                        acc_vec.to(self.acc_dtype) - tDrReduce.load()
+                                    )
+                            if cutlass.const_expr(
+                                local_reduce_feed_tensor is not None
+                                and self.local_reduce_axis == 0
+                            ):
+                                feed_vec = acc_vec.to(
+                                    local_reduce_feed_tensor.element_type
+                                )
+                                feed_fragment = cute.make_rmem_tensor_like(
+                                    feed_vec, local_reduce_feed_tensor.element_type
+                                )
+                                feed_fragment.store(feed_vec)
+                                feed_fragment_flt = cute.filter_zeros(feed_fragment)
+                                for i in cutlass.range(
+                                    cute.size(feed_fragment_flt), unroll_full=True
+                                ):
+                                    row_idx = coord_flt[i][0]
+                                    col_idx = coord_flt[i][1]
+                                    global_m = (
+                                        mma_tile_coord_mnl[0]
+                                        * self.cta_tile_shape_mnk[0]
+                                        + row_idx
+                                    )
+                                    global_n = (
+                                        mma_tile_coord_mnl[1]
+                                        * self.cta_tile_shape_mnk[1]
+                                        + col_idx
+                                    )
+                                    if global_m < output_m and global_n < output_n:
+                                        local_reduce_feed_tensor[
+                                            global_m,
+                                            global_n,
+                                            mma_tile_coord_mnl[2],
+                                        ] = feed_fragment_flt[i]
+                                acc_vec = primary_acc_vec
+                    tRS_rC.store(acc_vec.to(self.c_dtype))
 
                     #
                     # Store C to shared memory
@@ -1875,7 +2588,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             + cute.size_in_bytes(sf_dtype, sfa_smem_layout_staged_one)
             + cute.size_in_bytes(sf_dtype, sfb_smem_layout_staged_one)
         )
-        mbar_helpers_bytes = 1024
+        mbar_helpers_bytes = 2048
         c_bytes_per_stage = cute.size_in_bytes(c_dtype, c_smem_layout_staged_one)
         c_bytes = c_bytes_per_stage * num_c_stage
 
