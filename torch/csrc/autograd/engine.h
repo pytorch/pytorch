@@ -238,7 +238,7 @@ struct TORCH_API Engine {
   void decrement_non_reentrant_thread_count();
   virtual void thread_main(const std::shared_ptr<GraphTask>& task);
   void reentrant_thread_init();
-  void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
+  void add_thread_pool_task(std::weak_ptr<GraphTask> graph_task);
 
   // Safe to read device_ready_queues_ without synchronization after
   // initialization

@@ -16981,6 +16981,99 @@ class TestSelectiveActivationCheckpoint(TestCase):
         out.sum().backward()
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_saved_tensors_hooks_fire_for_saved_tensors(self):
+        # Tensors SAC decides to save skip SavedVariable, so SAC must simulate
+        # pack/unpack with the surrounding user saved-tensors hooks. This is
+        # opt-in for now (BC); the default legacy behavior is covered by
+        # TestSACAmbientSavedTensorsHooks.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        packed, unpacked = [], []
+
+        def pack(x):
+            packed.append(x)
+            return x * 2  # transform so we can tell unpack really ran
+
+        def unpack(x):
+            unpacked.append(x)
+            return x / 2
+
+        def fn(x):
+            return torch.mm(x, x).relu().sum()
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def run_checkpoint():
+            return checkpoint(
+                fn,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+                respect_saved_tensors_hooks=True,
+            )
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            out = run_checkpoint()
+        out.backward()
+        # Exactly two packs, both during forward: the checkpoint input x
+        # (save_inputs) and the mm output (MUST_SAVE, via SAC storage).
+        # Recompute saves are shadowed by _recomputation_hook and don't fire.
+        self.assertEqual(len(packed), 2)
+        self.assertEqual(len(packed), len(unpacked))
+
+        x_ref = x.detach().clone().requires_grad_()
+        fn(x_ref).backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
+        # Hooks around backward only must not affect tensors SAC saved
+        # without hooks in scope
+        packed.clear()
+        unpacked.clear()
+        x.grad = None
+        out = run_checkpoint()
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            out.backward()
+        self.assertEqual(len(packed), 0)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @skipIfTorchDynamo("gc is unreliable under dynamo-wrapped frames")
+    def test_saved_tensors_hooks_no_refcycle_with_stateful_owner(self):
+        # The graph retains checkpoint's internal pack_hook via SavedVariable
+        # in a way gc cannot traverse, so if pack_hook kept a permanent ref to
+        # the user hooks, a hook owner reaching back to the output would leak
+        # uncollectably. _user_hooks must not outlive the hooks TLS scope.
+        class Hooks:
+            def pack(self, t):
+                return t.detach()
+
+            def unpack(self, t):
+                return t
+
+        def scenario():
+            x = torch.randn(4, 4, requires_grad=True)
+            hooks = Hooks()
+
+            # No tensor args: keeps save_inputs from packing x through the
+            # user hooks, which would reach hooks via a pre-existing path.
+            def fn():
+                return torch.mm(x, x).relu().sum()
+
+            with torch.autograd.graph.saved_tensors_hooks(hooks.pack, hooks.unpack):
+                out = checkpoint(fn, use_reentrant=False)
+            hooks.output = out  # owner -> graph back-reference
+            return weakref.ref(hooks), weakref.ref(out)
+
+        hooks_ref, out_ref = scenario()
+        gc.collect()
+        self.assertIsNone(hooks_ref())
+        self.assertIsNone(out_ref())
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_function_with_more_than_one_output(self):
         # maybe there is a more systematic way:
         counter = [0]
@@ -17182,6 +17275,248 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 },
             )
             self.assertEqual(my_count[0], 9)
+
+
+@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
+class TestSACAmbientSavedTensorsHooks(TestCase):
+    # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
+    # a selective activation checkpoint (SAC) region interacts with the tensors
+    # SAC decides to save. Historically SAC held those tensors outside the
+    # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
+    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
+    # through the hook; the default (legacy) leaves them untouched and warns.
+    # These tests pin both behaviors so the eventual default flip is explicit.
+    class RecordingHooks:
+        # Records the shapes pack sees without transforming the tensor, so it is
+        # numerically transparent (models a CPU-offload hook on CPU).
+        def __init__(self):
+            self.packed = []
+
+        def __enter__(self):
+            def pack(t):
+                self.packed.append(tuple(t.shape))
+                return t
+
+            def unpack(t):
+                return t
+
+            self._ctx = torch.autograd.graph.saved_tensors_hooks(pack, unpack)
+            self._ctx.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._ctx.__exit__(*args)
+
+    # Distinct shapes so a recorded shape unambiguously identifies which op's
+    # output the ambient hook saw: only the MUST_SAVE mm output is MM_SHAPE.
+    INPUT_SHAPE = (4, 6)
+    MM_SHAPE = (6, 6)
+
+    @staticmethod
+    def _fn(x):
+        # mm(x.t(), x) turns an INPUT_SHAPE tensor into an MM_SHAPE one.
+        return torch.mm(x.t(), x).relu().sum()
+
+    @staticmethod
+    def _mm_save_context_fn():
+        # MUST_SAVE the mm output; recompute everything else.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        return functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+    def setUp(self):
+        super().setUp()
+        torch.manual_seed(0)
+
+    def _run(self, respects, capture_warning=False):
+        # Wrap an ambient RecordingHooks OUTER around a SAC region whose only
+        # saved tensor is the MM_SHAPE mm output. Returns the recorded shapes.
+        fn = self._fn
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        context_fn = self._mm_save_context_fn()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with self.RecordingHooks() as hooks:
+                out = checkpoint(
+                    fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                    respect_saved_tensors_hooks=respects,
+                )
+            out.backward()
+
+        # Numeric parity vs the plain (no-hook, no-checkpoint) reference must
+        # hold regardless of the flag: recording/offloading is transparent.
+        x_ref = x.detach().clone().requires_grad_()
+        fn(x_ref).backward()
+        torch.testing.assert_close(x.grad, x_ref.grad)
+
+        if capture_warning:
+            fw = [w for w in caught if issubclass(w.category, FutureWarning)]
+            return hooks.packed, fw
+        return hooks.packed
+
+    def test_hook_outer_sac_inner_default_bypasses(self):
+        # Legacy default: the ambient hook is blind to the MUST_SAVE mm output.
+        # A FutureWarning fires because a user hook is in scope.
+        packed, fw = self._run(respects=None, capture_warning=True)
+        self.assertNotIn(self.MM_SHAPE, packed)
+        self.assertTrue(
+            any("selective activation checkpoint" in str(w.message) for w in fw)
+        )
+
+    def test_hook_outer_sac_inner_opt_in_routes(self):
+        # Opt-in: the MUST_SAVE mm output now flows through the ambient hook.
+        packed = self._run(respects=True)
+        self.assertIn(self.MM_SHAPE, packed)
+
+    def test_hook_outer_sac_inner_opt_out_bypasses_silently(self):
+        # Explicit legacy opt-out: hook blind to the mm output, and no warning.
+        packed, fw = self._run(respects=False, capture_warning=True)
+        self.assertNotIn(self.MM_SHAPE, packed)
+        self.assertEqual(fw, [])
+
+    def test_save_on_cpu_opt_in_offloads_saved_tensor(self):
+        # save_on_cpu is the canonical ambient hook. On CPU we can only observe
+        # numeric parity; device movement is asserted on CUDA below.
+        fn = self._fn
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        context_fn = self._mm_save_context_fn()
+        with torch.autograd.graph.save_on_cpu():
+            out = checkpoint(
+                fn,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+                respect_saved_tensors_hooks=True,
+            )
+        out.backward()
+        x_ref = x.detach().clone().requires_grad_()
+        fn(x_ref).backward()
+        torch.testing.assert_close(x.grad, x_ref.grad)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "needs CUDA to observe offload")
+    def test_save_on_cpu_device_movement(self):
+        # save_on_cpu moves saved tensors to CPU. Under the default the SAC-kept
+        # mm output never reaches the hook, so it stays on GPU; under the opt-in
+        # the hook sees it and offloads it to CPU.
+        def offloaded_device(respects):
+            device_by_shape = {}
+
+            def pack(t):
+                device_by_shape[tuple(t.shape)] = t.device.type
+                return t.cpu()
+
+            def unpack(t):
+                return t.cuda()
+
+            x = torch.randn(*self.INPUT_SHAPE, device="cuda", requires_grad=True)
+            context_fn = self._mm_save_context_fn()
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = checkpoint(
+                    self._fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                    respect_saved_tensors_hooks=respects,
+                )
+            out.backward()
+            return device_by_shape
+
+        self.assertNotIn(self.MM_SHAPE, offloaded_device(False))
+        self.assertEqual(offloaded_device(True).get(self.MM_SHAPE), "cuda")
+
+    def test_nested_checkpoint_ignores_internal_hooks(self):
+        # An inner selective checkpoint nested inside an outer recompute-all
+        # checkpoint, both under a user hook. Torch installs its own internal
+        # saved_tensors_hooks per region; the user hook must be resolved through
+        # them, never mistaken for one. The single MUST_SAVE mm output must
+        # reach the user hook exactly once under the opt-in (not doubled by
+        # torch's internal hooks), and never under the default. Parity holds
+        # either way.
+        def inner(x, respects):
+            return checkpoint(
+                lambda x: torch.mm(x.t(), x).relu(),
+                x,
+                use_reentrant=False,
+                context_fn=self._mm_save_context_fn(),
+                respect_saved_tensors_hooks=respects,
+            )
+
+        def outer(x, respects):
+            recompute_all = functools.partial(
+                create_selective_checkpoint_contexts, lambda *a, **k: False
+            )
+            return checkpoint(
+                inner,
+                x,
+                respects,
+                use_reentrant=False,
+                context_fn=recompute_all,
+                respect_saved_tensors_hooks=respects,
+            ).sum()
+
+        def observe(respects):
+            packed = []
+
+            def pack(t):
+                packed.append(tuple(t.shape))
+                return t
+
+            def unpack(t):
+                return t
+
+            x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = outer(x, respects)
+            out.backward()
+            return packed
+
+        self.assertNotIn(self.MM_SHAPE, observe(False))
+        self.assertEqual(observe(True).count(self.MM_SHAPE), 1)
+
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        outer(x, True).backward()
+        x_ref = x.detach().clone().requires_grad_()
+        outer(x_ref, True).backward()
+        torch.testing.assert_close(x.grad, x_ref.grad)
+
+    def test_plain_checkpoint_no_warning(self):
+        # Plain (non-selective) checkpoint caches nothing via SAC, so an ambient
+        # hook is unaffected and no FutureWarning about SAC should fire.
+        packed = []
+
+        def pack(t):
+            packed.append(tuple(t.shape))
+            return t
+
+        def unpack(t):
+            return t
+
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = checkpoint(self._fn, x, use_reentrant=False)
+            out.backward()
+
+        self.assertEqual(
+            [w for w in caught if issubclass(w.category, FutureWarning)], []
+        )
+        self.assertIn(self.INPUT_SHAPE, packed)
+
+    def test_reentrant_rejects_flag(self):
+        # respect_saved_tensors_hooks is a non-reentrant-only feature, like
+        # context_fn and debug.
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        with self.assertRaisesRegex(ValueError, "use_reentrant=False"):
+            checkpoint(
+                self._fn, x, use_reentrant=True, respect_saved_tensors_hooks=True
+            )
 
 
 class TestAutogradMultipleDispatch(TestCase):
