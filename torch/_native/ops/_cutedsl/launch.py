@@ -30,6 +30,17 @@ torch2cute = {
     torch.bfloat16: cutlass.BFloat16,
     torch.int32: Int32,
     torch.int64: Int64,
+    # Small/unsigned integers: served by the conversion overrides (and any future
+    # int-capable rows). int8 also backs the BOOL storage view (cutlass.Boolean is
+    # 1-BIT -- the SIMT copy atom rejects it; aten bool bytes are guaranteed 0/1,
+    # so the int8 view is exact).
+    torch.int8: cutlass.Int8,
+    torch.int16: cutlass.Int16,
+    torch.uint8: cutlass.Uint8,
+    torch.uint16: cutlass.Uint16,
+    torch.uint32: cutlass.Uint32,
+    torch.uint64: cutlass.Uint64,
+    torch.bool: cutlass.Boolean,
 }
 
 
@@ -68,6 +79,51 @@ def cute_tensor_dynMN(t, vec, align=None, read_only=False):
     ct.element_type = torch2cute[t.dtype]
     ct.mark_compact_shape_dynamic(mode=0, stride_order=(0, 1), divisibility=1)
     ct.mark_compact_shape_dynamic(mode=1, stride_order=(0, 1), divisibility=vec)
+    return ct
+
+
+def cute_tensor_vec(t, V, read_only=False):
+    # Flat-coalesce a contiguous tensor to a (numel/V, V) cute tensor for the
+    # vectorized elementwise path: row i is one thread's V-wide fragment. assumed
+    # 16-byte alignment lets the DSL emit wide (128-bit) loads; torch allocations are
+    # >=256 B aligned and V*dtype == 128 bits, so this is safe. Caller guarantees
+    # numel % V == 0 and contiguity (see kernel._vec_ok).
+    tv = t.reshape(-1, V)
+    ct = cute.runtime.from_dlpack(
+        _ro(tv, read_only), assumed_align=16, enable_tvm_ffi=True
+    )
+    ct.element_type = torch2cute[t.dtype]
+    return ct
+
+
+def cute_tensor_vec_dyn(t, V, read_only=False):
+    # cute_tensor_vec with the LEADING (nvec = numel/V) mode marked dynamic: one
+    # compiled elementwise kernel serves EVERY numel (multiple of V) instead of one
+    # per distinct shape -- the recompile-minimization analog of cute_tensor_dynM.
+    # Measured cost of the dynamic extent: <=1% (the kernel is bandwidth-bound; the
+    # stride read hides under the loads). V stays static (vector instruction width).
+    tv = t.reshape(-1, V)
+    ct = cute.runtime.from_dlpack(
+        _ro(tv, read_only), assumed_align=16, enable_tvm_ffi=True
+    )
+    ct.element_type = torch2cute[t.dtype]
+    ct.mark_compact_shape_dynamic(mode=0, stride_order=(0, 1), divisibility=1)
+    return ct
+
+
+def cute_tensor_rowvec(t, rows, run, row_step, V, read_only=False):
+    # Wrap a ROW-DENSE, ROW-GAPPED tensor (dense innermost run of `run` elements,
+    # `rows` such runs each `row_step` elements apart) as a (rows, run//V, V) cute
+    # tensor: the innermost V is a contiguous 128-bit vector (within-row loads coalesce),
+    # only the row base carries the gap. This vectorizes the row-gapped case that aten
+    # leaves on its scalar offset-calculator path (~2x aten, near the contiguous vec
+    # path). Caller guarantees run % V == 0 and the outer dims collapse to one uniform
+    # row_step (see kernel._row_gap_view). assumed_align=16 for the wide within-row copy.
+    tv = t.as_strided((rows, run // V, V), (row_step, V, 1))
+    ct = cute.runtime.from_dlpack(
+        _ro(tv, read_only), assumed_align=16, enable_tvm_ffi=True
+    )
+    ct.element_type = torch2cute[t.dtype]
     return ct
 
 
