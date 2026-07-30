@@ -1316,6 +1316,27 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_channel_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        num_slots = symm_mem_hdl.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+
+        # channel == max_channel must be rejected
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.barrier(channel=max_channel)
+        torch.cuda.synchronize()
+
+        # channel == max_channel - 1 must be accepted
+        if max_channel > 1:
+            symm_mem_hdl.barrier(channel=max_channel - 1)
+        torch.cuda.synchronize()
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
