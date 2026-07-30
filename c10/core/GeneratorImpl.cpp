@@ -43,6 +43,15 @@ c10::intrusive_ptr<c10::GeneratorImpl> GeneratorImpl::graphsafe_get_state()
       false, "graphsafe_get_state is not supported in this Generator");
 }
 
+void GeneratorImpl::philox_state(
+    uint64_t /*increment*/,
+    at::Tensor& /*seed*/,
+    at::Tensor& /*offset*/,
+    at::Tensor& /*intragraph_offset*/) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "philox_state is not supported in this Generator");
+}
+
 /**
  * Gets the device of a generator.
  */

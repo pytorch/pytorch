@@ -365,24 +365,21 @@ class ModularIndexing(sympy.Function):
         # on wide Add expressions (e.g. in sizevars.simplify).
         if isinstance(base, sympy.Add) and not _is_wide_add(base):
             new_terms: list[sympy.Integer] = []
-            all_positive: bool = True
+            all_nonnegative: bool = True
             for term in base.args:
                 if safe_gcd(term, modulus * divisor) != modulus * divisor:
-                    if (isinstance(term, sympy.Integer) and term < 0) or (
-                        isinstance(term, sympy.Mul)
-                        and isinstance(term.args[0], sympy.Integer)
-                        and term.args[0] < 0
-                    ):
+                    if term.is_nonnegative is not True:
                         # workaround for https://github.com/triton-lang/triton/issues/619,
-                        # if there are negative terms, // produces wrong result
+                        # if terms are not provably nonnegative, // can produce
+                        # the wrong result
                         # TODO if https://github.com/triton-lang/triton/issues/619 is fixed
                         # this optimization would become valid
-                        all_positive = False
+                        all_nonnegative = False
                         break
                     else:
                         new_terms.append(term)
 
-            if len(new_terms) != len(base.args) and all_positive:
+            if len(new_terms) != len(base.args) and all_nonnegative:
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
         if isinstance(base, FloorDiv):
