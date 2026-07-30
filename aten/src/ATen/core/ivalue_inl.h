@@ -420,7 +420,8 @@ struct TORCH_API TupleElements {
       std::construct_at(&elementsVector_, rhs.elementsVector_);
     } else {
       auto copySize = std::min(inlineSize_, rhs.inlineSize_);
-      auto it = std::copy_n(rhs.elementsInline_, copySize, elementsInline_);
+      auto it = std::copy(
+        rhs.elementsInline_, rhs.elementsInline_ + copySize, elementsInline_);
       if (inlineSize_ > rhs.inlineSize_) {
         std::destroy(it, elementsInline_ + inlineSize_);
       } else if (inlineSize_ < rhs.inlineSize_) {
@@ -453,8 +454,8 @@ struct TORCH_API TupleElements {
       std::construct_at(&elementsVector_, std::move(rhs.elementsVector_));
     } else {
       auto moveSize = std::min(inlineSize_, rhs.inlineSize_);
-      auto it = std::copy_n(
-        std::make_move_iterator(rhs.elementsInline_), moveSize, elementsInline_);
+      auto it = std::move(
+        rhs.elementsInline_, rhs.elementsInline_ + moveSize, elementsInline_);
       if (inlineSize_ > rhs.inlineSize_) {
         std::destroy(it, elementsInline_ + inlineSize_);
       } else if (inlineSize_ < rhs.inlineSize_) {
