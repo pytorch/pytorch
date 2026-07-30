@@ -5279,7 +5279,7 @@ def find_free_port():
         return port
 
 # Errors that we can get in c10d initialization for which we should retry tests for.
-ADDRESS_IN_USE = "Address already in use"
+ADDRESS_IN_USE = "ddress already in use"
 CONNECT_TIMEOUT = "connect() timed out."
 
 def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):

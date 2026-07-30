@@ -97,7 +97,7 @@ def create_c10d_store(
             # detects timeouts and port conflicts in their own unittests
             # see - caffe2/torch/testing/_internal/common_utils.py
             # TODO properly map the exceptions in pybind (c10d/init.cpp)
-            if str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
+            if _ADDRESS_IN_USE[1:] in str(e):  # this will only happen on the server
                 if attempt < retries:
                     logger.warning(
                         "port: %s already in use, attempt: [%s/%s]",
