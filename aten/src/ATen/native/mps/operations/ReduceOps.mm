@@ -847,7 +847,9 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 // Unified host-side dispatch for value-preserving reductions on MPS, shared
 // by sum/nansum/mean/count_nonzero and min/max/all/any. Kernel name pattern
 // is always `{prefix}reduction_{variant}_{TI}_{TO}` with variant in
-// `""/"outer"/"inner"`. Selects among four code paths:
+// `""/"outer"/"inner"/"flat"/"strided"`; every op/dtype pair with a base
+// kernel also has the flat and strided variants. Selects among four code
+// paths:
 //   1. Outer-dim kernel (dim=0 on contiguous input).
 //   2. Inner-dim kernel (last dim on contiguous input).
 //   3. Two-pass full reduction (scalar output, large input).
@@ -981,7 +983,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       auto partials = at::empty({(int64_t)num_groups}, output.options().dtype(opts.partial_dtype));
 
       auto p1_kernel =
-          fmt::format("{}reduction{}_{}_{}", opts.prefix, use_strided ? "_strided" : "", in_str, partial_str);
+          fmt::format("{}reduction{}_{}_{}", opts.prefix, use_strided ? "_strided" : "_flat", in_str, partial_str);
       auto p2_kernel = fmt::format("{}reduction_{}_{}", opts.pass2_prefix, partial_str, out_str);
 
       NormParams params1{};
@@ -992,15 +994,6 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           params1.input_sizes[d] = input.size(d);
           params1.input_strides[d] = input.stride(d);
         }
-      } else {
-        // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1.
-        params1.ndim = 2;
-        params1.input_sizes[0] = num_groups;
-        params1.input_strides[0] = elems_per_group;
-        params1.output_sizes[0] = num_groups;
-        params1.output_strides[0] = 1;
-        params1.input_sizes[1] = elems_per_group;
-        params1.input_strides[1] = 1;
       }
 
       // Pass 2: partials[num_groups] -> output[1], reduce dim=0. divisor
@@ -1022,19 +1015,21 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           auto ps1 = lib.getPipelineStateForFunc(p1_kernel);
           getMPSProfiler().beginProfileKernel(ps1, opts.prefix + "reduction_pass1", {input});
           [ce setComputePipelineState:ps1];
-          mtl_setArgs(ce, input, partials, params1);
-          // Round both passes' TG sizes up to a full simdgroup. Required
-          // because c10::metal::simd_max/min<long> emulates 64-bit simd
-          // via simd_shuffle_and_fill_down, and inactive lanes (when active
-          // count < 32) return undefined data (in practice 0) instead of
-          // the op's identity — corrupting min/max of all-positive or
-          // all-negative longs. The fill value itself is fixed in
-          // reduction_utils.h, but the fill only applies to past-end
-          // shuffles, not to inactive-lane reads within the simdgroup.
-          // Padding threads here skip the load loop (tid >= rsize) and
-          // contribute Op::identity().
-          auto tpg1 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(elems_per_group, 32u));
-          [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
+          if (use_strided) {
+            mtl_setArgs(ce, input, partials, params1);
+            // Round up to a full simdgroup: c10::metal::simd_max/min<long>
+            // reads its neighbours' registers, and a partially populated
+            // simdgroup yields undefined data (0 in practice) rather than the
+            // op's identity. Padding threads skip the load loop (tid >= rsize)
+            // and contribute Op::identity() instead.
+            auto tpg1 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(elems_per_group, 32u));
+            [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
+          } else {
+            const std::array<uint32_t, 2> fparams{num_groups, elems_per_group};
+            mtl_setArgs(ce, input, partials, fparams);
+            constexpr uint32_t TPG = 256;
+            [ce dispatchThreads:MTLSizeMake(num_groups * TPG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TPG, 1, 1)];
+          }
           getMPSProfiler().endProfileKernel(ps1);
 
           auto ps2 = lib.getPipelineStateForFunc(p2_kernel);
