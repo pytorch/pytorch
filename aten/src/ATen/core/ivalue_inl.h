@@ -1,11 +1,26 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <condition_variable>
+#include <cstddef>
+#include <exception>
+#include <functional>
+#include <initializer_list>
+#include <iterator>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <ostream>
+#include <sstream>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
@@ -408,6 +423,7 @@ struct TORCH_API TupleElements {
     }
   }
 
+  // Note: this implementation is not exception safe
   TupleElements& operator=(const TupleElements& rhs) {
     if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
       elementsVector_ = rhs.elementsVector_;
