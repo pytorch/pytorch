@@ -20,6 +20,7 @@ from threading import Lock
 
 
 CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "currsize"])
+_MISSING = object()
 
 
 class _JitCacheWrapper:
@@ -39,36 +40,27 @@ class _JitCacheWrapper:
         self._misses = 0
 
     def __call__(self, *args, **kwargs):
-        if not kwargs:
-            compile_args = None
-            cache_key = args
-        elif len(kwargs) == 1 and "compile_args" in kwargs:
-            compile_args = kwargs["compile_args"]
-            cache_key = args
-            kwargs = {}
-        else:
-            kwargs = dict(kwargs)
-            compile_args = kwargs.pop("compile_args", None)
-            cache_key = args + tuple(sorted(kwargs.items())) if kwargs else args
-
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            self._hits += 1
-            return cached
+        kwargs = dict(kwargs)
+        compile_args = kwargs.pop("compile_args", _MISSING)
+        cache_key = args + (tuple(sorted(kwargs.items())) if kwargs else ())
 
         with self._lock:
-            cached = self._cache.get(cache_key)
-            if cached is not None:
+            cached = self._cache.get(cache_key, _MISSING)
+            if cached is not _MISSING:
                 self._hits += 1
                 return cached
 
             self._misses += 1
-            if compile_args is None:
+            if compile_args is _MISSING:
                 compiled = self._fn(*args, **kwargs)
             else:
                 compiled = self._fn(*args, compile_args=compile_args, **kwargs)
             self._cache[cache_key] = compiled
             return compiled
+
+    @property
+    def cache(self):
+        return self._cache
 
     def cache_clear(self) -> None:
         with self._lock:
@@ -81,7 +73,7 @@ class _JitCacheWrapper:
             return CacheInfo(self._hits, self._misses, len(self._cache))
 
 
-def jit_cache(fn):
+def flydsl_jit_cache(fn):
     """Decorate a FlyDSL compile helper using its explicit args as the key.
 
     The decorated function should take stable specialization parameters as its
@@ -91,3 +83,6 @@ def jit_cache(fn):
     """
 
     return _JitCacheWrapper(fn)
+
+
+jit_cache = flydsl_jit_cache
