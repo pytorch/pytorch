@@ -1411,7 +1411,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             FlexGemmEpilogueGraph,
             FlexGemmLocalReduceAnalysis,
             FlexGemmLocalReduceMatch,
@@ -1473,7 +1473,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             )
 
     def test_local_reduce_aux_result_requires_grouped_source(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueEmitter
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmEpilogueEmitter,
+        )
 
         graph = torch.fx.Graph()
         aux = graph.placeholder("aux")
