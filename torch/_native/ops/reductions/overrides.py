@@ -167,11 +167,28 @@ def _base_cond(self, dim, nouts=1, has_index=False) -> bool:
     # argument). Never raises -- a cond that throws would crash the dispatcher
     # instead of falling back. (COW is no longer gated: inputs export read-only,
     # see launch._ro.)
+    # A NEG/CONJ bit declines: it is lazy metadata, so the buffer we would read through
+    # dlpack holds the UNNEGATED values. It also must not be resolved inside a cond --
+    # aten materializes such a view by CALLING copy_, so any override of copy_ would be
+    # re-entered from here. Declining lets aten resolve the bit and re-dispatch the
+    # materialized tensor, which this cond then accepts normally.
+    #
+    # A base pointer that is not 16-byte aligned also declines. The row/col/xcta wraps
+    # claim an alignment derived from N and the vector width, and from_dlpack VALIDATES
+    # that claim -- a VIEW into a larger tensor need not honour it (base[1:] on fp64
+    # starts 8 B in), which raised "Misaligned Tensor data" mid-call on an ordinary
+    # sum/amax over a slice. Clamping the claim per call is not enough: the compiled
+    # kernel bakes its load width, so a plan built for an aligned call cannot serve a
+    # misaligned one. Fresh allocations are >=256 B aligned, so this only sheds sliced
+    # views, which aten handles correctly.
     return (
         not cap.is_traced(self)
         and cap.device_ok(self)
         and self.dtype in _SUPPORTED_DTYPES
         and cap.on_current_device(self)
+        and not self.is_neg()
+        and not self.is_conj()
+        and self.const_data_ptr() % 16 == 0
         and _dims_ok(dim, self.dim())
         and _geometry_supported(self, dim, nouts, has_index)
     )
