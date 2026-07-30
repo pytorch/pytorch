@@ -2285,16 +2285,20 @@ def use_flex_tdm_descriptor(
     def operand_compatible(
         mat: IRNode, block_shape: Sequence[sympy.Expr | int]
     ) -> bool:
-        if mat.get_dtype() not in _TDM_SUPPORTED_DTYPES:
+        def reject(reason: str) -> bool:
+            log.debug("Flex TDM descriptor rejected for %s: %s", mat.get_name(), reason)
             return False
+
+        if mat.get_dtype() not in _TDM_SUPPORTED_DTYPES:
+            return reject(f"unsupported dtype {mat.get_dtype()}")
         sizes = mat.get_size()
         strides = mat.get_stride()
         if len(sizes) != 4 or len(strides) != 4:
-            return False
+            return reject("expected four-dimensional sizes and strides")
         if not _descriptor_shape_fits_in_int32(sizes):
-            return False
+            return reject("descriptor shape does not fit in int32")
         if mat.get_name() in V.graph.unaligned_buffers:
-            return False
+            return reject("buffer is marked unaligned")
 
         # Keep layout expressions symbolic so alignment can be proven without
         # specializing dynamic sequence lengths. Unprovable alignment
@@ -2320,36 +2324,46 @@ def use_flex_tdm_descriptor(
         if not V.graph.sizevars.statically_known_equals(
             restore_precomputed(strides[-1]), 1
         ):
-            return False
+            return reject("innermost stride is not statically known to be one")
         if not aligned(offset * itemsize, TMA_ALIGNMENT):
-            return False
+            return reject(f"offset is not {TMA_ALIGNMENT}-byte aligned")
         if not aligned(sizes[-1] * itemsize, TMA_ALIGNMENT):
-            return False
+            return reject(f"innermost dimension is not {TMA_ALIGNMENT}-byte aligned")
         if not all(
             aligned(stride * itemsize, TMA_ALIGNMENT) for stride in strides[:-1]
         ):
-            return False
+            return reject(f"outer strides are not {TMA_ALIGNMENT}-byte aligned")
 
         if block_shape:
             if len(block_shape) != 2:
-                return False
+                return reject("expected a two-dimensional block shape")
             if not _descriptor_shape_fits_in_int32(block_shape):
-                return False
+                return reject("block shape does not fit in int32")
             if not aligned(block_shape[-1] * itemsize, TMA_ALIGNMENT):
-                return False
+                return reject(f"block width is not {TMA_ALIGNMENT}-byte aligned")
             if not aligned(
                 block_shape[-1] * itemsize,
                 _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
             ):
-                return False
+                return reject(
+                    "block width does not preserve the preferred "
+                    f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
+                )
 
-        return aligned(
-            sizes[-1] * itemsize,
-            _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
-        ) and all(
+        if not aligned(sizes[-1] * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES):
+            return reject(
+                "innermost dimension does not preserve the preferred "
+                f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
+            )
+        if not all(
             aligned(stride * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES)
             for stride in strides[:-1]
-        )
+        ):
+            return reject(
+                "outer strides do not preserve the preferred "
+                f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
+            )
+        return True
 
     return all(
         operand_compatible(mat, block_shape)
