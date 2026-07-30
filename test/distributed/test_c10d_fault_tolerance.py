@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 import unittest
 from datetime import timedelta
 
@@ -229,13 +230,48 @@ class AbstractFaultToleranceTest:
         # reconfigure() with a fresh uuid.
         self._create_reconfigured_pg("ft_abort", 1200)
         self.backend.abort()
-        if hasattr(self.backend, "get_error"):
-            from torch._C._distributed_c10d import ErrorType
 
-            self.assertEqual(self.backend.get_error(), ErrorType.COMM_ERROR)
+        from torch._C._distributed_c10d import ErrorType
+
+        is_nccl = self.backend_name == "nccl2"
+        expected = ErrorType.COMM_ERROR if is_nccl else ErrorType.SUCCESS
+        self.assertEqual(self.backend.get_error(), expected)
 
         handles = self._collect_handles("ft_abort_recover")
         self._reconfigure(1201, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_after_timeout(self):
+        from torch._C._distributed_c10d import ErrorType
+
+        self._create_reconfigured_pg("ft_timeout", 1300)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+        self.backend.set_timeout(timedelta(milliseconds=50))
+
+        if self.rank == 1:
+            tensor = torch.ones(4, device=self.device)
+            work = dist.all_reduce(tensor, async_op=True)
+            try:
+                work.wait()
+            except RuntimeError as error:
+                self.assertRegex(str(error), "[Tt]imed out")
+            else:
+                deadline = time.monotonic() + 10
+                while (
+                    self.backend.get_error() == ErrorType.SUCCESS
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.1)
+                self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
+                with self.assertRaisesRegex(RuntimeError, "timed out"):
+                    dist.all_reduce(tensor, async_op=True)
+            del work
+
+        self.backend.set_timeout(timedelta(seconds=30))
+        self._store_barrier("ft_timeout_observed")
+
+        handles = self._collect_handles("ft_timeout_recover")
+        self._reconfigure(1301, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
     def test_reconfigure_rejects_reused_uuid(self):
