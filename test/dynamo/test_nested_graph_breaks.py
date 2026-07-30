@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.utils._pytree as python_pytree
 
 
 try:
@@ -1835,6 +1836,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # separate frame and produce 6 isolated single-op graphs.
         self.assertEqual(len(backend.graphs), 4)
 
+    @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
     def test_cxx_pytree_treespec_leaf_namespace(self):
         import torch.utils._cxx_pytree as cxx_pytree
 
