@@ -746,7 +746,12 @@ class OrderedSetClassVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name == "__new__":
+        # Unbound method access must route back through call_method, which maps
+        # the call onto the SetVariable holding the elements. Resolving the
+        # attribute generically would hand back OrderedSet's real function and
+        # inline it, mutating the `_dict` slot that OrderedSetVariable does not
+        # model, so the mutation would be silently dropped.
+        if name == "__new__" or getattr(set, name, None) in set_methods:
             from .misc import GetAttrVariable
 
             if self.source:

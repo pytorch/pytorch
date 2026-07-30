@@ -7,6 +7,7 @@ Per-type hook implementations (bool_impl, richcompare_impl, getattro_impl,
 etc.) live in their respective VT files.
 """
 
+import _thread
 import abc
 import collections
 import enum
@@ -14,7 +15,7 @@ import sys
 import types
 import typing
 from functools import lru_cache, partial
-from typing import NoReturn, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
@@ -142,15 +143,33 @@ def type_has_dict(obj_type: type) -> bool:
     the builtin scalar/container bases (int, str, tuple, ...) have neither.
     Both signals are read from the type via __flags__ / __dictoffset__.
 
+    _thread._local is the one type that reports neither yet still has an
+    instance dict: it keeps one dict per thread and passes it to generic
+    getattr from tp_getattro (PyObject_GenericGetAttrWithDict).
+
     Not memoized: caching by type object would hold locally-defined classes
     (and anything their methods close over) alive, leaking compiled models.
-    The computation is two attribute reads and a bitwise op, so caching buys
+    The computation is a few attribute reads and a bitwise op, so caching buys
     nothing.
     """
     return (
         bool(obj_type.__flags__ & _Py_TPFLAGS_MANAGED_DICT)
         or obj_type.__dictoffset__ != 0
+        or issubclass(obj_type, _thread._local)
     )
+
+
+def get_instance_dict(obj: object) -> dict[str, Any] | None:
+    """The instance __dict__ of obj, or None if it has none.
+
+    object.__getattribute__ reads the tp_dictoffset/managed dict without
+    running a user-defined __getattribute__. _thread._local has neither and
+    only exposes its per-thread dict from tp_getattro, so retry via getattr.
+    """
+    try:
+        return object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return getattr(obj, "__dict__", None)
 
 
 def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
