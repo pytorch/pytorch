@@ -26,6 +26,7 @@ import builtins
 import collections
 import contextlib
 import dataclasses
+import datetime
 import enum
 import functools
 import inspect
@@ -1074,6 +1075,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0],
                 init_args,
                 tx=tx,
+            )
+        elif self.value is datetime.datetime and name == "now":
+            return variables.DatetimeNowFunctionVariable().call_function(
+                tx, args, kwargs
             )
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(

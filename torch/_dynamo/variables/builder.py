@@ -61,7 +61,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
-from torch._guards import TracingContext
+from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import (
@@ -3622,7 +3622,10 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         wrapped_value = torch.tensor(value)
-        if not isinstance(self.get_source(), RandomValueSource):
+        # Values sourced from RandomValueSource (or an attribute access
+        # chained on top of one, e.g. DateTimeValueSource) are expected to
+        # change on every invocation, so no equality/type guard applies.
+        if self.get_source().guard_source != GuardSource.RANDOM_VALUE:
             install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}

@@ -245,6 +245,29 @@ class RandomValueSource(Source):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class DateTimeValueSource(Source):
+    datetime_call_index: int
+
+    @property
+    def guard_source(self) -> GuardSource:
+        # Reuses RANDOM_VALUE: like random calls, this value is expected to
+        # change on every invocation, so no equality/type guard is installed
+        # for it (see wrap_unspecialized_primitive).
+        return GuardSource.RANDOM_VALUE
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.append_output(
+            codegen.create_load(codegen.tx.output.datetime_values_var)
+        )
+        codegen.append_output(codegen.create_load_const(self.datetime_call_index))
+        codegen.append_output(create_binary_subscr())
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"datetime_value_{_esc_str(self.datetime_call_index)}"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class GlobalSource(Source):
     global_name: str
 

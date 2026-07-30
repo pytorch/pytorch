@@ -18,6 +18,7 @@ Key classes include:
 import builtins
 import contextvars
 import dataclasses
+import datetime
 import enum
 import functools
 import inspect
@@ -58,6 +59,7 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
+    DateTimeValueSource,
     GenericAttrSource,
     GetItemSource,
     TypeMROSource,
@@ -73,7 +75,12 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    GetSet,
+    NO_SUCH_SUBOBJ,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .object_protocol import generic_str
@@ -2879,6 +2886,95 @@ class RandomVariable(VariableTracker):
         codegen(self.wrap_state(self.random.getstate()))
         codegen.call_function(1, True)
         codegen.pop_top()
+
+
+def _make_datetime_attr_getter(
+    attr_name: str,
+) -> Callable[["DatetimeVariable", "InstructionTranslatorBase"], VariableTracker]:
+    def getter(
+        self: "DatetimeVariable", tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        from .builder import VariableBuilder
+
+        source = AttrSource(DateTimeValueSource(self.datetime_call_index), attr_name)
+        example_value = getattr(self.example_value, attr_name)
+        return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+    return getter
+
+
+class DatetimeVariable(VariableTracker):
+    """datetime.datetime.now()
+
+    Represents the result of a single datetime.datetime.now() call. Reading
+    one of the supported integer fields (year/month/.../microsecond) routes
+    through the same "recompute on every invocation" mechanism dynamo uses
+    for random.random() (see OutputGraph.datetime_calls), so the underlying
+    now() call is re-executed fresh each time the compiled function runs
+    instead of being baked in at trace time.
+
+    Deliberately narrow scope: only reading these plain integer fields is
+    supported. Arithmetic, comparisons, or other methods on the datetime
+    object itself are not, and fall through to a graph break.
+    """
+
+    _supported_attrs = (
+        "year",
+        "month",
+        "day",
+        "hour",
+        "minute",
+        "second",
+        "microsecond",
+    )
+
+    tp_getset = {
+        attr: GetSet(_make_datetime_attr_getter(attr), None)
+        for attr in _supported_attrs
+    }
+
+    def __init__(
+        self,
+        datetime_call_index: int,
+        example_value: datetime.datetime,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.datetime_call_index = datetime_call_index
+        self.example_value = example_value
+
+
+class DatetimeNowFunctionVariable(VariableTracker):
+    """Represents the datetime.datetime.now callable itself.
+
+    Calling it (with no arguments) registers a fresh datetime.now() call in
+    tx.output.datetime_calls and returns a DatetimeVariable handle. See
+    DatetimeVariable for what's supported on the result.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if args or kwargs:
+            unimplemented(
+                gb_type="datetime.datetime.now() with arguments",
+                context=f"args={args} kwargs={kwargs}",
+                explanation=(
+                    "Dynamo only supports datetime.datetime.now() called "
+                    "with no arguments (e.g. no tz=...)."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        example_value = datetime.datetime.now()
+        datetime_call_index = len(tx.output.datetime_calls)
+        tx.output.datetime_calls.append((datetime.datetime.now, (), {}))
+        return DatetimeVariable(
+            datetime_call_index=datetime_call_index,
+            example_value=example_value,
+        )
 
 
 class WeakRefVariable(VariableTracker):

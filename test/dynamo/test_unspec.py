@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import datetime
 import math
 import random
 import unittest
+import unittest.mock
 
 import numpy as np
 
@@ -175,6 +177,77 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res.append(fn(torch.ones(2)))
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
+
+    def test_datetime_now_fullgraph(self):
+        # Repro from https://github.com/pytorch/pytorch/issues/125171 :
+        # datetime.datetime.now() used to graph break / fail under
+        # fullgraph=True.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            start_time = datetime.datetime.now()
+            return x + 1 + start_time.second
+
+        x = torch.randn(2, 3)
+        fn(x)  # must not raise
+
+    def test_datetime_now_fresh_each_call(self):
+        # datetime.datetime.now() must be re-evaluated on every invocation of
+        # the compiled function rather than baked in at trace time (this is
+        # the exact issue that sank the previous attempt, PR #165540).
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x + 1, datetime.datetime.now().microsecond
+
+        x = torch.ones(2)
+        _, us1 = fn(x)
+        _, us2 = fn(x)
+        _, us3 = fn(x)
+        # Extremely unlikely for all three microsecond readings to collide
+        # if now() is actually being called fresh each time.
+        self.assertFalse(us1 == us2 == us3)
+
+    def test_datetime_now_attrs_consistent(self):
+        # All attributes read off a single datetime.now() call within one
+        # invocation must come from that same call, not be independently
+        # recomputed (which could otherwise straddle a second/day boundary).
+        # datetime.datetime.now is a C-level immutable slot and can't be
+        # mocked directly, so instead bracket the compiled call with eager
+        # datetime.now() readings and check the returned fields reconstruct
+        # to a timestamp within that bracket.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            now = datetime.datetime.now()
+            return (
+                x + 1,
+                now.year,
+                now.month,
+                now.day,
+                now.hour,
+                now.minute,
+                now.second,
+                now.microsecond,
+            )
+
+        x = torch.ones(2)
+        before = datetime.datetime.now()
+        _, year, month, day, hour, minute, second, microsecond = fn(x)
+        after = datetime.datetime.now()
+        reconstructed = datetime.datetime(
+            year, month, day, hour, minute, second, microsecond
+        )
+        self.assertTrue(before <= reconstructed <= after)
+
+    def test_datetime_now_with_tz_graph_breaks(self):
+        # v1 only supports the no-argument datetime.datetime.now(); passing
+        # tz= should graph break in a controlled way, not crash.
+        def fn(x):
+            return x + 1 + datetime.datetime.now(tz=datetime.timezone.utc).second
+
+        x = torch.randn(2, 3)
+        torch.compile(fn, backend="eager")(x)  # allowed to graph break, not fullgraph
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_random_call_with_while_loop(self):
         def fn(x):
