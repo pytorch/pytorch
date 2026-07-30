@@ -166,6 +166,53 @@ class TestCuTeDSLReductionWiring(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
 
+    def test_scalar_operand_is_served(self):
+        # aten's unboxed parser turns `x * 2.0` into mul.Tensor(Tensor, Scalar) and
+        # dispatches THAT overload -- the number never reaches aten::mul.Scalar. The
+        # router now coerces the number to a 0-d tensor BEFORE the cond (it used to do
+        # so only on the fallback path), and the cond treats a 0-d CPU operand as that
+        # coerced number, so scalar calls are served instead of always declining.
+        from torch._native.ops.pointwise import kernel as K
+
+        def fired(fn):
+            # Count real kernel launches -- plan-cache growth is not a liveness signal
+            # once the cache is warm from an earlier identical call.
+            orig, n = K.run, [0]
+
+            def counting(*a, **k):
+                n[0] += 1
+                return orig(*a, **k)
+
+            K.run = counting
+            try:
+                fn()
+            finally:
+                K.run = orig
+            return n[0]
+
+        x = torch.randn(1024, device="cuda")
+        for fn in (
+            lambda: x * 2.0,
+            lambda: x + 2.0,
+            lambda: x - 2.0,
+            lambda: x / 2.0,
+            lambda: torch.fmod(x, 2.0),
+        ):
+            got = fn()
+            with _disabled():
+                ref = fn()
+            self.assertEqual(got, ref)
+            self.assertEqual(fired(fn), 1, "scalar call should route to our kernel")
+        # WEAK promotion must survive: a python number never widens the tensor dtype.
+        b = torch.randn(64, device="cuda", dtype=torch.bfloat16)
+        self.assertEqual((b * 2.0).dtype, torch.bfloat16)
+        i = torch.randint(0, 9, (64,), device="cuda", dtype=torch.int32)
+        self.assertEqual((i * 2).dtype, torch.int32)  # int stays int
+        self.assertEqual((i + 0.5).dtype, torch.float32)  # float promotes the category
+        # A dim>0 CPU tensor is a genuine cross-device call, not a scalar -> aten raises.
+        with self.assertRaises(RuntimeError):
+            x + torch.randn(1024)
+
     def test_pow_scalar_base_on_cuda(self):
         # REGRESSION: aten's pow_Scalar_out builds a wrapped_scalar_tensor on the
         # EXPONENT's device and redispatches to pow_out (Pow.cpp), so a CUDA
@@ -197,6 +244,52 @@ class TestCuTeDSLReductionWiring(TestCase):
                 torch.sum(x, dim=1), x.double().sum(dim=1).float(), atol=1e-3, rtol=1e-3
             )
             torch.linalg.vector_norm(x, 2, dim=1)  # same reduce path, must not raise
+
+    def test_strided_single_element_view_is_served(self):
+        # REGRESSION: is_contiguous() is True for ANY single-element tensor whatever its
+        # stride (with one element the stride is unobservable -- every stride addresses
+        # the same element), so a.diagonal(offset=2) on (5,3) is a contiguous shape-(1,)
+        # tensor that still declares stride (4,). The DSL compares the declared stride
+        # against stride_order and rejected it ("The stride_order is not consistent with
+        # the layout") -- a hard error on an ordinary sum, not a fallback. The wrap now
+        # restrides such a tensor to the canonical form, so these are SERVED (declining
+        # would give up coverage for a difference that cannot be observed).
+        a = torch.randn(5, 3, device="cuda", dtype=torch.float64)
+        d = a.diagonal(offset=2)
+        self.assertEqual(d.shape, torch.Size([1]))
+        self.assertNotEqual(d.stride(), (1,))  # the leftover stride is the whole point
+        for fn in (lambda z: z.sum(), lambda z: z.mean()):
+            with _disabled():
+                ref = fn(d)
+            self.assertEqual(fn(d), ref)
+
+    def test_misaligned_and_lazy_metadata_inputs_decline(self):
+        # Two cond gates that cannot be expressed as numerics:
+        #   - A base pointer that is not 16-byte aligned: the row/col/xcta wraps claim an
+        #     N-derived alignment that from_dlpack VALIDATES, and the compiled kernel
+        #     BAKES its load width, so a plan built for an aligned call cannot serve a
+        #     misaligned one (clamping the claim per call is not enough). Raised
+        #     "Misaligned Tensor data" mid-call on an ordinary sum over a slice.
+        #   - A NEG/CONJ bit: lazy metadata, so the exported buffer holds the UNNEGATED
+        #     values. It must not be resolved in a cond either, since aten materializes
+        #     such a view by CALLING copy_ -- any override of copy_ is then re-entered.
+        base = torch.arange(4096, device="cuda", dtype=torch.float64) + 1
+        for off in (0, 1, 2, 3):
+            t = base[off : off + 512].view(256, 2)
+            for fn in (
+                lambda z: z.sum(dim=0),
+                lambda z: z.sum(dim=1),
+                lambda z: z.sum(),
+            ):
+                with _disabled():
+                    ref = fn(t)
+                self.assertEqual(fn(t), ref, f"off={off}")
+        n = torch.randn(64, device="cuda", dtype=torch.float64)._neg_view()
+        self.assertTrue(n.is_neg())
+        for fn in (lambda z: z.sum(dim=0), lambda z: z.sum(), lambda z: z.mean()):
+            with _disabled():
+                ref = fn(n)
+            self.assertEqual(fn(n), ref)
 
 
 if __name__ == "__main__":
