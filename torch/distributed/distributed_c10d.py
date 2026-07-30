@@ -10,6 +10,7 @@ import hashlib
 import io
 import itertools
 import logging
+import operator
 import os
 import pickle
 import sys
@@ -6329,8 +6330,15 @@ def monitored_barrier(
         _warn_not_in_group("monitored_barrier")
         return
 
-    if get_backend(group) != Backend.GLOO:
-        raise ValueError("monitored_barrier is only implemented for GLOO backend.")
+    # monitored_barrier runs on a CPU backend (GLOO, or its torchcomms
+    # BackendWrapper equivalent). Require the group to have a CPU backend rather
+    # than matching the "gloo" name, so a device-qualified group (e.g.
+    # "cpu:gloo,cuda:nccl") is accepted for its CPU backend.
+    group_to_use = group or _get_default_group()
+    if torch.device("cpu") not in group_to_use._device_types:
+        raise ValueError(
+            "monitored_barrier requires a group with a CPU-capable backend (e.g. GLOO)."
+        )
 
     if timeout is None:
         timeout = _get_default_timeout(get_backend(group))
@@ -6345,7 +6353,6 @@ def monitored_barrier(
 
     _check_valid_timeout(timeout)
 
-    group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
         timeout, wait_all_ranks=wait_all_ranks
     )
@@ -6819,6 +6826,12 @@ def _new_group_with_tag(
         timeout = _get_default_timeout(backend)
     _check_valid_timeout(timeout)
 
+    if ranks is not None:
+        try:
+            ranks = [operator.index(rank) for rank in ranks]
+        except TypeError as error:
+            raise TypeError("ranks must be a sequence of integers") from error
+
     if use_local_synchronization:
         # MPI backend doesn't have a way for us to perform a partial sync
         if backend == Backend.MPI:
@@ -6832,8 +6845,6 @@ def _new_group_with_tag(
     if ranks is not None:
         if sort_ranks:
             ranks = sorted(ranks)
-        else:
-            ranks = list(ranks)
         if len(set(ranks)) != len(ranks):
             raise ValueError(
                 f"ranks list must not contain duplicate entries, got {ranks}"
@@ -7803,6 +7814,9 @@ def _supports_reconfigure(group: ProcessGroup | None = None) -> bool:
     """
     Return whether ``group`` supports the reconfigure-based fault tolerance API.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
             the default process group is used.
@@ -7817,6 +7831,9 @@ def _get_reconfigure_handle(group: ProcessGroup | None = None) -> str:
 
     The handle encodes the information peers exchange out-of-band to
     (re)initialize the communicator via :func:`_reconfigure`.
+
+    .. warning::
+        This API is experimental and subject to change or removal.
 
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
@@ -7836,6 +7853,9 @@ def _reconfigure(
     """
     Reconfigure ``group`` with a new set of peers for fault tolerance.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         uuid (int): Uniquely identifies this instance of the communicator. Pass
             a fresh value on every (re)initialization.
@@ -7850,6 +7870,13 @@ def _reconfigure(
 
     Returns:
         Work: An async work handle for the reconfigure operation.
+
+    Example::
+        >>> # xdoctest: +SKIP("requires out-of-band rendezvous")
+        >>> dist.init_process_group("gloo", enable_reconfigure=True)
+        >>> # Every peer receives the same fresh UUID and rank-ordered handles.
+        >>> uuid, handles = rendezvous_reconfigure(dist._get_reconfigure_handle())
+        >>> dist._reconfigure(uuid=uuid, handles=handles).wait()
     """
     pg = group or _get_default_group()
     opts = ReconfigureOptions()
