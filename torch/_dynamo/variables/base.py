@@ -427,32 +427,6 @@ def getset_build(
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
-def _dunder_dict_getset_getter(
-    self: VariableTracker, tx: InstructionTranslatorBase
-) -> VariableTracker | None:
-    """`__dict__` getset getter, mirroring CPython's per-type split.
-
-    A class object's `__dict__` is a read-only mappingproxy of the class
-    namespace (CPython's type_dict); an instance's is the writable instance
-    dict (subtype_dict). We dispatch on whether the object is itself a type.
-    Declines (None) when the type exposes no instance __dict__.
-    """
-    from .object_protocol import type_has_dict
-
-    py_type = maybe_get_python_type(self)
-    if issubclass(py_type, type):
-        # self represents a class object -> mappingproxy of its namespace.
-        value = self.get_real_python_backed_value()
-        if value is NO_SUCH_SUBOBJ:
-            return None
-        source = AttrSource(self.source, "__dict__") if self.source else None
-        return VariableTracker.build(tx, value.__dict__, source)
-
-    if not type_has_dict(py_type):
-        return None
-    return self.get_dict_vt(tx)
-
-
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
@@ -715,19 +689,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     tp_methods: dict[str, Method] = {}
     # Declarative attribute tables, split to match CPython: tp_getset holds the
     # PyGetSetDef attributes, tp_members the PyMemberDef ones.
-    tp_getset: dict[str, GetSet] = {
-        "__class__": GetSet(
-            getter=lambda self, tx: VariableTracker.build(
-                tx,
-                self.python_type(),
-                AttrSource(self.source, "__class__") if self.source else None,
-            )
-        ),
-        "__dict__": GetSet(
-            getter=_dunder_dict_getset_getter,
-            setter=None,  # TODO(dynamo-team): support __dict__ assignment
-        ),
-    }
+    tp_getset: dict[str, GetSet] = {}
     tp_members: dict[str, Member] = {}
 
     def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
@@ -1119,6 +1081,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             result = getset.getter(self, tx)
             if result is not None:
                 return result
+
+        # object.__class__: one shared getset on `object` rather than per-VT.
+        if name == "__class__":
+            return VariableTracker.build(tx, self.python_type())
 
         try:
             py_type = self.python_type()
