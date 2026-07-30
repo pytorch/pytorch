@@ -135,6 +135,15 @@ def cute_tensor_dynM(t, align=None, ndim=None, read_only=False):
     # serve any M at a fixed N. stride_order is row-major outer->inner: (0,1) for 2D
     # (M, N), (0,) for 1D (M,). N stays static so the kernel's const_expr vec/tile
     # checks still resolve.
+    # A single-element tensor is contiguous by definition -- with one element the stride
+    # is unobservable, since every stride addresses the same element -- but torch may
+    # still carry a leftover non-unit stride from the view that produced it
+    # (a.diagonal(offset=2) on (5,3) gives shape (1,) stride (4,)). The DSL compares the
+    # declared stride against stride_order and rejects that outright ("The stride_order
+    # is not consistent with the layout"), so restride to the canonical contiguous form
+    # first. Same tensor, same data, stride the DSL accepts.
+    if t.numel() == 1:
+        t = t.as_strided(t.shape, (1,) * t.dim())
     w = _ro(t, read_only)
     ct = (
         cute.runtime.from_dlpack(w, assumed_align=align, enable_tvm_ffi=True)

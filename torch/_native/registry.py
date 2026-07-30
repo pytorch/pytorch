@@ -368,6 +368,26 @@ def _same_dtype_kind(a: torch.dtype, b: torch.dtype) -> bool:
     return kind(a) == kind(b)
 
 
+def _cast_to_weak_dtype(out, cast_dtype):
+    """Cast a result down to aten's weak-promotion dtype, or return it unchanged.
+
+    The natural-precision scalar wrap in _scalar_arg_coercer can OVER-PROMOTE against
+    0-d operands (uint8_0d + 1 -> int64, should stay uint8). Cast only when the output
+    and that dtype are the SAME KIND (both int, or both float): a differing kind means
+    the OP changed category (div maps int -> float), so result_type is not the output
+    dtype and casting to it would truncate (div(-10, 9) -> 1 instead of 1.11). This
+    also skips bool comparison outputs (kind mismatch vs a numeric result_type).
+    """
+    if (
+        cast_dtype is not None
+        and isinstance(out, torch.Tensor)
+        and out.dtype != cast_dtype
+        and _same_dtype_kind(out.dtype, cast_dtype)
+    ):
+        return out.to(cast_dtype)
+    return out
+
+
 def _scalar_arg_coercer(overload: "torch._ops.OpOverload | None"):
     """Build a fn ``args -> (coerced_args, cast_dtype)`` that wraps Python-number args
     sitting in Tensor-typed positional slots into 0-d tensors, or None if the op has no
@@ -1033,11 +1053,19 @@ def _register_overrides_from_graph(
         ):
             return _aten_overload(*args, **kwargs)
 
+        # Coerce Python numbers in Tensor slots UP FRONT, so an override can serve
+        # them. aten's unboxed parser turns `x * 2.0` into mul.Tensor(Tensor, Scalar)
+        # and dispatches THAT overload -- the number never reaches aten::mul.Scalar --
+        # so a cond gating on `isinstance(other, Tensor)` declined every scalar call
+        # (x+1, x*2, x>0 all fell back). The coercer reproduces aten's weak-number
+        # semantics (see _scalar_arg_coercer), and the same cast_dtype fixup applies to
+        # a served result as to the fallback's, so both paths share it below.
+        cast_dtype = None
+        if _coerce_scalars is not None:
+            args, cast_dtype = _coerce_scalars(args)
+
         result = _dispatch(args, kwargs, swallow_cond_exceptions=False)
         if result is _NO_MATCH:
-            cast_dtype = None
-            if _coerce_scalars is not None:
-                args, cast_dtype = _coerce_scalars(args)
             out = _fallback.call_boxed(keyset, *args, **kwargs)
             # The natural-precision scalar wrap can OVER-PROMOTE against 0-d operands
             # (uint8_0d + 1 -> int64, should stay uint8); cast down to aten's
@@ -1046,15 +1074,10 @@ def _register_overrides_from_graph(
             # (div maps int -> float), so result_type is not the output dtype and casting
             # to it would truncate (div(-10, 9) -> 1 instead of 1.11). This also skips
             # bool comparison outputs (kind mismatch vs a numeric result_type).
-            if (
-                cast_dtype is not None
-                and isinstance(out, torch.Tensor)
-                and out.dtype != cast_dtype
-                and _same_dtype_kind(out.dtype, cast_dtype)
-            ):
-                out = out.to(cast_dtype)
-            return out
-        return result
+            return _cast_to_weak_dtype(out, cast_dtype)
+        # Our kernel derives its output dtype from the COERCED operands, which are
+        # natural-precision wraps, so it needs the same down-cast as the fallback.
+        return _cast_to_weak_dtype(result, cast_dtype)
 
     def compile_router(*args, **kwargs):
         result = _dispatch(args, kwargs, swallow_cond_exceptions=True)
