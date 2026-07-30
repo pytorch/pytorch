@@ -1576,7 +1576,7 @@ class ReplacementPatternEntry(PatternEntry):
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
-                    for tag_name in ["recompute", "ac_graph_id"]:
+                    for tag_name in ["recompute", "ac_graph_id", "custom"]:
                         if tag_name in old.meta:
                             percolate_tags(
                                 new, tag_name, old.meta[tag_name], OrderedSet(args_set)
@@ -2305,7 +2305,7 @@ def register_lowering_pattern(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Register an aten to inductor IR replacement pattern.  The decorated
-    function is saved and then called a lowering time allowing direct
+    function is saved and then called at lowering time allowing direct
     pattern to inductor IR conversion.
     """
 
