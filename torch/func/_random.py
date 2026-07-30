@@ -300,7 +300,8 @@ def bits_(key: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         result (Tensor): The output tensor to fill in-place. Must have dtype
-            ``torch.uint32`` or ``torch.uint64``.
+            ``torch.uint32``, ``torch.uint64``, ``torch.int32``, or
+            ``torch.int64``. Signed dtypes receive the same raw bits.
 
     Returns:
         ``result``, filled with raw random bits.
@@ -335,8 +336,10 @@ def bits(
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         *shape (int): The desired output shape.
-        dtype (:class:`torch.dtype`, optional): The desired dtype, either
-            ``torch.uint32`` or ``torch.uint64``. Default: ``torch.uint32``.
+        dtype (:class:`torch.dtype`, optional): The desired dtype: one of
+            ``torch.uint32``, ``torch.uint64``, ``torch.int32``, or
+            ``torch.int64``. Signed dtypes receive the same raw bits.
+            Default: ``torch.uint32``.
 
     Returns:
         A tensor of the given shape filled with raw random bits.
