@@ -20,7 +20,11 @@ from torch.optim.adamw import AdamW as AdamW
 from torch.optim.asgd import ASGD as ASGD
 from torch.optim.lbfgs import LBFGS as LBFGS
 from torch.optim.nadam import NAdam as NAdam
+from torch.optim.optimizer import OptimizationUnit as OptimizationUnit
 from torch.optim.optimizer import Optimizer as Optimizer
+from torch.optim.optimizer import OptimizerStepExecutor as OptimizerStepExecutor
+from torch.optim.optimizer import OptimizerStepOps as OptimizerStepOps
+from torch.optim.optimizer import StepContext as StepContext
 from torch.optim.radam import RAdam as RAdam
 from torch.optim.rmsprop import RMSprop as RMSprop
 from torch.optim.rprop import Rprop as Rprop
@@ -60,12 +64,16 @@ __all__ = [
     "lr_scheduler",
     "Muon",
     "NAdam",
+    "OptimizationUnit",
     "Optimizer",
+    "OptimizerStepExecutor",
+    "OptimizerStepOps",
     "RAdam",
     "RMSprop",
     "Rprop",
     "SGD",
     "SparseAdam",
+    "StepContext",
     "swap_in_optimizer_params_and_state",
     "swa_utils",
 ]

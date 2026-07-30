@@ -3,10 +3,11 @@
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass, field
 from itertools import chain
-from typing import Any, cast, overload, TypeAlias, TypeVar
+from typing import Any, cast, overload, Protocol, TypeAlias, TypeVar
 from typing_extensions import deprecated, ParamSpec, Self
 
 import torch
@@ -30,13 +31,80 @@ StateDict: TypeAlias = dict[str, Any]
 DeviceDict: TypeAlias = dict[torch.device | None, torch.Tensor]
 DeviceDtypeDict: TypeAlias = dict[tuple[torch.device, torch.dtype] | None, torch.Tensor]
 
+
+class StepContext(Protocol):
+    """Optimizer-defined state scoped to one optimizer step."""
+
+
+_StepContextT = TypeVar("_StepContextT", bound=StepContext)
+
+
+@dataclass(frozen=True, slots=True)
+class OptimizationUnit:
+    """The finest independently schedulable unit of optimizer work.
+
+    ``compute_requirements`` maps each named value exchanged with the executor
+    to its optimizer-declared compute-layout requirement.
+    """
+
+    parameter: torch.Tensor
+    parameter_group: dict[str, Any]
+    state: MutableMapping[str, Any]
+    gradient: torch.Tensor | None = None
+    name: str | None = None
+    metadata: Any = None
+    compute_requirements: Mapping[str, Any] = field(default_factory=dict)
+
+
+class OptimizerStepOps(Protocol[_StepContextT]):
+    """Optimizer math exposed as independently schedulable operations."""
+
+    def optimization_units(
+        self, optimizer: "Optimizer"
+    ) -> Sequence[OptimizationUnit]: ...
+
+    def begin_step(self, optimizer: "Optimizer") -> _StepContextT: ...
+
+    def prepare(
+        self, unit: OptimizationUnit, *, out: dict[str, torch.Tensor]
+    ) -> None: ...
+
+    def compute(
+        self,
+        unit_metadata: Any,
+        inputs: Mapping[str, torch.Tensor],
+        *,
+        out: dict[str, torch.Tensor],
+    ) -> None: ...
+
+    def apply_updates(
+        self, unit: OptimizationUnit, updates: Mapping[str, torch.Tensor]
+    ) -> None: ...
+
+    def end_step(self, context: _StepContextT) -> None: ...
+
+
+class OptimizerStepExecutor(Protocol):
+    """Execute optimizer operations with an implementation-defined schedule."""
+
+    def execute(
+        self,
+        optimizer: "Optimizer",
+        ops: OptimizerStepOps[Any],
+        closure: Callable[[], float] | None = None,
+    ) -> Any: ...
+
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], tuple[Args, Kwargs] | None
 ]
 GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
 
 __all__ = [
+    "OptimizationUnit",
     "Optimizer",
+    "OptimizerStepExecutor",
+    "OptimizerStepOps",
+    "StepContext",
     "register_optimizer_step_pre_hook",
     "register_optimizer_step_post_hook",
 ]
@@ -378,6 +446,7 @@ class Optimizer:
 
     _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
+    _step_executor: OptimizerStepExecutor | None
     # pyrefly: ignore [not-a-type]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: (
@@ -402,6 +471,7 @@ class Optimizer:
         self._optimizer_state_dict_post_hooks = OrderedDict()
         self._optimizer_load_state_dict_pre_hooks = OrderedDict()
         self._optimizer_load_state_dict_post_hooks = OrderedDict()
+        self._step_executor = None
 
         self._patch_step_function()
 
@@ -436,7 +506,13 @@ class Optimizer:
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
+        step_executor = getattr(self, "_step_executor", None)
         self.__dict__.update(state)
+        # Executors may own process groups, streams, and temporary buffers. They
+        # are excluded from __getstate__. Preserve an executor already installed
+        # on a live optimizer across load_state_dict(), while a newly unpickled
+        # optimizer defaults to no executor.
+        self._step_executor = step_executor
         if "_optimizer_step_pre_hooks" not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
         if "_optimizer_step_post_hooks" not in self.__dict__:
@@ -522,6 +598,32 @@ class Optimizer:
         This is a workaround due to lack of a proper step hook on the optimizer,
         and will be removed if it exists.
         """
+
+    @torch._disable_dynamo
+    def set_step_executor(
+        self, executor: OptimizerStepExecutor | None
+    ) -> None:
+        """Install an optional executor for schedulable optimizer operations.
+
+        Optimizers opt into this path by calling :meth:`_execute_step_ops` from
+        their ``step()`` implementation. Existing optimizer steps are unchanged
+        while no executor is installed. Executors are runtime-only and are not
+        included in optimizer serialization or ``state_dict()``.
+        """
+        if executor is not None and not callable(getattr(executor, "execute", None)):
+            raise TypeError("step executor must define an execute() method")
+        self._step_executor = executor
+
+    @torch._disable_dynamo
+    def _execute_step_ops(
+        self,
+        ops: OptimizerStepOps[Any],
+        closure: Callable[[], float] | None = None,
+    ) -> Any:
+        executor = self._step_executor
+        if executor is None:
+            raise RuntimeError("no optimizer step executor is installed")
+        return executor.execute(self, ops, closure)
 
     @staticmethod
     def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:
@@ -1134,6 +1236,10 @@ class Optimizer:
             param_group (dict): Specifies what Tensors should be optimized along with group
                 specific optimization options.
         """
+        if self._step_executor is not None:
+            raise RuntimeError(
+                "cannot add parameter groups after installing a step executor"
+            )
         if not isinstance(param_group, dict):
             raise TypeError(f"param_group must be a dict, but got {type(param_group)}")
 
