@@ -163,6 +163,11 @@ TORCH_API MPSStream* getDefaultMPSStream();
  */
 TORCH_API MPSStream* getStreamFromPool();
 
+/**
+ * Synchronize the default stream and any pool streams created so far.
+ */
+TORCH_API void synchronizeAllMPSStreams(SyncType syncType);
+
 //-----------------------------------------------------------------
 //  MPSStreamImpl
 //-----------------------------------------------------------------
