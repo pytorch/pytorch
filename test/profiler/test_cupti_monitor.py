@@ -1557,10 +1557,13 @@ _cupti_monitor.enable_hes_early()
     def test_graph_host_node_collected_on_device(self):
         # End-to-end: a CUDA-graph host node (a CPU callback run as a graph node) is collected
         # as a GRAPH_HOST_NODE record and rendered as a "graph_host_node" span in the exported
-        # trace. Built via cuda.bindings (a libc free(NULL) host node -- a safe no-op on every
-        # replay), so no torch host-node API is needed. Needs a driver new enough to emit the
-        # records (CUDA >= 13.2 / cuda-compat); the CUPTI enable succeeds on older drivers but
-        # yields nothing, so skip rather than falsely fail.
+        # trace. The graph is captured with torch.cuda.graph (keep_graph so the template stays
+        # live), then a host node is grafted onto it via cudaGraphAddHostNode -- stream capture
+        # never enqueues a host node, so the one node under test needs the runtime primitive --
+        # and the graph is re-instantiated before replay. The node is a libc free(NULL): a safe
+        # no-op on every replay. Needs a driver new enough to emit the records (CUDA >= 13.2 /
+        # cuda-compat); the CUPTI enable succeeds on older drivers but yields nothing, so skip
+        # rather than falsely fail.
         import ctypes
 
         try:
@@ -1577,16 +1580,20 @@ _cupti_monitor.enable_hes_early()
             return ret[1] if len(ret) > 1 else None
 
         free_addr = ctypes.cast(ctypes.CDLL(None).free, ctypes.c_void_p).value
-        stream = torch.cuda.Stream()
-        graph = ck(cudart.cudaGraphCreate(0))
         params = cudart.cudaHostNodeParams()
         try:
             params.fn = cudart.cudaHostFn_t(init_value=free_addr)
         except TypeError:
             params.fn = free_addr
         params.userData = 0  # free(NULL): safe no-op on every replay
-        ck(cudart.cudaGraphAddHostNode(graph, [], 0, params))
-        exec_ = ck(cudart.cudaGraphInstantiate(graph, 0))
+
+        x = torch.zeros(8, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(graph):
+            x.add_(1.0)
+        # raw_cuda_graph() is an int handle; pass it straight to the binding (no typed wrapper).
+        ck(cudart.cudaGraphAddHostNode(graph.raw_cuda_graph(), [], 0, params))
+        graph.instantiate()
 
         cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cupti_monitor"}')
         with TemporaryFileName(mode="w+") as trace_path:
@@ -1595,8 +1602,7 @@ _cupti_monitor.enable_hes_early()
                 experimental_config=cfg,
             ) as prof:
                 for _ in range(5):
-                    ck(cudart.cudaGraphLaunch(exec_, stream.cuda_stream))
-                ck(cudart.cudaStreamSynchronize(stream.cuda_stream))
+                    graph.replay()
                 torch.cuda.synchronize()
             prof.export_chrome_trace(trace_path)
             gz = trace_path + ".gz"
