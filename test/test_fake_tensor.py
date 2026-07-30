@@ -3676,6 +3676,109 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res2),
             )
 
+    def _symbolic_cache_input(self, *, requires_grad=False):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        fake_mode.cache_crosscheck_enabled = False
+        x = fake_mode.from_tensor(
+            torch.randn(4, 8, requires_grad=requires_grad),
+            source=LocalSource("x", is_input=True),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+                constraint_sizes=[None, None],
+            ),
+        )
+        return fake_mode, x
+
+    def test_cache_symbolic_contiguous_output_avoids_empty_strided(self):
+        fake_mode, x = self._symbolic_cache_input()
+
+        with fake_mode:
+            FakeTensorMode.cache_clear()
+            expected = aten.clone.default(x)
+            before_hit = FakeTensorMode.cache_info()
+
+            with patch.object(
+                torch, "empty_strided", wraps=torch.empty_strided
+            ) as empty_strided:
+                actual = aten.clone.default(x)
+
+            after_hit = FakeTensorMode.cache_info()
+            self.assertEqual(after_hit.hits, before_hit.hits + 1)
+            self.assertEqual(after_hit.misses, before_hit.misses)
+            empty_strided.assert_not_called()
+            self.assertEqual(
+                extract_tensor_metadata(actual),
+                extract_tensor_metadata(expected),
+            )
+
+    def test_cache_symbolic_noncontiguous_output_preserves_strides(self):
+        fake_mode, x = self._symbolic_cache_input()
+
+        with fake_mode:
+            x = aten.transpose.int(x, 0, 1)
+            FakeTensorMode.cache_clear()
+            expected = aten.clone.default(x, memory_format=torch.preserve_format)
+            before_hit = FakeTensorMode.cache_info()
+
+            with patch.object(
+                torch, "empty_strided", wraps=torch.empty_strided
+            ) as empty_strided:
+                actual = aten.clone.default(x, memory_format=torch.preserve_format)
+
+            after_hit = FakeTensorMode.cache_info()
+            self.assertEqual(after_hit.hits, before_hit.hits + 1)
+            self.assertEqual(after_hit.misses, before_hit.misses)
+            empty_strided.assert_called_once()
+            self.assertEqual(
+                extract_tensor_metadata(actual),
+                extract_tensor_metadata(expected),
+            )
+
+    def test_cache_symbolic_view_output_uses_as_strided(self):
+        fake_mode, x = self._symbolic_cache_input()
+
+        with fake_mode:
+            FakeTensorMode.cache_clear()
+            expected = aten.transpose.int(x, 0, 1)
+            before_hit = FakeTensorMode.cache_info()
+
+            with patch.object(
+                torch, "as_strided", wraps=torch.as_strided
+            ) as as_strided:
+                actual = aten.transpose.int(x, 0, 1)
+
+            after_hit = FakeTensorMode.cache_info()
+            self.assertEqual(after_hit.hits, before_hit.hits + 1)
+            self.assertEqual(after_hit.misses, before_hit.misses)
+            as_strided.assert_called_once()
+            self.assertEqual(
+                extract_tensor_metadata(actual),
+                extract_tensor_metadata(expected),
+            )
+            self.assertEqual(
+                actual.untyped_storage()._cdata,
+                x.untyped_storage()._cdata,
+            )
+
+    def test_cache_symbolic_detach_output_clears_requires_grad(self):
+        fake_mode, x = self._symbolic_cache_input(requires_grad=True)
+
+        with fake_mode:
+            FakeTensorMode.cache_clear()
+            expected = aten.detach.default(x)
+            before_hit = FakeTensorMode.cache_info()
+            actual = aten.detach.default(x)
+
+            after_hit = FakeTensorMode.cache_info()
+            self.assertEqual(after_hit.hits, before_hit.hits + 1)
+            self.assertEqual(after_hit.misses, before_hit.misses)
+            self.assertFalse(actual.requires_grad)
+            self.assertEqual(
+                extract_tensor_metadata(actual),
+                extract_tensor_metadata(expected),
+            )
+
     def test_cache_bypass_prims_as_strided(self):
         x = torch.empty(0, 8)
         y = torch.empty(0, 8)
