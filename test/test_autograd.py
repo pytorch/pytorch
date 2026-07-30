@@ -4453,6 +4453,26 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertEqual(ReturnAsIs.seen_grad_dtype, torch.float32)
 
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_no_leak_from_returned_input(self):
+        # The output defaults to its dtype while leaf accumulation uses x.grad_dtype.
+        class ReturnInput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, g):
+                ReturnInput.seen_grad_dtype = g.dtype
+                return g
+
+        x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True)
+        x.grad_dtype = torch.float64
+        out = ReturnInput.apply(x)
+        out.sum().backward()
+        self.assertEqual(ReturnInput.seen_grad_dtype, torch.float32)
+        self.assertEqual(x.grad.dtype, torch.float64)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,

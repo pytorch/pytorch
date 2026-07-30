@@ -262,10 +262,10 @@ class FunctionCtx:
             >>>     ctx.set_output_grad_dtype(torch.float32, t2.dtype, None, None)
             >>>     return t1, t2, t3, "not a tensor"
 
-        casts ``t1``'s gradient to ``float32``, requests the default explicitly
-        for ``t2`` via ``t2.dtype``, leaves the differentiable ``t3``'s gradient
-        uncast with ``None``, and uses ``None`` as the placeholder for the
-        trailing non-Tensor output.
+        This ensures that backward receives ``t1``'s gradient in ``float32``,
+        keeps the default behavior for ``t2``'s gradient via ``t2.dtype``,
+        passes ``t3``'s gradient through uncast with ``None``, and uses ``None``
+        as the placeholder for the trailing non-Tensor output.
         """
         if self.output_grad_dtypes is not None:
             raise RuntimeError("set_output_grad_dtype can only be called once")
