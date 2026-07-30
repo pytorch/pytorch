@@ -897,8 +897,154 @@ class TestStatelessRNGLogicalShards(TestCase):
                 local_sizes=((2, 2),),
             )
 
+    @parametrize("distribution", ["normal", "uniform"])
+    def test_parameter_validation_precedes_writes(self, device, distribution):
+        key = random.key(123, device=device)
+        metadata = dict(
+            global_shape=(2, 2),
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((2, 2),),
+        )
+        invalid_params = (
+            ({"std": -1.0}, {"std": float("nan")})
+            if distribution == "normal"
+            else ({"low": 1.0, "high": -1.0}, {"low": float("nan")})
+        )
+
+        for params in invalid_params:
+            result = torch.full((2, 2), 17.0, device=device)
+            with self.assertRaisesRegex(ValueError, "expects"):
+                getattr(random, f"{distribution}_shards_")(
+                    key, result, **params, **metadata
+                )
+            self.assertEqual(result, torch.full_like(result, 17.0))
+
+    @onlyCUDA
+    def test_cuda_fused_path_is_stateless(self, device):
+        key = random.key(123, device=device)
+        result = torch.empty((3, 4), device=device)
+        state = torch.cuda.get_rng_state(device)
+
+        random.normal_shards_(
+            key,
+            result,
+            global_shape=(3, 4),
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((3, 4),),
+        )
+
+        self.assertEqual(torch.cuda.get_rng_state(device), state)
+
+    @onlyCUDA
+    def test_cuda_fused_path_graph_replay_reads_key(self, device):
+        key = random.key(123, device=device)
+        result = torch.empty((3, 4), device=device)
+        metadata = dict(
+            global_shape=(3, 4),
+            global_offsets=((0, 0),),
+            local_offsets=((0, 0),),
+            local_sizes=((3, 4),),
+        )
+
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            for _ in range(3):
+                random.normal_shards_(key, result, mean=1.25, std=0.75, **metadata)
+        torch.cuda.current_stream().wait_stream(stream)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            random.normal_shards_(key, result, mean=1.25, std=0.75, **metadata)
+
+        for seed in (456, 789):
+            replay_key = random.key(seed, device=device)
+            key.copy_(replay_key)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(
+                result,
+                self._dense_reference(replay_key, (3, 4), torch.float32, "normal"),
+                atol=0,
+                rtol=0,
+            )
+
+    @onlyCUDA
+    def test_cuda_native_validation_precedes_writes(self, device):
+        key = random.key(123, device=device)
+        result = torch.full((2, 2), 17.0, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "outside global_shape"):
+            torch.ops.aten._philox_keyed_distribution_shards_(
+                result,
+                key,
+                (2, 2),
+                (0, 0, 2, 0),
+                (0, 0, 1, 0),
+                (1, 2, 1, 2),
+                2,
+                0,
+                (0.0, 1.0),
+            )
+        self.assertEqual(result, torch.full_like(result, 17.0))
+
+    def test_native_meta(self, device):
+        key = torch.empty((2,), dtype=torch.uint64, device="meta")
+        result = torch.empty((2, 3), device="meta")
+
+        output = torch.ops.aten._philox_keyed_distribution_shards_(
+            result,
+            key,
+            (2, 3),
+            (0, 0),
+            (0, 0),
+            (2, 3),
+            1,
+            0,
+            (0.0, 1.0),
+        )
+        self.assertEqual(output.shape, result.shape)
+
+        with self.assertRaisesRegex(RuntimeError, "outside global_shape"):
+            torch.ops.aten._philox_keyed_distribution_shards_(
+                result,
+                key,
+                (2, 3),
+                (2, 0),
+                (0, 0),
+                (1, 3),
+                1,
+                0,
+                (0.0, 1.0),
+            )
+
 
 class TestStatelessRNGCompile(TestCase):
+    @onlyCUDA
+    def test_keyed_shards_fullgraph(self, device):
+        key = random.key(42, device=device)
+        sentinel = 17.0
+
+        def fill(key, result):
+            result = result.clone()
+            return torch.ops.aten._philox_keyed_distribution_shards_(
+                result,
+                key,
+                (3, 4),
+                (1, 0),
+                (1, 2),
+                (2, 4),
+                1,
+                0,
+                (1.25, 0.75),
+            )
+
+        result = torch.full((4, 8), sentinel, device=device)
+        compiled = torch.compile(fill, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled(key, result), fill(key, result), atol=0, rtol=0)
+
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
 
