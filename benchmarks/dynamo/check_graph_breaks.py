@@ -24,6 +24,32 @@ def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
         return None
 
 
+# Dynamo metrics tracked against the expected-accuracy baselines, and whether
+# higher or lower is better. A regression is a move in the "bad" direction:
+#   lower_is_better=True  -> regression when actual > expected (e.g. graph breaks,
+#                            eager fallbacks)
+#   lower_is_better=False -> regression when actual < expected (e.g. ops/graphs
+#                            captured -- capturing less is the regression)
+# A metric is only checked for models whose expected baseline has that column,
+# so baselines predating a metric are silently skipped until regenerated.
+# Keep in sync with METRIC_COLUMNS in ci_expected_accuracy/update_expected.py
+# (the baseline writer).
+TRACKED_METRICS = {
+    "graph_breaks": True,
+    "calls_captured": False,  # ops captured
+    "unique_graphs": False,  # graphs captured
+    "fallbacks_to_eager": True,
+}
+
+
+def _classify(actual: Any, expected: Any, lower_is_better: bool) -> str:
+    """Return "PASS" / "FAIL" / "IMPROVED" for one metric."""
+    if actual == expected:
+        return "PASS"
+    worse = actual > expected if lower_is_better else actual < expected
+    return "FAIL" if worse else "IMPROVED"
+
+
 def check_graph_breaks(
     actual_csv: pd.DataFrame, expected_csv: pd.DataFrame, expected_filename: str
 ) -> tuple[list[str], str]:
@@ -69,42 +95,68 @@ def check_graph_breaks(
         num_graphs = get_field(actual_csv, model, "unique_graphs")
         dynamo_called = num_graphs is not None and int(num_graphs) != 0
 
-        graph_breaks = get_field(actual_csv, model, "graph_breaks")
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
         flaky = model in flaky_models
 
+        # graph_breaks is the primary metric: if the model has no baseline
+        # graph_breaks entry it is missing from the baseline entirely.
         if expected_graph_breaks is None:
-            status = "MISSING:"
+            actual_graph_breaks = get_field(actual_csv, model, "graph_breaks")
+            print(
+                f"{model:34}  {'MISSING:':19} "
+                f"graph_breaks={actual_graph_breaks}, expected=None"
+            )
             improved.append(model)
-        elif not dynamo_called:
+            continue
+        if not dynamo_called:
             print(f"{model:34}  EAGER_FAILED")
             continue
-        elif graph_breaks == expected_graph_breaks:
+
+        model_failed = False
+        model_improved = False
+        printed_detail = False
+        for field, lower_is_better in TRACKED_METRICS.items():
+            expected = get_field(expected_csv, model, field)
+            actual = get_field(actual_csv, model, field)
+            # Skip a metric absent from this baseline or the output, or whose
+            # cell is unreadable (NaN) -- get_field returns NaN for a
+            # present-but-empty cell, which must not be treated as a value.
+            if (
+                expected is None
+                or actual is None
+                or pd.isna(expected)
+                or pd.isna(actual)
+            ):
+                continue
+            result = _classify(actual, expected, lower_is_better)
+            if result == "PASS":
+                continue
+            if flaky:
+                status = f"{result}_BUT_FLAKY:"
+            else:
+                status = f"{result}:"
+                if result == "FAIL":
+                    model_failed = True
+                else:
+                    model_improved = True
+            print(f"{model:34}  {status:19} {field}={actual}, expected={expected}")
+            printed_detail = True
+
+        if not printed_detail:
             status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
-            continue
-        elif graph_breaks > expected_graph_breaks:
-            if flaky:
-                status = "FAIL_BUT_FLAKY:"
-            else:
-                status = "FAIL:"
-                failed.append(model)
-        elif graph_breaks < expected_graph_breaks:
-            if flaky:
-                status = "IMPROVED_BUT_FLAKY:"
-            else:
-                status = "IMPROVED:"
-                improved.append(model)
-        print(
-            f"{model:34}  {status:19} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
-        )
+        if model_failed:
+            failed.append(model)
+        elif model_improved:
+            improved.append(model)
 
     msg = ""
     if failed or improved:
         if failed:
             msg += textwrap.dedent(
                 f"""
-            Error: {len(failed)} models have new dynamo graph breaks:
+            Error: {len(failed)} models have regressed dynamo metrics (more graph
+            breaks / eager fallbacks, or fewer ops / graphs captured):
                 {" ".join(failed)}
 
             """
@@ -112,7 +164,7 @@ def check_graph_breaks(
         if improved:
             msg += textwrap.dedent(
                 f"""
-            Improvement: {len(improved)} models have fixed dynamo graph breaks:
+            Improvement: {len(improved)} models have improved dynamo metrics:
                 {" ".join(improved)}
 
             """
