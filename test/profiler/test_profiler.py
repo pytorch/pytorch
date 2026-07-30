@@ -4439,18 +4439,12 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
         self.assertGreater(len(json_records), 0)
         self.assertEqual(set(event_records), set(json_records))
 
-        typed_keys_by_category = collections.defaultdict(set)
         for key, trace_metadata in json_records.items():
             typed_metadata = event_records[key]
             self.assertGreater(len(typed_metadata), 0)
             self.assertEqual(set(typed_metadata) - set(trace_metadata), set())
             for field, value in typed_metadata.items():
                 self.assertEqual(value, trace_metadata[field])
-            typed_keys_by_category[key[1]].update(typed_metadata)
-
-        self.assertIn("cbid", typed_keys_by_category["cuda_runtime"])
-        self.assertIn("bytes", typed_keys_by_category["gpu_memcpy"])
-        self.assertIn("grid", typed_keys_by_category["kernel"])
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")

@@ -709,9 +709,8 @@ class FunctionEvent(FormattedTimesMixin):
         is_legacy (bool): Whether this is from the legacy profiler.
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
-        metadata (Dict[str, Any]): Typed Kineto metadata keyed by its original
-            field names. This may be partial for activities that have not fully
-            migrated to typed metadata.
+        metadata (Dict[str, Any]): Additional metadata keyed by the field names
+            used in exported traces. Available fields vary by activity and backend.
         metadata_json (str): Deprecated. Use event_metadata instead.
         event_metadata (EventMetadata): Additional JSON-derived metadata in
             structured format.
