@@ -504,6 +504,28 @@ void initDynamoBindings(PyObject* torch) {
   m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
   m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
 
+  // Read a builtin callable's PyMethodDef.ml_flags (CPython's METH_* bits) so
+  // the tp_methods arity check can derive its calling convention from CPython
+  // instead of a hand-maintained flag. Returns None for callables that carry
+  // no ml_flags (slot wrappers, Python functions). method_descriptor and
+  // classmethod_descriptor share the d_method layout prefix, so one cast serves
+  // both.
+  m.def("get_method_ml_flags", [](py::handle fn) -> py::object {
+    PyObject* o = fn.ptr();
+    int flags = -1;
+    if (PyCFunction_Check(o)) {
+      flags = PyCFunction_GetFlags(o);
+    } else if (
+        Py_IS_TYPE(o, &PyMethodDescr_Type) ||
+        Py_IS_TYPE(o, &PyClassMethodDescr_Type)) {
+      flags = reinterpret_cast<PyMethodDescrObject*>(o)->d_method->ml_flags;
+    }
+    if (flags < 0) {
+      return py::none();
+    }
+    return py::int_(flags);
+  });
+
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   m.def("_get_cache_entries_for_region", &_get_cache_entries_for_region);
   m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
