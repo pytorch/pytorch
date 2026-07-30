@@ -8088,6 +8088,10 @@ class ExternKernel(InputsKernel):
             maybe_free_unbacked_symbols if unbacked_only else maybe_free_symbols
         )
         r = InputsKernel.get_free_symbol_uses(self, unbacked_only)
+        if isinstance(self.layout, NonOwningLayout) and self.should_allocate():
+            # We allocate the buffer we alias into (e.g. a cat destination), so
+            # its size symbols must be in scope before this kernel runs.
+            r |= self.layout.get_free_symbol_uses(unbacked_only)
         for arg in self.constant_args:
             r |= maybe_get_symbols(arg)
         for arg in self.kwargs.values():

@@ -1382,6 +1382,31 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_cat_extern_kernel_inputs_unbacked_size(self, device):
+        # The mm outputs are written straight into the cat destination, whose
+        # size depends on every slice length, so all of them have to be in
+        # scope before the first mm allocates the destination.
+        def fn(x, ends, w):
+            outputs = []
+            start = 0
+            for i in range(4):
+                end = ends[i].item()
+                outputs.append(x[start:end] @ w)
+                start = end
+            return torch.cat(outputs, dim=0)
+
+        example_inputs = (
+            make_tensor(64, 32, dtype=torch.float32, device=device, requires_grad=True),
+            torch.tensor([16, 32, 48, 64], dtype=torch.int64, device=device),
+            make_tensor(32, 32, dtype=torch.float32, device=device, requires_grad=True),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
