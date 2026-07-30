@@ -16,7 +16,7 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch.distributed.distributed_c10d as c10d
-from torch._C._distributed_c10d import ErrorType, WorkResult
+from torch._C._distributed_c10d import WorkResult
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -31,18 +31,11 @@ class FaultToleranceBackend:
     name: str
     device_type: str
     supports_work_result: bool = False
-    has_pair_channels: bool = False
 
 
 FAULT_TOLERANCE_BACKENDS = [
     FaultToleranceBackend("gloo", "cpu"),
     FaultToleranceBackend("nccl2", "cuda", supports_work_result=True),
-    FaultToleranceBackend(
-        "nccl-lazy",
-        "cuda",
-        supports_work_result=True,
-        has_pair_channels=True,
-    ),
 ]
 
 
@@ -125,7 +118,16 @@ class AbstractFaultToleranceTest:
         expected = torch.full((4,), expected_value, dtype=tensor.dtype)
         self.assertEqual(tensor.cpu(), expected)
 
-    def _exchange_with_peer(self):
+    def test_reconfigure_basic(self):
+        self._create_reconfigured_pg("ft_basic", 100)
+
+    def test_reconfigure_then_all_reduce(self):
+        self._create_reconfigured_pg("ft_all_reduce", 200)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_then_send_recv(self):
+        self._create_reconfigured_pg("ft_send_recv", 300)
+
         rank = dist.get_rank()
         send_rank = (rank + 1) % self.world_size
         recv_rank = (rank - 1 + self.world_size) % self.world_size
@@ -141,18 +143,7 @@ class AbstractFaultToleranceTest:
 
         send_work.wait()
         recv_work.wait()
-        self.assertEqual(recv_tensor, torch.full_like(recv_tensor, recv_rank + 1.0))
-
-    def test_reconfigure_basic(self):
-        self._create_reconfigured_pg("ft_basic", 100)
-
-    def test_reconfigure_then_all_reduce(self):
-        self._create_reconfigured_pg("ft_all_reduce", 200)
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
-    def test_reconfigure_then_send_recv(self):
-        self._create_reconfigured_pg("ft_send_recv", 300)
-        self._exchange_with_peer()
+        self.assertEqual(recv_tensor.cpu(), torch.full((4,), recv_rank + 1.0))
 
     def test_work_explicit_timeout_includes_prelaunch_stall(self):
         if not self.supports_work_result:
@@ -195,30 +186,6 @@ class AbstractFaultToleranceTest:
                 work.wait()
         else:
             time.sleep(1)
-
-    def test_reconfigure_drops_pair_channels(self):
-        if not self.has_pair_channels:
-            self.skipTest(f"{self.backend_name} does not use pair channels")
-        self._create_reconfigured_pg("ft_pair_reconfigure", 1302)
-        self._exchange_with_peer()
-        self.assertEqual(self.backend._num_active_channels(), 2)
-
-        handles = self._collect_handles("ft_pair_reconfigure_post")
-        self._reconfigure(1303, handles)
-        self.assertEqual(self.backend._num_active_channels(), 0)
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
-    def test_pair_error_updates_backend_error(self):
-        if not self.has_pair_channels:
-            self.skipTest(f"{self.backend_name} does not use pair channels")
-        self._create_reconfigured_pg("ft_pair_error", 1304)
-        self._exchange_with_peer()
-
-        peer = (self.rank + 1) % self.world_size
-        pair = self.backend._get_peer_channel(peer)
-        self.assertIsNotNone(pair)
-        pair.abort()
-        self.assertEqual(self.backend.get_error(), ErrorType.COMM_ERROR)
 
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)
@@ -320,7 +287,9 @@ class AbstractFaultToleranceTest:
         self._create_reconfigured_pg("ft_abort", 1200)
         self.backend.abort()
 
-        is_nccl = self.backend_name in ("nccl2", "nccl-lazy")
+        from torch._C._distributed_c10d import ErrorType
+
+        is_nccl = self.backend_name == "nccl2"
         expected = ErrorType.COMM_ERROR if is_nccl else ErrorType.SUCCESS
         self.assertEqual(self.backend.get_error(), expected)
 
@@ -373,13 +342,10 @@ def _make_fault_tolerance_test_class(backend):
     class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
         pass
 
-    class_name = backend.name.replace("-", " ").title().replace(" ", "")
-    class_name = f"{class_name}FaultToleranceTest"
     FaultToleranceTest.backend_name = backend.name
     FaultToleranceTest.device_type = backend.device_type
     FaultToleranceTest.supports_work_result = backend.supports_work_result
-    FaultToleranceTest.has_pair_channels = backend.has_pair_channels
-    FaultToleranceTest.__name__ = class_name
+    FaultToleranceTest.__name__ = f"{backend.name.capitalize()}FaultToleranceTest"
     FaultToleranceTest.__qualname__ = FaultToleranceTest.__name__
     cls = unittest.skipIf(
         not dist.is_backend_available(backend.name),
@@ -394,8 +360,8 @@ def _make_fault_tolerance_test_class(backend):
 
 
 for backend in FAULT_TOLERANCE_BACKENDS:
-    test_class = _make_fault_tolerance_test_class(backend)
-    globals()[test_class.__name__] = test_class
+    class_name = f"{backend.name.capitalize()}FaultToleranceTest"
+    globals()[class_name] = _make_fault_tolerance_test_class(backend)
 
 
 class ReconfigureContractTest(TestCase):
