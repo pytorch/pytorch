@@ -16,6 +16,10 @@ using optional_variable_list = std::vector<std::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
 using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
+// attached_node is set to the node actually attached as the outputs'
+// history: cdata, or the CopySlices node wrapping cdata when a dirty view
+// input forced a rebase. Callers fire node creation hooks on it once the
+// node is fully populated (i.e. after saving variables).
 TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
@@ -25,7 +29,8 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view);
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node);
 
 TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     at::ArrayRef<const Variable*> input_vars,
@@ -36,7 +41,8 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view);
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -528,6 +534,7 @@ auto Function<T>::apply(Args&&... args)
     return x.view_as(x);
   };
 
+  c10::intrusive_ptr<Node> attached_node;
   auto wrapped_outputs = _wrap_outputs(
       input_vars,
       node->ctx_.get_non_differentiable(),
@@ -537,7 +544,8 @@ auto Function<T>::apply(Args&&... args)
       jvp_fn,
       {},
       view_as_self_fn,
-      false);
+      false,
+      attached_node);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
@@ -550,6 +558,10 @@ auto Function<T>::apply(Args&&... args)
 
   if (is_executable) {
     node->save_variables_to_ctx();
+    // Fire only after saved variables are stored on the node.
+    if (attached_node) {
+      fire_node_creation_hooks(attached_node);
+    }
   }
 
   // wrapped_outputs will be a variable_list so, convert it to the correct

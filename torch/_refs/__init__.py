@@ -604,6 +604,22 @@ def _make_inplace(fn):
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(a, *args, **kwargs):
+        # In-place ops never resize `a`, but out_wrapper would resize `out=a`
+        # if the broadcasted result shape were larger. Reject the mismatch up
+        # front with the same error eager (TensorIterator) raises. Otherwise
+        # fake/meta tensors silently change shape here, which corrupts shape
+        # metadata recorded before the op (e.g. dynamo's tracked fakes).
+        shapes = [
+            t.shape
+            for t in itertools.chain(args, kwargs.values())
+            if isinstance(t, TensorLike)
+        ]
+        if shapes:
+            broadcasted_shape = tuple(_broadcast_shapes(a.shape, *shapes))
+            torch._check(
+                broadcasted_shape == a.shape,
+                lambda: f"output with shape {a.shape} doesn't match the broadcast shape {broadcasted_shape}",
+            )
         return fn(a, *args, out=a, **kwargs)
 
     inplace_name = f"{fn.__name__}_"
