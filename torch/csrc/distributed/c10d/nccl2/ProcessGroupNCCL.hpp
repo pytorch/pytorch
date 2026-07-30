@@ -229,6 +229,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
   }
+  void enableCollectivesTiming() override;
   void shutdown() override;
   void abort() override;
   ::c10d::ErrorType getError() override;
@@ -295,13 +296,22 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
+  bool collectivesTimingEnabled() const {
+    return timing_enabled_.load();
+  }
 
   friend class WorkNCCL;
   friend class WindowNCCL;
 
  protected:
-  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent();
-  void returnEvent(std::unique_ptr<at::cuda::CUDAEvent> event);
+  // Events are pooled per timing mode: an event created with timing disabled
+  // cannot serve a work that needs elapsed_time(), so `timing_enabled` must
+  // describe the work the event is taken for / returned from.
+  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
+      bool timing_enabled);
+  void returnEvent(
+      std::unique_ptr<at::cuda::CUDAEvent> event,
+      bool timing_enabled);
   void abortNcclComm();
   void revokeNcclComm();
 
@@ -529,6 +539,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
   std::mutex event_pool_mutex_;
+  // Set by enableCollectivesTiming(); mutated under event_pool_mutex_ so the
+  // pool never holds events whose timing mode disagrees with it.
+  std::atomic<bool> timing_enabled_{false};
 
   WorkNCCLQueue workq_;
 
