@@ -3598,6 +3598,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           &::c10d::ProcessGroupGloo::setTimeout,
           py::arg("timeout"),
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_error",
+          &::c10d::ProcessGroupGloo::getError,
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
           &::c10d::ProcessGroupGloo::getOptions,
@@ -4125,7 +4129,15 @@ Returns:
       .def(
           "_get_peer_channel",
           &::c10d::nccl2::ProcessGroupNCCLLazy::getPeerChannel,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly(
+          "options",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return c10::static_intrusive_pointer_cast<
+                ::c10d::nccl2::ProcessGroupNCCL::Options>(
+                self.getBackendOptions());
+          },
+          R"(Return the options used to create this ProcessGroupNCCLLazy instance.)");
 #endif
 
 #ifdef USE_C10D_UCC
