@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
-from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._dynamo.testing import CompileCounterWithBackend, extract_graph, normalize_gm
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
@@ -1852,6 +1852,104 @@ class GraphModule(torch.nn.Module):
         # the one preserved original (`_orig = `).
         FileCheck().check_count("_orig = ", 1, exactly=True).run(wrapper_body)
         FileCheck().check_count("_orig)", 2, exactly=True).run(wrapper_body)
+
+    def test_synchronize_threads_all_prior_sync_data(self):
+        """Both intermediates must be threaded through synchronize_stream."""
+        import operator
+
+        def fn(x, w1, w2):
+            s1 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record()
+                b = a @ w2
+                e2.record()
+            s1.synchronize()
+            return a.sum(), b.sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        sync_cd = None
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and "control_deps" in str(node.target)
+                and isinstance(node.args[1], torch.fx.Node)
+                and "synchronize_stream" in node.args[1].name
+            ):
+                sync_cd = node
+        self.assertIsNotNone(sync_cd, "no synchronize_stream control_deps node found")
+        sums = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.sum.default
+        ]
+        self.assertEqual(len(sums), 2)
+        for sum_node in sums:
+            inp = sum_node.args[0]
+            self.assertTrue(
+                inp.op == "call_function"
+                and inp.target is operator.getitem
+                and inp.args[0] is sync_cd,
+                f"sum consumer {inp} does not route through synchronize_stream barrier",
+            )
+
+    def test_synchronize_event_threads_all_prior_sync_data(self):
+        """Both intermediates must be threaded through synchronize_event."""
+        import operator
+
+        def fn(x, w1, w2):
+            s = torch.cuda.Stream()
+            e0 = torch.cuda.Event()
+            e1 = torch.cuda.Event()
+            with torch.cuda.stream(s):
+                a = x @ w1
+                e0.record()
+                b = a @ w2
+                e1.record()
+            e1.synchronize()
+            return a.sum(), b.sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        sync_cd = None
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and "control_deps" in str(node.target)
+                and isinstance(node.args[1], torch.fx.Node)
+                and "synchronize_event" in node.args[1].name
+            ):
+                sync_cd = node
+        self.assertIsNotNone(sync_cd, "no synchronize_event control_deps node found")
+        sums = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.sum.default
+        ]
+        self.assertEqual(len(sums), 2)
+        for sum_node in sums:
+            inp = sum_node.args[0]
+            self.assertTrue(
+                inp.op == "call_function"
+                and inp.target is operator.getitem
+                and inp.args[0] is sync_cd,
+                f"sum consumer {inp} does not route through synchronize_event barrier",
+            )
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
