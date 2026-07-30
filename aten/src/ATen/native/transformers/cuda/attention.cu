@@ -1130,7 +1130,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   } else {
     // TODO(eqy): debug mask support
     // BHSD ...
-    const auto& cum_seq_q = cumulative_sequence_length_q.value();
+    Tensor cum_seq_q = cumulative_sequence_length_q.value();
     TORCH_CHECK(cum_seq_q.dim() == 1, "cum_seq_q must be 1D");
     const int64_t batch_size = cum_seq_q.size(0) - 1;
     const int64_t num_heads_q = query.size(-2);
@@ -1142,7 +1142,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
         block_table.has_value() || cumulative_sequence_length_kv.has_value(),
         "cuDNN varlen attention requires cum_seq_k unless a block_table is given.");
     // The schema returns cum_seq_k even when paged attention does not use one.
-    const Tensor cum_seq_k = cumulative_sequence_length_kv.has_value()
+    Tensor cum_seq_k = cumulative_sequence_length_kv.has_value()
         ? cumulative_sequence_length_kv.value()
         : at::empty({0}, query.options().dtype(at::kInt));
     for (const auto& cum : {cumulative_sequence_length_q, cumulative_sequence_length_kv}) {
@@ -1256,7 +1256,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                      cudnn_seed/*Tensor dropoutseed*/,
                                      cudnn_offset/*Tensor dropoutoffset*/);
     //attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
-    return std::make_tuple(std::move(attention), std::move(log_sumexp), cum_seq_q, cum_seq_k, max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
+    return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(cum_seq_q), std::move(cum_seq_k), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
   }
 }
 
