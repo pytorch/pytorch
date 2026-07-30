@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import functools
+import warnings
 from typing import Any
 
 import sympy
@@ -27,19 +29,33 @@ from .common import (
 )
 
 
+@functools.cache
+def _warn_block_ptr_unavailable() -> None:
+    # Fires only in the no-op case (flag on, API gone), so users who never set
+    # the flag -- and callers that patch it to False -- stay quiet.
+    warnings.warn(
+        "config.triton.use_block_ptr=True but the installed Triton no longer "
+        "provides the block-pointer frontend API (removed in "
+        "triton-lang/triton#10833); falling back to the default masked-indexing "
+        "path. This flag is deprecated and will be removed (#191012).",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+
 def use_block_ptr_enabled() -> bool:
     """Effective block-pointer codegen setting.
 
-    Honors the user's (deprecated) ``config.triton.use_block_ptr`` only when the
-    installed Triton still provides the block-pointer frontend API; otherwise it
-    silently falls back to the default masked-indexing path. Reads the raw config
-    value so the deprecation FutureWarning is not emitted on every compile (see
-    the review on #189368); the FutureWarning from the deprecated config is the
-    single signal and fires only on explicit user access.
+    Honors ``config.triton.use_block_ptr`` only where the installed Triton still
+    provides the block-pointer frontend API. When the flag is set but the API is
+    gone the request is a no-op: warn once, then fall back to masked indexing.
     """
-    if not config.get_value_no_warn("triton.use_block_ptr"):
+    if not config.triton.use_block_ptr:
         return False
-    return has_triton_block_ptr()
+    if has_triton_block_ptr():
+        return True
+    _warn_block_ptr_unavailable()
+    return False
 
 
 def should_unwrap_unspec_arg(name: str):

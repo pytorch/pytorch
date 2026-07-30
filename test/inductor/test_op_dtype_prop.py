@@ -8,6 +8,7 @@ import torch
 from torch._dynamo.utils import disable_cache_limit
 from torch._inductor import config
 from torch._inductor.codegen.triton import OpDtypeSupport
+from torch._inductor.codegen.triton_utils import use_block_ptr_enabled
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code, triton_type
 from torch.fx.operator_schemas import get_signature_for_torch_op
@@ -16,7 +17,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
-from torch.utils._triton import has_triton_block_ptr
 
 
 # Make the helper files in test/ importable
@@ -223,11 +223,16 @@ class TestCase(InductorTestCase):
                     re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
                 )
                 self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
-                # With block pointers the atan output carries an explicit
-                # downcast; on the default (masked) path that downcast is folded
-                # into tl.store, so only assert it where the block-pointer API is
-                # available (this test forces triton.use_block_ptr=True).
-                if convert_output and has_triton_block_ptr():
+                # The atan output downcast shows up as an explicit
+                # `.to(<low prec>)` on the block-pointer path (always) and on the
+                # default masked path whenever the op-local upcast is used
+                # (codegen_upcast_to_fp32=False). With a global load upcast on the
+                # default path the store narrows implicitly, so no explicit cast
+                # is emitted -- mirroring the assertNotEqual(..., load_upcast...)
+                # check on the general path below.
+                if convert_output and (
+                    use_block_ptr_enabled() or not load_upcast_to_fp32
+                ):
                     self.assertIn(f".to({tl_dtype_str})", code)
                 return
 

@@ -440,55 +440,6 @@ class ConfigModule(ModuleType):
                 if config.hide:
                     config.hide = False
 
-    def _resolve(self, name: str) -> Any:
-        """Resolve the current value of a config WITHOUT side effects such as
-        emitting deprecation warnings. Shared by __getattr__ and
-        get_value_no_warn."""
-        config = self._config[name]
-
-        if config.hide:
-            raise AttributeError(f"{self.__name__}.{name} does not exist")
-
-        alias_val = self._get_alias_val(config)
-        if alias_val is not _UNSET_SENTINEL:
-            return alias_val
-
-        if config.env_value_force is not _UNSET_SENTINEL:
-            return config.env_value_force
-
-        user_override = config.user_override.get()
-        if user_override is not _UNSET_SENTINEL:
-            return user_override
-
-        if config.env_value_default is not _UNSET_SENTINEL:
-            return config.env_value_default
-
-        if config.justknob is not None:
-            # JK only supports bools and ints
-            return justknobs_check(name=config.justknob, default=config.default)
-
-        # Reference types can still be modified, so copy them to
-        # user_overrides to prevent accidental mutation of defaults.
-        if not isinstance(config.default, _IMMUTABLE_CONFIG_TYPES):
-            config.user_override.set(copy.deepcopy(config.default))
-            return config.user_override.get()
-        return config.default
-
-    def get_value_no_warn(self, name: str) -> Any:
-        """Read a config value without triggering its deprecation warning.
-
-        Deprecation warnings fire on read as well as write (see __getattr__ /
-        __setattr__), so a deprecated config that is still read internally on a
-        hot path (e.g. every compile) would otherwise spam every user with a
-        FutureWarning. Internal reads of such load-bearing deprecated configs
-        should go through this helper so that only user-facing access
-        (``config.foo``) warns.
-        """
-        try:
-            return self._resolve(name)
-        except KeyError as e:
-            raise AttributeError(f"{self.__name__}.{name} does not exist") from e
-
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
@@ -499,7 +450,30 @@ class ConfigModule(ModuleType):
             # Issue deprecation warning on read (once per config)
             self._warn_if_deprecated(name, config)
 
-            return self._resolve(name)
+            alias_val = self._get_alias_val(config)
+            if alias_val is not _UNSET_SENTINEL:
+                return alias_val
+
+            if config.env_value_force is not _UNSET_SENTINEL:
+                return config.env_value_force
+
+            user_override = config.user_override.get()
+            if user_override is not _UNSET_SENTINEL:
+                return user_override
+
+            if config.env_value_default is not _UNSET_SENTINEL:
+                return config.env_value_default
+
+            if config.justknob is not None:
+                # JK only supports bools and ints
+                return justknobs_check(name=config.justknob, default=config.default)
+
+            # Reference types can still be modified, so copy them to
+            # user_overrides to prevent accidental mutation of defaults.
+            if not isinstance(config.default, _IMMUTABLE_CONFIG_TYPES):
+                config.user_override.set(copy.deepcopy(config.default))
+                return config.user_override.get()
+            return config.default
 
         except KeyError as e:
             # make hasattr() work properly

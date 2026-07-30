@@ -12,6 +12,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
+from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import load_template, triton_type
@@ -147,8 +148,6 @@ def use_native_matmul(mat1, mat2):
 
     # Currently only enable native matmul for default indexing.
     # TODO: support block ptr
-    from ..codegen.triton_utils import use_block_ptr_enabled
-
     if use_block_ptr_enabled():
         raise AssertionError("native matmul doesn't support block_ptr codegen yet")
 

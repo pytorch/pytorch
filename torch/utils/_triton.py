@@ -45,25 +45,17 @@ def has_triton_package() -> bool:
 
 @functools.cache
 def has_triton_block_ptr() -> bool:
-    """Whether the installed Triton still supports the block-pointer frontend API
-    that Inductor's block-pointer codegen relies on (``tl.make_block_ptr`` **and**
-    ``tl.advance``).
+    """Whether the installed Triton still provides the block-pointer frontend API.
 
-    Block pointers were removed from the Triton frontend in
-    triton-lang/triton#10833. That removal keeps ``tl.make_block_ptr`` importable
-    as a *raising stub* (it stays in ``tl.__all__`` but raises
-    ``NotImplementedError`` when traced) and instead drops ``tl.advance`` from the
-    public ``tl`` namespace. Inductor's codegen emits both builtins, so we require
-    both to be present: checking ``make_block_ptr`` alone would spuriously report
-    support on a post-removal Triton. Where the API still works Inductor keeps
-    emitting block pointers; elsewhere it falls back to masked indexing.
+    triton-lang/triton#10833 removed block pointers but kept ``tl.make_block_ptr``
+    as a raising stub while dropping ``tl.advance``, so ``advance`` is the
+    load-bearing check -- probing ``make_block_ptr`` alone would be fooled by the
+    stub. Inductor's codegen emits both builtins, so require both.
     """
     if not has_triton_package():
         return False
     import triton.language as tl
 
-    # `advance` is the load-bearing check here: post-#10833 Triton retains
-    # `make_block_ptr` as a raising stub but removes `tl.advance`.
     return hasattr(tl, "make_block_ptr") and hasattr(tl, "advance")
 
 

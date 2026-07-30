@@ -2,6 +2,7 @@
 import functools
 import math
 import unittest
+import unittest.mock
 
 import torch
 from torch._dynamo.utils import counters
@@ -62,41 +63,29 @@ class TestInductorConfig(TestCase):
         self.assertEqual(config.max_fusion_size, 321)
         self.assertEqual(config.triton.cudagraphs, False)
 
-    def test_use_block_ptr_deprecation_warns_on_write(self):
-        # Explicit user assignment of the deprecated flag must warn.
-        entry = config._config["triton.use_block_ptr"]
-        prior_warned = entry._deprecation_warned
-        entry._deprecation_warned = False
-        try:
-            with self.assertWarns(FutureWarning):
-                config.triton.use_block_ptr = True
-        finally:
-            entry._deprecation_warned = prior_warned
-
-    def test_use_block_ptr_internal_read_does_not_warn(self):
-        # Internal reads go through get_value_no_warn so the hot path does not
-        # spam a FutureWarning on every compile.
-        import warnings
-
-        entry = config._config["triton.use_block_ptr"]
-        prior_warned = entry._deprecation_warned
-        entry._deprecation_warned = False
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", FutureWarning)
-                config.get_value_no_warn("triton.use_block_ptr")
-        finally:
-            entry._deprecation_warned = prior_warned
-
-    def test_use_block_ptr_enabled_respects_capability(self):
+    def test_use_block_ptr_enabled_off_by_default(self):
         from torch._inductor.codegen.triton_utils import use_block_ptr_enabled
-        from torch.utils._triton import has_triton_block_ptr
 
         with config.patch("triton.use_block_ptr", False):
             self.assertFalse(use_block_ptr_enabled())
+
+    def test_use_block_ptr_enabled_tracks_triton_capability(self):
+        # With the flag on, the effective setting follows Triton capability; when
+        # the block-pointer API is gone it is a no-op that warns exactly once.
+        import torch._inductor.codegen.triton_utils as triton_utils
+
         with config.patch("triton.use_block_ptr", True):
-            # Effective only where the Triton block-pointer API still exists.
-            self.assertEqual(use_block_ptr_enabled(), has_triton_block_ptr())
+            with unittest.mock.patch.object(
+                triton_utils, "has_triton_block_ptr", lambda: True
+            ):
+                self.assertTrue(triton_utils.use_block_ptr_enabled())
+
+            triton_utils._warn_block_ptr_unavailable.cache_clear()
+            with unittest.mock.patch.object(
+                triton_utils, "has_triton_block_ptr", lambda: False
+            ):
+                with self.assertWarns(FutureWarning):
+                    self.assertFalse(triton_utils.use_block_ptr_enabled())
 
     def test_hasattr(self):
         self.assertTrue(hasattr(config, "max_fusion_size"))
