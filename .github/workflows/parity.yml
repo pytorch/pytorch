@@ -98,7 +98,7 @@ on:
       auto_classify:
         description: 'Auto-classify skip reasons for SKIPPED/MISSED tests in the output CSV'
         required: false
-        default: false
+        default: true
         type: boolean
 
 jobs:
