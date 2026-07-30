@@ -118,8 +118,15 @@ def check_graph_breaks(
         for field, lower_is_better in TRACKED_METRICS.items():
             expected = get_field(expected_csv, model, field)
             actual = get_field(actual_csv, model, field)
-            # Skip metrics not present in this baseline (or missing from output).
-            if expected is None or actual is None:
+            # Skip a metric absent from this baseline or the output, or whose
+            # cell is unreadable (NaN) -- get_field returns NaN for a
+            # present-but-empty cell, which must not be treated as a value.
+            if (
+                expected is None
+                or actual is None
+                or pd.isna(expected)
+                or pd.isna(actual)
+            ):
                 continue
             result = _classify(actual, expected, lower_is_better)
             if result == "PASS":
