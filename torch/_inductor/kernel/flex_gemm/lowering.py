@@ -17,7 +17,6 @@ from torch._higher_order_ops.flex_gemm import (
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
 )
-from torch._inductor import config
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
@@ -32,41 +31,6 @@ from .constraints import (
     statically_known_shape_equal,
     validate_flex_gemm_local_reduce_config,
 )
-
-
-def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
-    graph = graph_module.graph
-    changed = False
-    for node in list(graph.nodes):
-        if node.target not in (
-            torch.ops.aten.addmm.default,
-            torch.ops.aten.baddbmm.default,
-        ):
-            continue
-        bias, mat1, mat2 = node.args[:3]
-        alpha = node.kwargs.get("alpha", 1.0)
-        beta = node.kwargs.get("beta", 1.0)
-        gemm_target = (
-            torch.ops.aten.mm.default
-            if node.target is torch.ops.aten.addmm.default
-            else torch.ops.aten.bmm.default
-        )
-        with graph.inserting_before(node):
-            result = graph.call_function(gemm_target, (mat1, mat2))
-            if alpha != 1:
-                result = graph.call_function(torch.ops.aten.mul.Tensor, (result, alpha))
-            if beta != 0:
-                if beta != 1:
-                    bias = graph.call_function(torch.ops.aten.mul.Tensor, (bias, beta))
-                result = graph.call_function(torch.ops.aten.add.Tensor, (result, bias))
-        result.meta = node.meta
-        node.replace_all_uses_with(result)
-        graph.erase_node(node)
-        changed = True
-    if changed:
-        graph.eliminate_dead_code()
-        graph.lint()
-        graph_module.recompile()
 
 
 def flex_gemm_tensor_placeholders(
@@ -510,15 +474,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
-    backend = kernel_options.get("backend", "TRITON")
-    if backend == "NVGEMM":
-        decompose_nvgemm_additive_gemm(subgraph.graph_module)
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="NVGEMM",
-        ):
-            return process_subgraph_nodes(subgraph.graph_module, list(args))
-    if backend == "QUACK":
+    if kernel_options.get("backend", "TRITON") == "QUACK":
         return lower_quack_flex_gemm(
             gemm_op, subgraph, args, gemm_kwargs, kernel_options
         )

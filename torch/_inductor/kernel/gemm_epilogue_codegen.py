@@ -14,10 +14,31 @@ from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .gemm_epilogue_ir import (
-    GemmEpilogueIRAnalysis,
-    GemmEpilogueIRExpression,
-)
+from .gemm_epilogue_ir import GemmEpilogueIRAnalysis, GemmEpilogueIRExpression
+
+
+def gemm_epilogue_op_scope(cute: Any) -> dict[str, Any]:
+    import operator
+
+    import cutlass
+    from cutlass._mlir.dialects import math as mlir_math
+
+    def sigmoid(x: Any) -> Any:
+        return 1.0 / (1.0 + cute.math.exp(-x))
+
+    return {
+        "cutlass": cutlass,
+        "operator": operator,
+        "mlir_math": mlir_math,
+        "cute": cute,
+        "erf": cute.math.erf,
+        "exp": cute.math.exp,
+        "gelu": lambda x: 0.5 * x * (1.0 + cute.math.erf(x * 0.7071067811865476)),
+        "relu": lambda x: cute.math.max(x, cute.full_like(x, 0.0)),
+        "sigmoid": sigmoid,
+        "silu": lambda x: x * sigmoid(x),
+        "tanh": cute.math.tanh,
+    }
 
 
 class GemmEpilogueCuteDSLBody:
@@ -127,11 +148,13 @@ class GemmEpilogueIRCodegen:
 
     @staticmethod
     def args_kwargs(args: tuple[Any, ...]) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        if args and isinstance(args[-1], tuple) and all(
-            isinstance(item, tuple)
-            and len(item) == 2
-            and isinstance(item[0], str)
-            for item in args[-1]
+        if (
+            args
+            and isinstance(args[-1], tuple)
+            and all(
+                isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str)
+                for item in args[-1]
+            )
         ):
             return args[:-1], dict(args[-1])
         return args, {}
@@ -184,8 +207,7 @@ class GemmEpilogueIRCodegen:
         params = ", ".join(("accum", *self.reads))
         body = "\n".join(f"    {line}" for line in self.kernel.body.lines)
         source = (
-            f"def {fn_name}({params}):\n{body}\n"
-            f"    return {', '.join(result_names)}"
+            f"def {fn_name}({params}):\n{body}\n    return {', '.join(result_names)}"
         )
         return list(self.reads), [name for name, _ in outputs], renames, source
 
