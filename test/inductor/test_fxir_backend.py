@@ -272,6 +272,18 @@ class FxirTestCase(InductorTestCase):
         ) + self._count_ops(gm, torch.ops.aten.addbmm.default)
         self.assertEqual(num_fallback, 2)
 
+    def test_fallback_helper_survives_dead_code_elimination(self):
+        graph = torch.fx.Graph()
+        fallback = graph.call_function(
+            call_fallback_below_autograd,
+            args=(torch.ops.aten.rand.default, [2]),
+        )
+        graph.output(())
+
+        graph.eliminate_dead_code()
+
+        self.assertIn(fallback, graph.nodes)
+
     def test_cat_inputs(self):
         """
         Test concatenation of graph inputs.

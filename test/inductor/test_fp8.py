@@ -1915,6 +1915,73 @@ class TestFP8Lowering(TestCase):
         self.assertTrue("Invalid scaling configuration." in str(cm.exception))
 
 
+class TestE8M0ToFloat(TestCase):
+    @parametrize(
+        "dtype",
+        (torch.float64, torch.float32, torch.float16, torch.bfloat16),
+    )
+    @parametrize("direct_input", (False, True))
+    @onlyOn(["cpu", "cuda"])
+    def test_conversion(self, device, dtype, direct_input):
+        raw = torch.tensor(
+            [0, 1, 126, 127, 128, 129, 254, 255],
+            device=device,
+            dtype=torch.uint8,
+        )
+        if direct_input:
+            inp = raw.view(torch.float8_e8m0fnu)
+
+            def fn(value):
+                return value.to(dtype)
+
+        else:
+            inp = raw
+
+            def fn(value):
+                return value.view(torch.float8_e8m0fnu).to(dtype)
+
+        expected = fn(inp)
+        actual = torch.compile(fn, fullgraph=True)(inp)
+        self.assertEqual(actual, expected)
+        if dtype is torch.float32:
+            self.assertEqual(actual.view(torch.int32), expected.view(torch.int32))
+
+    @parametrize("direct_input", (False, True))
+    @onlyOn(["cpu", "cuda"])
+    def test_codegen(self, device, direct_input):
+        raw = torch.tensor(
+            [0, 1, 126, 127, 128, 129, 254, 255],
+            device=device,
+            dtype=torch.uint8,
+        )
+        if direct_input:
+            inp = raw.view(torch.float8_e8m0fnu)
+
+            def fn(value):
+                return value.float()
+
+        else:
+            inp = raw
+
+            def fn(value):
+                return value.view(torch.float8_e8m0fnu).float()
+
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
+        expected = fn(inp)
+        self.assertEqual(actual.view(torch.int32), expected.view(torch.int32))
+
+        code_str = "\n".join(code)
+        self.assertIn("4194304", code_str)
+        self.assertIn("2139095041", code_str)
+        if torch.device(device).type == "cuda":
+            self.assertIn("bitcast=True", code_str)
+            self.assertNotIn("libdevice.ldexp", code_str)
+        else:
+            self.assertIn("async_compile.cpp_pybinding", code_str)
+            if direct_input:
+                self.assertIn("at::Float8_e8m0fnu", code_str)
+
+
 class TestCvtE8M0RceilGating(TestCase):
     def test_nvidia_sm100_gate_excludes_rocm_gfx1101(self):
         with (
@@ -2135,6 +2202,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8Lowering, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
 
 
 if __name__ == "__main__":

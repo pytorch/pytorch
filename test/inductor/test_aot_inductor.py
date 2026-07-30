@@ -4832,11 +4832,109 @@ class AOTInductorTestsTemplate:
             return x.to(torch.complex64)
 
         inputs = (torch.randn(4, device=self.device),)
-        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, copy_fn, inputs)
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": (
+                    self.use_minimal_arrayref_interface
+                ),
+            }
+        ):
+            actual, code = run_and_get_cpp_code(AOTIRunnerUtil.run, copy_fn, inputs)
+        torch.testing.assert_close(actual, copy_fn(*inputs))
         self.assertIn("#include <torch/csrc/stable/macros.h>", code)
         self.assertIn("TORCH_DYNAMIC_VERSION_CALL_2_14_0(", code)
         self.assertIn("aoti_torch_copy_below_autograd_", code)
         self.assertNotIn("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(", code)
+        self.assertNotIn("ATen/core/LegacyTypeDispatch.h", code)
+        self.assertNotIn("at::AutoDispatchBelowADInplaceOrView guard;", code)
+
+    def test_proxy_executor_fallback_dispatch_runs_below_autograd(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-only proxy executor dispatch check")
+
+        namespace = f"aoti_fallback_dispatch_{uuid.uuid4().hex}"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+            calls = {"autograd": 0, "cpu": 0}
+            op = getattr(torch.ops, namespace).foo.default
+
+            def foo_cpu(x):
+                calls["cpu"] += 1
+                return x.sin()
+
+            def foo_meta(x):
+                return torch.empty_like(x)
+
+            def foo_autograd(keyset, x):
+                calls["autograd"] += 1
+                return op.redispatch(keyset & torch._C._after_autograd_keyset, x)
+
+            lib.impl("foo", foo_cpu, "CPU")
+            lib.impl("foo", foo_meta, "Meta")
+            lib.impl("foo", foo_autograd, "Autograd", with_keyset=True)
+
+            from torch._inductor.lowering import make_fallback
+
+            make_fallback(op, warn=False)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return op(x).cos()
+
+            inputs = (torch.randn(4),)
+            expected = Model()(*inputs)
+            with config.patch(
+                {
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": (
+                        self.use_minimal_arrayref_interface
+                    ),
+                }
+            ):
+                package_path, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, Model(), inputs
+                )
+                compiled = torch._inductor.aoti_load_package(package_path)
+
+            calls["autograd"] = 0
+            calls["cpu"] = 0
+            torch.testing.assert_close(compiled(*inputs), expected)
+            self.assertEqual(calls, {"autograd": 0, "cpu": 1})
+            self.assertIn("aoti_torch_proxy_executor_call_function", code)
+
+    def test_dual_wrapper_fallback_jit_headers_stay_out_of_aoti_codegen(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires a Triton dual wrapper")
+        if config.triton.autotune_at_compile_time:
+            raise unittest.SkipTest("requires lazy autotuning dual-wrapper codegen")
+
+        namespace = f"aoti_dual_fallback_{uuid.uuid4().hex}"
+
+        @torch.library.custom_op(f"{namespace}::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        @foo.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        from torch._inductor.lowering import make_fallback
+
+        make_fallback(foo._opoverload, warn=False)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return foo(x).cos()
+
+        inputs = (torch.randn(4, device=self.device),)
+        package_path = AOTIRunnerUtil.compile(Model(), inputs)
+        with zipfile.ZipFile(package_path, "r") as package:
+            code = "\n".join(
+                package.read(name).decode("utf-8")
+                for name in package.namelist()
+                if name.endswith("wrapper.cpp")
+            )
         self.assertNotIn("ATen/core/LegacyTypeDispatch.h", code)
         self.assertNotIn("at::AutoDispatchBelowADInplaceOrView guard;", code)
 

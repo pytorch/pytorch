@@ -10,7 +10,7 @@ from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.lowering import _record_symbolic_input_source
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import IndentedBuffer
+from torch._inductor.utils import AotOnlyBuffer, DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -34,6 +34,27 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
         wrapper.prefix = IndentedBuffer()
         return wrapper
+
+    def _new_cpp_wrapper_with_header(self, header):
+        wrapper = self._new_cpp_wrapper()
+        wrapper.header = header
+        wrapper._included_extra_headers_jit = OrderedSet()
+        wrapper._included_extra_headers_aot = OrderedSet()
+        return wrapper
+
+    def test_jit_only_extra_header_can_be_promoted_to_shared(self):
+        include = "#include <example.h>"
+
+        dual_wrapper = self._new_cpp_wrapper_with_header(DualIndentedBuffer())
+        dual_wrapper.include_extra_header("example.h", jit_only=True)
+        dual_wrapper.include_extra_header("example.h")
+        self.assertEqual(dual_wrapper.header.getvalue().count(include), 1)
+        self.assertEqual(dual_wrapper.header.aot.getvalue().count(include), 1)
+
+        aot_wrapper = self._new_cpp_wrapper_with_header(AotOnlyBuffer())
+        aot_wrapper.include_extra_header("example.h", jit_only=True)
+        aot_wrapper.include_extra_header("example.h")
+        self.assertEqual(aot_wrapper.header.getvalue().count(include), 1)
 
     def test_explicit_symbol_input_assignment_uses_canonical_symbol(self):
         wrapper = self._new_wrapper()
