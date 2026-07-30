@@ -8342,6 +8342,13 @@ class Scheduler:
         if not V.choices.can_fuse(self, node1, node2, shared_data_score):
             return False
 
+        def reindexing_regresses_memory() -> bool:
+            if mutation_tracker is None:
+                raise AssertionError("expected a loop mutation tracker")
+            return self._reindexing_regresses_memory_coalescing(
+                node1, node2, mutation_tracker
+            )
+
         is_vertical = bool(node1.get_operation_names() & node2.ancestors)
         if is_vertical:
             # node2 depends on node1 outputs
@@ -8354,14 +8361,7 @@ class Scheduler:
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
             ):
-                if reindexed:
-                    if mutation_tracker is None:
-                        raise AssertionError("expected a loop mutation tracker")
-                    if self._reindexing_regresses_memory_coalescing(
-                        node1, node2, mutation_tracker
-                    ):
-                        return False
-                return True
+                return not (reindexed and reindexing_regresses_memory())
 
             # Vertical fusion failed — the iteration domains may not
             # match (e.g. pointwise reads buf[x//32] while reduction
@@ -8383,26 +8383,16 @@ class Scheduler:
                         )
                         and self.get_backend(device).can_fuse_vertical(node1, node2)
                     )
-                    if can_fuse_reindexed:
-                        if mutation_tracker is None:
-                            raise AssertionError("expected a loop mutation tracker")
-                        if not self._reindexing_regresses_memory_coalescing(
-                            node1, node2, mutation_tracker
-                        ):
-                            return True
+                    if can_fuse_reindexed and not reindexing_regresses_memory():
+                        return True
 
             return False
         else:  # nodes don't depend on each other, but may have common reads
             can_fuse_horizontal = V.choices.can_fuse_horizontal(
                 self, node1, node2, shared_data_score
             ) and self.get_backend(device).can_fuse_horizontal(node1, node2)
-            if can_fuse_horizontal and reindexed:
-                if mutation_tracker is None:
-                    raise AssertionError("expected a loop mutation tracker")
-                if self._reindexing_regresses_memory_coalescing(
-                    node1, node2, mutation_tracker
-                ):
-                    return False
+            if can_fuse_horizontal and reindexed and reindexing_regresses_memory():
+                return False
             return can_fuse_horizontal
 
     def can_fuse_vertical(
