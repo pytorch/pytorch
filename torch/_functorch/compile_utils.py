@@ -33,9 +33,9 @@ class _ScalarKey:
 def _normalize_cse_arg(val: Any) -> Any:
     # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
     # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
-    if isinstance(val, float):
+    if type(val) is float:
         return _ScalarKey("float", struct.pack(">d", val))
-    if isinstance(val, complex):
+    if type(val) is complex:
         return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
     return val
 
