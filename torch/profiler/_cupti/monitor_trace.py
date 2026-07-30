@@ -363,7 +363,7 @@ def _trace_window_entries(
     # Each kind builds X events from one dict literal per row over the bulk-converted
     # columns; graph-id/node and annotation keys (absent for eager kernels) are patched on
     # only when the column carries them.
-    for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
+    for ks in ("kernel", "gpu_memcpy", "gpu_memset", "graph_host_node"):
         c = _col(ks)
         if c is None:
             continue
@@ -457,7 +457,7 @@ def _trace_window_entries(
                 }
                 for i in range(n)
             ]
-        else:
+        elif ks == "gpu_memset":
             bytes_l = c["bytes"].tolist()
             val_l = c["value"].tolist()
             mk_l = c["memory_kind"].tolist()
@@ -484,6 +484,32 @@ def _trace_window_entries(
                         "flags": fl_l[i],
                         "channel": chan_l[i],
                         "channel_type": chant_l[i],
+                    },
+                }
+                for i in range(n)
+            ]
+        else:
+            # graph_host_node: a CPU callback run as a CUDA-graph node. Rendered on the
+            # waiting stream's lane like the other graphed ops; graph id / node / annotation
+            # are patched on below (host nodes always carry a graph_node_id).
+            pid_l = c["process_id"].tolist()
+            htid_l = c["thread_id"].tolist()
+            events = [
+                {
+                    "ph": "X",
+                    "cat": "graph_host_node",
+                    "name": "HostNode",
+                    "pid": dev_l[i],
+                    "tid": tid_l[i],
+                    "ts": ts_l[i],
+                    "dur": dur_l[i],
+                    "args": {
+                        "device": dev_l[i],
+                        "context": ctx_l[i],
+                        "stream": str_l[i],
+                        "correlation": corr_l[i],
+                        "host process": pid_l[i],
+                        "host thread": htid_l[i],
                     },
                 }
                 for i in range(n)

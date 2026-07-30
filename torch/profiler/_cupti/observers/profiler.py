@@ -29,6 +29,7 @@ from torch.profiler._cupti.records import (
     CudaEvent,
     ExternalCorrelation,
     Field,
+    GraphHostNode,
     Kernel,
     Memcpy,
     Memcpy2,
@@ -142,6 +143,21 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memset.FLAGS,
         Memset.CHANNEL_ID,
         Memset.CHANNEL_TYPE,
+    },
+    # Graph host nodes run a CPU callback as a CUDA-graph node; CUPTI reports them with a
+    # graph_node_id + start/end on the stream that waits for them, so they render like the
+    # other graphed GPU ops (attributed via the graph annotation resolver).
+    ActivityKind.GRAPH_HOST_NODE: {
+        GraphHostNode.START,
+        GraphHostNode.END,
+        GraphHostNode.DEVICE_ID,
+        GraphHostNode.CONTEXT_ID,
+        GraphHostNode.STREAM_ID,
+        GraphHostNode.CORRELATION_ID,
+        GraphHostNode.GRAPH_NODE_ID,
+        GraphHostNode.GRAPH_ID,
+        GraphHostNode.PROCESS_ID,
+        GraphHostNode.THREAD_ID,
     },
     ActivityKind.RUNTIME: {
         Api.CBID,
@@ -788,6 +804,23 @@ def _memset_columns(cols, convert, resolver):
     }
 
 
+def _graph_host_node_columns(cols, convert, resolver):
+    gnid = cols[GraphHostNode.GRAPH_NODE_ID.id].astype(np.int64)
+    return {
+        "start_ns": convert(cols[GraphHostNode.START.id]),
+        "end_ns": convert(cols[GraphHostNode.END.id]),
+        "device_id": cols[GraphHostNode.DEVICE_ID.id].astype(np.int64),
+        "context_id": cols[GraphHostNode.CONTEXT_ID.id].astype(np.int64),
+        "stream_id": cols[GraphHostNode.STREAM_ID.id].astype(np.int64),
+        "correlation_id": cols[GraphHostNode.CORRELATION_ID.id].astype(np.int64),
+        "graph_node_id": gnid,
+        "graph_id": cols[GraphHostNode.GRAPH_ID.id].astype(np.int64),
+        "annotation": _resolve_annotation_column(resolver, gnid),
+        "process_id": cols[GraphHostNode.PROCESS_ID.id].astype(np.int64),
+        "thread_id": cols[GraphHostNode.THREAD_ID.id].astype(np.int64),
+    }
+
+
 def _api_columns(cols, convert, resolver):
     del resolver
     return {
@@ -860,6 +893,11 @@ _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.MEMCPY): ("gpu_memcpy", _memcpy_columns, True),
     int(ActivityKind.MEMCPY2): ("gpu_memcpy", _memcpy2_columns, True),
     int(ActivityKind.MEMSET): ("gpu_memset", _memset_columns, True),
+    int(ActivityKind.GRAPH_HOST_NODE): (
+        "graph_host_node",
+        _graph_host_node_columns,
+        True,
+    ),
     int(ActivityKind.RUNTIME): ("cuda_runtime", _api_columns, True),
     int(ActivityKind.DRIVER): ("cuda_driver", _api_columns, True),
     int(ActivityKind.EXTERNAL_CORRELATION): (
