@@ -5,11 +5,10 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
-import sympy
-
-from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import (
-    statically_known_true as fx_statically_known_true,
+from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue_utils import (
+    statically_known,
+    statically_known_shape_equal,
 )
 
 
@@ -129,33 +128,9 @@ LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
 )
 
 
-def statically_known(expr: Any) -> bool:
-    """Return whether a symbolic predicate is known true without adding guards."""
-    if isinstance(expr, bool):
-        return expr
-    if isinstance(expr, sympy.Basic):
-        return V.graph.sizevars.statically_known_true(expr)
-    return fx_statically_known_true(expr)
-
-
-def statically_known_equal(lhs: Any, rhs: Any) -> bool:
-    """Return whether symbolic shape values are known equal without adding guards."""
-    return statically_known(lhs == rhs)
-
-
 def statically_known_multiple(value: Any, divisor: int) -> bool:
     """Return whether a symbolic shape value is known divisible without guards."""
     return statically_known(value % divisor == 0)
-
-
-def statically_known_shape_equal(
-    actual_shape: Sequence[Any], expected_shape: Sequence[Any]
-) -> bool:
-    """Compare possibly symbolic shape tuples without adding guards."""
-    return len(actual_shape) == len(expected_shape) and all(
-        statically_known_equal(actual, expected)
-        for actual, expected in zip(actual_shape, expected_shape)
-    )
 
 
 def is_flex_gemm_partial_reduction_shape(
@@ -409,25 +384,7 @@ def flex_gemm_local_reduce_config_error(
     )
 
 
-@dataclasses.dataclass(frozen=True)
-class FlexGemmLocalReduceGeometry:
-    """Describe the grouped output axis shared by local-reduce consumers.
-
-    Attributes:
-        group: Number of contiguous M or N elements in each local group.
-        axis: GEMM output axis being grouped: 0 for M, 1 for N.
-    """
-
-    group: int
-    axis: int
-
-    def __post_init__(self) -> None:
-        """Reject geometry outside the GEMM tile's M/N grouping model."""
-        validate_local_reduce_group_axis(self.group, self.axis)
-
-    @property
-    def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.axis, self.group)
+FlexGemmLocalReduceGeometry = GemmReductionGeometry
 
 
 @dataclasses.dataclass(frozen=True)
