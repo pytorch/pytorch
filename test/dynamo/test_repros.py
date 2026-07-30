@@ -8614,6 +8614,32 @@ SavedForBackwardsAOTOutput(idx=5)""",
                 self.assertEqual(old, 0)
         assert_swappable(m3.weight)
 
+    def test_unbound_builtin_dunder_calls_fullgraph(self):
+        # Calling a builtin method/wrapper descriptor unbound, via the
+        # class rather than an instance (e.g. type(obj).method(obj, ...)),
+        # used to graph break: comparison dunders forwarded both operands
+        # into a bound-call-only dispatch path, and neither
+        # UserDefinedClassVariable nor ListBuiltinVariable had a generic
+        # fallback for unbound method/wrapper descriptors.
+        class MyType:
+            pass
+
+        def fn(x):
+            i = MyType()
+            a = [1, 2, 3]
+            eq = MyType.__eq__(i, i)
+            sz = MyType.__sizeof__(MyType()) > 0
+            ln = list.__len__(a)
+            list.append(a, 9)
+            return x + 1, eq, sz, ln, a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1:], expected[1:])
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()

@@ -1243,5 +1243,54 @@ class TestObjectConstruction(TestCase):
         self.assertEqual(cnt.frame_count, 0)
 
 
+class TestUnboundClassDunderCalls(TestCase):
+    """Calling unbound builtin method/wrapper descriptors via the class,
+    e.g. MyType.__eq__(a, b), should match eager semantics instead of
+    graph-breaking."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        self._b_prev = torch._dynamo.config.enable_trace_load_build_class
+        torch._dynamo.config.enable_trace_unittest = True
+        torch._dynamo.config.enable_trace_load_build_class = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+        torch._dynamo.config.enable_trace_load_build_class = self._b_prev
+
+    @make_dynamo_test
+    def test_unbound_eq_default(self):
+        class MyType:
+            pass
+
+        i = MyType()
+        # default object.__eq__ is identity-based
+        self.assertEqual(MyType.__eq__(i, i), True)
+        self.assertEqual(MyType.__eq__(i, MyType()), NotImplemented)
+
+    @make_dynamo_test
+    def test_unbound_richcompare_ops(self):
+        class MyType:
+            def __init__(self, v):
+                self.v = v
+
+            def __lt__(self, other):
+                return self.v < other.v
+
+        a, b = MyType(1), MyType(2)
+        self.assertEqual(MyType.__lt__(a, b), True)
+        self.assertEqual(MyType.__lt__(b, a), False)
+
+    @make_dynamo_test
+    def test_unbound_sizeof(self):
+        class MyType:
+            pass
+
+        obj = MyType()
+        self.assertEqual(MyType.__sizeof__(obj), obj.__sizeof__())
+
+
 if __name__ == "__main__":
     run_tests()

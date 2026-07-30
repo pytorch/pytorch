@@ -1082,6 +1082,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
                 hints=graph_break_hints.SUPPORTABLE,
             )
+        elif name in cmp_name_to_op_mapping and len(args) == 2 and not kwargs:
+            # Unbound comparison dunder called via the class, e.g.
+            # MyType.__eq__(a, b). Mirror CPython's wrapperdescr_call: bind
+            # args[0] as self and pass only the remaining arg, instead of
+            # forwarding both args into this class VT's own call_method
+            # (which assumes bound-call semantics of exactly one "other").
+            attr = inspect.getattr_static(self.value, name, None)
+            if attr is not None and not isinstance(attr, types.FunctionType):
+                return args[0].call_method(tx, name, [args[1]], kwargs)
+        elif (
+            len(args) >= 1
+            and (attr := inspect.getattr_static(self.value, name, None)) is not None
+            and isinstance(
+                attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
+            )
+        ):
+            # Generic unbound C-level method/wrapper descriptor called via
+            # the class, e.g. MyType.__sizeof__(obj). Not every such method
+            # has a curated case above; dispatch the split call directly to
+            # the instance instead of hard failing.
+            obj, *rest = args
+            return obj.call_method(tx, name, rest, kwargs)
 
         # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
         # In Python, `x in Color` calls `type(Color).__contains__(Color, x)`.
@@ -2896,6 +2918,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is list.__len__ and self.source and not (args or kwargs):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return VariableTracker.build(tx, len(self.value))  # type: ignore[arg-type]
+
+            if method is object.__sizeof__ and not (args or kwargs):
+                # object.__sizeof__ only reflects the type's C-level layout,
+                # not any traced value, so it's safe to constant-fold using
+                # the real shadow instance backing this VT.
+                return ConstantVariable.create(self.value.__sizeof__())
 
             if trace_rules.is_polyfilled_callable(method):  # type: ignore[arg-type]
                 from .functions import PolyfilledFunctionVariable

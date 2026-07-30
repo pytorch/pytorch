@@ -73,6 +73,7 @@ from ..utils import (
     get_fake_value,
     is_tensor_getset_descriptor,
     istype,
+    list_methods,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -141,7 +142,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    UserDefinedListVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -3632,6 +3637,20 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     args[1:],
                     tx=tx,
                 )
+        elif args:
+            # Unbound list method called via the class, e.g. list.append(a, 9)
+            # or list.__len__(a). Mirrors DictBuiltinVariable's analogous
+            # fallback for dict.get(d, ...) etc.
+            resolved_fn = getattr(list, name, None)
+            if resolved_fn is not None and resolved_fn in list_methods:
+                if isinstance(args[0], UserDefinedListVariable):
+                    if args[0]._base_vt is None:
+                        raise AssertionError(
+                            "UserDefinedListVariable._base_vt must not be None for list method dispatch"
+                        )
+                    return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
+                elif isinstance(args[0], ListVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
