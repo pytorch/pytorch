@@ -10,10 +10,15 @@
 #   kernel_xcta    - fused two-stage cross-CTA row reduction for few-row / huge-N
 #                    and reduce-all.
 #
-# The aten op overrides that route torch.sum / mean / var / ... onto these kernels
-# are registered in a later stage (overrides.register_reduction_overrides());
-# importing this package today does NOT register anything with the dispatcher.
+# Importing this package registers the aten reduction overrides (sum / mean / ...)
+# with the _native registry via register_reduction_overrides(); the registry
+# installs them at its _register_all_overrides() step. Each override is gated by a
+# capability `cond` and falls back to aten when it does not apply.
 
 # The kernel modules import `cutlass`, so they are NOT imported here -- that
 # would pull the DSL runtime into `import torch` (the lazy-DSL-import contract;
 # see test_no_dsl_imports_after_import_torch). overrides.py binds them lazily.
+from .overrides import register_reduction_overrides
+
+
+register_reduction_overrides()
