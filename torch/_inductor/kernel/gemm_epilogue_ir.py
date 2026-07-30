@@ -19,7 +19,12 @@ from torch.utils._ordered_set import OrderedSet
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionGeometry:
-    """Grouped M/N reduction geometry shared by frontend and backend plans."""
+    """Grouped M/N reduction geometry shared by frontend and backend plans.
+
+    Attributes:
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+    """
 
     group: int
     axis: int
@@ -80,7 +85,12 @@ class GemmReductionGeometry:
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionDescriptor:
-    """Backend lowering descriptor for a recognized reduction expression."""
+    """Backend lowering descriptor for a recognized reduction expression.
+
+    Attributes:
+        kind: Canonical reduction or normalized-consumer expression name.
+        parameters: Compile-time scalar parameters encoded by that expression.
+    """
 
     kind: str
     parameters: tuple[float, ...] = ()
@@ -118,7 +128,18 @@ class GemmReductionDescriptor:
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionConfig:
-    """Reduction recognized from frontend graph or scheduler loop IR."""
+    """Reduction recognized from frontend graph or scheduler loop IR.
+
+    This is an analysis result, before output ownership and feed-main behavior
+    are finalized into a :class:`GemmReductionPlan`.
+
+    Attributes:
+        output_name: Buffer produced by the recognized reduction.
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+        reduction_type: Reduction or normalized consumer expression to compute.
+        source_type: Transformation applied to GEMM accumulator values.
+    """
 
     output_name: str
     group: int
@@ -137,7 +158,20 @@ class GemmReductionConfig:
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionPlan:
-    """Backend-neutral reduction outputs passed from analysis to codegen."""
+    """Backend-neutral reduction outputs passed from analysis to codegen.
+
+    Attributes:
+        reduction_output: Optional compressed reduction output buffer.
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+        reduction_type: Reduction or normalized consumer expression to compute.
+        source_type: Transformation applied to GEMM accumulator values.
+        primary_output: Buffer receiving the primary GEMM result.
+        feeds_main: Whether the reduction participates in the primary output.
+        feed_output: Optional full-shape output consuming the reduction.
+        secondary_feed_output: Optional second full-shape reduction consumer.
+        secondary_feed_type: Expression implemented by the secondary consumer.
+    """
 
     reduction_output: str | None
     group: int
@@ -171,18 +205,39 @@ class GemmReductionPlan:
 
 @dataclasses.dataclass(frozen=True)
 class GemmEpilogueIRExpression:
+    """Operation captured from a lowered GEMM epilogue loop body.
+
+    Attributes:
+        op: Virtualized Inductor operation name.
+        args: Captured positional arguments and normalized keyword arguments.
+    """
+
     op: str
     args: tuple[Any, ...]
 
 
 @dataclasses.dataclass(frozen=True)
 class GemmEpilogueIRStore:
+    """Symbolic store produced by replaying a lowered epilogue loop body.
+
+    Attributes:
+        index: Symbolic destination index used by the lowered store.
+        value: Captured expression written at that index.
+    """
+
     index: sympy.Expr
     value: GemmEpilogueIRExpression
 
 
 @dataclasses.dataclass(frozen=True)
 class GemmEpilogueIROutputRole:
+    """Transitive inputs that determine one captured epilogue output.
+
+    Attributes:
+        transitive_inputs: All buffers loaded directly or through stored values.
+        reduction_inputs: Loaded buffers whose captured values contain reductions.
+    """
+
     transitive_inputs: frozenset[str]
     reduction_inputs: frozenset[str]
 

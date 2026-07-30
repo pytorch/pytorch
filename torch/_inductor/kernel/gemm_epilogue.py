@@ -12,40 +12,38 @@ from torch.utils._ordered_set import OrderedSet
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionArguments:
-    """Typed view of grouped-reduction fields attached to GEMM arguments."""
+    """Runtime tensors and compile-time parameters for a grouped GEMM reduction.
 
-    output: Any | None
-    feed_output: Any | None
-    secondary_feed_output: Any | None
-    secondary_feed_type: str | None
-    group: int
-    axis: int
-    reduction_type: str
-    source_type: str
-    feeds_main: bool
+    Attributes:
+        output: Optional tensor receiving the compressed reduction.
+        feed_output: Optional full-shape tensor receiving the reduction consumer.
+        secondary_feed_output: Optional second full-shape reduction consumer.
+        secondary_feed_type: Expression implemented by ``secondary_feed_output``.
+        group: Number of adjacent GEMM output elements in each reduction group.
+        axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
+        reduction_type: Reduction or normalized consumer expression to compute.
+        source_type: Transformation applied to GEMM accumulator values.
+        feeds_main: Whether the reduction also produces the primary GEMM output.
+    """
 
-    SPECIALIZATION_KEYS: ClassVar[tuple[str, ...]] = (
-        "local_reduce_group",
-        "local_reduce_axis",
-        "local_reduce_type",
-        "local_reduce_source",
-        "local_reduce_feeds_main",
-        "local_reduce_secondary_feed_type",
+    output: Any | None = None
+    feed_output: Any | None = None
+    secondary_feed_output: Any | None = None
+    secondary_feed_type: str | None = None
+    group: int = 0
+    axis: int = 1
+    reduction_type: str = "sum"
+    source_type: str = "identity"
+    feeds_main: bool = False
+
+    SPECIALIZATION_FIELDS: ClassVar[tuple[str, ...]] = (
+        "group",
+        "axis",
+        "reduction_type",
+        "source_type",
+        "feeds_main",
+        "secondary_feed_type",
     )
-
-    @classmethod
-    def from_operator_args(cls, args: Any) -> "GemmReductionArguments":
-        return cls(
-            getattr(args, "local_reduce_out", None),
-            getattr(args, "local_reduce_feed_out", None),
-            getattr(args, "local_reduce_secondary_feed_out", None),
-            getattr(args, "local_reduce_secondary_feed_type", None),
-            getattr(args, "local_reduce_group", 0),
-            getattr(args, "local_reduce_axis", 1),
-            getattr(args, "local_reduce_type", "sum"),
-            getattr(args, "local_reduce_source", "identity"),
-            getattr(args, "local_reduce_feeds_main", False),
-        )
 
     @property
     def enabled(self) -> bool:
