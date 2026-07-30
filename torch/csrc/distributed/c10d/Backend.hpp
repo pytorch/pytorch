@@ -8,6 +8,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Hooks.hpp>
@@ -398,6 +399,22 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support gather"));
   }
 
+  // Gathers a single tensor inputBuffer from every rank into a single flat
+  // outputBuffer on the root rank, interpreted as a contiguous collection of
+  // size inputBuffer * WORLD_SIZE. This is the single-tensor analog of gather
+  // that avoids materializing a per-rank output tensor list.
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const GatherOptions& /* opts */ = GatherOptions()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support gather_into_tensor"));
+  }
+
   virtual c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
@@ -650,9 +667,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual ErrorType getError() {
-    TORCH_CHECK(
-        false,
-        c10::str("Backend ", getBackendName(), " does not support getError"));
+    return ErrorType::SUCCESS;
   }
 
   virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
@@ -705,6 +720,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemoryStats"));
   }
 
+  c10::impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const c10::impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -723,8 +750,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 
   bool use_pg_for_symm_mem_rendezvous_ = false;
+
+  c10::impl::PyObjectSlot pyobj_slot_;
 };
 
 } // namespace c10d
+
+namespace c10::detail {
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+} // namespace c10::detail
 
 #undef C10D_BACKEND_FORWARDING_GUARD

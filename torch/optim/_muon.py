@@ -3,7 +3,7 @@
 """Implementation of the Muon optimizer."""
 
 import math
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -30,6 +30,7 @@ DEFAULT_A = 3.4445
 DEFAULT_B = -4.7750
 DEFAULT_C = 2.0315
 DEFAULT_NS_STEPS = 5
+_UPDATE = "update"
 
 
 def _zeropower_via_newtonschulz(
@@ -88,7 +89,9 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
+def _adjust_lr(
+    lr: float | Tensor, adjust_lr_fn: str | None, param_shape: torch.Size
+) -> float | Tensor:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[-2:]
 
@@ -155,13 +158,14 @@ class _MuonStepOps:
                     OptimizationUnit(
                         parameter=param,
                         parameter_group=group,
-                        state=muon_optimizer.state[param],
+                        state=muon_optimizer.state.get(param, {}),
                         gradient=param.grad,
                         name=name,
                         metadata=_MuonUnitMetadata(
                             parameter_shape=param.shape,
                             parameter_group=group,
                         ),
+                        compute_requirements={_UPDATE: None},
                     )
                 )
         return tuple(units)
@@ -172,7 +176,7 @@ class _MuonStepOps:
             muon_optimizer._init_group(group, [], [], [])
         return _MuonStepContext()
 
-    def prepare(self, unit: OptimizationUnit, *, out: Tensor) -> None:
+    def prepare(self, unit: OptimizationUnit, *, out: dict[str, Tensor]) -> None:
         metadata = cast(_MuonUnitMetadata, unit.metadata)
         group = metadata.parameter_group
         grad = unit.gradient
@@ -188,21 +192,26 @@ class _MuonStepOps:
                 grad,
                 momentum_buffer,
                 group["momentum"],
-                out=out,
+                out=out[_UPDATE],
             )
         else:
-            out.copy_(momentum_buffer)
+            out[_UPDATE].copy_(momentum_buffer)
 
     def compute(
         self,
         unit_metadata: _MuonUnitMetadata,
-        inputs: Tensor,
+        inputs: Mapping[str, Tensor],
         *,
-        out: Tensor,
+        out: dict[str, Tensor],
     ) -> None:
+        compute_input = inputs[_UPDATE]
+        compute_output = out[_UPDATE]
+        if compute_input.numel() == 0:
+            compute_output.copy_(compute_input)
+            return
         group = unit_metadata.parameter_group
         direction, adjusted_lr = _compute_muon_update(
-            inputs,
+            compute_input,
             unit_metadata.parameter_shape,
             lr=_to_scalar(group["lr"]),
             ns_coefficients=group["ns_coefficients"],
@@ -210,21 +219,27 @@ class _MuonStepOps:
             eps=group["eps"],
             adjust_lr_fn=group["adjust_lr_fn"],
         )
-        out.zero_()
-        out.add_(direction, alpha=-adjusted_lr)
+        compute_output.zero_()
+        if isinstance(adjusted_lr, Tensor):
+            direction.mul_(-adjusted_lr)
+            compute_output.add_(direction)
+        else:
+            compute_output.add_(direction, alpha=-adjusted_lr)
 
-    def apply_updates(self, unit: OptimizationUnit, updates: Tensor) -> None:
+    def apply_updates(
+        self, unit: OptimizationUnit, updates: Mapping[str, Tensor]
+    ) -> None:
         group = unit.parameter_group
         lr = _to_scalar(group["lr"])
         unit.parameter.mul_(1 - lr * group["weight_decay"])
-        unit.parameter.add_(updates)
+        unit.parameter.add_(updates[_UPDATE])
 
     def end_step(self, context: _MuonStepContext) -> None:
         pass
 
 
 class Muon(Optimizer):
-    _step_ops: OptimizerStepOps = _MuonStepOps()
+    _step_ops: OptimizerStepOps[_MuonStepContext] = _MuonStepOps()
 
     def __init__(
         self,
@@ -502,7 +517,11 @@ def _single_tensor_muon(
         )
 
         param.mul_(1 - lr * weight_decay)
-        param.add_(direction, alpha=-adjusted_lr)
+        if isinstance(adjusted_lr, Tensor):
+            direction.mul_(-adjusted_lr)
+            param.add_(direction)
+        else:
+            param.add_(direction, alpha=-adjusted_lr)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)

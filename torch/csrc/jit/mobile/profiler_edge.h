@@ -14,7 +14,7 @@ class TORCH_API KinetoEdgeCPUProfiler {
   /*
    * @param m is the instance of mobile Module which is being profiled.
    *        Note that this implies that KinetoEdgeCPUProfiler can be used
-   *        to profile specific Module (see usage below), unliked ProfilerKineto
+   *        to profile specific Module (see usage below), unlike ProfilerKineto
    *        which can profile pytorch runtime in arbitrary scope.
    * @param fname is the name of the file to which chrome trace is written.
    * @param report_input_shapes: whether to record shapes of op's inputs.

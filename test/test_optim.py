@@ -2030,69 +2030,125 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
 
     @optims(optim_db, dtypes=[torch.float32])
-    def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
-            nonlocal data
-            data += 2
+    @parametrize("hook_type", ["pre", "post"])
+    def test_step_local_hook(self, device, dtype, optim_info, hook_type):
+        # total number of times the hook has been called
+        count = 0
+        # marks that the optimizer's step body has executed
+        body_ran = False
 
-        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
-
-        def dummy_closure():
+        def closure():
+            nonlocal body_ran
+            body_ran = True
             return 1
 
-        closure = dummy_closure if optim_info.step_requires_closure else None
-
-        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
-            device, dtype, optim_info
-        )
-        for optim_input in all_optim_inputs:
-            optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = 2
-            hook_handle = optim.register_step_post_hook(post_hook)
-
-            optim.step(closure)
-            optim.step(closure)
-            # check if post hooks were registered
-            self.assertEqual(data, 6)
-
-            # remove handles, take step and verify that hook is no longer registered
-            hook_handle.remove()
-
-            optim.step(closure)
-            self.assertEqual(data, 6)
-
-    @optims(optim_db, dtypes=[torch.float32])
-    def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
-            nonlocal data
-            data += 2
+        def hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+            nonlocal count
+            if hook_type == "pre":
+                self.assertFalse(body_ran)
+            else:
+                self.assertTrue(body_ran)
+            count += 1
 
         # Create a random 2D tensor for compatibility with Muon.
         params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
 
-        def dummy_closure():
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        for optim_input in all_optim_inputs:
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            # a second optimizer to prove a local hook stays isolated to the
+            # optimizer it is registered on
+            optim2 = SGD(params)
+            count = 0
+            register = (
+                optim.register_step_pre_hook
+                if hook_type == "pre"
+                else optim.register_step_post_hook
+            )
+            hook_handle = register(hook)
+
+            # reset the marker before each step
+            body_ran = False
+            optim.step(closure)
+            body_ran = False
+            optim.step(closure)
+            # check if hooks were triggered accordingly
+            self.assertEqual(count, 2)
+
+            # a local hook does not fire for a different optimizer
+            body_ran = False
+            optim2.step(closure)
+            self.assertEqual(count, 2)
+
+            # remove handles, take step and verify that hook is no longer registered
+            hook_handle.remove()
+            body_ran = False
+            optim.step(closure)
+            self.assertEqual(count, 2)
+
+    @optims(optim_db, dtypes=[torch.float32])
+    @parametrize("hook_type", ["pre", "post"])
+    def test_step_global_hook(self, device, dtype, optim_info, hook_type):
+        # total number of times the hook has been called
+        count = 0
+        # marks that the optimizer's step body has executed
+        body_ran = False
+
+        def closure():
+            nonlocal body_ran
+            body_ran = True
             return 1
 
-        closure = dummy_closure if optim_info.step_requires_closure else None
+        def hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+            nonlocal count
+            if hook_type == "pre":
+                self.assertFalse(body_ran)
+            else:
+                self.assertTrue(body_ran)
+            count += 1
+
+        # Create an arbitrary 2D tensor for compatibility with Muon.
+        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
 
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info
         )
         for optim_input in all_optim_inputs:
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = 5
-            hook_handle = optim.register_step_pre_hook(pre_hook)
+            optim2 = SGD(params)
+            count = 0
+            register = (
+                register_optimizer_step_pre_hook
+                if hook_type == "pre"
+                else register_optimizer_step_post_hook
+            )
+            hook_handle = register(hook)
+            try:
+                # reset the marker before each step
+                body_ran = False
+                optim.step(closure)
+                body_ran = False
+                optim.step(closure)
+                # check if hooks were triggered accordingly
+                self.assertEqual(count, 2)
 
-            optim.step(closure)
-            optim.step(closure)
-            # check if pre hooks were registered
-            self.assertEqual(data, 9)
+                # a global hook also fires for a different optimizer
+                body_ran = False
+                optim2.step(closure)
+                self.assertEqual(count, 3)
 
-            # remove handles, take step and verify that hook is no longer registered
-            hook_handle.remove()
-
-            optim.step(closure)
-            self.assertEqual(data, 9)
+                # remove handles, take step and verify that hook is no longer registered
+                hook_handle.remove()
+                body_ran = False
+                optim.step(closure)
+                body_ran = False
+                optim2.step(closure)
+                self.assertEqual(count, 3)
+            finally:
+                # global hooks persist in module-level state; always clean up
+                hook_handle.remove()
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
@@ -2548,18 +2604,24 @@ class TestMuonBatchedMatrices(TestCase):
                 with torch.enable_grad():
                     loss = closure()
 
-            units = ops.optimization_units(optimizer)
             context = ops.begin_step(optimizer)
             self.begin_count += 1
             try:
+                units = ops.optimization_units(optimizer)
                 units = [unit for unit in units if unit.gradient is not None]
                 for bucket_start in range(0, len(units), self.units_per_bucket):
                     bucket = units[
                         bucket_start : bucket_start + self.units_per_bucket
                     ]
                     for unit in bucket:
-                        prepared = torch.empty_like(unit.parameter)
-                        update = torch.empty_like(unit.parameter)
+                        prepared = {
+                            name: torch.empty_like(unit.parameter)
+                            for name in unit.compute_requirements
+                        }
+                        update = {
+                            name: torch.empty_like(unit.parameter)
+                            for name in unit.compute_requirements
+                        }
                         ops.prepare(unit, out=prepared)
                         ops.compute(unit.metadata, prepared, out=update)
                         ops.apply_updates(unit, update)
@@ -2607,13 +2669,14 @@ class TestMuonBatchedMatrices(TestCase):
             torch.randn((3, 5), dtype=torch.bfloat16),
             torch.randn((4, 6), dtype=torch.bfloat16),
             torch.randn((2, 3, 5), dtype=torch.bfloat16),
+            torch.randn((0, 5), dtype=torch.bfloat16),
         ]
         parameter_sets = [
             [Parameter(value.clone()) for value in initial_params]
             for _ in range(3)
         ]
         optimizer_kwargs = {
-            "lr": 0.03,
+            "lr": torch.tensor(0.03),
             "weight_decay": 0.2,
             "momentum": 0.8,
             "nesterov": True,
@@ -2651,6 +2714,38 @@ class TestMuonBatchedMatrices(TestCase):
         self.assertEqual(one_unit_executor.end_count, 2)
         self.assertEqual(two_unit_executor.begin_count, 2)
         self.assertEqual(two_unit_executor.end_count, 2)
+
+    def test_muon_step_executor_initializes_only_active_state(self):
+        active = Parameter(torch.randn((3, 5), dtype=torch.bfloat16))
+        skipped = Parameter(torch.randn((4, 6), dtype=torch.bfloat16))
+        optimizer = torch.optim.Muon([active, skipped])
+        optimizer.set_step_executor(self._EagerStepExecutor(units_per_bucket=1))
+
+        self.assertEqual(len(optimizer.state), 0)
+
+        def closure():
+            active.grad = torch.randn_like(active)
+            return 1.0
+
+        self.assertEqual(optimizer.step(closure), 1.0)
+        self.assertIn(active, optimizer.state)
+        self.assertNotIn(skipped, optimizer.state)
+
+    def test_step_executor_is_runtime_only_and_freezes_param_groups(self):
+        param = Parameter(torch.randn((3, 5), dtype=torch.bfloat16))
+        optimizer = torch.optim.Muon([param])
+        executor = self._EagerStepExecutor(units_per_bucket=1)
+        optimizer.set_step_executor(executor)
+
+        state_dict = optimizer.state_dict()
+        self.assertNotIn("step_executor", state_dict)
+        optimizer.load_state_dict(state_dict)
+        self.assertIs(optimizer._step_executor, executor)
+        self.assertIsNone(deepcopy(optimizer)._step_executor)
+        with self.assertRaisesRegex(RuntimeError, "after installing a step executor"):
+            optimizer.add_param_group(
+                {"params": [Parameter(torch.randn((4, 6), dtype=torch.bfloat16))]}
+            )
 
     def test_compute_muon_update_matches_optimizer_step(self, device):
         torch.manual_seed(2)

@@ -1,12 +1,11 @@
-# mypy: allow-untyped-defs
 """Base optimizer."""
 
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
-from collections.abc import Callable, Hashable, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import chain
 from typing import Any, cast, overload, Protocol, TypeAlias, TypeVar
 from typing_extensions import deprecated, ParamSpec, Self
@@ -37,9 +36,16 @@ class StepContext(Protocol):
     """Optimizer-defined state scoped to one optimizer step."""
 
 
+_StepContextT = TypeVar("_StepContextT", bound=StepContext)
+
+
 @dataclass(frozen=True, slots=True)
 class OptimizationUnit:
-    """The finest independently schedulable unit of optimizer work."""
+    """The finest independently schedulable unit of optimizer work.
+
+    ``compute_requirements`` maps each named value exchanged with the executor
+    to its optimizer-declared compute-layout requirement.
+    """
 
     parameter: torch.Tensor
     parameter_group: dict[str, Any]
@@ -47,35 +53,35 @@ class OptimizationUnit:
     gradient: torch.Tensor | None = None
     name: str | None = None
     metadata: Any = None
-    compute_requirement: Any = None
+    compute_requirements: Mapping[str, Any] = field(default_factory=dict)
 
 
-class OptimizerStepOps(Protocol):
+class OptimizerStepOps(Protocol[_StepContextT]):
     """Optimizer math exposed as independently schedulable operations."""
 
     def optimization_units(
         self, optimizer: "Optimizer"
     ) -> Sequence[OptimizationUnit]: ...
 
-    def begin_step(self, optimizer: "Optimizer") -> StepContext: ...
+    def begin_step(self, optimizer: "Optimizer") -> _StepContextT: ...
 
     def prepare(
-        self, unit: OptimizationUnit, *, out: torch.Tensor
+        self, unit: OptimizationUnit, *, out: dict[str, torch.Tensor]
     ) -> None: ...
 
     def compute(
         self,
         unit_metadata: Any,
-        inputs: torch.Tensor,
+        inputs: Mapping[str, torch.Tensor],
         *,
-        out: torch.Tensor,
+        out: dict[str, torch.Tensor],
     ) -> None: ...
 
     def apply_updates(
-        self, unit: OptimizationUnit, updates: torch.Tensor
+        self, unit: OptimizationUnit, updates: Mapping[str, torch.Tensor]
     ) -> None: ...
 
-    def end_step(self, context: StepContext) -> None: ...
+    def end_step(self, context: _StepContextT) -> None: ...
 
 
 class OptimizerStepExecutor(Protocol):
@@ -84,7 +90,7 @@ class OptimizerStepExecutor(Protocol):
     def execute(
         self,
         optimizer: "Optimizer",
-        ops: OptimizerStepOps,
+        ops: OptimizerStepOps[Any],
         closure: Callable[[], float] | None = None,
     ) -> Any: ...
 
@@ -148,7 +154,15 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return _use_grad
 
 
-def _get_value(x):
+@overload
+def _get_value(x: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def _get_value(x: float) -> float: ...
+
+
+def _get_value(x: torch.Tensor | float) -> torch.Tensor | float:
     # item is significantly faster than a cpu tensor in eager mode
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
@@ -156,9 +170,11 @@ def _get_value(x):
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
-def _stack_if_compiling(x):
+def _stack_if_compiling(
+    x: Sequence[torch.Tensor | float],
+) -> torch.Tensor | Sequence[torch.Tensor | float]:
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
-        return torch.stack(x)
+        return torch.stack(cast(list[torch.Tensor], x))
     else:
         return x
 
@@ -190,7 +206,7 @@ def _disable_dynamo_if_unsupported(
         # but this only occurs in the rare case that the user explicitly deletes
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs):
+        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
@@ -260,7 +276,9 @@ def _device_dtype_check_for_fused(
         )
 
 
-def _view_as_real(params, *state_and_grads) -> None:
+def _view_as_real(
+    params: list[torch.Tensor], *state_and_grads: list[torch.Tensor]
+) -> None:
     for i, p in enumerate(params):
         if torch.is_complex(p):
             params[i] = torch.view_as_real(params[i])
@@ -268,7 +286,7 @@ def _view_as_real(params, *state_and_grads) -> None:
                 s[i] = torch.view_as_real(s[i])
 
 
-def _get_scalar_dtype(is_fused=None):
+def _get_scalar_dtype(is_fused: bool | None = None) -> torch.dtype:
     if is_fused:
         return torch.float32
     return (
@@ -286,7 +304,15 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x: float | torch.Tensor):
+@overload
+def _to_scalar(x: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def _to_scalar(x: float) -> float: ...
+
+
+def _to_scalar(x: torch.Tensor | float) -> torch.Tensor | float:
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -465,7 +491,7 @@ class Optimizer:
             param_groups = [{"params": param_groups}]
 
         for param_group in param_groups:
-            self.add_param_group(cast(dict, param_group))
+            self.add_param_group(cast(dict[str, Any], param_group))
 
         # Allows _accelerator_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
         # which I don't think exists
@@ -573,6 +599,7 @@ class Optimizer:
         and will be removed if it exists.
         """
 
+    @torch._disable_dynamo
     def set_step_executor(
         self, executor: OptimizerStepExecutor | None
     ) -> None:
@@ -587,9 +614,10 @@ class Optimizer:
             raise TypeError("step executor must define an execute() method")
         self._step_executor = executor
 
+    @torch._disable_dynamo
     def _execute_step_ops(
         self,
-        ops: OptimizerStepOps,
+        ops: OptimizerStepOps[Any],
         closure: Callable[[], float] | None = None,
     ) -> Any:
         executor = self._step_executor
@@ -868,8 +896,8 @@ class Optimizer:
         param: torch.Tensor,
         value: torch.Tensor,
         param_id: int,
-        param_groups: list[dict[Any, Any]],
-        key: Hashable = None,
+        param_groups: list[dict[str, Any]],
+        key: str | None = None,
     ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.
@@ -1054,32 +1082,37 @@ class Optimizer:
             )
         )
 
-        def _cast(param, value, param_id=None, param_groups=None, key=None):
+        def _cast(
+            param: torch.Tensor,
+            value: _T,
+            param_id: int,
+            param_groups: list[dict[str, Any]],
+            key: str | None = None,
+        ) -> _T:
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
-                return Optimizer._process_value_according_to_param_policy(
-                    param,
-                    value,
-                    # pyrefly: ignore [bad-argument-type]
-                    param_id,
-                    # pyrefly: ignore [bad-argument-type]
-                    param_groups,
-                    key,
+                return cast(
+                    _T,
+                    Optimizer._process_value_according_to_param_policy(
+                        param, value, param_id, param_groups, key
+                    ),
                 )
             elif isinstance(value, dict):
-                return {
+                casted = {
                     k: _cast(
                         param, v, param_id=param_id, param_groups=param_groups, key=k
                     )
                     for k, v in value.items()
                 }
+                return cast(_T, casted)
             elif isinstance(value, Iterable):
                 # pyrefly: ignore [bad-instantiation]
-                return type(value)(
+                rebuilt = type(value)(
                     # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]
+                return cast(_T, rebuilt)
             else:
                 return value
 
@@ -1221,8 +1254,8 @@ class Optimizer:
         else:
             param_group["params"] = list(params)
 
-        extracted_param_tensors = []
-        extracted_param_names = []
+        extracted_param_tensors: list[torch.Tensor] = []
+        extracted_param_names: list[str] = []
         for param in param_group["params"]:
             if isinstance(param, tuple):
                 param_name = param[0]
