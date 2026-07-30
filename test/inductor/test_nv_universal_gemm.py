@@ -349,6 +349,7 @@ class TestNVUniversalGemm(TestCase):
         torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
 
     def test_direct_dense_epilogue_support_check(self):
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
         from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
             VendoredDenseGemmEFCOperator,
         )
@@ -357,13 +358,8 @@ class TestNVUniversalGemm(TestCase):
         args = MagicMock()
         args.epilogue._is_direct_cutedsl = True
         args.epilogue.traced_epilogue = None
-        reduction = MagicMock(enabled=False)
-        with patch(
-            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers."
-            "dense_gemm_efc_kernel.GemmReductionArguments.from_operator_args",
-            return_value=reduction,
-        ):
-            self.assertTrue(operator._supports(args))
+        args.local_reduce = GemmReductionArguments()
+        self.assertTrue(operator._supports(args))
 
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
@@ -630,6 +626,7 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_arguments,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
         m, n, k = 128, 128, 512
         packed_k = k // 2
@@ -661,9 +658,11 @@ class TestNVUniversalGemm(TestCase):
             swizzle_mode_a=swizzle,
             scale_mode_b=mode,
             swizzle_mode_b=swizzle,
-            local_reduce_out=reduce_out,
-            local_reduce_group=group,
-            local_reduce_axis=1,
+            local_reduce=GemmReductionArguments(
+                output=reduce_out,
+                group=group,
+                axis=1,
+            ),
         )
         kernel = next(
             candidate
@@ -937,46 +936,46 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
     def test_local_reduce_cache_specialization(self):
+        import dataclasses
+
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _local_reduce_specialization,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
-        base = {
-            "local_reduce_group": 4,
-            "local_reduce_axis": 1,
-            "local_reduce_type": "mean",
-            "local_reduce_source": "identity",
-            "local_reduce_feeds_main": False,
-            "local_reduce_secondary_feed_type": None,
-        }
-        specialization = _local_reduce_specialization(base)
-        for key, value in (
-            ("local_reduce_group", 8),
-            ("local_reduce_axis", 0),
-            ("local_reduce_feeds_main", True),
-            ("local_reduce_secondary_feed_type", "direct_bool_gt_zero"),
+        base = GemmReductionArguments(group=4, reduction_type="mean")
+        specialization = _local_reduce_specialization({"local_reduce": base})
+        for field, value in (
+            ("group", 8),
+            ("axis", 0),
+            ("feeds_main", True),
+            ("secondary_feed_type", "direct_bool_gt_zero"),
         ):
-            variant = dict(base)
-            variant[key] = value
-            self.assertNotEqual(specialization, _local_reduce_specialization(variant))
+            variant = dataclasses.replace(base, **{field: value})
+            self.assertNotEqual(
+                specialization,
+                _local_reduce_specialization({"local_reduce": variant}),
+            )
 
         tensor = torch.empty((4, 8))
         tensor_specialization = _local_reduce_specialization(
-            base | {"local_reduce_out": tensor}
+            {"local_reduce": dataclasses.replace(base, output=tensor)}
         )
         self.assertNotEqual(
             tensor_specialization,
-            _local_reduce_specialization(base | {"local_reduce_out": None}),
+            _local_reduce_specialization({"local_reduce": base}),
         )
         self.assertNotEqual(
             tensor_specialization,
             _local_reduce_specialization(
-                base | {"local_reduce_out": torch.empty((8, 4))}
+                {"local_reduce": dataclasses.replace(base, output=torch.empty((8, 4)))}
             ),
         )
         self.assertNotEqual(
             tensor_specialization,
-            _local_reduce_specialization(base | {"local_reduce_feed_out": tensor}),
+            _local_reduce_specialization(
+                {"local_reduce": dataclasses.replace(base, feed_output=tensor)}
+            ),
         )
 
     def test_local_reduce_plan_deduplicates_outputs(self):
@@ -1489,7 +1488,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, fn(a, b))
         self.assertEqual(result[1].dtype, torch.bool)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_type': 'direct_bool_gt_zero'", code)
+        self.assertIn("reduction_type='direct_bool_gt_zero'", code)
 
     def test_bf16_tuple_aux_supports_distinct_output_dtypes(self):
         m, n, k = 128, 128, 64
@@ -1531,8 +1530,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, epilogue(a @ b))
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_group': 16", code)
-        self.assertIn(f"'local_reduce_feeds_main': {feeds_main}", code)
+        self.assertIn("group=16", code)
+        self.assertIn(f"feeds_main={feeds_main}", code)
 
     @parametrize(
         "case",
@@ -1575,8 +1574,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result[1], expected[1], atol=1e-2, rtol=1e-2)
         torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_out'", code)
-        self.assertIn(f"'local_reduce_group': {group}", code)
+        self.assertIn("output=", code)
+        self.assertIn(f"group={group}", code)
 
     @parametrize(
         "case",
@@ -1629,8 +1628,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result[1], expected[1], atol=1e-2, rtol=1e-2)
         torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_axis': 0", code)
-        self.assertIn(f"'local_reduce_group': {group}", code)
+        self.assertIn("axis=0", code)
+        self.assertIn(f"group={group}", code)
 
     def test_bf16_dynamic_grouped_n_reduce_epilogue_fusion(self):
         n, k = 128, 64
@@ -1671,7 +1670,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result2[1], expected2[1], atol=1e-2, rtol=1e-2)
         code = "\n".join(code_list)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_group': 16", code)
+        self.assertIn("group=16", code)
 
     @parametrize("reduction", ("amax", "amin"))
     def test_bf16_grouped_n_extrema_preserve_nan(self, reduction):
@@ -1690,7 +1689,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, expected, equal_nan=True)
         self.assertTrue(torch.isnan(result[1][:, 0]).all())
         self.assertEqual(result[1][:, 1], torch.zeros_like(result[1][:, 1]))
-        self.assertIn("'local_reduce_group': 64", code)
+        self.assertIn("group=64", code)
 
     def test_bf16_grouped_m_reduce_supports_post_reduction_pointwise(self):
         m, n, k, group = 128, 128, 64, 64
@@ -1706,8 +1705,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_axis': 0", code)
-        self.assertIn("'local_reduce_group': 64", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=64", code)
 
     def test_bf16_grouped_n_reduce_supports_post_reduction_pointwise(self):
         m, n, k, group = 128, 128, 64, 64
@@ -1722,8 +1721,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_axis': 1", code)
-        self.assertIn("'local_reduce_group': 64", code)
+        self.assertIn("axis=1", code)
+        self.assertIn("group=64", code)
 
     def test_bf16_dynamic_grouped_m_reduce_epilogue_fusion(self):
         n, k, group = 128, 64, 16
@@ -1760,8 +1759,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result2, fn(a2, b))
         code = "\n".join(code_list)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_axis': 0", code)
-        self.assertIn("'local_reduce_group': 16", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=16", code)
 
     def test_bf16_grouped_m_reduce_supports_cta_tail(self):
         m, n, k, group = 144, 128, 64, 16
@@ -1775,8 +1774,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertIn("'local_reduce_axis': 0", code)
-        self.assertIn("'local_reduce_group': 16", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=16", code)
 
     def test_bf16_grouped_m_reduce_transposed_b_input(self):
         m, n, k, group = 128, 192, 64, 16
@@ -1790,8 +1789,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertIn("'local_reduce_axis': 0", code)
-        self.assertIn("'local_reduce_group': 16", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=16", code)
 
     def test_bf16_grouped_n_reduce_supports_tuple_reshape(self):
         m, n, k, group = 128, 128, 64, 16
@@ -1805,8 +1804,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertIn("'local_reduce_axis': 1", code)
-        self.assertIn("'local_reduce_group': 16", code)
+        self.assertIn("axis=1", code)
+        self.assertIn("group=16", code)
 
     def test_bf16_grouped_n_chained_logsumexp_fusion(self):
         m, n, k, group = 128, 96, 64, 4
@@ -1820,7 +1819,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertIn("'local_reduce_type': 'logsumexp'", code)
+        self.assertIn("reduction_type='logsumexp'", code)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
 
     def test_bf16_grouped_n_reduction_near_miss_falls_back(self):
@@ -1836,7 +1835,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertNotIn("'local_reduce_type': 'logsumexp'", code)
+        self.assertNotIn("reduction_type='logsumexp'", code)
 
     def test_bf16_grouped_n_chained_logsumexp_special_values(self):
         m, n, k, group = 8, 96, 8, 4
@@ -1857,7 +1856,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertTrue(torch.isposinf(result[1][:, 0]).all())
         self.assertTrue(torch.isneginf(result[1][:, 1]).all())
         self.assertTrue(torch.isnan(result[1][:, 2]).all())
-        self.assertIn("'local_reduce_type': 'logsumexp'", code)
+        self.assertIn("reduction_type='logsumexp'", code)
 
     def test_bf16_grouped_n_chained_stable_logsumexp_fusion(self):
         m, n, k, group = 128, 96, 64, 4
@@ -1873,7 +1872,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertIn("'local_reduce_type': 'logsumexp'", code)
+        self.assertIn("reduction_type='logsumexp'", code)
 
     @parametrize("affine", ((0.5, 1.0), (2.0, -0.25)))
     def test_bf16_grouped_n_chained_variance_fusion(self, affine):
@@ -1891,7 +1890,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertIn("'local_reduce_type': 'variance_affine:", code)
+        self.assertIn("reduction_type='variance_affine:", code)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
 
     @parametrize(
@@ -1974,8 +1973,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         else:
             self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_axis': 0", code)
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("feeds_main=True", code)
         if mean_mode:
             self.assertIn("mean_linear:", code)
         if mode in ("fp8", "fp8_with_sum"):
@@ -1997,10 +1996,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_axis': 0", code)
-        self.assertIn("'local_reduce_feeds_main': True", code)
-        self.assertIn("'local_reduce_secondary_feed_out': out_ptr1", code)
-        self.assertIn("'local_reduce_secondary_feed_type': 'sum_mul_affine:1:1'", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("feeds_main=True", code)
+        self.assertIn("secondary_feed_output=out_ptr1", code)
+        self.assertIn("secondary_feed_type='sum_mul_affine:1:1'", code)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
 
     def test_bf16_grouped_m_regrouped_reduction_reuse(self):
@@ -2020,7 +2019,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
 
     def test_bf16_grouped_m_composite_reduction_falls_back(self):
         m, n, k, group = 128, 64, 64, 8
@@ -2035,7 +2034,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertNotIn("'local_reduce_feeds_main': True", code)
+        self.assertNotIn("feeds_main=True", code)
 
     def test_bf16_grouped_m_mixed_layouts_fall_back(self):
         m, n, k = 128, 64, 64
@@ -2052,7 +2051,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
-        self.assertNotIn("'local_reduce_feeds_main': True", code)
+        self.assertNotIn("feeds_main=True", code)
 
     def test_bf16_grouped_m_hidden_reduction_falls_back(self):
         m, n, k, group = 128, 64, 64, 8
@@ -2068,7 +2067,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
-        self.assertNotIn("'local_reduce_feeds_main': True", code)
+        self.assertNotIn("feeds_main=True", code)
 
     def test_bf16_grouped_m_repeated_reductions_fall_back(self):
         m, n, k, group = 128, 64, 64, 8
@@ -2085,7 +2084,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
-        self.assertNotIn("'local_reduce_feeds_main': True", code)
+        self.assertNotIn("feeds_main=True", code)
 
     @parametrize(
         "case",
@@ -2138,7 +2137,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         else:
             torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
         reduce_type = (
             "normalize_sum_reverse_affine"
             if mode == "reverse"
@@ -2324,7 +2323,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         code = "\n".join(code_list)
         self.assertIn("nv_universal_gemm", code)
         self.assertIn("EpilogueArguments", code)
-        self.assertIn("'local_reduce_group': 32", code)
+        self.assertIn("group=32", code)
 
     @parametrize("mode", ("softmax", "sum"))
     def test_scaled_mm_dynamic_unrolled_reduction_fusion(self, mode):
@@ -2389,11 +2388,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result2, fn(a2, b, scale_a2, scale_b))
         code = "\n".join(code_list)
         self.assertIn("EpilogueArguments", code)
-        self.assertIn("'local_reduce_group': 4", code)
+        self.assertIn("group=4", code)
         reduce_type = (
             "online_softmax" if mode == "softmax" else "normalize_sum_affine:1:0:1:0"
         )
-        self.assertIn(f"'local_reduce_type': '{reduce_type}'", code)
+        self.assertIn(f"reduction_type='{reduce_type}'", code)
 
     @parametrize(
         "case",
@@ -2582,7 +2581,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
+        self.assertIn("output=", code)
 
     @parametrize(
         "case",
@@ -2638,8 +2637,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
-        self.assertIn(f"'local_reduce_source': '{source}'", code)
+        self.assertIn("output=", code)
+        self.assertIn(f"source_type='{source}'", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
@@ -2673,7 +2672,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertNotIn("'local_reduce_out'", code)
+        self.assertNotIn("output=", code)
 
     @parametrize("group", (128, 256))
     def test_scaled_mm_coda_rmsnorm_fusion(self, group):
@@ -2719,8 +2718,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, *args)
         expected = fn(*args)
         torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
-        self.assertIn("'local_reduce_source': 'square'", code)
-        self.assertIn(f"'local_reduce_group': {group}", code)
+        self.assertIn("source_type='square'", code)
+        self.assertIn(f"group={group}", code)
 
     @parametrize(
         "case",
@@ -2784,7 +2783,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
 
     @parametrize("group", (4, 8, 16, 32))
     def test_scaled_mm_grouped_softmax_fusion(self, group):
@@ -2818,7 +2817,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_type': 'online_softmax'", code)
+        self.assertIn("reduction_type='online_softmax'", code)
 
     @parametrize(
         "case",
@@ -2887,7 +2886,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             if reverse
             else f"normalize_sum_affine:1:0:1:{denominator_bias:g}"
         )
-        self.assertIn(f"'local_reduce_type': '{reduce_type}'", code)
+        self.assertIn(f"reduction_type='{reduce_type}'", code)
 
     @parametrize(
         "case",
@@ -2967,16 +2966,16 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             if normalization.startswith("absmax")
             else "normalize_sum_affine:1:0:1:0"
         )
-        self.assertIn(f"'local_reduce_type': '{reduce_type}'", code)
+        self.assertIn(f"reduction_type='{reduce_type}'", code)
         if normalization.startswith("absmax"):
-            self.assertIn("'local_reduce_source': 'abs_scale'", code)
+            self.assertIn("source_type='abs_scale'", code)
         if normalization in ("absmax_fp8", "sum_fp8"):
             self.assertEqual(result[0].dtype, torch.float8_e4m3fn)
         self.assertEqual(result[1], expected[1])
         if normalization == "sum_reuse":
-            self.assertIn("'local_reduce_feed_out': out_ptr", code)
+            self.assertIn("feed_output=out_ptr", code)
         else:
-            self.assertIn("'local_reduce_out'", code)
+            self.assertIn("output=", code)
 
     @parametrize(
         "case",
@@ -3022,7 +3021,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
         self.assertIn(
-            f"'local_reduce_type': 'normalize_sum_affine:{affine_scale:g}:{affine_bias:g}:1:0'",
+            f"reduction_type='normalize_sum_affine:{affine_scale:g}:{affine_bias:g}:1:0'",
             code,
         )
 
@@ -3070,9 +3069,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
         if case == "mixed_group":
-            self.assertIn("'local_reduce_feeds_main': True", code)
+            self.assertIn("feeds_main=True", code)
         else:
-            self.assertNotIn("'local_reduce_feeds_main': True", code)
+            self.assertNotIn("feeds_main=True", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
