@@ -32,8 +32,8 @@ struct CUDAErrorLogBuffer {
 thread_local CUDAErrorLogBuffer cuda_error_log_buffer;
 
 void CUDA_CB cuda_error_log_callback(
-    void*,
-    CUlogLevel,
+    void* /*data*/,
+    CUlogLevel /*logLevel*/,
     char* message,
     size_t length) noexcept {
   auto& buffer = cuda_error_log_buffer;
@@ -49,14 +49,19 @@ void CUDA_CB cuda_error_log_callback(
 }
 
 bool register_cuda_error_log_callback() noexcept {
+  DriverAPI* api = nullptr;
   try {
-    auto* api = DriverAPI::get();
-    return api->cuLogsRegisterCallback_ &&
-        api->cuLogsRegisterCallback_(
-            cuda_error_log_callback, nullptr, nullptr) == CUDA_SUCCESS;
+    api = DriverAPI::get();
   } catch (...) {
+    // This can happen if no suitable CUDA driver is found. In that case,
+    // silently disable CUDA error log reporting.
     return false;
   }
+  return api->cuLogsRegisterCallback_ &&
+      api->cuLogsRegisterCallback_(
+          cuda_error_log_callback,
+          /*userData=*/nullptr,
+          /*callback_out=*/nullptr) == CUDA_SUCCESS;
 }
 #endif
 
@@ -75,20 +80,13 @@ std::string CUDAErrorLogCapture::get_error_log_suffix() noexcept {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
     defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
   auto& buffer = cuda_error_log_buffer;
-  const auto length = buffer.length;
-  buffer.length = 0;
-  if (length == 0) {
+  if (buffer.length == 0) {
     return {};
   }
-
-  try {
-    std::string error_log{
-        "\nThe CUDA driver logged these messages, which may provide useful details:\n"};
-    error_log.append(buffer.data.data(), length);
-    return error_log;
-  } catch (...) {
-    return {};
-  }
+  std::string error_log{
+      "\nThe CUDA driver logged these messages, which may provide useful details:\n"};
+  error_log.append(buffer.data.data(), buffer.length);
+  return error_log;
 #else
   return {};
 #endif
