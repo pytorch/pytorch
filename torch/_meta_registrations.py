@@ -659,6 +659,163 @@ def meta_philox_uniform_(self, key, low=0.0, high=1.0):
     return self
 
 
+@register_meta(aten._philox_keyed_distribution_shards_.default)
+def meta_philox_keyed_distribution_shards_(
+    self,
+    key,
+    global_shape,
+    global_offsets,
+    local_offsets,
+    local_sizes,
+    chunk_count,
+    distribution,
+    params,
+):
+    op_name = "_philox_keyed_distribution_shards_"
+    _check_philox_distribution_args(op_name, self, key)
+    torch._check(
+        key.dim() == 1,
+        lambda: f"{op_name}: key must be unbatched, got shape {key.shape}",
+    )
+    torch._check(
+        len(global_shape) == self.dim(),
+        lambda: f"{op_name}: global_shape and self must have the same rank",
+    )
+    max_dims = 16 if torch.version.hip else 25
+    torch._check(
+        self.dim() <= max_dims,
+        lambda: f"{op_name}: tensors with more than {max_dims} dimensions are not supported",
+    )
+    torch._check(
+        chunk_count >= 0,
+        lambda: f"{op_name}: chunk_count must be non-negative",
+    )
+    if self.dim() == 0:
+        torch._check(
+            chunk_count <= 1,
+            lambda: f"{op_name}: a scalar tensor can have at most one shard",
+        )
+    metadata_size = chunk_count * self.dim()
+    torch._check(
+        len(global_offsets) == metadata_size
+        and len(local_offsets) == metadata_size
+        and len(local_sizes) == metadata_size,
+        lambda: (
+            f"{op_name}: flattened shard metadata arrays must contain "
+            "chunk_count * ndim values"
+        ),
+    )
+    torch._check(
+        distribution in (0, 1),
+        lambda: f"{op_name}: unsupported distribution kind {distribution}",
+    )
+    torch._check(
+        len(params) == 2,
+        lambda: f"{op_name}: distribution kind {distribution} expects 2 parameters",
+    )
+
+    global_numel = 1
+    for size in global_shape:
+        torch._check(
+            size >= 0,
+            lambda: f"{op_name}: global_shape must contain non-negative sizes",
+        )
+        global_numel *= size
+    torch._check(
+        global_numel <= torch.iinfo(torch.int64).max,
+        lambda: f"{op_name}: global tensor has more than int64 elements",
+    )
+
+    ndim = self.dim()
+    mapped_numel = 0
+    for chunk in range(chunk_count):
+        chunk_numel = 1
+        for dim in range(ndim):
+            index = chunk * ndim + dim
+            global_offset = global_offsets[index]
+            local_offset = local_offsets[index]
+            local_size = local_sizes[index]
+            torch._check(
+                (global_offset >= 0)
+                & (local_size >= 0)
+                & (local_size <= global_shape[dim])
+                & (global_offset <= global_shape[dim] - local_size),
+                lambda: f"{op_name}: global shard {chunk} dimension {dim} is outside global_shape",
+            )
+            torch._check(
+                (local_offset >= 0)
+                & (local_size <= self.shape[dim])
+                & (local_offset <= self.shape[dim] - local_size),
+                lambda: f"{op_name}: local shard {chunk} dimension {dim} is outside self shape",
+            )
+            chunk_numel *= local_size
+        mapped_numel += chunk_numel
+    torch._check(
+        mapped_numel <= self.numel(),
+        lambda: f"{op_name}: local shard metadata describes more than self.numel() elements",
+    )
+
+    for first in range(chunk_count):
+        for second in range(first + 1, chunk_count):
+            first_empty = False
+            second_empty = False
+            global_separated = False
+            local_separated = False
+            for dim in range(ndim):
+                first_index = first * ndim + dim
+                second_index = second * ndim + dim
+                first_size = local_sizes[first_index]
+                second_size = local_sizes[second_index]
+                first_empty = first_empty | (first_size == 0)
+                second_empty = second_empty | (second_size == 0)
+                global_separated = (
+                    global_separated
+                    | (
+                        global_offsets[first_index]
+                        >= global_offsets[second_index] + second_size
+                    )
+                    | (
+                        global_offsets[second_index]
+                        >= global_offsets[first_index] + first_size
+                    )
+                )
+                local_separated = (
+                    local_separated
+                    | (
+                        local_offsets[first_index]
+                        >= local_offsets[second_index] + second_size
+                    )
+                    | (
+                        local_offsets[second_index]
+                        >= local_offsets[first_index] + first_size
+                    )
+                )
+            torch._check(
+                first_empty | second_empty | global_separated,
+                lambda: f"{op_name}: global shards {first} and {second} must not overlap",
+            )
+            torch._check(
+                first_empty | second_empty | local_separated,
+                lambda: f"{op_name}: local shards {first} and {second} must not overlap",
+            )
+
+    torch._check(
+        not any(isinstance(param, complex) for param in params),
+        lambda: f"{op_name}: parameters must be real",
+    )
+    if distribution == 0:
+        torch._check(
+            params[1] >= 0,
+            lambda: f"normal expects std >= 0.0, but found std {params[1]}",
+        )
+    else:
+        torch._check(
+            params[0] <= params[1],
+            lambda: f"uniform expects low <= high, but found {params[0]} > {params[1]}",
+        )
+    return self
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):

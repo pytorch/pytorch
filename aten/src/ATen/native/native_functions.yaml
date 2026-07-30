@@ -6638,6 +6638,12 @@
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
+- func: _philox_keyed_distribution_shards_(Tensor(a!) self, Tensor key, SymInt[] global_shape, SymInt[] global_offsets, SymInt[] local_offsets, SymInt[] local_sizes, int chunk_count, int distribution, Scalar[] params) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CUDA: _philox_keyed_distribution_shards_cuda_
+  autogen: _philox_keyed_distribution_shards, _philox_keyed_distribution_shards.out
+
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
     CPU: _dirichlet_grad_cpu
