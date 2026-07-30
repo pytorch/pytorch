@@ -241,14 +241,6 @@ void CuptiMonitorDecoder::configure(
   valid_bytes_.store(0);
 }
 
-void CuptiMonitorDecoder::set_cbid_filter(
-    int cbid_field_id,
-    std::unordered_map<uint32_t, std::pair<bool, std::unordered_set<uint32_t>>>
-        filters) {
-  cbid_field_id_ = cbid_field_id;
-  cbid_filters_ = std::move(filters);
-}
-
 void CuptiMonitorDecoder::start() {
   if (running_.exchange(true)) {
     return; // already running
@@ -343,9 +335,6 @@ void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
       local;
   std::map<uint32_t, const CuptiRecordLayout*> layout_by_kind;
   std::map<uint32_t, CuptiLayoutKey> key_by_kind;
-  // Per-kind cbid field offset for the noisy-cbid filter (-1 = kind has no cbid
-  // field).
-  std::map<uint32_t, int64_t> cbid_off_by_kind;
   uint64_t local_max_sync = 0;
   void* record = nullptr;
   while (get_next(subscriber, buf.ptr, buf.valid_size, &record) == 0) {
@@ -368,37 +357,6 @@ void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
     }
     if (layout == nullptr) {
       continue; // no captured layout for this kind; skip
-    }
-    // Drop noisy runtime/driver records by cbid (see set_cbid_filter) so they
-    // never reach the columns: the runtime blocklist / driver allowlist,
-    // applied here because CUPTI's own per-cbid filter is NOT_COMPATIBLE under
-    // user-defined records.
-    if (!cbid_filters_.empty()) {
-      auto filt = cbid_filters_.find(kind);
-      if (filt != cbid_filters_.end()) {
-        auto offit = cbid_off_by_kind.find(kind);
-        int64_t cbid_off = -1;
-        if (offit == cbid_off_by_kind.end()) {
-          for (const auto& f : layout->fields) {
-            if (f.field_id == cbid_field_id_) {
-              cbid_off = static_cast<int64_t>(f.offset);
-              break;
-            }
-          }
-          cbid_off_by_kind[kind] = cbid_off;
-        } else {
-          cbid_off = offit->second;
-        }
-        if (cbid_off >= 0) {
-          uint32_t cbid = 0;
-          std::memcpy(&cbid, rec + cbid_off, sizeof(uint32_t));
-          const bool in_set = filt->second.second.contains(cbid);
-          const bool keep = filt->second.first ? in_set : !in_set;
-          if (!keep) {
-            continue; // noisy record: drop before accumulating its columns
-          }
-        }
-      }
     }
     auto& kind_cols = local[kind][key_by_kind[kind]];
     for (const auto& field : layout->fields) {

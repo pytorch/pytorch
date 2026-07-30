@@ -23,6 +23,10 @@ ROOT_PATH = Path(__file__).absolute().parent.parent.parent
 REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
 PYPROJECT_TOML_PATH = ROOT_PATH / "pyproject.toml"
 
+sys.path.insert(0, str(ROOT_PATH))
+
+from tools.clean import clean as clean_source_tree
+
 
 def run_cmd(
     cmd: list[str], capture_output: bool = False
@@ -162,7 +166,10 @@ class Builder:
 
     def clean(self) -> bool:
         logger.info("Running clean")
-        return run_cmd([self.interpreter, "setup.py", "clean"]).returncode == 0
+        # Like the old `setup.py clean`, this operates on the current working
+        # directory, which is expected to be the repository root.
+        clean_source_tree()
+        return True
 
     def install_requirements(self) -> None:
         logger.info("Installing requirements")
@@ -235,8 +242,8 @@ def main() -> None:
     for interpreter in pythons:
         with venv(interpreter) as venv_interpreter:
             builder = Builder(venv_interpreter)
-            # clean actually requires setuptools so we need to ensure we
-            # install requirements before
+            # requirements provide the build backend for the non-isolated
+            # wheel build below
             builder.install_requirements()
             builder.clean()
 
