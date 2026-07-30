@@ -11,9 +11,6 @@ export USE_CUDA=0
 if [[ -z "$CMAKE_ARGS" ]]; then
     CMAKE_ARGS=()
 fi
-if [[ -z "$EXTRA_CAFFE2_CMAKE_FLAGS" ]]; then
-    EXTRA_CAFFE2_CMAKE_FLAGS=()
-fi
 
 ARCH=$(uname -m)
 echo "Building CPU wheel for architecture: $ARCH"
