@@ -6330,8 +6330,15 @@ def monitored_barrier(
         _warn_not_in_group("monitored_barrier")
         return
 
-    if get_backend(group) != Backend.GLOO:
-        raise ValueError("monitored_barrier is only implemented for GLOO backend.")
+    # monitored_barrier runs on a CPU backend (GLOO, or its torchcomms
+    # BackendWrapper equivalent). Require the group to have a CPU backend rather
+    # than matching the "gloo" name, so a device-qualified group (e.g.
+    # "cpu:gloo,cuda:nccl") is accepted for its CPU backend.
+    group_to_use = group or _get_default_group()
+    if torch.device("cpu") not in group_to_use._device_types:
+        raise ValueError(
+            "monitored_barrier requires a group with a CPU-capable backend (e.g. GLOO)."
+        )
 
     if timeout is None:
         timeout = _get_default_timeout(get_backend(group))
@@ -6346,7 +6353,6 @@ def monitored_barrier(
 
     _check_valid_timeout(timeout)
 
-    group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
         timeout, wait_all_ranks=wait_all_ranks
     )
