@@ -8494,6 +8494,29 @@ SavedForBackwardsAOTOutput(idx=5)""",
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(dual)
 
+    def test_grid_sampler_2d_cpu_fallback_graph_breaks(self):
+        # torch._grid_sampler_2d_cpu_fallback is a private CPU fallback kernel
+        # that is not fake/meta-safe, so Dynamo must graph-break on it and run
+        # it eagerly rather than capturing it into the graph. Regression test
+        # for the NGB-enabled failure of test_nn.py TestNN.test_grid_sample;
+        # the fallback call here is top-level, so it reproduces regardless of
+        # nested_graph_breaks (no config dependence needed).
+        def fn(inp, grid):
+            out = torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+            return out + 1
+
+        inp = torch.randn(1, 1, 2, 5)
+        grid = torch.randn(1, 2, 5, 2)
+        expected = fn(inp, grid)
+
+        cnt = CompileCounter()
+        out = torch.compile(fn, backend=cnt, fullgraph=False)(inp, grid)
+        self.assertEqual(out, expected)
+        # It must graph-break on the fallback and capture only the resume
+        # frame's `out + 1`, not silently capture/fold the fallback itself.
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()
