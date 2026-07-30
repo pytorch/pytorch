@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 
 #include <ATen/core/Tensor.h>
@@ -1174,8 +1175,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
       TORCH_CHECK(table.stride(-1) == 1, "block_table must have contiguous last dimension");
       TORCH_CHECK(key.dim() == 4 && value.dim() == 4,
           "paged key/value must be 4D page pools (num_pages, page_size, num_heads, head_dim)");
-      TORCH_CHECK(key.sizes() == value.sizes(),
-          "paged key and value must have the same shape, got ", key.sizes(), " and ", value.sizes());
+      TORCH_CHECK(key.size(-1) == query.size(-1),
+          "paged key head dimension must match query, got ", key.size(-1), " and ", query.size(-1));
+      TORCH_CHECK(
+          key.size(0) == value.size(0) &&
+              key.size(1) == value.size(1) &&
+              key.size(2) == value.size(2),
+          "paged key and value must have matching page count, page size, and number of heads, got ",
+          key.sizes(), " and ", value.sizes());
+      const int64_t page_size = key.size(1);
+      TORCH_CHECK(page_size > 0, "paged key/value page size must be positive");
+      TORCH_CHECK(
+          table.size(1) <= std::numeric_limits<int>::max() / page_size,
+          "paged key/value capacity exceeds cuDNN's maximum supported sequence length, got page table width ",
+          table.size(1), " and page size ", page_size);
     }
     auto attn_bias_ = attn_bias;
     if (attn_bias_.has_value()) {

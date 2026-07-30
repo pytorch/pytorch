@@ -1451,7 +1451,7 @@ class TestVarlenAttention(NNTestCase):
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_cudnn_varlen_cached_graph_grad_out_layout(self, device, dtype):
-        """Normalize grad_output before reusing a cached backward graph."""
+        """Key cached backward graphs by grad_output layout."""
         torch.manual_seed(42)
         num_heads, head_dim = 4, 64
         q_lens = [192, 256]
@@ -1477,6 +1477,10 @@ class TestVarlenAttention(NNTestCase):
         )[..., :head_dim]
         self.assertEqual(padded.stride(-1), 1)
         self.assertNotEqual(padded.stride(-2), contiguous.stride(-2))
+        expanded = torch.randn(
+            total, num_heads, 1, device=device, dtype=dtype
+        ).expand_as(contiguous)
+        self.assertEqual(expanded.stride(-1), 0)
         storage = torch.empty(contiguous.numel() + 1, device=device, dtype=dtype)
         misaligned = torch.as_strided(
             storage, contiguous.shape, contiguous.stride(), storage_offset=1
@@ -1492,12 +1496,93 @@ class TestVarlenAttention(NNTestCase):
         )
         # Prime the cache before exercising alternate strides and alignment.
         with cudnn_backward as spy:
-            for grad_out in (contiguous, padded, misaligned):
+            for grad_out in (contiguous, padded, expanded, misaligned):
                 expected = grads(grad_out.clone(), use_cudnn=False)
                 actual = grads(grad_out, use_cudnn=True)
                 for got, want in zip(actual, expected):
                     self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
-        self.assertEqual(spy.call_count, 3, "expected the cuDNN backend to be used")
+        self.assertEqual(spy.call_count, 4, "expected the cuDNN backend to be used")
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_cached_graph_aux_layouts(self, device, dtype):
+        """Key cached backward graphs by output and LSE layouts."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim, max_len = 384, 4, 64, 192
+        cu_seq = torch.tensor([0, max_len, total], device=device, dtype=torch.int32)
+        q, k, v = (
+            torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(3)
+        )
+        grad_out = torch.randn_like(q)
+
+        with torch.no_grad():
+            result = torch.ops.aten._cudnn_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                True,
+                0.0,
+                False,
+                False,
+            )
+        out, lse, seed, offset = result[0], result[1], result[6], result[7]
+
+        def backward(output, output_grad, stats):
+            return torch.ops.aten._cudnn_attention_backward(
+                output_grad,
+                q,
+                k,
+                v,
+                output,
+                stats,
+                seed,
+                offset,
+                None,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                0.0,
+                False,
+            )
+
+        # Prime the cache with contiguous auxiliary tensors.
+        expected = backward(out, grad_out, lse)
+        out_permuted = (
+            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
+            .permute(1, 0, 2)
+            .copy_(out)
+        )
+        grad_permuted = (
+            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
+            .permute(1, 0, 2)
+            .copy_(grad_out)
+        )
+        out_padded = torch.empty(
+            total, num_heads, 2 * head_dim, device=device, dtype=dtype
+        )[..., :head_dim]
+        out_padded.copy_(out)
+        lse_padded = torch.empty(num_heads, 2 * total, device=device, dtype=lse.dtype)[
+            :, :total
+        ]
+        lse_padded.copy_(lse)
+
+        cases = [
+            (out_permuted, grad_permuted, lse),
+            (out_padded, grad_out, lse),
+            (out, grad_out, lse_padded),
+        ]
+        for output, output_grad, stats in cases:
+            actual = backward(output, output_grad, stats)
+            for got, want in zip(actual, expected):
+                self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
 
     @skipIfRocm
     def test_cudnn_kv_cache_validation(self, device):
@@ -1543,6 +1628,39 @@ class TestVarlenAttention(NNTestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(RuntimeError, message):
                     run(**override)
+
+        value_head_dim = 32
+        v_narrow = torch.randn(
+            *v.shape[:-1], value_head_dim, device=device, dtype=dtype
+        )
+        output = run(value=v_narrow)
+        self.assertEqual(output.shape, (q.size(0), num_heads, value_head_dim))
+
+        k_logical = gather_paged_cache(k, block_table)
+        v_logical = gather_paged_cache(v_narrow, block_table)
+        expected = torch.empty_like(output)
+        scale = 1.0 / math.sqrt(head_dim)
+        for i, kv_len in enumerate((200, 128)):
+            lo, hi = int(cu_seq_q[i]), int(cu_seq_q[i + 1])
+            q_i = q[lo:hi].float()
+            k_i = k_logical[i, :kv_len].float()
+            v_i = v_logical[i, :kv_len].float()
+            attn = (torch.einsum("qhd,khd->hqk", q_i, k_i) * scale).softmax(-1)
+            expected[lo:hi] = torch.einsum("hqk,khd->qhd", attn, v_i).to(dtype)
+        self.assertEqual(output.float(), expected.float(), atol=2e-2, rtol=2e-2)
+
+        with self.assertRaisesRegex(RuntimeError, "head dimension must match query"):
+            run(key=k[..., :32])
+
+        mismatched_values = [
+            ("page count", v[:-1]),
+            ("page size", v[:, :-1]),
+            ("number of heads", v[:, :, :-1]),
+        ]
+        for axis, bad_value in mismatched_values:
+            with self.subTest(axis=axis):
+                with self.assertRaisesRegex(RuntimeError, "matching page count"):
+                    run(value=bad_value)
 
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             run(key=k.half(), value=v.half())

@@ -144,6 +144,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/TypeCast.h>
 #include <cudnn.h>
 
 #include <cstdint>
@@ -241,8 +242,15 @@ struct MHAParams {
   std::array<int, MAX_MHA_DIM> v_stride;
   std::array<int, MAX_MHA_DIM> bias_dim;
   std::array<int, MAX_MHA_DIM> bias_stride;
-  std::array<int, 2> page_table_dim;
-  std::array<int, 2> page_table_stride;
+  // Block tables have shape (batch_size, max_pages_per_sequence).
+  std::array<int64_t, 2> page_table_dim;
+  std::array<int64_t, 2> page_table_stride;
+  std::array<int64_t, MAX_MHA_DIM> o_dim;
+  std::array<int64_t, MAX_MHA_DIM> o_stride;
+  std::array<int64_t, MAX_MHA_DIM> do_dim;
+  std::array<int64_t, MAX_MHA_DIM> do_stride;
+  std::array<int64_t, MAX_MHA_DIM> softmaxstats_dim;
+  std::array<int64_t, MAX_MHA_DIM> softmaxstats_stride;
   int64_t b;
   int64_t h;
   int64_t s_q;
@@ -257,7 +265,25 @@ struct MHAParams {
   bool has_attn_bias;
   bool use_ragged;
   bool is_paged;
+  bool is_nested;
 };
+
+namespace {
+
+// Record an auxiliary tensor layout in the zero-initialized cache key.
+void setMHAParamLayout(
+    const Tensor& tensor,
+    std::array<int64_t, MAX_MHA_DIM>& dim,
+    std::array<int64_t, MAX_MHA_DIM>& stride) {
+  if (!tensor.defined()) {
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(tensor.dim() <= MAX_MHA_DIM);
+  std::copy(tensor.sizes().begin(), tensor.sizes().end(), dim.begin());
+  std::copy(tensor.strides().begin(), tensor.strides().end(), stride.begin());
+}
+
+} // namespace
 
 void setMHAParams(
     MHAParams& params,
@@ -271,6 +297,9 @@ void setMHAParams(
     const Tensor& k,
     const Tensor& v,
     const std::optional<Tensor>& attn_bias,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
     double dropout_probability,
     bool is_causal,
     bool return_softmaxstats,
@@ -293,6 +322,7 @@ void setMHAParams(
   params.return_softmaxstats = return_softmaxstats;
   params.has_attn_bias = attn_bias.has_value();
   params.is_paged = page_table.has_value();
+  params.is_nested = is_nested;
   // Paged K/V remain 4D page pools in the nested path.
   const uint8_t q_rank = (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested);
   const uint8_t kv_rank = params.is_paged ? MAX_MHA_DIM : q_rank;
@@ -320,7 +350,11 @@ void setMHAParams(
   std::copy(k.strides().begin(), k.strides().end(), params.k_stride.begin());
   std::copy(v.sizes().begin(), v.sizes().end(), params.v_dim.begin());
   std::copy(v.strides().begin(), v.strides().end(), params.v_stride.begin());
-  bool use_ragged = use_ragged_in_dense(q, k, v, q, params.has_attn_bias);
+  setMHAParamLayout(o, params.o_dim, params.o_stride);
+  setMHAParamLayout(dO, params.do_dim, params.do_stride);
+  setMHAParamLayout(
+      softmaxstats, params.softmaxstats_dim, params.softmaxstats_stride);
+  bool use_ragged = use_ragged_in_dense(q, k, v, o, params.has_attn_bias);
   params.use_ragged = use_ragged;
   if (use_ragged) {
     // ignore B - stride in BSHD (THD) avoid-recompile
@@ -366,6 +400,9 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       const Tensor& k,
       const Tensor& v,
       const std::optional<Tensor>& attn_bias,
+      const Tensor& o,
+      const Tensor& dO,
+      const Tensor& softmaxstats,
       double dropout_probability,
       bool is_causal,
       bool return_softmaxstats,
@@ -383,6 +420,9 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         k,
         v,
         attn_bias,
+        o,
+        dO,
+        softmaxstats,
         dropout_probability,
         is_causal,
         return_softmaxstats,
@@ -839,6 +879,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
             .set_stride({v.stride(0), v.stride(2), v.stride(1), v.stride(3)}));
     const auto& table = page_table.value();
     const int64_t table_size = table.size(1);
+    const int64_t max_seq_len_kv = table_size * k.size(1);
     auto page_table_tensor = [&](UIDS uid, const char* name) {
       return mha_graph->tensor(
           fe::graph::Tensor_attributes()
@@ -856,8 +897,8 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
         .set_paged_attention_v_table(
             page_table_tensor(PAGE_TABLE_V, "page_table_v"))
         // cuDNN derives its maximum KV length from the page-table width.
-        .set_paged_attention_max_seq_len_kv(
-            static_cast<int>(table_size * k.size(1)));
+        .set_paged_attention_max_seq_len_kv(c10::checked_convert<int>(
+            max_seq_len_kv, "paged attention maximum KV sequence length"));
   } else {
     K_ = mha_graph->tensor(fe::graph::Tensor_attributes()
                                .set_uid(K)
@@ -1469,6 +1510,9 @@ void run_cudnn_SDP_fprop(
       k,
       v,
       attn_bias,
+      o,
+      Tensor(),
+      softmaxstats,
       dropout_probability,
       is_causal,
       return_softmaxstats,
@@ -1592,6 +1636,9 @@ void run_cudnn_SDP_fprop_nestedtensor(
       k,
       v,
       attn_bias,
+      o,
+      Tensor(),
+      softmaxstats_,
       dropout_probability,
       is_causal,
       return_softmaxstats,
@@ -1770,6 +1817,9 @@ void run_cudnn_SDP_bprop(
       k,
       v,
       attn_bias,
+      o,
+      dO_,
+      softmaxstats,
       dropout_probability,
       is_causal,
       true,
@@ -1876,18 +1926,17 @@ void run_cudnn_SDP_bprop_nestedtensor(
       softmaxstats.dim() == 2, "cuDNN SDPA expected a 2D (H, T) softmax_lse");
   auto softmaxstats_ = softmaxstats.unsqueeze(-1).transpose(0, 1);
 
-  // Nested graphs bake dO strides but do not key on them, so use O's layout.
+  // Alignment is not part of the cache key, and cuDNN requires a unit
+  // embedding stride. Preserve all other dO strides when those hold.
   Tensor dO_ = dO;
-  if (!same_strides(o, dO)) {
-    permute_to_matching_layout(o, dO_);
-  }
-  if (reinterpret_cast<uintptr_t>(dO_.const_data_ptr()) % 16 != 0) {
-    dO_ = dO_.clone();
+  if (dO.stride(-1) != 1 ||
+      reinterpret_cast<uintptr_t>(dO.const_data_ptr()) % 16 != 0) {
+    dO_ = dO.clone(at::MemoryFormat::Contiguous);
   }
   TORCH_INTERNAL_ASSERT(
-      same_strides(o, dO_) &&
+      dO_.stride(-1) == 1 &&
           reinterpret_cast<uintptr_t>(dO_.const_data_ptr()) % 16 == 0,
-      "cuDNN SDPA expected grad_output to match output layout and alignment");
+      "cuDNN SDPA expected an aligned grad_output with unit embedding stride");
 
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
@@ -1933,6 +1982,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
       k,
       v,
       attn_bias,
+      o,
+      dO_,
+      softmaxstats_,
       dropout_probability,
       is_causal,
       true,
