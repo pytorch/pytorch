@@ -82,6 +82,27 @@ _blocklisted_modules = [
     "os",
     "posix",
     "nt",
+    "subprocess",
+    "commands",
+    "ctypes",
+    "runpy",
+    "importlib",
+    "pickle",
+    "_pickle",
+    "cPickle",
+    "marshal",
+]
+
+# individual globals that are never allowed, even if the user attempts to
+# allowlist them via add_safe_globals
+_blocklisted_globals = [
+    "builtins.eval",
+    "builtins.exec",
+    "builtins.compile",
+    "builtins.__import__",
+    "builtins.getattr",
+    "builtins.setattr",
+    "builtins.delattr",
 ]
 
 _marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
@@ -334,6 +355,10 @@ class Unpickler:
                 if module in _blocklisted_modules:
                     raise UnpicklingError(
                         f"Trying to load unsupported GLOBAL {full_path} whose module {module} is blocked."
+                    )
+                if full_path in _blocklisted_globals:
+                    raise UnpicklingError(
+                        f"Trying to load unsupported GLOBAL {full_path} which is blocked."
                     )
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
