@@ -92,61 +92,54 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.is_contiguous());
 }
 
-// Scale shape checks for blockwise scaling.
-// For a matrix t [rows, cols]:
-//   BlockWise1x128:   scale has shape [rows, ceil_div(cols, 128)]
-//   BlockWise128x128: scale has shape [ceil_div(rows, 128), ceil_div(cols,
-//   128)]
-// These shapes match CUDA's convention.
+// Shared scale shape check for blockwise scaling.
+// For a matrix t [rows, cols], scale must have shape
+// [ceil_div(rows, block_rows), ceil_div(cols, block_cols)], where cols is the
+// logical column count: packed FP4 stores two elements per byte, so its
+// logical width is size(1) * 2.
 // XPU accepts both row-major (contiguous) and column-major strides,
 // since it internally calls .contiguous() for oneDNN. CUDA requires
 // specific strides for cuBLAS swizzling; XPU is more permissive but
 // still validates that strides form a valid contiguous layout.
-bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+bool is_blockwise_scaling(
+    const at::Tensor& t,
+    const at::Tensor& scale,
+    at::ScalarType scale_dtype,
+    int64_t block_rows,
+    int64_t block_cols) {
+  const int64_t cols = t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2
+      ? t.size(1) * 2
+      : t.size(1);
   return (
-      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
-      scale.dim() == 2 && scale.size(0) == t.size(0) &&
-      scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
+      scale.scalar_type() == scale_dtype && scale.dim() == 2 &&
+      scale.size(0) == ceil_div<int64_t>(t.size(0), block_rows) &&
+      scale.size(1) == ceil_div<int64_t>(cols, block_cols) &&
       (scale.is_contiguous() || scale.t().is_contiguous()));
+}
+
+bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return at::isFloat8Type(t.scalar_type()) &&
+      is_blockwise_scaling(t, scale, at::kFloat, 1, 128);
 }
 
 bool is_blockwise_128x128_scaling(
     const at::Tensor& t,
     const at::Tensor& scale) {
-  return (
-      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
-      scale.dim() == 2 && scale.size(0) == ceil_div<int64_t>(t.size(0), 128) &&
-      scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
-      (scale.is_contiguous() || scale.t().is_contiguous()));
+  return at::isFloat8Type(t.scalar_type()) &&
+      is_blockwise_scaling(t, scale, at::kFloat, 128, 128);
 }
 
-// 1x32 blocks for microscaled fp8 data and fp8_e8m0fnu scales
+// 1x32 blocks for microscaled fp8 or packed fp4 data and fp8_e8m0fnu scales
 bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  bool is_fp8_path =
-      (isFloat8Type(t.scalar_type()) &&
-       scale.scalar_type() == at::kFloat8_e8m0fnu && scale.dim() == 2 &&
-       scale.size(0) == t.size(0) &&
-       scale.size(1) == ceil_div<int64_t>(t.size(1), 32) &&
-       (scale.is_contiguous() || scale.t().is_contiguous()));
-  bool is_packed_fp4_path =
-      (t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
-       scale.scalar_type() == at::kFloat8_e8m0fnu && scale.dim() == 2 &&
-       scale.size(0) == t.size(0) &&
-       scale.size(1) == ceil_div<int64_t>(t.size(1) * 2, 32) &&
-       (scale.is_contiguous() || scale.t().is_contiguous()));
-  return (is_fp8_path || is_packed_fp4_path);
+  return (at::isFloat8Type(t.scalar_type()) ||
+          t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2) &&
+      is_blockwise_scaling(t, scale, at::kFloat8_e8m0fnu, 1, 32);
 }
 
 // 1x16 blocks for packed nvfp4 data and float8_e4m3fn scales
 bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  // Packed FP4 stores 2 elements per byte, so the logical column count is
-  // size(1) * 2.
-  return (
-      t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
-      scale.scalar_type() == at::kFloat8_e4m3fn && scale.dim() == 2 &&
-      scale.size(0) == t.size(0) &&
-      scale.size(1) == ceil_div<int64_t>(t.size(1) * 2, 16) &&
-      (scale.is_contiguous() || scale.t().is_contiguous()));
+  return t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
+      is_blockwise_scaling(t, scale, at::kFloat8_e4m3fn, 1, 16);
 }
 
 bool is_desired_scaling(
