@@ -1,4 +1,5 @@
 # Owner(s): ["module: sdpa"]
+import math
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
@@ -12,7 +13,7 @@ from torch.nn.attention import (
     activate_flash_attention_impl,
     restore_flash_attention_impl,
 )
-from torch.nn.attention.varlen import varlen_attn, varlen_attn_out
+from torch.nn.attention.varlen import AuxRequest, varlen_attn, varlen_attn_out
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_CK_SDPA,
@@ -284,6 +285,14 @@ def pack_sequences(seqs, device):
     max_len = seq_lens.max().item()
 
     return x_packed, cu_seq, max_len
+
+
+def gather_paged_cache(cache: torch.Tensor, block_table: torch.Tensor) -> torch.Tensor:
+    """Gather a logical batched KV cache from a physical page pool."""
+    page_size, num_heads, head_dim = cache.shape[1:]
+    index = block_table.flatten().long().view(-1, 1, 1, 1)
+    index = index.expand(-1, page_size, num_heads, head_dim)
+    return cache.gather(0, index).view(block_table.size(0), -1, num_heads, head_dim)
 
 
 def create_variable_length_batch(
@@ -1180,17 +1189,8 @@ class TestVarlenAttention(NNTestCase):
         ).view(batch_size, max_pages_per_seq)
         seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
 
-        idx = (
-            block_table.long()
-            .view(-1, 1, 1, 1)
-            .expand(-1, page_size, num_heads, head_dim)
-        )
-        k_gathered = k_pages.gather(0, idx).view(
-            batch_size, cache_size, num_heads, head_dim
-        )
-        v_gathered = v_pages.gather(0, idx).view(
-            batch_size, cache_size, num_heads, head_dim
-        )
+        k_gathered = gather_paged_cache(k_pages, block_table)
+        v_gathered = gather_paged_cache(v_pages, block_table)
         k_seqs = [k_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
         v_seqs = [v_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
 
@@ -1305,6 +1305,294 @@ class TestVarlenAttention(NNTestCase):
                     num_splits=1,
                 )
             self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "paged,page_size,strided_table",
+        [
+            (False, 64, False),
+            (True, 32, False),
+            (True, 64, False),
+            (True, 128, True),
+            (True, 256, False),
+        ],
+    )
+    def test_cudnn_kv_cache(self, device, dtype, paged, page_size, strided_table):
+        """Test cuDNN seqused_k with packed and paged KV caches."""
+        torch.manual_seed(42)
+        actual_kv_lens = [200, 128, 7, 300]
+        batch_size = len(actual_kv_lens)
+        num_heads, head_dim = 8, 64
+        q_seqs = [
+            torch.randn(n, num_heads, head_dim, device=device, dtype=dtype)
+            for n in [192, 256, 192, 129]
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        pages_per_seq = math.ceil(max(actual_kv_lens) / page_size)
+        cache_size = pages_per_seq * page_size
+        if paged:
+            total_pages = batch_size * pages_per_seq
+            k_cache = torch.randn(
+                total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+            )
+            v_cache = torch.randn_like(k_cache)
+            block_table = torch.randperm(
+                total_pages, device=device, dtype=torch.int32
+            ).view(batch_size, pages_per_seq)
+            if strided_table:
+                padded_table = torch.empty(
+                    batch_size, pages_per_seq + 1, device=device, dtype=torch.int32
+                )
+                padded_table[:, :pages_per_seq].copy_(block_table)
+                block_table = padded_table[:, :pages_per_seq]
+            k_logical = gather_paged_cache(k_cache, block_table)
+            v_logical = gather_paged_cache(v_cache, block_table)
+            cu_seq_k = None
+        else:
+            k_logical = torch.randn(
+                batch_size, cache_size, num_heads, head_dim, device=device, dtype=dtype
+            )
+            v_logical = torch.randn_like(k_logical)
+            k_cache, v_cache = k_logical.flatten(0, 1), v_logical.flatten(0, 1)
+            block_table = None
+            cu_seq_k = torch.arange(
+                0,
+                (batch_size + 1) * cache_size,
+                cache_size,
+                device=device,
+                dtype=torch.int32,
+            )
+
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+        cudnn_forward = patch.object(
+            torch.ops.aten,
+            "_cudnn_attention_forward",
+            wraps=torch.ops.aten._cudnn_attention_forward,
+        )
+        with (
+            _use_cudnn_varlen(True, device),
+            cudnn_forward as spy,
+            torch.no_grad(),
+        ):
+            output = varlen_attn(
+                q_packed,
+                k_cache,
+                v_cache,
+                cu_seq_q,
+                cu_seq_k,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                block_table=block_table,
+            )
+        self.assertEqual(spy.call_count, 1, "expected the cuDNN backend to be used")
+
+        scale = 1.0 / math.sqrt(head_dim)
+        expected = torch.empty_like(q_packed)
+        for i, kv_len in enumerate(actual_kv_lens):
+            lo, hi = int(cu_seq_q[i]), int(cu_seq_q[i + 1])
+            q_i = q_packed[lo:hi].float()
+            k_i, v_i = k_logical[i, :kv_len].float(), v_logical[i, :kv_len].float()
+            attn = (torch.einsum("qhd,khd->hqk", q_i, k_i) * scale).softmax(-1)
+            expected[lo:hi] = torch.einsum("hqk,khd->qhd", attn, v_i).to(dtype)
+        self.assertEqual(output.float(), expected.float(), atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_lse(self, device, dtype):
+        """cuDNN returns log-sum-exp in (num_heads, total_q) layout."""
+        torch.manual_seed(42)
+        num_heads, head_dim = 4, 64
+        q_lens, kv_lens = [192, 256, 192], [256, 300, 192]
+        q_seqs = [
+            torch.randn(n, num_heads, head_dim, device=device, dtype=dtype)
+            for n in q_lens
+        ]
+        k_seqs = [
+            torch.randn(n, num_heads, head_dim, device=device, dtype=dtype)
+            for n in kv_lens
+        ]
+        q, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+        k, cu_seq_k, max_k = pack_sequences(k_seqs, device)
+
+        cudnn_forward = patch.object(
+            torch.ops.aten,
+            "_cudnn_attention_forward",
+            wraps=torch.ops.aten._cudnn_attention_forward,
+        )
+        with (
+            _use_cudnn_varlen(True, device),
+            cudnn_forward as spy,
+            torch.no_grad(),
+        ):
+            _, lse = varlen_attn(
+                q,
+                k,
+                torch.randn_like(k),
+                cu_seq_q,
+                cu_seq_k,
+                max_q,
+                max_k,
+                return_aux=AuxRequest(lse=True),
+            )
+
+        self.assertEqual(spy.call_count, 1, "expected the cuDNN backend to be used")
+        self.assertEqual(lse.shape, (num_heads, q.size(0)))
+        scale = 1.0 / math.sqrt(head_dim)
+        expected = torch.empty_like(lse)
+        for i, k_i in enumerate(k_seqs):
+            lo, hi = int(cu_seq_q[i]), int(cu_seq_q[i + 1])
+            scores = torch.einsum("qhd,khd->hqk", q[lo:hi].float(), k_i.float())
+            expected[:, lo:hi] = (scores * scale).logsumexp(-1)
+        self.assertEqual(lse, expected, atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_cached_graph_grad_out_layout(self, device, dtype):
+        """Normalize grad_output before reusing a cached backward graph."""
+        torch.manual_seed(42)
+        num_heads, head_dim = 4, 64
+        q_lens = [192, 256]
+        total, max_len = sum(q_lens), max(q_lens)
+        cu_seq_q = torch.tensor([0, q_lens[0], total], device=device, dtype=torch.int32)
+        tensors = [
+            torch.randn(
+                total, num_heads, head_dim, device=device, dtype=dtype
+            ).requires_grad_()
+            for _ in range(3)
+        ]
+        q, k, v = tensors
+
+        def grads(grad_out, use_cudnn):
+            with _use_cudnn_varlen(use_cudnn, device):
+                out = varlen_attn(q, k, v, cu_seq_q, cu_seq_q, max_len, max_len)
+                return torch.autograd.grad(out, tensors, grad_out)
+
+        contiguous = torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+        # Same shape and innermost stride 1, but a wider row stride.
+        padded = torch.randn(
+            total, num_heads, head_dim * 2, device=device, dtype=dtype
+        )[..., :head_dim]
+        self.assertEqual(padded.stride(-1), 1)
+        self.assertNotEqual(padded.stride(-2), contiguous.stride(-2))
+        storage = torch.empty(contiguous.numel() + 1, device=device, dtype=dtype)
+        misaligned = torch.as_strided(
+            storage, contiguous.shape, contiguous.stride(), storage_offset=1
+        )
+        misaligned.copy_(contiguous)
+        self.assertEqual(misaligned.stride(), contiguous.stride())
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+
+        cudnn_backward = patch.object(
+            torch.ops.aten,
+            "_cudnn_attention_backward",
+            wraps=torch.ops.aten._cudnn_attention_backward,
+        )
+        # Prime the cache before exercising alternate strides and alignment.
+        with cudnn_backward as spy:
+            for grad_out in (contiguous, padded, misaligned):
+                expected = grads(grad_out.clone(), use_cudnn=False)
+                actual = grads(grad_out, use_cudnn=True)
+                for got, want in zip(actual, expected):
+                    self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
+        self.assertEqual(spy.call_count, 3, "expected the cuDNN backend to be used")
+
+    @skipIfRocm
+    def test_cudnn_kv_cache_validation(self, device):
+        """Validate cuDNN KV-cache metadata and inference-only inputs."""
+        dtype = torch.bfloat16
+        batch_size, num_heads, head_dim, page_size = 2, 8, 64, 64
+        pages_per_seq = 4
+        cache_size = pages_per_seq * page_size
+
+        q = torch.randn(2 * 192, num_heads, head_dim, device=device, dtype=dtype)
+        cu_seq_q = torch.tensor([0, 192, 384], device=device, dtype=torch.int32)
+        k = torch.randn(
+            batch_size * pages_per_seq,
+            page_size,
+            num_heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        v = torch.randn_like(k)
+        block_table = torch.arange(
+            batch_size * pages_per_seq, device=device, dtype=torch.int32
+        ).view(batch_size, pages_per_seq)
+        seqused_k = torch.tensor([200, 128], device=device, dtype=torch.int32)
+
+        def run(query=q, key=k, value=v, **overrides):
+            kwargs = dict(seqused_k=seqused_k, block_table=block_table)
+            kwargs.update(overrides)
+            with _use_cudnn_varlen(True, device), torch.no_grad():
+                return varlen_attn(
+                    query, key, value, cu_seq_q, None, 192, cache_size, **kwargs
+                )
+
+        bad_inputs = [
+            ("seqused_k must have shape", {"seqused_k": seqused_k[:1]}),
+            ("seqused_k must be on the same", {"seqused_k": seqused_k.cpu()}),
+            ("seqused_k must have dtype int32", {"seqused_k": seqused_k.long()}),
+            ("block_table must have shape", {"block_table": block_table[:1]}),
+            ("block_table must have dtype int32", {"block_table": block_table.long()}),
+            ("block_table must be on the same", {"block_table": block_table.cpu()}),
+        ]
+        for message, override in bad_inputs:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(RuntimeError, message):
+                    run(**override)
+
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            run(key=k.half(), value=v.half())
+
+        aten_kwargs = dict(
+            query=q,
+            key=k,
+            value=v,
+            attn_bias=None,
+            cum_seq_q=cu_seq_q,
+            cum_seq_k=None,
+            max_q=192,
+            max_k=cache_size,
+            compute_log_sumexp=True,
+            dropout_p=0.0,
+            is_causal=False,
+            return_debug_mask=False,
+            seqused_k=seqused_k,
+            block_table=block_table,
+        )
+        with self.assertRaisesRegex(RuntimeError, "only supports float16"):
+            torch.ops.aten._cudnn_attention_forward(
+                **(aten_kwargs | {"query": q.float()})
+            )
+
+        storage = torch.empty(k.numel() + 1, device=device, dtype=dtype)
+        misaligned_k = torch.as_strided(storage, k.shape, k.stride(), storage_offset=1)
+        misaligned_k.copy_(k)
+        with self.assertRaisesRegex(RuntimeError, "16-byte-aligned"):
+            run(key=misaligned_k)
+
+        # Exercise both the custom-op and direct-aten autograd guards.
+        q_grad = q.clone().requires_grad_()
+        with _use_cudnn_varlen(True, device):
+            with self.assertRaisesRegex(RuntimeError, "inference-only parameter"):
+                varlen_attn(
+                    q_grad,
+                    k,
+                    v,
+                    cu_seq_q,
+                    None,
+                    192,
+                    cache_size,
+                    seqused_k=seqused_k,
+                    block_table=block_table,
+                )
+        with self.assertRaisesRegex(
+            RuntimeError, "seqused_k and block_table are inference-only"
+        ):
+            torch.ops.aten._cudnn_attention_forward(**(aten_kwargs | {"query": q_grad}))
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

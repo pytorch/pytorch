@@ -3,6 +3,7 @@
 #include <type_traits>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
@@ -983,6 +984,31 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
 }
 
+namespace {
+
+// Check the pointer and stride alignment required by cuDNN varlen SDPA.
+bool has_aligned_varlen_layout(const Tensor& tensor) {
+  constexpr int64_t alignment_bytes = 16;
+  if (!tensor.numel()) {
+    return true;
+  }
+  if (tensor.dim() == 0 || tensor.stride(-1) != 1 ||
+      reinterpret_cast<uintptr_t>(tensor.const_data_ptr()) % alignment_bytes !=
+          0) {
+    return false;
+  }
+  const int64_t alignment = alignment_bytes / tensor.element_size();
+  for (int64_t dim = 0; dim < tensor.dim() - 1; ++dim) {
+    if (tensor.size(dim) > 1 &&
+        (tensor.stride(dim) <= 0 || tensor.stride(dim) % alignment != 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward(
     const Tensor& query,
     const Tensor& key,
@@ -996,15 +1022,42 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    const std::optional<Tensor>& seqused_k,
+    const std::optional<Tensor>& block_table) {
   // TODO(eqy): debug mask support
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
   const bool is_nested = cumulative_sequence_length_q.has_value();
+  const bool has_kv_cache = seqused_k.has_value() || block_table.has_value();
+  TORCH_CHECK(
+      query.scalar_type() == at::kHalf || query.scalar_type() == at::kBFloat16,
+      "cuDNN attention only supports float16 and bfloat16, got ",
+      query.scalar_type());
+  TORCH_CHECK(
+      key.scalar_type() == query.scalar_type() &&
+          value.scalar_type() == query.scalar_type(),
+      "cuDNN attention expects query, key and value to have the same dtype, got ",
+      query.scalar_type(), ", ", key.scalar_type(), " and ", value.scalar_type());
+  TORCH_CHECK(
+      !has_kv_cache ||
+          (has_aligned_varlen_layout(query) &&
+           has_aligned_varlen_layout(key) &&
+           has_aligned_varlen_layout(value)),
+      "cuDNN KV-cache attention requires query, key and value to have "
+      "16-byte-aligned storage and non-broadcast strides, with a contiguous "
+      "last dimension.");
   TORCH_CHECK(
       !is_nested || max_seqlen_batch_q > 128,
       "cuDNN varlen attention does not support query sequence length <= 128.");
+  TORCH_CHECK(
+      is_nested || !has_kv_cache,
+      "cuDNN attention only supports seqused_k/block_table in the varlen path.");
+  TORCH_CHECK(
+      !has_kv_cache || !at::GradMode::is_enabled() ||
+          !(query.requires_grad() || key.requires_grad() || value.requires_grad()),
+      "seqused_k and block_table are inference-only for cuDNN attention.");
   if (!is_nested) {
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
@@ -1076,12 +1129,54 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   } else {
     // TODO(eqy): debug mask support
     // BHSD ...
-    const int64_t batch_size = cumulative_sequence_length_q.value().size(0) - 1;
+    const auto& cum_seq_q = cumulative_sequence_length_q.value();
+    TORCH_CHECK(cum_seq_q.dim() == 1, "cum_seq_q must be 1D");
+    const int64_t batch_size = cum_seq_q.size(0) - 1;
     const int64_t num_heads_q = query.size(-2);
     const int64_t num_heads_k = key.size(-2);
     const int64_t num_heads_v = value.size(-2);
     const int64_t head_dim_qk = query.size(-1);
     const int64_t head_dim_v = value.size(-1);
+    TORCH_CHECK(
+        block_table.has_value() || cumulative_sequence_length_kv.has_value(),
+        "cuDNN varlen attention requires cum_seq_k unless a block_table is given.");
+    // The schema returns cum_seq_k even when paged attention does not use one.
+    const Tensor cum_seq_k = cumulative_sequence_length_kv.has_value()
+        ? cumulative_sequence_length_kv.value()
+        : at::empty({0}, query.options().dtype(at::kInt));
+    for (const auto& cum : {cumulative_sequence_length_q, cumulative_sequence_length_kv}) {
+      if (!cum.has_value()) {
+        continue;
+      }
+      TORCH_CHECK(cum.value().dtype() == at::kInt, "cum_seq_q/cum_seq_k must have dtype int32");
+      TORCH_CHECK(cum.value().is_contiguous(), "cum_seq_q/cum_seq_k must be contiguous");
+      TORCH_CHECK(cum.value().device() == query.device(),
+          "cum_seq_q/cum_seq_k must be on the same device as query");
+      TORCH_CHECK(cum.value().dim() == 1 && cum.value().size(0) == batch_size + 1,
+          "cum_seq_q/cum_seq_k must have shape (", batch_size + 1,
+          "), got ", cum.value().sizes());
+    }
+    if (seqused_k.has_value()) {
+      const auto& seqused = seqused_k.value();
+      TORCH_CHECK(seqused.dtype() == at::kInt, "seqused_k must have dtype int32");
+      TORCH_CHECK(seqused.device() == query.device(), "seqused_k must be on the same device as query");
+      TORCH_CHECK(seqused.is_contiguous(), "seqused_k must be contiguous");
+      TORCH_CHECK(seqused.dim() == 1 && seqused.size(0) == batch_size,
+          "seqused_k must have shape (", batch_size, "), got ", seqused.sizes());
+    }
+    if (block_table.has_value()) {
+      const auto& table = block_table.value();
+      TORCH_CHECK(seqused_k.has_value(), "block_table requires seqused_k");
+      TORCH_CHECK(table.dtype() == at::kInt, "block_table must have dtype int32");
+      TORCH_CHECK(table.device() == query.device(), "block_table must be on the same device as query");
+      TORCH_CHECK(table.dim() == 2 && table.size(0) == batch_size,
+          "block_table must have shape (", batch_size, ", max_pages_per_seq), got ", table.sizes());
+      TORCH_CHECK(table.stride(-1) == 1, "block_table must have contiguous last dimension");
+      TORCH_CHECK(key.dim() == 4 && value.dim() == 4,
+          "paged key/value must be 4D page pools (num_pages, page_size, num_heads, head_dim)");
+      TORCH_CHECK(key.sizes() == value.sizes(),
+          "paged key and value must have the same shape, got ", key.sizes(), " and ", value.sizes());
+    }
     auto attn_bias_ = attn_bias;
     if (attn_bias_.has_value()) {
       const auto bias_dim = attn_bias_.value().dim();
@@ -1135,8 +1230,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                      compute_logsumexp/* bool */,
                                      is_causal/* bool */,
                                      dropout_p/*double dropout_probability*/,
-                                     cumulative_sequence_length_q.value(),
-                                     cumulative_sequence_length_kv.value(),
+                                     cum_seq_q,
+                                     cum_seq_k,
+                                     seqused_k,
+                                     block_table,
                                      query/* Tensor q*/,
                                      key/* Tensor k*/,
                                      value/* Tensor v*/,
@@ -1146,7 +1243,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                      cudnn_seed/*Tensor dropoutseed*/,
                                      cudnn_offset/*Tensor dropoutoffset*/);
     //attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
-    return std::make_tuple(std::move(attention), std::move(log_sumexp), cumulative_sequence_length_q.value(), cumulative_sequence_length_kv.value(), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
+    return std::make_tuple(std::move(attention), std::move(log_sumexp), cum_seq_q, cum_seq_k, max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
   }
 }
 
@@ -1165,7 +1262,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   const int64_t max_seqlen_batch_q = query.size(2);
   const int64_t max_seqlen_batch_k = key.size(2);
 
-  return at::_cudnn_attention_forward(query, key, value, attn_bias, std::nullopt, std::nullopt, max_seqlen_batch_q, max_seqlen_batch_k, compute_logsumexp, dropout_p, is_causal, return_debug_mask, scale);
+  return at::_cudnn_attention_forward(query, key, value, attn_bias, std::nullopt, std::nullopt, max_seqlen_batch_q, max_seqlen_batch_k, compute_logsumexp, dropout_p, is_causal, return_debug_mask, scale, std::nullopt, std::nullopt);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
