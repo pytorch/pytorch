@@ -191,6 +191,129 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    def test_matmul_swap_ab_epilogue(self):
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return torch.relu(a @ b)
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        torch._dynamo.reset()
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def benchmark(caller, *args, **kwargs):
+            if caller.swap_ab and caller.supports_epilogue_fusion:
+                return 0.1
+            return 0.5 if caller.swap_ab else 1.0
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    benchmark_epilogue_fusion=False,
+                )
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            result, (code,) = run_and_get_code(torch.compile(matmul), a, b)
+
+        torch.testing.assert_close(result, matmul(a, b))
+        self.assertIn("swap_ab=True", code)
+        self.assertIn("EpilogueArguments", code)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    @parametrize(
+        "scale_shape",
+        ((16, 512), (1, 512), (16, 1)),
+        name_fn=lambda shape: "x".join(map(str, shape)),
+    )
+    def test_matmul_swap_ab_captured_epilogue(self, scale_shape):
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b, scale):
+            return (a @ b).float() * scale
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        scale = torch.randn(scale_shape, device="cuda")
+        if scale_shape == (16, 1):
+            scale = torch.randn(32, 1, device="cuda")[::2]
+
+        torch._dynamo.reset()
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def benchmark(caller, *args, **kwargs):
+            if caller.swap_ab and caller.supports_epilogue_fusion:
+                return 0.1
+            return 0.5 if caller.swap_ab else 1.0
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    benchmark_epilogue_fusion=False,
+                )
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            result, (code,) = run_and_get_code(torch.compile(matmul), a, b, scale)
+
+        torch.testing.assert_close(result, matmul(a, b, scale), atol=0.7, rtol=1e-2)
+        self.assertIn("swap_ab=True", code)
+        self.assertIn("EpilogueArguments", code)
+
+    def test_matmul_swap_ab_dynamic_epilogue(self):
+        k = 512
+
+        def matmul(a, b):
+            return torch.relu((a @ b).float() + 1)
+
+        torch._dynamo.reset()
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def benchmark(caller, *args, **kwargs):
+            if caller.swap_ab and caller.supports_epilogue_fusion:
+                return 0.1
+            return 0.5 if caller.swap_ab else 1.0
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    benchmark_epilogue_fusion=False,
+                )
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            compiled = torch.compile(matmul, dynamic=True)
+            a = torch.randn(16, k, device="cuda", dtype=torch.bfloat16)
+            b = torch.randn(k, 512, device="cuda", dtype=torch.bfloat16)
+            result, (code,) = run_and_get_code(compiled, a, b)
+            torch.testing.assert_close(result, matmul(a, b), atol=0.7, rtol=1e-2)
+
+            a = torch.randn(32, k, device="cuda", dtype=torch.bfloat16)
+            b = torch.randn(k, 384, device="cuda", dtype=torch.bfloat16)
+            torch.testing.assert_close(
+                compiled(a, b), matmul(a, b), atol=0.7, rtol=1e-2
+            )
+
+        self.assertIn("swap_ab=True", code)
+        self.assertIn("EpilogueArguments", code)
+
     def test_cudagraphs_intermediate_addmm(self):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
         downstream must not leave that output retained by the cached EFC kernel,
@@ -490,6 +613,7 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_arguments,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
         m, n, k = 128, 128, 512
         packed_k = k // 2
@@ -521,9 +645,11 @@ class TestNVUniversalGemm(TestCase):
             swizzle_mode_a=swizzle,
             scale_mode_b=mode,
             swizzle_mode_b=swizzle,
-            local_reduce_out=reduce_out,
-            local_reduce_group=group,
-            local_reduce_axis=1,
+            local_reduce=GemmReductionArguments(
+                output=reduce_out,
+                group=group,
+                axis=1,
+            ),
         )
         kernel = next(
             candidate
@@ -1220,6 +1346,806 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, torch.relu(a @ b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "FlexGEMM body was NOT fused into epilogue")
 
+    def test_flex_gemm_addmm_pointwise_epilogue_fusion(self):
+        m, n, k = 128, 128, 64
+        bias = torch.randn(m, n, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.addmm,
+                (bias, a, b),
+                torch.relu,
+                gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, _ = self._compile_and_check(fn, bias, a, b)
+        expected = torch.addmm(bias, a, b, beta=0.5, alpha=1.5).relu()
+        self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    def test_flex_gemm_addmm_beta_zero_ignores_bias(self):
+        m, n, k = 128, 128, 64
+        bias = torch.full((m, n), float("nan"), device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.addmm,
+                (bias, a, b),
+                torch.relu,
+                gemm_kwargs={"beta": 0, "alpha": 1.5},
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, _ = self._compile_and_check(fn, bias, a, b)
+        expected = torch.addmm(bias, a, b, beta=0, alpha=1.5).relu()
+        self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    @parametrize("batch", (1, 2))
+    def test_flex_gemm_bmm_pointwise_epilogue_fusion(self, batch):
+        m, n, k = 128, 128, 64
+        a = torch.randn(batch, m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(batch, k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, torch.bmm(a, b).relu(), atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    @parametrize("bias_kind", ("batch", "tile", "row_1d", "row_2d", "col_2d"))
+    def test_flex_gemm_baddbmm_pointwise_epilogue_fusion(self, bias_kind):
+        batch, m, n, k = 2, 128, 192, 64
+        bias_shapes = {
+            "batch": (batch, m, n),
+            "tile": (m, n),
+            "row_1d": (n,),
+            "row_2d": (1, n),
+            "col_2d": (m, 1),
+        }
+        bias = torch.randn(*bias_shapes[bias_kind], device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(batch, m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(batch, k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.baddbmm,
+                (bias, a, b),
+                torch.relu,
+                gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, _ = self._compile_and_check(fn, bias, a, b)
+        expected = torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5).relu()
+        self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    def test_flex_gemm_dynamic_tuple_output_fusion(self):
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: (
+                    ((acc.float() + 1.0) * 0.5).to(torch.bfloat16),
+                    acc.float().square() + 2.0,
+                ),
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "force_disable_caches": True,
+                }
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+            b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+            result, code_list = run_and_get_code(compiled, a, b)
+            self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+            a2 = torch.randn(256, 64, device="cuda", dtype=torch.bfloat16)
+            b2 = torch.randn(64, 192, device="cuda", dtype=torch.bfloat16)
+            self.assertEqual(compiled(a2, b2), fn(a2, b2), atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", "\n".join(code_list))
+
+    @parametrize("shape", ((128, 128, 64), (144, 96, 32)))
+    def test_bf16_tuple_aux_bool_output_fusion(self, shape):
+        m, n, k = shape
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            return torch.relu(result), result.float() > 0
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b))
+        self.assertEqual(result[1].dtype, torch.bool)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("reduction_type='direct_bool_gt_zero'", code)
+
+    def test_bf16_tuple_aux_supports_distinct_output_dtypes(self):
+        m, n, k = 128, 128, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            return torch.relu(result), result.float().square() + 2.0
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertEqual(result[0].dtype, torch.bfloat16)
+        self.assertEqual(result[1].dtype, torch.float32)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    @parametrize("feeds_main", (False, True))
+    def test_flex_gemm_grouped_n_reduce_epilogue_fusion(self, feeds_main):
+        m, n, k, group = 128, 128, 64, 16
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue(acc):
+            grouped = acc.float().view(m, -1, group)
+            sums = grouped.sum(-1, keepdim=True)
+            if feeds_main:
+                return (grouped / sums).reshape(m, n).to(torch.bfloat16)
+            return torch.relu(acc), sums.squeeze(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, epilogue(a @ b))
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("group=16", code)
+        self.assertIn(f"feeds_main={feeds_main}", code)
+
+    @parametrize(
+        "case",
+        (
+            (4, "sum"),
+            (16, "sum"),
+            (16, "mean"),
+            (16, "prod"),
+            (16, "amax"),
+            (16, "amin"),
+            (32, "sum"),
+            (64, "sum"),
+            (64, "mean"),
+            (64, "amax"),
+            (128, "sum"),
+            (16, "square_mean"),
+            (16, "abs_amax"),
+        ),
+        name_fn=lambda case: f"group_{case[0]}_{case[1]}",
+    )
+    def test_bf16_grouped_n_reduce_epilogue_fusion(self, case):
+        group, reduction = case
+        m, n, k = 128, 256 if group == 128 else 128, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            source, _, reduce_op = reduction.rpartition("_")
+            if source == "square":
+                grouped = grouped.square()
+            elif source == "abs":
+                grouped = grouped.abs()
+            reduced = getattr(grouped, reduce_op)(-1)
+            return torch.relu(result), reduced
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        torch.testing.assert_close(result[1], expected[1], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("output=", code)
+        self.assertIn(f"group={group}", code)
+
+    @parametrize(
+        "case",
+        (
+            (2, "sum"),
+            (2, "mean"),
+            (2, "prod"),
+            (2, "amax"),
+            (2, "amin"),
+            (16, "sum"),
+            (16, "mean"),
+            (16, "prod"),
+            (16, "amax"),
+            (16, "amin"),
+            (32, "sum"),
+            (32, "mean"),
+            (32, "prod"),
+            (32, "amax"),
+            (32, "amin"),
+            (64, "sum"),
+            (64, "mean"),
+            (64, "amax"),
+            (128, "sum"),
+            (128, "mean"),
+            (128, "amax"),
+            (16, "square_mean"),
+            (64, "abs_amax"),
+        ),
+        name_fn=lambda case: f"group_{case[0]}_{case[1]}",
+    )
+    def test_bf16_grouped_m_reduce_epilogue_fusion(self, case):
+        group, reduction = case
+        m, n, k = 128, 128, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            source, _, reduce_op = reduction.rpartition("_")
+            if source == "square":
+                grouped = grouped.square()
+            elif source == "abs":
+                grouped = grouped.abs()
+            reduced = getattr(grouped, reduce_op)(1)
+            return torch.relu(result), reduced
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        torch.testing.assert_close(result[1], expected[1], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("axis=0", code)
+        self.assertIn(f"group={group}", code)
+
+    def test_bf16_dynamic_grouped_n_reduce_epilogue_fusion(self):
+        n, k = 128, 64
+        a = torch.randn(128, k, device="cuda", dtype=torch.bfloat16)
+        a2 = torch.randn(192, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(result.shape[0], -1, 16)
+            return torch.relu(result), grouped.sum(-1)
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "force_disable_caches": True,
+                }
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            result, code_list = run_and_get_code(compiled, a, b)
+            result2 = compiled(a2, b)
+        expected = fn(a, b)
+        expected2 = fn(a2, b)
+        torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(result[1], expected[1], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(result2[0], expected2[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(result2[1], expected2[1], atol=1e-2, rtol=1e-2)
+        code = "\n".join(code_list)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("group=16", code)
+
+    @parametrize("reduction", ("amax", "amin"))
+    def test_bf16_grouped_n_extrema_preserve_nan(self, reduction):
+        m, n, k, group = 16, 128, 16, 64
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        b[0, 0] = float("nan")
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            return result, getattr(grouped, reduction)(-1)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected, equal_nan=True)
+        self.assertTrue(torch.isnan(result[1][:, 0]).all())
+        self.assertEqual(result[1][:, 1], torch.zeros_like(result[1][:, 1]))
+        self.assertIn("group=64", code)
+
+    def test_bf16_grouped_m_reduce_supports_post_reduction_pointwise(self):
+        m, n, k, group = 128, 128, 64, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            reduced = (grouped.abs().amax(1) + 1.0).sqrt()
+            return torch.relu(result), reduced
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=64", code)
+
+    def test_bf16_grouped_n_reduce_supports_post_reduction_pointwise(self):
+        m, n, k, group = 128, 128, 64, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            return torch.relu(result), grouped.sum(-1) + 1.0
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("axis=1", code)
+        self.assertIn("group=64", code)
+
+    def test_bf16_dynamic_grouped_m_reduce_epilogue_fusion(self):
+        n, k, group = 128, 64, 16
+        a = torch.randn(128, k, device="cuda", dtype=torch.bfloat16)
+        a2 = torch.randn(192, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(result.shape[0] // group, group, n)
+            return torch.relu(result), grouped.sum(1)
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "force_disable_caches": True,
+                }
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            result, code_list = run_and_get_code(compiled, a, b)
+            result2 = compiled(a2, b)
+        self.assertEqual(result, fn(a, b))
+        self.assertEqual(result2, fn(a2, b))
+        code = "\n".join(code_list)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=16", code)
+
+    def test_bf16_grouped_m_reduce_supports_cta_tail(self):
+        m, n, k, group = 144, 128, 64, 16
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            return torch.relu(result), grouped.sum(1)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=16", code)
+
+    def test_bf16_grouped_m_reduce_transposed_b_input(self):
+        m, n, k, group = 128, 192, 64, 16
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(n, k, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b.mT
+            grouped = result.float().view(-1, group, n)
+            return torch.relu(result), grouped.sum(1)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("axis=0", code)
+        self.assertIn("group=16", code)
+
+    def test_bf16_grouped_n_reduce_supports_tuple_reshape(self):
+        m, n, k, group = 128, 128, 64, 16
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            return torch.relu(result), grouped.sum(-1).view(8, 16, 8)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("axis=1", code)
+        self.assertIn("group=16", code)
+
+    def test_bf16_grouped_n_chained_logsumexp_fusion(self):
+        m, n, k, group = 128, 96, 64, 4
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            return torch.relu(result), grouped.logsumexp(-1)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("reduction_type='logsumexp'", code)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    def test_bf16_grouped_n_reduction_near_miss_falls_back(self):
+        m, n, k, group = 128, 96, 64, 4
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            reduced = grouped.exp().sum(-1).log() + grouped.amax(-1)
+            return torch.relu(result), reduced
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertNotIn("reduction_type='logsumexp'", code)
+
+    def test_bf16_grouped_n_chained_logsumexp_special_values(self):
+        m, n, k, group = 8, 96, 8, 4
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        b[0, 0] = float("inf")
+        b[:, 4:8] = float("-inf")
+        b[0, 8] = float("nan")
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            return torch.relu(result), grouped.logsumexp(-1)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        self.assertEqual(result[1], expected[1], equal_nan=True)
+        self.assertTrue(torch.isposinf(result[1][:, 0]).all())
+        self.assertTrue(torch.isneginf(result[1][:, 1]).all())
+        self.assertTrue(torch.isnan(result[1][:, 2]).all())
+        self.assertIn("reduction_type='logsumexp'", code)
+
+    def test_bf16_grouped_n_chained_stable_logsumexp_fusion(self):
+        m, n, k, group = 128, 96, 64, 4
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            maximum = grouped.amax(-1, keepdim=True)
+            reduced = (grouped - maximum).exp().sum(-1).log()
+            return torch.relu(result), reduced + maximum.squeeze(-1)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("reduction_type='logsumexp'", code)
+
+    @parametrize("affine", ((0.5, 1.0), (2.0, -0.25)))
+    def test_bf16_grouped_n_chained_variance_fusion(self, affine):
+        m, n, k, group = 128, 96, 64, 4
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+        scale, bias = affine
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            centered = grouped - grouped.mean(-1, keepdim=True)
+            variance = centered.square().mean(-1) * scale + bias
+            return torch.relu(result), variance
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("reduction_type='variance_affine:", code)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+
+    @parametrize(
+        "case",
+        (
+            (2, "forward"),
+            (16, "affine"),
+            (16, "reverse"),
+            (16, "with_sum"),
+            (16, "centered"),
+            (8, "centered_aux"),
+            (8, "centered_with_mean"),
+            (16, "reverse_centered"),
+            (16, "mean_affine"),
+            (32, "forward"),
+            (8, "trailing"),
+            (32, "fp8"),
+            (32, "fp8_with_sum"),
+        ),
+        name_fn=lambda case: f"group_{case[0]}_{case[1]}",
+    )
+    def test_bf16_grouped_m_sum_normalize_epilogue_fusion(self, case):
+        group, mode = case
+        m, n, k = 128, 128, 64
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+        mean_mode = mode in (
+            "centered",
+            "centered_aux",
+            "centered_with_mean",
+            "reverse_centered",
+            "mean_affine",
+        )
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            reductions = (
+                grouped.mean(1, keepdim=True)
+                if mean_mode
+                else grouped.sum(1, keepdim=True)
+            )
+            if mode in ("centered", "centered_aux", "centered_with_mean"):
+                normalized = grouped - reductions
+            elif mode == "reverse_centered":
+                normalized = reductions - grouped
+            elif mode == "mean_affine":
+                normalized = grouped * 2.0 + reductions * 3.0 + 0.5
+            elif mode == "affine":
+                normalized = grouped / (reductions * 2.0 + 1.0) * 3.0 + 0.5
+            elif mode == "reverse":
+                normalized = (reductions + 1.0) / grouped
+            else:
+                normalized = grouped / reductions
+            if mode == "trailing":
+                normalized = normalized * 0.5 + 1.0
+            if mode != "centered_aux":
+                normalized = normalized.to(
+                    torch.float8_e4m3fn
+                    if mode in ("fp8", "fp8_with_sum")
+                    else torch.bfloat16
+                )
+            if mode == "centered_aux":
+                return torch.relu(result), normalized
+            return (
+                (normalized, reductions.squeeze(1))
+                if mode in ("with_sum", "centered_with_mean", "fp8_with_sum")
+                else normalized
+            )
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        if mode == "fp8_with_sum":
+            self.assertEqual(
+                result[0].float(), expected[0].float(), atol=2e-2, rtol=2e-2
+            )
+            self.assertEqual(result[1], expected[1], atol=2e-2, rtol=2e-2)
+        elif mode == "fp8":
+            self.assertEqual(result.float(), expected.float(), atol=2e-2, rtol=2e-2)
+        else:
+            self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("feeds_main=True", code)
+        if mean_mode:
+            self.assertIn("mean_linear:", code)
+        if mode in ("fp8", "fp8_with_sum"):
+            output = result[0] if isinstance(result, tuple) else result
+            self.assertEqual(output.dtype, torch.float8_e4m3fn)
+
+    def test_bf16_grouped_m_outputs_share_physical_reduction(self):
+        m, n, k, group = 128, 128, 64, 8
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            scale = grouped.sum(1, keepdim=True)
+            normalized = (grouped / scale).view(m, n).to(torch.bfloat16)
+            scaled = (grouped * (scale + 1.0)).view(m, n)
+            return normalized, scaled
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("axis=0", code)
+        self.assertIn("feeds_main=True", code)
+        self.assertIn("secondary_feed_output=out_ptr1", code)
+        self.assertIn("secondary_feed_type='sum_mul_affine:1:1'", code)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+
+    def test_bf16_grouped_m_regrouped_reduction_reuse(self):
+        m, n, k, group = 128, 64, 64, 8
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            scale = grouped.sum(1, keepdim=True)
+            normalized = (grouped * scale.reciprocal()).view(m, n)
+            regrouped = grouped.view(m, n).view(-1, group, n)
+            aux = (regrouped * scale.reciprocal()).view(m, n)
+            return normalized, aux
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("feeds_main=True", code)
+
+    def test_bf16_grouped_m_composite_reduction_falls_back(self):
+        m, n, k, group = 128, 64, 64, 8
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            scale = grouped.sum(1, keepdim=True) + grouped.amax(1, keepdim=True)
+            return (grouped / scale).view(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertNotIn("feeds_main=True", code)
+
+    def test_bf16_grouped_m_mixed_layouts_fall_back(self):
+        m, n, k = 128, 64, 64
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped8 = result.float().view(-1, 8, n)
+            grouped4 = result.float().view(-1, 4, n)
+            out = grouped8 / grouped8.sum(1, keepdim=True)
+            aux = grouped4 / grouped4.sum(1, keepdim=True)
+            return out.view(m, n), aux.view(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
+        self.assertNotIn("feeds_main=True", code)
+
+    def test_bf16_grouped_m_hidden_reduction_falls_back(self):
+        m, n, k, group = 128, 64, 64, 8
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            relu_grouped = result.float().relu().view(-1, group, n)
+            scaled = grouped / (grouped.sum(1, keepdim=True) + 1.0)
+            return (scaled + relu_grouped.sum(1, keepdim=True)).view(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
+        self.assertNotIn("feeds_main=True", code)
+
+    def test_bf16_grouped_m_repeated_reductions_fall_back(self):
+        m, n, k, group = 128, 64, 64, 8
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped0 = result.float().view(-1, group, n)
+            out = grouped0 / grouped0.sum(1, keepdim=True)
+            grouped1 = result.float().view(-1, group, n)
+            aux = grouped1 * (grouped1.sum(1, keepdim=True) + 1.0)
+            return out.view(m, n), aux.view(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
+        self.assertNotIn("feeds_main=True", code)
+
+    @parametrize(
+        "case",
+        (
+            (4, "forward"),
+            (16, "affine"),
+            (32, "reverse"),
+            (16, "with_sum"),
+            (32, "fp8"),
+            (16, "fp8_with_sum"),
+        ),
+        name_fn=lambda case: f"group_{case[0]}_{case[1]}",
+    )
+    def test_bf16_grouped_n_sum_normalize_epilogue_fusion(self, case):
+        group, mode = case
+        m, n, k = 128, 128, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            sums = grouped.sum(-1, keepdim=True)
+            if mode == "affine":
+                normalized = grouped / (sums * 2.0 + 1.0) * 3.0 + 0.5
+            elif mode == "reverse":
+                normalized = (sums + 1.0) / grouped
+            else:
+                normalized = grouped / sums
+            normalized = normalized.to(
+                torch.float8_e4m3fn
+                if mode in ("fp8", "fp8_with_sum")
+                else torch.bfloat16
+            )
+            if mode in ("with_sum", "fp8_with_sum"):
+                return normalized, sums.squeeze(-1)
+            return normalized
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        if mode == "fp8_with_sum":
+            torch.testing.assert_close(
+                result[0].float(), expected[0].float(), atol=1e-2, rtol=1e-2
+            )
+            torch.testing.assert_close(result[1], expected[1], atol=1e-2, rtol=1e-2)
+        elif mode == "fp8":
+            torch.testing.assert_close(
+                result.float(), expected.float(), atol=1e-2, rtol=1e-2
+            )
+        else:
+            torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("feeds_main=True", code)
+        reduce_type = (
+            "normalize_sum_reverse_affine"
+            if mode == "reverse"
+            else "normalize_sum_affine"
+        )
+        self.assertIn(reduce_type, code)
+
     def test_flex_gemm_preserves_output_for_unfused_reduction(self):
         dtype = torch.bfloat16
         a = torch.randn(128, 64, device="cuda", dtype=dtype)
@@ -1377,6 +2303,138 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         for index in range(1, 6):
             self.assertIn(f"out_ptr{index}", code)
 
+    def test_scaled_mm_dynamic_epilogue_fusion(self):
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = (
+            torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8)
+            .view(torch.float4_e2m1fn_x2)
+            .T
+        )
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        a2 = _create_tensor_with_layout(
+            "contiguous", 256, packed_k, torch.float4_e2m1fn_x2
+        )
+        scale_a2 = torch.rand(256 * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(result.shape[0], -1, 32)
+            return torch.relu(result), grouped.sum(-1)
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "force_disable_caches": True,
+                }
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            result, code_list = run_and_get_code(compiled, a, b, scale_a, scale_b)
+            result2 = compiled(a2, b, scale_a2, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertEqual(result2, fn(a2, b, scale_a2, scale_b))
+        code = "\n".join(code_list)
+        self.assertIn("nv_universal_gemm", code)
+        self.assertIn("EpilogueArguments", code)
+        self.assertIn("group=32", code)
+
+    @parametrize("mode", ("softmax", "sum"))
+    def test_scaled_mm_dynamic_unrolled_reduction_fusion(self, mode):
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = (
+            torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8)
+            .view(torch.float4_e2m1fn_x2)
+            .T
+        )
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        a2 = _create_tensor_with_layout(
+            "contiguous", 256, packed_k, torch.float4_e2m1fn_x2
+        )
+        scale_a2 = torch.rand(256 * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(result.shape[0], -1, 4)
+            if mode == "softmax":
+                return torch.softmax(grouped, -1).reshape_as(result)
+            return (grouped / grouped.sum(-1, keepdim=True)).reshape_as(result)
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "force_disable_caches": True,
+                }
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            result, code_list = run_and_get_code(compiled, a, b, scale_a, scale_b)
+            result2 = compiled(a2, b, scale_a2, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertEqual(result2, fn(a2, b, scale_a2, scale_b))
+        code = "\n".join(code_list)
+        self.assertIn("EpilogueArguments", code)
+        self.assertIn("group=4", code)
+        reduce_type = (
+            "online_softmax" if mode == "softmax" else "normalize_sum_affine:1:0:1:0"
+        )
+        self.assertIn(f"reduction_type='{reduce_type}'", code)
+
     @parametrize(
         "case",
         (
@@ -1473,6 +2531,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     @parametrize(
         "case",
         (
+            (0, "sum", 2),
             (0, "sum", 4),
             (0, "mean", 4),
             (0, "prod", 4),
@@ -1484,10 +2543,18 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             (0, "amax", 8),
             (0, "amin", 8),
             (0, "sum", 16),
+            (0, "sum", 16, 96),
             (0, "mean", 16),
             (0, "prod", 16),
             (0, "amax", 16),
             (0, "amin", 16),
+            (0, "sum", 64),
+            (0, "mean", 64),
+            (0, "prod", 64),
+            (0, "amax", 64),
+            (0, "amin", 64),
+            (1, "sum", 2),
+            (1, "sum", 16),
             (1, "sum", 32),
             (1, "mean", 32),
             (1, "prod", 32),
@@ -1499,11 +2566,16 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             (1, "amax", 64),
             (1, "amin", 64),
         ),
-        name_fn=lambda case: f"axis_{case[0]}_{case[1]}_group_{case[2]}",
+        name_fn=lambda case: (
+            f"axis_{case[0]}_{case[1]}_group_{case[2]}"
+            + (f"_m_{case[3]}" if len(case) == 4 else "")
+        ),
     )
     def test_scaled_mm_grouped_reduce_fusion(self, case):
-        axis, reduction, group = case
-        m, n, k = 128, 256 if group > 32 else 128, 512
+        axis, reduction, group = case[:3]
+        m = case[3] if len(case) == 4 else 128
+        n = 256 if group > 32 else 128
+        k = 512
         packed_k = k // 2
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
@@ -1529,9 +2601,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 out_dtype=torch.bfloat16,
             )
             grouped = (
-                result.float().view(-1, group, n)
+                result.float().view(m // group, group, n)
                 if axis == 0
-                else result.float().view(m, -1, group)
+                else result.float().view(m, n // group, group)
             )
             dim = 1 if axis == 0 else -1
             if reduction == "sum":
@@ -1550,10 +2622,25 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
+        self.assertIn("output=", code)
 
-    def test_scaled_mm_grouped_reduce_source_fusion(self):
-        m, n, k, group = 128, 128, 512, 32
+    @parametrize(
+        "case",
+        (
+            ("square", 32),
+            ("square", 64),
+            ("square", 128),
+            ("square", 256),
+            ("abs", 32),
+            ("abs_scale", 32),
+        ),
+        name_fn=lambda case: f"{case[0]}_group_{case[1]}",
+    )
+    def test_scaled_mm_grouped_reduce_source_fusion(self, case):
+        source, group = case
+        m = 128
+        n = 256 if group == 128 else max(128, group * 4)
+        k = 512
         packed_k = k // 2
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
@@ -1579,14 +2666,20 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 out_dtype=torch.bfloat16,
             )
             grouped = result.float().view(m, -1, group)
-            return torch.relu(result), grouped.square().mean(-1)
+            if source == "square":
+                reduced = grouped.square().mean(-1)
+            elif source == "abs":
+                reduced = grouped.abs().amax(-1)
+            else:
+                reduced = grouped.abs().amax(-1).clamp(min=1e-12) / 448.0
+            return torch.relu(result), reduced
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
-        self.assertIn("'local_reduce_source': 'square'", code)
+        self.assertIn("output=", code)
+        self.assertIn(f"source_type='{source}'", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
@@ -1620,10 +2713,74 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertNotIn("'local_reduce_out'", code)
+        self.assertNotIn("output=", code)
 
-    def test_scaled_mm_grouped_reduce_feeds_main(self):
-        m, n, k, group = 128, 128, 512, 4
+    @parametrize("group", (128, 256))
+    def test_scaled_mm_coda_rmsnorm_fusion(self, group):
+        m, n, k, p = 128, 256, 512, 64
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b1 = (
+            torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8)
+            .view(torch.float4_e2m1fn_x2)
+            .T
+        )
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        gamma = torch.randn(1, n, device="cuda", dtype=torch.bfloat16)
+        b2 = torch.randn(n, p, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b1, scale_a, scale_b, gamma, b2):
+            result = torch._scaled_mm(
+                a,
+                b1,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            h2 = (result.float() * gamma).to(torch.bfloat16)
+            h2 = torch.ops.prims.inductor_force_stride_order.default(h2, (n, 1))
+            partial_mean_square = result.float().view(m, -1, group).square().mean(-1)
+            partial_mean_square = torch.ops.prims.inductor_force_stride_order.default(
+                partial_mean_square, (n // group, 1)
+            )
+            rstd = (partial_mean_square.mean(-1, keepdim=True) + 1e-5).rsqrt()
+            rstd = torch.ops.prims.inductor_force_stride_order.default(rstd, (1, 1))
+            return (h2 @ b2).float() * rstd
+
+        args = (a, b1, scale_a, scale_b, gamma, b2)
+        result, code, _ = self._compile_and_check(fn, *args)
+        expected = fn(*args)
+        torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
+        self.assertIn("source_type='square'", code)
+        self.assertIn(f"group={group}", code)
+
+    @parametrize(
+        "case",
+        (
+            (4, "sub"),
+            (8, "sub"),
+            (16, "sub"),
+            (64, "sub"),
+            (8, "add"),
+            (8, "rsub"),
+            (8, "sub_bias"),
+            (8, "sub_scale_bias"),
+            (8, "add_alpha"),
+            (8, "sub_alpha"),
+        ),
+        name_fn=lambda case: f"group_{case[0]}_{case[1]}",
+    )
+    def test_scaled_mm_grouped_reduce_feeds_main(self, case):
+        group, consumer = case
+        m, n, k = 128, 128, 512
         packed_k = k // 2
         a = _create_tensor_with_layout(
             "contiguous", m, packed_k, torch.float4_e2m1fn_x2
@@ -1650,11 +2807,312 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             )
             grouped = result.float().view(-1, group, n)
             mean = grouped.mean(1, keepdim=True).expand(-1, group, -1)
-            return result.float() - mean.reshape(m, n)
+            mean = mean.reshape(m, n)
+            if consumer == "add":
+                return mean + result.float()
+            if consumer == "rsub":
+                return mean - result.float()
+            if consumer == "sub_bias":
+                return result.float() - mean + 0.5
+            if consumer == "sub_scale_bias":
+                return (result.float() - mean) * 0.5 + 1.0
+            if consumer == "add_alpha":
+                return torch.add(mean, result.float(), alpha=0.25) + 0.5
+            if consumer == "sub_alpha":
+                return torch.sub(mean, result.float(), alpha=0.25) + 0.5
+            return result.float() - mean
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
+
+    @parametrize("group", (4, 8, 16, 32))
+    def test_scaled_mm_grouped_softmax_fusion(self, group):
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            return torch.softmax(grouped, -1).reshape(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("reduction_type='online_softmax'", code)
+
+    @parametrize(
+        "case",
+        (
+            (0, 4),
+            (0, 8),
+            (0, 16),
+            (0, 64),
+            (1, 4),
+            (1, 8),
+            (1, 16),
+            (1, 32),
+            (0, 8, "reverse"),
+            (0, 8, "forward_bias"),
+            (0, 8, "reverse_bias"),
+        ),
+        name_fn=lambda case: (
+            f"axis_{case[0]}_group_{case[1]}"
+            + (f"_{case[2]}" if len(case) == 3 else "")
+        ),
+    )
+    def test_scaled_mm_grouped_sum_normalize_fusion(self, case):
+        axis, group = case[:2]
+        mode = case[2] if len(case) == 3 else "forward"
+        reverse = mode.startswith("reverse")
+        denominator_bias = 1.0 if mode.endswith("bias") else 0.0
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = (
+                result.float().view(m // group, group, n)
+                if axis == 0
+                else result.float().view(m, n // group, group)
+            )
+            dim = 1 if axis == 0 else -1
+            scale = grouped.sum(dim, keepdim=True) + denominator_bias
+            normalized = scale / grouped if reverse else grouped / scale
+            return normalized.reshape(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        reduce_type = (
+            f"normalize_sum_reverse_affine:1:0:1:{denominator_bias:g}"
+            if reverse
+            else f"normalize_sum_affine:1:0:1:{denominator_bias:g}"
+        )
+        self.assertIn(f"reduction_type='{reduce_type}'", code)
+
+    @parametrize(
+        "case",
+        (
+            (0, 8),
+            (1, 4),
+            (1, 8),
+            (1, 16),
+            (1, 32),
+            (1, 8, "absmax"),
+            (1, 8, "absmax_fp8"),
+            (0, 8, "sum_fp8"),
+            (0, 8, "sum_reuse"),
+        ),
+        name_fn=lambda case: (
+            f"axis_{case[0]}_group_{case[1]}"
+            + (f"_{case[2]}" if len(case) == 3 else "")
+        ),
+    )
+    def test_scaled_mm_grouped_sum_normalize_with_scale_fusion(self, case):
+        axis, group = case[:2]
+        normalization = case[2] if len(case) == 3 else "sum"
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = (
+                result.float().view(m // group, group, n)
+                if axis == 0
+                else result.float().view(m, n // group, group)
+            )
+            dim = 1 if axis == 0 else -1
+            scale = (
+                grouped.abs().amax(dim, keepdim=True).clamp(min=1e-12) / 448.0
+                if normalization.startswith("absmax")
+                else grouped.sum(dim, keepdim=True)
+            )
+            normalized = grouped * scale.reciprocal()
+            if normalization in ("absmax_fp8", "sum_fp8"):
+                normalized = normalized.to(torch.float8_e4m3fn)
+            if normalization == "sum_reuse":
+                normalized = normalized.reshape(m, n)
+                return normalized, normalized
+            return normalized.reshape(m, n), scale.squeeze(dim)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        expected = fn(a, b, scale_a, scale_b)
+        if normalization in ("absmax_fp8", "sum_fp8"):
+            torch.testing.assert_close(
+                result[0].float(), expected[0].float(), rtol=0.125, atol=1.0
+            )
+        else:
+            self.assertEqual(result[0], expected[0])
+        reduce_type = (
+            "normalize_absmax"
+            if normalization.startswith("absmax")
+            else "normalize_sum_affine:1:0:1:0"
+        )
+        self.assertIn(f"reduction_type='{reduce_type}'", code)
+        if normalization.startswith("absmax"):
+            self.assertIn("source_type='abs_scale'", code)
+        if normalization in ("absmax_fp8", "sum_fp8"):
+            self.assertEqual(result[0].dtype, torch.float8_e4m3fn)
+        self.assertEqual(result[1], expected[1])
+        if normalization == "sum_reuse":
+            self.assertIn("feed_output=out_ptr", code)
+        else:
+            self.assertIn("output=", code)
+
+    @parametrize(
+        "case",
+        ((0, 1.0, 1.0), (1, 1.0, 1.0), (0, 0.5, 1.0)),
+        name_fn=lambda case: f"axis_{case[0]}_scale_{case[1]}_bias_{case[2]}",
+    )
+    def test_scaled_mm_grouped_sum_normalize_trailing_add(self, case):
+        axis, affine_scale, affine_bias = case
+        m, n, k, group = 128, 128, 512, 8
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = (
+                result.float().view(m // group, group, n)
+                if axis == 0
+                else result.float().view(m, n // group, group)
+            )
+            dim = 1 if axis == 0 else -1
+            normalized = grouped * grouped.sum(dim, keepdim=True).reciprocal()
+            return (normalized * affine_scale + affine_bias).reshape(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn(
+            f"reduction_type='normalize_sum_affine:{affine_scale:g}:{affine_bias:g}:1:0'",
+            code,
+        )
+
+    @parametrize("case", ("composite", "hidden", "mixed_group"))
+    def test_scaled_mm_grouped_reduce_feed_main_falls_back(self, case):
+        m, n, k, group = 128, 128, 512, 8
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = (
+            torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8)
+            .view(torch.float4_e2m1fn_x2)
+            .T
+        )
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            x = result.float().view(-1, group, n)
+            scale = x.sum(1, keepdim=True) + 1.0
+            if case == "composite":
+                scale = scale + x.amax(1, keepdim=True)
+                return (x / scale).reshape(m, n)
+            if case == "mixed_group":
+                x4 = result.float().view(-1, 4, n)
+                out8 = (x / x.sum(1, keepdim=True)).reshape(m, n)
+                out4 = (x4 / x4.sum(1, keepdim=True)).reshape(m, n)
+                return out8, out4
+            hidden = result.float().relu().view(-1, group, n).sum(1, keepdim=True)
+            return (x / scale + hidden).reshape(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        if case == "mixed_group":
+            self.assertIn("feeds_main=True", code)
+        else:
+            self.assertNotIn("feeds_main=True", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
@@ -1780,6 +3238,18 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
         torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "broadcast bias+relu was not fused")
+
+    def test_epilogue_with_fp32_row_scale(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+        scale = torch.rand(self.M, 1, device="cuda", dtype=torch.float32)
+
+        def fn(a, b, scale):
+            return (a @ b).float() * scale
+
+        result, _, epilogue_fused = self._compile_and_check(fn, a, b, scale)
+        torch.testing.assert_close(result, fn(a, b, scale), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
 
     def test_efc_disk_cache_round_trip(self):
         """Verify that EFC kernel compiled artifacts can be serialized to disk
