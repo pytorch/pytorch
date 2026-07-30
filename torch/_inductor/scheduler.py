@@ -7713,6 +7713,7 @@ class Scheduler:
             rollback_snapshot.restore()
             return False
 
+        # TODO: Measure fused memory first so coalesced fusions skip per-node analysis.
         # Reindexing the pointwise onto the reduction's split can make its own
         # accesses uncoalesced. Undo the reindex when that costs more than the
         # traffic saved by fusing.
