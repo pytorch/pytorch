@@ -2870,6 +2870,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            tp_method = self.lookup_tp_method(name)
+            if tp_method is not None:
+                result = tp_method(self, tx, name, args, kwargs)
+                if result is not None:
+                    return result
+
             # Delegate to _base_vt for non-overridden base-class methods.
             # Skip comparison ops: they go through richcompare_impl on the
             # UserDefined*Variable subclass, which handles _base_vt
