@@ -49,6 +49,9 @@ ignored_c_binding_in_graph_function_names = {
     "torch.sparse_csr_tensor",
     "torch.cuda._get_device_properties",
     # Ignored and go through rules defined at `trace_rules.check`.
+    # Not fake/meta-safe (the CPU fallback kernel is not traceable with fake
+    # tensors), so Dynamo should graph-break on it rather than capture it.
+    "torch._grid_sampler_2d_cpu_fallback",
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
     "torch._C._abort",
