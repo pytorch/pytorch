@@ -235,6 +235,8 @@ class LBFGS(Optimizer):
             value/parameter changes (default: 1e-9).
         history_size (int, optional): update history size (default: 100).
         line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
+        maximize (bool, optional): maximize the objective with respect to the
+            params, instead of minimizing (default: False)
     """
 
     def __init__(
@@ -247,6 +249,7 @@ class LBFGS(Optimizer):
         tolerance_change: float = 1e-9,
         history_size: int = 100,
         line_search_fn: str | None = None,
+        maximize: bool = False,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -262,6 +265,7 @@ class LBFGS(Optimizer):
             "tolerance_change": tolerance_change,
             "history_size": history_size,
             "line_search_fn": line_search_fn,
+            "maximize": maximize,
         }
         super().__init__(params, defaults)
 
@@ -272,6 +276,11 @@ class LBFGS(Optimizer):
 
         self._params = self.param_groups[0]["params"]
         self._numel_cache = None
+
+    def __setstate__(self, state) -> None:
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault("maximize", False)
 
     def _numel(self):
         if self._numel_cache is None:
@@ -315,11 +324,13 @@ class LBFGS(Optimizer):
         for p, pdata in zip(self._params, params_data, strict=True):
             p.copy_(pdata)
 
-    def _directional_evaluate(self, closure, x, t, d):
+    def _directional_evaluate(self, closure, x, t, d, maximize=False):
         self._add_grad(t, d)
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
         self._set_param(x)
+        if maximize:
+            loss, flat_grad = -loss, flat_grad.neg()
         return loss, flat_grad
 
     @torch.no_grad()
@@ -346,6 +357,7 @@ class LBFGS(Optimizer):
         tolerance_change = group["tolerance_change"]
         line_search_fn = group["line_search_fn"]
         history_size = group["history_size"]
+        maximize = group["maximize"]
 
         # NOTE: LBFGS has only global state, but we register it as state for
         # the first param, because this helps with casting in load_state_dict
@@ -360,6 +372,10 @@ class LBFGS(Optimizer):
         state["func_evals"] += 1
 
         flat_grad = self._gather_flat_grad()
+        # Maximizing f is minimizing -f, so negate the value and gradient the
+        # algorithm works with. orig_loss is returned to the caller unchanged.
+        if maximize:
+            loss, flat_grad = -loss, flat_grad.neg()
         opt_cond = flat_grad.abs().max() <= tolerance_grad
 
         # optimal condition
@@ -466,7 +482,7 @@ class LBFGS(Optimizer):
                     x_init = self._clone_param()
 
                     def obj_func(x, t, d):
-                        return self._directional_evaluate(closure, x, t, d)
+                        return self._directional_evaluate(closure, x, t, d, maximize)
 
                     loss, flat_grad, t, ls_func_evals = _strong_wolfe(
                         obj_func,
@@ -491,6 +507,8 @@ class LBFGS(Optimizer):
                         loss = closure()
                     loss = float(loss)
                     flat_grad = self._gather_flat_grad()
+                    if maximize:
+                        loss, flat_grad = -loss, flat_grad.neg()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1
 
