@@ -2940,7 +2940,6 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"autograd_cache_normalize_inputs": True})
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     @parametrize("is_aot", (False, True))
     def test_split_module(self, is_aot):
         class Mod(torch.nn.Module):
@@ -2949,21 +2948,6 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                 x = x + (b0**2) + (b1 / 2)
                 x = x + (c0**2) + (c1 / 2)
                 return x
-
-        seen = 0
-        splits = [4, 8]
-
-        def split(n):
-            nonlocal seen
-            if seen < splits[0]:
-                seen += 1
-                return 0
-            elif seen < splits[1]:
-                seen += 1
-                return 1
-            else:
-                seen += 1
-                return 2
 
         def t():
             return torch.randn([])
@@ -2978,22 +2962,73 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         example_inputs = (x, a0, a1, b0, b1, c0, c1)
         gm, inps, _ = self.capture(Mod())(*example_inputs)
-        split = torch.fx.passes.split_module.split_module(gm, gm, split)
 
-        # Each of the split graphs only has one output.
-        ca0 = torch._inductor.standalone_compile(
-            split.submod_0, (a0, x, a1), aot=is_aot
-        )
-        ca1 = torch._inductor.standalone_compile(
-            split.submod_1, (b0, x, b1), aot=is_aot
-        )
-        ca2 = torch._inductor.standalone_compile(
-            split.submod_2, (c0, x, c1), aot=is_aot
+        # Partition by data dependency: nodes depending on a0/a1 -> 0,
+        # b0/b1 -> 1, c0/c1 -> 2. This produces 3 structurally identical
+        # subgraphs regardless of canonicalized node order.
+        placeholder_group = {}
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                name = node.name
+                if "a0" in name or "a1" in name:
+                    placeholder_group[node] = 0
+                elif "b0" in name or "b1" in name:
+                    placeholder_group[node] = 1
+                elif "c0" in name or "c1" in name:
+                    placeholder_group[node] = 2
+                else:
+                    placeholder_group[node] = -1
+
+        node_group: dict = {}
+
+        def get_group(node):
+            if node in node_group:
+                return node_group[node]
+            if node.op == "placeholder":
+                return placeholder_group[node]
+            if node.op == "output":
+                return -1
+            groups = {get_group(a) for a in node.all_input_nodes}
+            groups.discard(-1)
+            g = max(groups) if groups else -1
+            node_group[node] = g
+            return g
+
+        def split_fn(node):
+            return max(get_group(node), 0)
+
+        split = torch.fx.passes.split_module.split_module(
+            gm,
+            gm,
+            split_fn,
+            keep_original_node_name=False,
+            keep_original_input_name=False,
         )
 
-        y = ca0(a0, x, a1)
-        y = ca1(b0, y, b1)
-        y = ca2(c0, y, c1)
+        # Derive each submodule's inputs from the split graph's
+        # call_module args rather than hardcoding the order, which
+        # depends on canonicalization.
+        node_to_val = {}
+        ph_idx = 0
+        for n in split.graph.nodes:
+            if n.op == "placeholder":
+                node_to_val[n] = inps[ph_idx]
+                ph_idx += 1
+
+        for call_node in split.graph.nodes:
+            if call_node.op != "call_module":
+                continue
+            submod = getattr(split, call_node.target)
+            submod_inputs = tuple(node_to_val[a] for a in call_node.args)
+            compiled = torch._inductor.standalone_compile(
+                submod,
+                submod_inputs,
+                aot=is_aot,
+            )
+            node_to_val[call_node] = compiled(*submod_inputs)
+
+        output_node = next(n for n in split.graph.nodes if n.op == "output")
+        y = node_to_val[output_node.args[0][0]]
         if not is_aot:
             # fx graph cache doesn't run in AOT mode
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
