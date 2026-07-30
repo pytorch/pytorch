@@ -264,6 +264,108 @@ def _prod_cond(self, dim, keepdim=False, *, dtype=None):
     return _base_cond(self, dim) and _supported_out_dtype(dtype)
 
 
+# --- Group B: INDEX reductions. argmax / argmin return the winning index (int64);
+# max.dim / min.dim return (values, indices). The traits carry the index in a
+# second accumulator field (has_index), so these route through the index-aware
+# dispatcher paths (two-stage K0 / reduce_dim2) rather than the value fast paths.
+# Tie-break and NaN handling match aten (first max/min, first NaN). ---
+
+
+def _idx_width(self, red):
+    # Choose the in-kernel INDEX dtype for an argmax/argmin/max.dim/min.dim: the
+    # winning position ranges over the REDUCED extent, so Int32 overflows once that
+    # reaches 2^31. Return (cute idx dtype, torch kernel-out dtype, key tag). Int32 is
+    # the default (cheaper partials + shuffle); Int64 only when needed. red is the set
+    # of reduced axes (None = reduce-all).
+    import cutlass
+
+    if red is None:
+        extent = self.numel()
+    else:
+        extent = 1
+        for d in red:
+            extent *= self.shape[d]
+    if extent > (1 << 31) - 1:
+        return cutlass.Int64, torch.int64, "i64"
+    return cutlass.Int32, torch.int32, "i32"
+
+
+def _run_arg(make_trait, key, self, red, keepdim):
+    # Single-output INDEX reduction (argmax/argmin). aten indices are int64; the kernel
+    # emits its index field (Int32 or, for a huge reduced extent, Int64 -- see
+    # _idx_width) and we cast the result up to int64. acc dtype is the value
+    # accumulator (from _ACC_POLICY).
+    acc, _ = _acc_policy()[self.dtype]
+    idx_cute, idx_torch, tag = _idx_width(self, red)
+    trait = make_trait(acc, idx_cute)
+    key = key + tag  # distinct idx width -> distinct compiled kernel
+    if red is None:
+        out = kg.reduce_all(trait, key, self, idx_torch)
+    else:
+        out = kg.reduce_dim(trait, key, self, sorted(red), idx_torch)
+    out = _keepdim_reshape(out, self.shape, red, keepdim)
+    return out.to(torch.int64)
+
+
+def _run_dim2(make_trait, key, self, dim, keepdim):
+    # Two-output reduction over a single dim (max.dim/min.dim): (values, indices).
+    # Values keep the input dtype, indices are int64 (kernel emits Int32/Int64 per
+    # _idx_width -- Int64 when the reduced dim can exceed the Int32 range).
+    acc, kout = _acc_policy()[self.dtype]
+    red = {dim % self.dim()}
+    idx_cute, idx_torch, tag = _idx_width(self, red)
+    vals, idxs = kg.reduce_dim2(
+        make_trait(acc, idx_cute), key + tag, self, sorted(red), [kout, idx_torch]
+    )
+    vals = _keepdim_reshape(vals, self.shape, red, keepdim).to(self.dtype)
+    idxs = _keepdim_reshape(idxs, self.shape, red, keepdim).to(torch.int64)
+    return vals, idxs
+
+
+def _argmax_impl(self, dim=None, keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    return _run_arg(
+        lambda acc, idx: T.ArgMaxOps(acc=acc, idx=idx), "argmax", self, red, keepdim
+    )
+
+
+def _argmin_impl(self, dim=None, keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    return _run_arg(
+        lambda acc, idx: T.ArgMinOps(acc=acc, idx=idx), "argmin", self, red, keepdim
+    )
+
+
+def _max_dim_impl(self, dim, keepdim=False):
+    return _run_dim2(
+        lambda acc, idx: T.MaxDimOps(acc=acc, idx=idx), "max.dim", self, dim, keepdim
+    )
+
+
+def _min_dim_impl(self, dim, keepdim=False):
+    return _run_dim2(
+        lambda acc, idx: T.MinDimOps(acc=acc, idx=idx), "min.dim", self, dim, keepdim
+    )
+
+
+def _argmax_cond(self, dim=None, keepdim=False):
+    return _base_cond(self, dim, has_index=True)
+
+
+def _argmin_cond(self, dim=None, keepdim=False):
+    return _base_cond(self, dim, has_index=True)
+
+
+def _max_dim_cond(self, dim, keepdim=False):
+    # max.dim/min.dim take a required single int dim (not a list); _base_cond's
+    # _dims_ok accepts the int form and declines scalars / out-of-range.
+    return _base_cond(self, dim, nouts=2, has_index=True)
+
+
+def _min_dim_cond(self, dim, keepdim=False):
+    return _base_cond(self, dim, nouts=2, has_index=True)
+
+
 def register_reduction_overrides() -> None:
     # CUDA overrides; cu.register_op_override short-circuits when the CuteDSL
     # runtime is unavailable, so this is safe to call unconditionally at import.
@@ -278,4 +380,17 @@ def register_reduction_overrides() -> None:
     cu.register_op_override("aten", "amin", "CUDA", cond=_amin_cond, impl=_amin_impl)
     cu.register_op_override(
         "aten", "prod.dim_int", "CUDA", cond=_prod_cond, impl=_prod_impl
+    )
+    # Group B: argmax / argmin (int64 index) and max.dim / min.dim (values, indices).
+    cu.register_op_override(
+        "aten", "argmax", "CUDA", cond=_argmax_cond, impl=_argmax_impl
+    )
+    cu.register_op_override(
+        "aten", "argmin", "CUDA", cond=_argmin_cond, impl=_argmin_impl
+    )
+    cu.register_op_override(
+        "aten", "max.dim", "CUDA", cond=_max_dim_cond, impl=_max_dim_impl
+    )
+    cu.register_op_override(
+        "aten", "min.dim", "CUDA", cond=_min_dim_cond, impl=_min_dim_impl
     )
