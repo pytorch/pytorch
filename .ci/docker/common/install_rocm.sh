@@ -21,74 +21,16 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    # When ROCM_VERSION=preview, install ROCm from TheRock preview wheels
+    # ROCM_VERSION=preview installs ROCm from TheRock wheels via the shared
+    # distro-agnostic helper below. The Ubuntu-specific path remains for apt packages.
     if [[ "${ROCM_VERSION}" == "preview" ]]; then
-      if [[ -d /opt/rocm ]]; then
-        rm -rf /opt/rocm
-      fi
+        install_rocm
+        return
+    fi
 
-      if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
-        THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
-      fi
-      # FIXME: temporarily pin TheRock nightly ROCm to the July 12 build while
-      # the rolling nightly index is unstable.
-      THEROCK_NIGHTLY_VERSION="7.14.0a20260712"
-
-      echo "=============================================="
-      echo "ROCm Multi-Arch Wheel Installation (TheRock preview)"
-      echo "=============================================="
-      echo "Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
-      echo "TheRock preview version: ${THEROCK_NIGHTLY_VERSION}"
-      echo "=============================================="
-
-      python3 -m pip install \
-        --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
-        "rocm[libraries,devel,device-all]==${THEROCK_NIGHTLY_VERSION}"
-
-      # Use the rocm-sdk CLI helper to discover install paths
-      ROCM_HOME="$(rocm-sdk path --root)"
-      ROCM_BIN="$(rocm-sdk path --bin)"
-
-      echo "ROCM_HOME=${ROCM_HOME}"
-      echo "ROCM_BIN=${ROCM_BIN}"
-
-      # theRock bundles system dependencies like libdrm, liblzma in rocm_sysdeps
-      ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
-      ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
-      ROCM_SYSDEPS_LIB="${ROCM_SYSDEPS}/lib"
-      ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS_LIB}/pkgconfig"
-
-      # Write environment file (sourced by CI scripts and interactive shells)
-      cat > /etc/rocm_env.sh << ROCM_ENV
-# ROCm paths discovered from rocm-sdk. Keep this list short: PyTorch's
-# LoadHIP.cmake derives CMake package paths, MAGMA_HOME, ROCM_SOURCE_DIR, and
-# the TheRock device library path from ROCM_PATH when those env vars are unset.
-export ROCM_PATH="${ROCM_HOME}"
-export ROCM_HOME="${ROCM_HOME}"
-export PATH="${ROCM_BIN}:\${PATH}"
-export LD_LIBRARY_PATH="${ROCM_HOME}/lib:\${LD_LIBRARY_PATH:-}"
-# theRock system dependencies (libdrm, liblzma, etc.)
-export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
-export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
-export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
-export LD_LIBRARY_PATH="${ROCM_SYSDEPS_LIB}:\${LD_LIBRARY_PATH}"
-export LIBRARY_PATH="${ROCM_SYSDEPS_LIB}:\${LIBRARY_PATH:-}"
-# Disable MSLK for theRock preview (not yet supported)
-export USE_MSLK=0
-ROCM_ENV
-
-      echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
-
-      echo "=============================================="
-      echo "TheRock preview ROCm wheel install complete"
-      echo "ROCM_HOME=${ROCM_HOME}"
-      echo "=============================================="
-
-      # --- End of theRock preview wheel installation ---
-    else
-      # =========================================================================
-      # Non-preview: install ROCm from repo.radeon.com apt packages
-      # =========================================================================
+    # =========================================================================
+    # Non-preview: install ROCm from repo.radeon.com apt packages
+    # =========================================================================
 
     # Make sure rocm packages from repo.radeon.com have highest priority
     cat << EOF > /etc/apt/preferences.d/rocm-pin-600
@@ -202,47 +144,76 @@ ROCM_ENV
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-    fi
 }
 
-install_almalinux() {
-    # ROCm from the multi-arch TheRock wheel index (used by the manywheel builder
-    # image). Distro-agnostic pip install; no OS packages. The ROCm SDK unpacks
-    # under <site-packages>/_rocm_sdk_* and its real install root is discovered via
-    # `rocm-sdk path` and exported through /etc/rocm_env.sh (no /opt/rocm symlink);
-    # build_env_setup.py / repair_wheel.py discover ROCM_HOME from there. Mirrors #188429.
-    local THEROCK_INDEX_URL="${THEROCK_INDEX_URL:-https://repo.amd.com/rocm/whl-multi-arch/}"
-    # ROCM_VERSION is the ROCm minor line (e.g. "7.14"); resolve to newest 7.14.x.
-    local ROCM_VERSION="${ROCM_VERSION:-7.14}"
-    local ROCM_PIP_SPEC="rocm[libraries,devel,device-all]==${ROCM_VERSION}.*"
+install_rocm() {
+    # ROCm from the multi-arch TheRock wheel index. This is distro-agnostic and
+    # used by both the AlmaLinux manywheel builder and Ubuntu ROCm preview image.
+    # The ROCm SDK unpacks under <site-packages>/_rocm_sdk_*; discover the real
+    # install root via `rocm-sdk path` and export it through /etc/rocm_env.sh.
+    local therock_index_url rocm_pip_spec
+    if [[ "${ROCM_VERSION}" == "preview" ]]; then
+        therock_index_url="${THEROCK_NIGHTLY_INDEX_URL:-https://rocm.nightlies.amd.com/whl-multi-arch/}"
+        # FIXME: temporarily pin TheRock nightly ROCm to the July 12 build while
+        # the rolling nightly index is unstable.
+        local therock_nightly_version="${THEROCK_NIGHTLY_VERSION:-7.14.0a20260712}"
+        rocm_pip_spec="rocm[libraries,devel,device-all]==${therock_nightly_version}"
+    else
+        therock_index_url="${THEROCK_INDEX_URL:-https://repo.amd.com/rocm/whl-multi-arch/}"
+        # ROCM_VERSION is the ROCm minor line (e.g. "7.14"); resolve to newest 7.14.x.
+        local rocm_version="${ROCM_VERSION:-7.14}"
+        rocm_pip_spec="rocm[libraries,devel,device-all]==${rocm_version}.*"
+    fi
 
     echo "=============================================="
     echo "ROCm Multi-Arch Wheel Installation (TheRock)"
-    echo "Index URL:  ${THEROCK_INDEX_URL}"
-    echo "ROCm spec:  ${ROCM_PIP_SPEC}"
+    echo "Index URL:  ${therock_index_url}"
+    echo "ROCm spec:  ${rocm_pip_spec}"
     echo "=============================================="
 
     # device-all pulls kernels for every supported gfx target (multi-arch wheel);
     # libraries+devel provide the runtime libs + headers/hipcc to compile against ROCm.
-    python3 -m pip install --index-url "${THEROCK_INDEX_URL}" "${ROCM_PIP_SPEC}"
+    python3 -m pip install --index-url "${therock_index_url}" "${rocm_pip_spec}"
 
     # Discover the real install root/bin via the rocm-sdk CLI (rocm-sdk-core wheel).
-    local ROCM_HOME ROCM_BIN
-    ROCM_HOME="$(rocm-sdk path --root)"
-    ROCM_BIN="$(rocm-sdk path --bin)"
+    local rocm_home rocm_bin rocm_sysdeps rocm_sysdeps_include rocm_sysdeps_lib rocm_sysdeps_pkgconfig
+    rocm_home="$(rocm-sdk path --root)"
+    rocm_bin="$(rocm-sdk path --bin)"
+    rocm_sysdeps="${rocm_home}/lib/rocm_sysdeps"
+    rocm_sysdeps_include="${rocm_sysdeps}/include"
+    rocm_sysdeps_lib="${rocm_sysdeps}/lib"
+    rocm_sysdeps_pkgconfig="${rocm_sysdeps_lib}/pkgconfig"
 
-    # Build-time environment file (sourced by CI scripts): ROCM_PATH/PATH let the
-    # build find ROCm + hipcc. No LD_LIBRARY_PATH: the produced wheel resolves ROCm
-    # at runtime via RPATH (see repair_wheel.py), and TheRock's own binaries carry
-    # their RPATHs, so the build does not need it either.
-    cat > /etc/rocm_env.sh << ROCM_ENV
-export ROCM_PATH="${ROCM_HOME}"
-export ROCM_HOME="${ROCM_HOME}"
-export PATH="${ROCM_BIN}:\${PATH}"
-ROCM_ENV
-    echo "source /etc/rocm_env.sh" >> /etc/bashrc || true
+    # Build-time environment file (sourced by CI scripts). Keep the common path
+    # exports short; add the preview/sysdeps exports only when that payload exists.
+    {
+        echo '# ROCm paths discovered from rocm-sdk.'
+        printf 'export ROCM_PATH=%q\n' "${rocm_home}"
+        printf 'export ROCM_HOME=%q\n' "${rocm_home}"
+        printf 'export PATH=%q:${PATH}\n' "${rocm_bin}"
+        if [[ "${ROCM_VERSION}" == "preview" ]]; then
+            printf 'export LD_LIBRARY_PATH=%q:${LD_LIBRARY_PATH:-}\n' "${rocm_home}/lib"
+            echo '# Disable MSLK for theRock preview (not yet supported)'
+            echo 'export USE_MSLK=0'
+        fi
+        if [[ -d "${rocm_sysdeps}" ]]; then
+            echo '# TheRock system dependencies (libdrm, liblzma, etc.)'
+            printf 'export CPLUS_INCLUDE_PATH=%q:${CPLUS_INCLUDE_PATH:-}\n' "${rocm_sysdeps_include}"
+            printf 'export C_INCLUDE_PATH=%q:${C_INCLUDE_PATH:-}\n' "${rocm_sysdeps_include}"
+            printf 'export PKG_CONFIG_PATH=%q:${PKG_CONFIG_PATH:-}\n' "${rocm_sysdeps_pkgconfig}"
+            printf 'export LD_LIBRARY_PATH=%q:${LD_LIBRARY_PATH:-}\n' "${rocm_sysdeps_lib}"
+            printf 'export LIBRARY_PATH=%q:${LIBRARY_PATH:-}\n' "${rocm_sysdeps_lib}"
+        fi
+    } > /etc/rocm_env.sh
 
-    echo "TheRock ROCm wheel install complete: ROCM_HOME=${ROCM_HOME}"
+    if [[ -e /etc/bash.bashrc ]]; then
+        echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
+    fi
+    if [[ -e /etc/bashrc ]]; then
+        echo "source /etc/rocm_env.sh" >> /etc/bashrc
+    fi
+
+    echo "TheRock ROCm wheel install complete: ROCM_HOME=${rocm_home}"
 }
 
 # Install Python packages depending on the base OS
@@ -252,7 +223,7 @@ case "$ID" in
     install_ubuntu
     ;;
   almalinux)
-    install_almalinux
+    install_rocm
     ;;
   *)
     echo "Unable to determine OS..."
