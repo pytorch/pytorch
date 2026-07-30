@@ -35,22 +35,6 @@
     set_flush_denormal
 ```
 
-(version-information)=
-## Version information
-
-``torch.__version__`` reports the installed PyTorch version. The ``torch.version``
-module contains build metadata for optional backends, such as ``torch.version.cuda``
-and ``torch.version.hip``; these values can be ``None`` when the corresponding
-backend is not included in the build.
-
-.. code-block:: python
-
-    import torch
-
-    print(torch.__version__)
-    print(torch.version.cuda)
-    print(torch.version.hip)
-
 (tensor-creation-ops)=
 
 ### Creation Ops
