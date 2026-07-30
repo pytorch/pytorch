@@ -1013,7 +1013,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         type has no instance dict. UDOV overrides to also wrap the source for
         nn.Module instances.
         """
-        from .object_protocol import type_has_dict
+        from .object_protocol import get_instance_dict, type_has_dict
 
         if not type_has_dict(maybe_get_python_type(self)):
             return None
@@ -1045,8 +1045,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         value = self.get_real_python_backed_value()
         if value is not NO_SUCH_SUBOBJ:
-            instance_dict = object.__getattribute__(value, "__dict__")
-            if name in instance_dict:
+            instance_dict = get_instance_dict(value)
+            if instance_dict is not None and name in instance_dict:
                 if isinstance(self, variables.UnspecializedNNModuleVariable):
                     source = self.maybe_wrap_nn_module_source_for_instance(
                         tx, name, source
