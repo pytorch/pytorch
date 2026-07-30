@@ -75,17 +75,21 @@ def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
 def fold_in(key: torch.Tensor, data: int | torch.Tensor) -> torch.Tensor:
     r"""Deterministically derive a new key by folding in an integer value.
 
-    ``data`` may be a Python ``int`` or a single-item ``uint64`` tensor on the
-    same device as ``key``. Note that passing ``data`` as a tensor prevents it
-    from being baked into a captured CUDA graph, so the graph can be replayed
-    with a different value without recapture.
+    ``data`` may be a Python ``int`` or a ``uint64`` tensor on the same device
+    as ``key``. Tensor data is broadcast against the key's batch dimensions,
+    deriving one key for each broadcasted ``(key, data)`` pair. Passing
+    ``data`` as a tensor also prevents it from being baked into a captured CUDA
+    graph, so the graph can be replayed with different values without
+    recapture.
 
-    Equivalent to ``split(key, data + 1)[data]``, but more efficient when
-    only a single derived key is needed. Useful for associating a key with
-    a loop iteration, layer index, or other integer identifier.
+    For scalar ``data``, this is equivalent to
+    ``split(key, data + 1)[data]``, but more efficient when only a single
+    derived key is needed. Useful for associating a key with a loop iteration,
+    layer index, or other integer identifier.
 
-    Supports batched keys: if ``key`` has shape ``(*batch, K)``, ``data`` is
-    folded into each key independently.
+    Supports batched keys and tensor data. If ``key`` has shape
+    ``(*key_batch, K)`` and tensor ``data`` has shape ``*data_batch``, the
+    result has shape ``(*broadcast_shapes(key_batch, data_batch), K)``.
 
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
@@ -95,11 +99,13 @@ def fold_in(key: torch.Tensor, data: int | torch.Tensor) -> torch.Tensor:
             ``[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]``. Negative inputs
             are remapped to positive values with the formula
             ``0x1_0000_0000_0000_0000 + data``. A tensor must have dtype
-            ``uint64``, contain a single value, and reside on the same device
-            as ``key``.
+            ``uint64`` and reside on the same device as ``key``. Tensor data is
+            broadcast against the key's batch dimensions.
 
     Returns:
-        A new key tensor with the same shape as ``key``.
+        A new key tensor. Python integer data preserves the shape of ``key``;
+        tensor data produces the broadcasted batch shape followed by the key
+        dimension.
 
     Example::
 

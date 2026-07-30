@@ -280,9 +280,12 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         # tensor with the wrong dtype
         with self.assertRaisesRegex(RuntimeError, "data must have dtype uint64"):
             random.fold_in(key, torch.tensor(7, dtype=torch.int64, device=device))
-        # tensor with more than one value
-        with self.assertRaisesRegex(RuntimeError, "data must be a single value"):
-            random.fold_in(key, torch.tensor([1, 2], dtype=torch.uint64, device=device))
+        # tensor data whose shape does not broadcast with the key batch
+        keys = random.split(key, 2)
+        with self.assertRaisesRegex(RuntimeError, "must match the size"):
+            random.fold_in(
+                keys, torch.tensor([1, 2, 3], dtype=torch.uint64, device=device)
+            )
 
     @onlyAccelerator
     def test_error_data_wrong_device(self, device):
@@ -311,12 +314,55 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         self.assertEqual(random.fold_in(key, scalar), expected)
         self.assertEqual(random.fold_in(key, one_d), expected)
 
+    def test_tensor_data_broadcasts(self, device):
+        base_key = random.key(42, device=device)
+        data = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.uint64, device=device)
+        result = random.fold_in(base_key, data)
+        self.assertEqual(result.shape, (2, 3, 2))
+        self.assertEqual(result.stride(-1), 1)
+        for i in range(2):
+            for j in range(3):
+                self.assertEqual(result[i, j], random.fold_in(base_key, data[i, j]))
+
+        keys = random.split(base_key, 2).reshape(2, 1, 2)
+        row_data = data[:1]
+        result = random.fold_in(keys, row_data)
+        self.assertEqual(result.shape, (2, 3, 2))
+        for i in range(2):
+            for j in range(3):
+                self.assertEqual(
+                    result[i, j], random.fold_in(keys[i, 0], row_data[0, j])
+                )
+
+        keys = random.split(base_key, 6).reshape(2, 3, 2).transpose(0, 1)
+        data = data.transpose(0, 1)
+        self.assertFalse(keys.is_contiguous())
+        self.assertFalse(data.is_contiguous())
+        result = random.fold_in(keys, data)
+        for i in range(3):
+            for j in range(2):
+                self.assertEqual(result[i, j], random.fold_in(keys[i, j], data[i, j]))
+
+    def test_tensor_data_empty(self, device):
+        key = random.key(42, device=device)
+        data = torch.empty((0, 3), dtype=torch.uint64, device=device)
+        self.assertEqual(random.fold_in(key, data).shape, (0, 3, 2))
+
+    def test_tensor_data_meta(self, device):
+        key = torch.empty((3, 1, 2), dtype=torch.uint64, device="meta")
+        data = torch.empty((1, 4), dtype=torch.uint64, device="meta")
+        self.assertEqual(random.fold_in(key, data).shape, (3, 4, 2))
+
     @onlyCUDA
     def test_tensor_data_cuda_graph(self, device):
         # A tensor data is not baked into the graph: mutating it and replaying
         # produces the result for the new value.
         key = random.key(42, device=device)
-        data = torch.zeros((), dtype=torch.uint64, device=device)
+        data = torch.zeros((2, 3), dtype=torch.uint64, device=device)
+        replay_values = (
+            torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.uint64, device=device),
+            torch.tensor([[9, 8, 7], [6, 5, 4]], dtype=torch.uint64, device=device),
+        )
 
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
@@ -329,8 +375,8 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         with torch.cuda.graph(g):
             out = random.fold_in(key, data)
 
-        for value in (5, 99):
-            data.fill_(value)
+        for value in replay_values:
+            data.copy_(value)
             g.replay()
             torch.cuda.synchronize()
             self.assertEqual(out, random.fold_in(key, value))
@@ -651,9 +697,9 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(f(key), random.fold_in(key, 7))
 
     def test_fold_in_tensor_fullgraph(self, device):
-        key = random.key(42, device=device)
-        # data as a graph input (not a constant) exercises the Tensor overload.
-        data = torch.tensor(7, dtype=torch.uint64, device=device)
+        key = random.split(random.key(42, device=device), 2).reshape(2, 1, 2)
+        # Tensor data as a graph input exercises broadcast shape inference.
+        data = torch.tensor([[1, 2, 3]], dtype=torch.uint64, device=device)
 
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(key, data):

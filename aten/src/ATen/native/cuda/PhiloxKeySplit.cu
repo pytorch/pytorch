@@ -1,8 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/StatelessPhilox4x32.cuh>
+#include <ATen/ExpandUtils.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -76,15 +80,6 @@ __global__ void philox_key_fold_in_scalar_kernel(
     int64_t num_keys,
     uint64_t data) {
   philox_key_fold_in_impl(input, output, num_keys, data);
-}
-
-// data read from device (CUDA graph safe: not baked into the launch).
-__global__ void philox_key_fold_in_tensor_kernel(
-    const uint64_t* __restrict__ input,
-    uint64_t* __restrict__ output,
-    int64_t num_keys,
-    const uint64_t* __restrict__ data) {
-  philox_key_fold_in_impl(input, output, num_keys, data[0]);
 }
 
 } // anonymous namespace
@@ -167,33 +162,37 @@ Tensor _philox_key_fold_in_tensor_cuda(const Tensor& key, const Tensor& data) {
   TORCH_CHECK(data.scalar_type() == kUInt64,
       "_philox_key_fold_in: data must have dtype uint64, got ",
       data.scalar_type());
-  // TODO: Relax this and allow for arbitrary data shape that broadcasts with
-  // batched keys?
-  TORCH_CHECK(data.numel() == 1,
-      "_philox_key_fold_in: data must be a single value, got ",
-      data.numel(), " elements");
 
-  Tensor output = at::empty_like(key);
-  int64_t num_keys = key.numel() / 2;
-  if (num_keys == 0) {
-    return output;
-  }
+  auto output_shape = at::infer_size_dimvector(
+      key.sizes().slice(0, key.dim() - 1), data.sizes());
+  output_shape.push_back(2);
+  Tensor output = at::empty(output_shape, key.options());
+  Tensor output_seed = output.select(-1, 0);
+  Tensor output_offset = output.select(-1, 1);
+  Tensor key_seed = key.select(-1, 0);
+  Tensor key_offset = key.select(-1, 1);
 
-  auto key_contig = key.contiguous();
-
-  constexpr int block_size = 256;
-  int num_blocks = std::min(
-      static_cast<int>((num_keys + block_size - 1) / block_size),
-      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4);
-
-  philox_key_fold_in_tensor_kernel<<<num_blocks, block_size, 0,
-      at::cuda::getCurrentCUDAStream()>>>(
-      key_contig.data_ptr<uint64_t>(),
-      output.data_ptr<uint64_t>(),
-      num_keys,
-      data.const_data_ptr<uint64_t>());
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .add_output(output_seed)
+      .add_output(output_offset)
+      .add_const_input(key_seed)
+      .add_const_input(key_offset)
+      .add_const_input(data)
+      .build();
+  gpu_kernel_multiple_outputs(
+      iter,
+      [] GPU_LAMBDA(uint64_t seed, uint64_t offset, uint64_t fold)
+          -> thrust::tuple<uint64_t, uint64_t> {
+        at::Philox4_32 engine(seed, 0, offset + fold);
+        const uint64_t r0 = engine();
+        const uint64_t r1 = engine();
+        const uint64_t r2 = engine();
+        const uint64_t r3 = engine();
+        return {
+            r0 | (r1 << 32),
+            r2 | (r3 << 32)};
+      });
   return output;
 }
 
