@@ -41,7 +41,7 @@ import cutlass.utils.blackwell_helpers as sm100_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.operators.providers.cutedsl.evt.common_efc import log
 
-from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
+from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -654,7 +654,7 @@ class PersistentDenseGemmEFCKernel:
         self.local_reduce_direct_bool = False
         self.local_reduce_secondary_reuses_primary = False
         secondary_expression = (
-            GemmReductionExpression.parse(local_reduce_secondary_feed_type)
+            GemmReductionDescriptor.parse(local_reduce_secondary_feed_type)
             if local_reduce_secondary_feed_type is not None
             else None
         )
@@ -675,7 +675,7 @@ class PersistentDenseGemmEFCKernel:
             self.local_reduce_direct_bool = True
         elif cutlass.const_expr(local_reduce_secondary_feed_type is not None):
             self.local_reduce_secondary_reuses_primary = True
-        reduction_expression = GemmReductionExpression.parse(local_reduce_type)
+        reduction_expression = GemmReductionDescriptor.parse(local_reduce_type)
         local_reduce_type = reduction_expression.kind
         if cutlass.const_expr(local_reduce_type == "mean_linear"):
             input_coefficient, result_coefficient, bias = (
