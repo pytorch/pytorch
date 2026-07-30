@@ -390,11 +390,8 @@ function(torch_compile_options libname)
       else()
         # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
         list(APPEND private_compile_options -Wno-deprecated-copy)
-        # NVCC + clang18  reports spurious deprecated deprecated literal operator declaration when there were none
-        # I.e. failures look like torch/headeronly/util/complex.h:334:40: error: identifier '_if' preceded by whitespace in a literal operator declaration is deprecated
-        # but if one to look at the source code, there are no space there
+        # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
         list(APPEND private_compile_options -Wno-deprecated-literal-operator)
-
       endif()
       list(APPEND private_compile_options -Wmove)
     else()
