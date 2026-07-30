@@ -3676,12 +3676,12 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res2),
             )
 
-    def _symbolic_cache_input(self, *, requires_grad=False):
+    def _symbolic_cache_input(self, *, dtype=torch.float32, requires_grad=False):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
         fake_mode.cache_crosscheck_enabled = False
         x = fake_mode.from_tensor(
-            torch.randn(4, 8, requires_grad=requires_grad),
+            torch.randn(4, 8, dtype=dtype, requires_grad=requires_grad),
             source=LocalSource("x", is_input=True),
             symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
@@ -3752,6 +3752,33 @@ class FakeTensorDispatchCache(TestCase):
             self.assertEqual(after_hit.hits, before_hit.hits + 1)
             self.assertEqual(after_hit.misses, before_hit.misses)
             as_strided.assert_called_once()
+            self.assertEqual(
+                extract_tensor_metadata(actual),
+                extract_tensor_metadata(expected),
+            )
+            self.assertEqual(
+                actual.untyped_storage()._cdata,
+                x.untyped_storage()._cdata,
+            )
+
+    def test_cache_symbolic_dtype_changing_view_preserves_dtype(self):
+        fake_mode, x = self._symbolic_cache_input(dtype=torch.complex64)
+
+        with fake_mode:
+            FakeTensorMode.cache_clear()
+            expected = aten.view_as_real.default(x)
+            before_hit = FakeTensorMode.cache_info()
+
+            with patch.object(
+                torch, "as_strided", wraps=torch.as_strided
+            ) as as_strided:
+                actual = aten.view_as_real.default(x)
+
+            after_hit = FakeTensorMode.cache_info()
+            self.assertEqual(after_hit.hits, before_hit.hits + 1)
+            self.assertEqual(after_hit.misses, before_hit.misses)
+            as_strided.assert_not_called()
+            self.assertEqual(actual.dtype, torch.float32)
             self.assertEqual(
                 extract_tensor_metadata(actual),
                 extract_tensor_metadata(expected),
