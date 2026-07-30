@@ -641,6 +641,15 @@ def _meta_epilogue_metadata(epilogue_args: Any) -> Any:
             )
         else:
             fake_kwargs[name] = val
+    if getattr(epilogue_args, "_is_direct_cutedsl", False):
+        from types import SimpleNamespace
+
+        fake_args = SimpleNamespace(
+            epilogue_fn=epilogue_args.epilogue_fn,
+            tensors=fake_kwargs,
+            traced_epilogue=None,
+        )
+        return EpilogueMetadata.from_args(fake_args)
     fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
     accum = epilogue_args.traced_epilogue.example_inputs["accum"]
     fake_args.trace(accum.shape, accum.element)
