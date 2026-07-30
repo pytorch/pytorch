@@ -109,9 +109,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     @mock.patch("torch.utils.cpp_extension.sysconfig.get_path")
     @mock.patch("torch.utils.cpp_extension.shutil.which", return_value=None)
-    def test_ninja_command_falls_back_to_python_module(
-        self, mock_which, mock_get_path
-    ):
+    def test_ninja_command_falls_back_to_python_module(self, mock_which, mock_get_path):
         mock_get_path.return_value = "/python/scripts"
 
         self.assertEqual(_get_ninja_command(), [sys.executable, "-m", "ninja"])
