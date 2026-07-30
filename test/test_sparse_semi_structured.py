@@ -1371,7 +1371,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "Only supported on ROCm MI350 or newer",
+    )
     @xfailIfSM89PreCUDA13
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
