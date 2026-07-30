@@ -215,6 +215,13 @@ def side_effect_func(x: torch.Tensor):
     print(x)
 
 
+@torch.fx.wrap
+def wrapped_optional_typing_dict(
+    value: dict[int, tuple[torch.Tensor, torch.Tensor]] | None,
+):
+    return value
+
+
 def _enrich_profiler_traces(prof):
     """
     Helper function to extract and augment profiler events with stack traces.
@@ -1908,6 +1915,42 @@ class TestFX(JitTestCase):
         offsets = torch.LongTensor([0, 4])
         self.assertEqual(loaded(input, offsets), traced(input, offsets))
 
+    def test_save_string_type_annotation(self):
+        def f(x: "torch.Tensor") -> "torch.Tensor":
+            return x
+
+        traced = symbolic_trace(f)
+        _, (body, import_block) = traced.__reduce__()
+        self.assertExpectedInline(
+            import_block + body["_code"].rstrip(),
+            """\
+NoneType = type(None)
+_torch_Tensor_ = 'torch.Tensor'
+from math import inf
+from math import nan
+from torch import device
+import torch
+import torch.fx._pytree as fx_pytree
+import torch.utils._pytree as pytree
+
+
+def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
+    return x""",
+        )
+
+        bio = io.BytesIO()
+        torch.save(traced, bio)
+        bio.seek(0)
+        loaded = torch.load(bio, weights_only=False)
+        loaded.graph.lint()
+
+        x = torch.randn(2, 3)
+        self.assertEqual(loaded(x), traced(x))
+        self.assertEqual(
+            loaded.forward.__annotations__,
+            {"x": "torch.Tensor", "return": "torch.Tensor"},
+        )
+
     def test_return_tuple(self):
         class M(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -2544,6 +2587,25 @@ class TestFX(JitTestCase):
             return a[0]
 
         torch.jit.script(symbolic_trace(forward))
+
+    def test_optional_typing_dict_placeholder_annotation_python314(self):
+        class OptionalTypingDictModule(torch.nn.Module):
+            def forward(
+                self,
+                value: typing.Optional[  # noqa: UP045
+                    typing.Dict[  # noqa: UP006
+                        int, typing.Tuple[torch.Tensor, torch.Tensor]  # noqa: UP006
+                    ]
+                ],
+            ):
+                return wrapped_optional_typing_dict(value)
+
+        traced = symbolic_trace(OptionalTypingDictModule())
+
+        FileCheck().check("value : typing_Union[typing_Dict").check(
+            "typing_Tuple"
+        ).check("NoneType]").run(traced.code)
+        torch.jit.script(traced)
 
     def test_wrapped_method(self):
         def wrap_with_relu(fn):

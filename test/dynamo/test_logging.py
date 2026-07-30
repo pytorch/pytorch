@@ -25,8 +25,6 @@ from torch.testing._internal.common_utils import (
     munge_exc,
     skipIfTorchDynamo,
     skipIfWindows,
-    TEST_XPU,
-    xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
@@ -227,13 +225,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 201, in outmost_fn
+    -   File [file_path], line 199, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 204, in outer_fn
+    -   File [file_path], line 202, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 207, in fn
+    -   File [file_path], line 205, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 210, in inner
+    -   File [file_path], line 208, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -1339,7 +1337,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
 
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/157778
     @make_logging_test(perf_hints=True)
     @requires_gpu
     def test_optimizer_non_static_param(self, records):

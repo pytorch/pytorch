@@ -43,19 +43,14 @@ class SwitchOp(HigherOrderOperator):
 
     # pyrefly: ignore [bad-override]
     def gen_schema(self, index, branches, operands):
-        from torch._guards import detect_fake_mode
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
         branch_gms: list[torch.fx.GraphModule] = []
-        all_branch_outputs: list[tuple[Any, ...] | list[Any]] = []
+        branch0_outputs: list[Any] | tuple[Any, ...] = []
         mutated_inputs: set[int] = set()
         for branch in branches:
-            gm = (
-                branch
-                if isinstance(branch, torch.fx.GraphModule)
-                else materialize_as_graph(branch, operands)
-            )
+            gm = materialize_as_graph(branch, operands)
             (
                 _,
                 _,
@@ -64,21 +59,9 @@ class SwitchOp(HigherOrderOperator):
                 branch_outputs,
             ) = check_input_alias_and_mutation_return_outputs(gm)
             branch_gms.append(gm)
-            all_branch_outputs.append(branch_outputs)
+            if not branch0_outputs:
+                branch0_outputs = branch_outputs
             mutated_inputs |= set(branch_mutated_inputs)
-
-        # Merge outputs to detect int -> SymInt change
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        fake_mode = detect_fake_mode(operands)
-        if fake_mode is None or fake_mode.shape_env is None:
-            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        # pyrefly: ignore [missing-attribute]
-        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
-            merged_outputs = [
-                _merge_output(branch_outs, fake_mode)
-                for branch_outs in zip(*all_branch_outputs)
-            ]
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("index", index)
@@ -87,7 +70,7 @@ class SwitchOp(HigherOrderOperator):
         for idx, arg in enumerate(operands):
             schema_gen.add_arg(f"operand{idx}", arg, is_mutated=idx in mutated_inputs)
 
-        for out in merged_outputs:
+        for out in branch0_outputs:
             schema_gen.add_output(out)
         schema_gen.add_schema_tree_spec(index, branches, operands)
         return schema_gen.gen_schema()
@@ -101,9 +84,17 @@ def wrap_branch_fn_flat(*args, branch_fn, spec_operands):
     return branch_fn(*operands)
 
 
+def _get_branch(branches, idx):
+    if not 0 <= idx < len(branches):
+        raise AssertionError(
+            f"switch index {idx} out of range for {len(branches)} branches"
+        )
+    return branches[idx]
+
+
 @exposed_in("torch")
 def switch(
-    index: int | torch.Tensor,
+    index: int | torch.SymInt | torch.Tensor,
     branches: tuple[Callable, ...] | list[Callable],
     operands: tuple | list = (),
 ) -> Any:
@@ -181,8 +172,17 @@ def switch(
     )
 
     # Early shortcut: single-branch switch degenerates to a plain call
-    if len(wrapped_branches) == 1:
+    num_branches = len(wrapped_branches)
+    if num_branches == 1:
         return wrapped_branches[0](*leaves_operands)
+
+    # Clamp out-of-range indices to [0, len(branches) - 1]
+    if isinstance(index, torch.Tensor):
+        index = index.clamp(0, num_branches - 1)
+    elif isinstance(index, torch.SymInt):
+        index = torch.sym_max(0, torch.sym_min(index, num_branches - 1))
+    elif isinstance(index, int):
+        index = max(0, min(index, num_branches - 1))
 
     # Constant index shortcut for eager mode.
     if not torch.compiler.is_dynamo_compiling() and isinstance(index, int):
@@ -196,9 +196,7 @@ def switch(
                 stacklevel=2,
             )
 
-        # Clamp out-of-range indices rather than raising for consistency with compiled behavior.
-        clamped_index = min(max(0, index), len(wrapped_branches) - 1)
-        return wrapped_branches[clamped_index](*leaves_operands)
+        return _get_branch(wrapped_branches, index)(*leaves_operands)
 
     # Use _maybe_compile_and_run_fn pattern from scan/associative_scan
     def run_switch(index, wrapped_branches, leaves_operands):
@@ -262,9 +260,7 @@ def switch_op_dense(index, branches, operands):
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     idx: int = int(index.item()) if isinstance(index, torch.Tensor) else int(index)
-    # Clamp out-of-range indices rather than raising for consistency with compiled behavior.
-    clamped_idx = min(max(0, idx), len(branches) - 1)
-    return branches[clamped_idx](*operands)
+    return _get_branch(branches, idx)(*operands)
 
 
 class SwitchAutogradOp(torch.autograd.Function):
@@ -376,7 +372,10 @@ def switch_fake_tensor_mode(mode, index, branches, operands):
 
 
 def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMode):
-    from torch._higher_order_ops.cond import _merge_output as cond_merge_output
+    from torch._higher_order_ops.cond import (
+        _merge_ints_to_symint,
+        _merge_output as cond_merge_output,
+    )
 
     # Shortcut if a branch produces None outputs; then all branches need to produce None
     if any(x is None for x in xs):
@@ -386,24 +385,27 @@ def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMod
 
     # In case all branches return an int, use an unbacked symbol as the merge result
     if all(type(x) is int for x in xs):
-        if all(x == xs[0] for x in xs):
-            return xs[0]
-        if mode.shape_env is None:
-            raise AssertionError("mode.shape_env is None")
-        merged_out = mode.shape_env.create_unbacked_symint()
-        mode.shape_env.constrain_symbol_range(
-            merged_out.node.expr,
-            min(xs),  # type: ignore[type-var]
-            max(xs),  # type: ignore[type-var]
-        )
-        return merged_out
+        return _merge_ints_to_symint(list(xs), mode)  # type: ignore[arg-type]
 
     return functools.reduce(lambda a, b: cond_merge_output(a, b, mode), xs)
 
 
 @switch_op.py_functionalize_impl
 def switch_func(ctx, index, branches, inputs):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+
+    hop_instance = HopInstance.create(switch_op, index, branches, inputs)
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            tuple(pytree.tree_flatten((index, branches, inputs))[0]),
+            {},
+        )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_index = ctx.unwrap_tensors(index)

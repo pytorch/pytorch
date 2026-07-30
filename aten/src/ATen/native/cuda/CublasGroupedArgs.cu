@@ -13,7 +13,7 @@
 
 namespace at::native {
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 
 namespace {
 
@@ -323,6 +323,6 @@ cublasGroupedArgs::cublasGroupedArgs(
       stream);
 }
 
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 
 } // namespace at::native

@@ -340,7 +340,7 @@ void MemoryPlanner::deallocate() {
     c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(*iv);
   }
   // It's important to call this function after all other owning refs
-  // of the managed StorageImpls are cleaned up. It can reset the
+  // of the managed StorageImpls are cleaned up. It can reset
   // the StorageImpl's refcount to (# tensors in storage group),
   // so destructing any owning refs afterwards will bring the refcount
   // lower than expected and trigger the debug assertion in

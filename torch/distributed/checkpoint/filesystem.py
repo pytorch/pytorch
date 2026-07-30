@@ -89,11 +89,6 @@ class _StoragePrefix:
     prefix: str
 
 
-# Transmitted between ranks as SavePlan/WriteResult storage_data via the c10d
-# object collectives (which deserialize with weights_only=True by default).
-torch.serialization.add_safe_globals([_StorageInfo, _StoragePrefix])
-
-
 class SerializationFormat(Enum):
     TORCH_SAVE = "torch_save"
     SAFETENSORS = "safetensors"
@@ -314,7 +309,7 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
         buckets[i % bins].append(wi)
 
     for wi in tensor_w:
-        # TODO replace with headq
+        # TODO replace with heapq
         idx = min(enumerate(bucket_sizes), key=operator.itemgetter(1))[0]
         buckets[idx].append(wi)
         bucket_sizes[idx] += _item_size(wi)
