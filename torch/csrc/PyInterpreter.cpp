@@ -986,7 +986,8 @@ std::string ConcretePyInterpreterVTable::name() const {
 namespace {
 
 // use this pattern to avoid decref after pyinterpreter finalization
-// this is non owning
+// this is non owning. Mirrors DEFINE_CACHING_PYTHON_IMPORT_GETTER in
+// torch/csrc/autograd/python_variable.cpp.
 #if IS_PYBIND_2_13_PLUS
 #define DEFINE_CACHED_PYTHON_IMPORT(name, import_expr)                     \
   py::handle name() {                                                      \
