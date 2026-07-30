@@ -2317,8 +2317,6 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       gloo::alltoall(opts);
     } else {
       // Gloo alltoallv
-      c10d::checkSplitSizes(inputCounts, inputTensor, context_->size);
-      c10d::checkSplitSizes(outputCounts, outputTensor, context_->size);
       std::vector<int64_t> sendCounts(context_->size);
       std::vector<int64_t> recvCounts(context_->size);
       std::vector<int64_t> sendOffsets(context_->size);
@@ -2433,6 +2431,9 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
   if (!inputTensor.is_contiguous(inputTensor.suggest_memory_format())) {
     C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
   }
+
+  c10d::checkSplitSizes(inputCounts, inputTensor, getSize());
+  c10d::checkSplitSizes(outputCounts, outputTensor, getSize());
 
   const auto& device = outputTensor.device();
   c10::intrusive_ptr<AsyncAlltoallWork> work;
