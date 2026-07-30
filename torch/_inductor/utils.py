@@ -2307,24 +2307,16 @@ def use_flex_tdm_descriptor(
         def aligned(expr: sympy.Expr | int, alignment: int) -> bool:
             return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
 
-        # TMA_ALIGNMENT is the existing name for Triton's shared 16-byte tensor
-        # descriptor contract; AMD TDM descriptors have the same requirement.
+        # Only the allocation base uses Triton's shared 16-byte descriptor
+        # contract; request dimensions below require 128-byte alignment.
         if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
             return reject("innermost stride is not statically known to be one")
         if not aligned(offset * itemsize, TMA_ALIGNMENT):
             return reject(f"offset is not {TMA_ALIGNMENT}-byte aligned")
-        if not aligned(sizes[-1] * itemsize, TMA_ALIGNMENT):
-            return reject(f"innermost dimension is not {TMA_ALIGNMENT}-byte aligned")
-        if not all(
-            aligned(stride * itemsize, TMA_ALIGNMENT) for stride in strides[:-1]
-        ):
-            return reject(f"outer strides are not {TMA_ALIGNMENT}-byte aligned")
 
         if block_shape:
             if len(block_shape) != 2:
                 return reject("expected a two-dimensional block shape")
-            if not aligned(block_shape[-1] * itemsize, TMA_ALIGNMENT):
-                return reject(f"block width is not {TMA_ALIGNMENT}-byte aligned")
             if not aligned(
                 block_shape[-1] * itemsize,
                 _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
