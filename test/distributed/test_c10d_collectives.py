@@ -372,6 +372,68 @@ class AbstractCollectivesTest(C10dBackendTest):
             "synchronous barrier must host-block until prior stream work completes",
         )
 
+    def test_split_group(self):
+        # split_group drives the backend's split() (ncclCommSplit under the
+        # NCCL backends). gloo's backend supports splitting too, but only
+        # reachable via a mixed cpu:gloo,cuda:nccl pg: dist.split_group requires
+        # the default pg to have a bound_device_id, and a pure-gloo (CPU) pg
+        # can't bind one (a CPU device has no index -> "setBoundDeviceId must
+        # have an index"), so it raises "No device associated with the default
+        # pg". Restrict this shared test to the CUDA backends.
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} split_group test requires CUDA")
+        self._init_pg()
+        # split_group requires the default pg to have a bound device.
+        default_pg = dist.distributed_c10d._get_default_group()
+        default_pg.bound_device_id = self.device
+        # Initialize the parent communicator before splitting.
+        dist.all_reduce(torch.ones(4, device=self.device))
+
+        # First half are members; the rest are non-members and must get the
+        # NON_GROUP_MEMBER sentinel (they still issue the no-color split so the
+        # collective stays in lockstep across the parent group).
+        members = list(range(self.world_size // 2))
+        subgroup = dist.split_group(split_ranks=[members])
+
+        if self.rank in members:
+            self.assertIsNot(subgroup, dist.GroupMember.NON_GROUP_MEMBER)
+            self.assertEqual(dist.get_process_group_ranks(subgroup), members)
+            tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+            dist.all_reduce(tensor, group=subgroup)
+            expected = float(sum(r + 1 for r in members))
+            self.assertEqual(tensor, torch.full_like(tensor, expected))
+        else:
+            self.assertIs(subgroup, dist.GroupMember.NON_GROUP_MEMBER)
+
+        dist.barrier()
+
+    def test_split_group_full_partition(self):
+        # Partition the whole parent group into two subgroups; every rank is a
+        # member of exactly one split and gets a live communicator. See
+        # test_split_group for why this is restricted to the CUDA backends.
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} split_group test requires CUDA")
+        if self.world_size % 2 != 0:
+            self.skipTest("full-partition split requires an even world size")
+        self._init_pg()
+        default_pg = dist.distributed_c10d._get_default_group()
+        default_pg.bound_device_id = self.device
+        dist.all_reduce(torch.ones(4, device=self.device))
+
+        half = self.world_size // 2
+        first = list(range(half))
+        second = list(range(half, self.world_size))
+        subgroup = dist.split_group(split_ranks=[first, second])
+        my_group = first if self.rank in first else second
+
+        self.assertIsNot(subgroup, dist.GroupMember.NON_GROUP_MEMBER)
+        self.assertEqual(dist.get_process_group_ranks(subgroup), my_group)
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        dist.all_reduce(tensor, group=subgroup)
+        expected = float(sum(r + 1 for r in my_group))
+        self.assertEqual(tensor, torch.full_like(tensor, expected))
+        dist.barrier()
+
     def test_all_reduce_coalesced(self):
         self._init_pg()
         for dtype in self.dtypes:
