@@ -1599,7 +1599,7 @@ class TestOptimRenewed(TestCase):
 
         def _get_model_and_input_tensor(device, dtype, optim_cls):
             if optim_cls.__name__ == "Muon":
-                # Muon only accepts 2D parameter.
+                # Muon requires parameters with at least two dimensions.
                 model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
@@ -1664,7 +1664,7 @@ class TestOptimRenewed(TestCase):
 
         def _get_model_and_input_tensor(device, dtype, optim_cls):
             if optim_cls.__name__ == "Muon":
-                # Muon only accepts 2D parameter.
+                # Muon requires parameters with at least two dimensions.
                 model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
@@ -2382,7 +2382,7 @@ class TestOptimRenewed(TestCase):
     def test_non_empty_state(self, device, dtype, optim_info):
         # There are internal tests that check that the state is not empty
         optim_cls = optim_info.optim_cls
-        # Muon only accepts 2D parameter.
+        # Muon requires parameters with at least two dimensions.
         model = torch.nn.Linear(5, 5, bias=False)
         model.to(dtype=dtype, device=device)
         inpt = torch.rand(2, 5, dtype=dtype, device=device)
@@ -2590,8 +2590,81 @@ class TestOptimRenewed(TestCase):
         self.assertEqual(counter, 6)
 
 
+class TestMuonBatchedMatrices(TestCase):
+    @parametrize("matrix_shape", [(2, 5), (5, 2)])
+    def test_muon_batched_matrices(self, device, matrix_shape):
+        torch.manual_seed(2)
+        batch_shape = (2, 3)
+        momentum = 0.8
+        param = Parameter(
+            torch.randn(
+                (*batch_shape, *matrix_shape),
+                device=device,
+                dtype=torch.bfloat16,
+            )
+        )
+        reference_params = [
+            Parameter(matrix.clone())
+            for matrix in param.detach().reshape(-1, *matrix_shape)
+        ]
+        kwargs = {
+            "lr": 0.03,
+            "weight_decay": 0.2,
+            "momentum": momentum,
+            "nesterov": False,
+            "ns_steps": 3,
+        }
+        optimizer = torch.optim.Muon([param], **kwargs)
+        reference_optimizer = torch.optim.Muon(reference_params, **kwargs)
+        grad_scales = torch.tensor(
+            [0.1, 1.0, 10.0, 0.2, 2.0, 20.0],
+            device=device,
+            dtype=param.dtype,
+        ).reshape(*batch_shape, 1, 1)
+        expected_momentum = torch.zeros_like(param)
+
+        for _ in range(2):
+            grad = torch.randn_like(param) * grad_scales
+            param.grad = grad.clone()
+            expected_momentum.lerp_(grad, 1 - momentum)
+            for reference_param, reference_grad in zip(
+                reference_params,
+                grad.reshape(-1, *matrix_shape),
+                strict=True,
+            ):
+                reference_param.grad = reference_grad.clone()
+
+            optimizer.step()
+            reference_optimizer.step()
+
+        self.assertEqual(param, torch.stack(reference_params).reshape_as(param))
+        self.assertEqual(
+            optimizer.state[param]["momentum_buffer"],
+            expected_momentum,
+        )
+
+        shape = (0, 2, 5)
+        param = Parameter(torch.empty(shape, device=device))
+        param.grad = torch.empty_like(param)
+        optimizer = torch.optim.Muon([param], ns_steps=100)
+
+        optimizer.step()
+
+        self.assertEqual(tuple(optimizer.state[param]["momentum_buffer"].shape), shape)
+
+    def test_muon_add_param_group(self, device):
+        optimizer = torch.optim.Muon([Parameter(torch.randn(4, 6, device=device))])
+        with self.assertRaisesRegex(ValueError, "at least two dimensions"):
+            optimizer.add_param_group(
+                {"params": [Parameter(torch.randn(6, device=device))]}
+            )
+
+        self.assertEqual(len(optimizer.param_groups), 1)
+
+
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
+instantiate_device_type_tests(TestMuonBatchedMatrices, globals())
 
 
 if __name__ == "__main__":
