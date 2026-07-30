@@ -32,6 +32,8 @@ def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
 #                            captured -- capturing less is the regression)
 # A metric is only checked for models whose expected baseline has that column,
 # so baselines predating a metric are silently skipped until regenerated.
+# Keep in sync with METRIC_COLUMNS in ci_expected_accuracy/update_expected.py
+# (the baseline writer).
 TRACKED_METRICS = {
     "graph_breaks": True,
     "calls_captured": False,  # ops captured

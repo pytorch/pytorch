@@ -79,16 +79,17 @@ CSV_LINTER = str(
 )
 
 # Integer dynamo metric columns saved to the reference CSVs, in output order.
-# Sourced from check_graph_breaks.py (one dir up, not a package) so the baseline
-# writer and the CI checker share one list. graph_breaks is always present; the
-# coverage metrics (calls_captured/unique_graphs/fallbacks_to_eager) appear only
-# once the benchmark run's get_dynamo_stats writes them, and check_graph_breaks
-# skips any metric absent from the baseline, so older CSVs stay valid.
-sys.path.insert(0, str(Path(__file__).absolute().parents[1]))
-from check_graph_breaks import TRACKED_METRICS
-
-
-METRIC_COLUMNS = list(TRACKED_METRICS)
+# Keep in sync with TRACKED_METRICS in benchmarks/dynamo/check_graph_breaks.py
+# (the CI checker). graph_breaks is always present; the coverage metrics
+# (calls_captured/unique_graphs/fallbacks_to_eager) appear only once the
+# benchmark run's get_dynamo_stats writes them, and check_graph_breaks skips any
+# metric absent from the baseline, so older CSVs stay valid.
+METRIC_COLUMNS = [
+    "graph_breaks",
+    "calls_captured",
+    "unique_graphs",
+    "fallbacks_to_eager",
+]
 
 
 def query_job_sha(repo, sha):
