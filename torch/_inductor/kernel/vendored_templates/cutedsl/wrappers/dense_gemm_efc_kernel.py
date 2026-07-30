@@ -20,8 +20,8 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     canonical_tensorssa_reduction_type,
     materialize_tensorssa_reduction,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_op_scope
-from torch._inductor.kernel.gemm_epilogue_ir import GemmReductionDescriptor
 from torch.utils._ordered_set import OrderedSet
 
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
