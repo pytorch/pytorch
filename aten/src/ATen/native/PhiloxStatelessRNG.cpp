@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/StatelessPhilox4x32.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/TransformationHelper.h>
 
@@ -10,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_bits_native.h>
 #include <ATen/ops/_philox_key_fold_in_native.h>
 #include <ATen/ops/_philox_key_split_native.h>
 #include <ATen/ops/_philox_normal_native.h>
@@ -26,9 +28,12 @@ using at::cpu::philox_4x32;
 
 namespace {
 
-// Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for double.
+// Elements produced per Philox 4x32 call: a call yields 128 bits, so 4 elements
+// for 4-byte types (float/half/bfloat16/uint32) and 2 for 8-byte types
+// (double/uint64). Note that we use a full float for each generated
+// half/bfloat16 for better numerics.
 template <typename scalar_t>
-constexpr int elems_per_call = std::is_same_v<scalar_t, double> ? 2 : 4;
+constexpr int elems_per_call = sizeof(scalar_t) == 8 ? 2 : 4;
 
 // Derive a new (seed, offset) key from 4 random uint32 values.
 inline void philox_derive_key(
@@ -76,9 +81,6 @@ void philox_distribution_kernel(
     const char* op_name,
     Tensor& self, const Tensor& key,
     const sample_func_t& sample_func, const param_func_t& param_func) {
-  TORCH_CHECK(self.is_floating_point(),
-      op_name, ": self must be a floating point tensor, got ",
-      self.scalar_type());
   TORCH_CHECK(key.scalar_type() == kUInt64,
       op_name, ": key must have dtype uint64, got ",
       key.scalar_type());
@@ -279,6 +281,32 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
   });
+  return self;
+}
+
+Tensor& _philox_bits_cpu_(Tensor& self, const Tensor& key) {
+  auto st = self.scalar_type();
+  TORCH_CHECK(
+      st == kUInt32 || st == kUInt64 || st == kInt || st == kLong,
+      "_philox_bits_: self must have dtype int32, int64, uint32, or uint64, got ",
+      st);
+  AT_DISPATCH_V2(st, "_philox_bits_", AT_WRAP([&] {
+    // 8-byte types pack the four uint32 outputs into two 64-bit values; 4-byte
+    // types emit the raw uint32 outputs. Signed dtypes receive the same bits.
+    auto sample_func = [](uint64_t seed, uint64_t offset) {
+      auto r = philox_4x32(seed, offset);
+      if constexpr (sizeof(scalar_t) == 8) {
+        return std::array<uint64_t, 2>{
+            (static_cast<uint64_t>(r[0]) << 32) | r[1],
+            (static_cast<uint64_t>(r[2]) << 32) | r[3]};
+      } else {
+        return r;
+      }
+    };
+    auto param_func = [](auto rand) { return static_cast<scalar_t>(rand); };
+    philox_distribution_kernel<scalar_t>(
+        "_philox_bits_", self, key, sample_func, param_func);
+  }), kUInt32, kUInt64, kInt, kLong);
   return self;
 }
 
