@@ -6,16 +6,16 @@ carry grouped TensorSSA layouts, matches supported local reductions, and plans
 the main, auxiliary, and local-reduction consumers.
 
 ``materialize_flex_gemm_epilogue`` uses that analysis to generate the CuTeDSL
-epilogue and physical reduction callbacks. Selected FX nodes are normalized once
-during analysis; materialization consumes the same canonical arguments while
-ordinary pointwise nodes remain on the open-ended ops-handler path.
+epilogue and physical reduction callbacks.
 """
 
 import dataclasses
 import hashlib
+import operator
 from typing import Any
 
 import torch
+from torch._inductor import inductor_prims
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
@@ -50,16 +50,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
-from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-    normalize_flex_gemm_epilogue_fx_node,
-    NormalizedGetItem,
-    NormalizedNode,
-    NormalizedPrepareSoftmax,
-    NormalizedReduction,
-    NormalizedSqueeze,
-    NormalizedUnsupportedReduction,
-    NormalizedView,
-)
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
     _cute_call,
@@ -75,7 +65,11 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_squeeze,
     lower_tensorssa_reduce,
     lower_view_or_reshape,
+    reduction_from_node,
+    squeeze_source_node,
     tensor_meta_shape,
+    unsupported_reduction_from_node,
+    view_or_reshape_args,
 )
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -292,17 +286,14 @@ class FlexGemmOutputPlan:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueGraph:
-    """Index dependencies and normalized nodes alongside the original FX graph.
+    """Index transitive dependencies between nodes in an epilogue FX graph.
 
     Attributes:
         dependencies: Every FX node mapped to all of its direct and transitive
             input nodes.
-        normalized_nodes: Selected FX nodes mapped to canonical arguments shared
-            by semantic analysis and emission.
     """
 
     dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]]
-    normalized_nodes: dict[torch.fx.Node, NormalizedNode]
 
     @classmethod
     def from_graph_module(
@@ -310,16 +301,13 @@ class FlexGemmEpilogueGraph:
     ) -> "FlexGemmEpilogueGraph":
         """Build transitive dependencies in the graph's topological order."""
         dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]] = {}
-        normalized_nodes: dict[torch.fx.Node, NormalizedNode] = {}
         for node in graph_module.graph.nodes:
             node_dependencies: OrderedSet[torch.fx.Node] = OrderedSet()
             for input_node in iter_fx_node_inputs((node.args, node.kwargs)):
                 node_dependencies.add(input_node)
                 node_dependencies.update(dependencies.get(input_node, ()))
             dependencies[node] = frozenset(node_dependencies)
-            if (normalized := normalize_flex_gemm_epilogue_fx_node(node)) is not None:
-                normalized_nodes[node] = normalized
-        return cls(dependencies, normalized_nodes)
+        return cls(dependencies)
 
     def depends_on(self, value: Any, target: torch.fx.Node) -> bool:
         """Return whether a value is or transitively depends on the target node."""
@@ -368,47 +356,57 @@ class FlexGemmLocalReduceAnalysis:
         """Record grouped layouts and local-reduction matches for one FX node."""
         if node.op != "call_function":
             return
-        normalized = self.graph.normalized_nodes.get(node)
-        if isinstance(normalized, NormalizedView):
-            if self.propagate_local_reduce_match(node, normalized.source):
+        view_args = view_or_reshape_args(node)
+        if view_args is not None:
+            source_node, shape = view_args
+            if self.propagate_local_reduce_match(node, source_node):
                 return
-            if self.bind_grouped_layout(node, normalized):
+            if self.bind_grouped_layout(node, shape, source_node):
                 return
-        elif isinstance(normalized, NormalizedReduction):
+        reduction = reduction_from_node(node)
+        if reduction is not None:
+            input_node, dim, _, dtype, _ = reduction
+            if self.bind_grouped_reduction(node, input_node, dim, dtype):
+                return
+        if node.target is inductor_prims.prepare_softmax_online:
+            input_node = node.args[0]
+            dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
             if self.bind_grouped_reduction(
-                node, normalized.source, normalized.dim, normalized.dtype
+                node, input_node, dim, raise_invalid_dims=False
             ):
                 return
-        elif isinstance(normalized, NormalizedPrepareSoftmax):
-            if self.bind_grouped_reduction(
-                node, normalized.source, normalized.dim, raise_invalid_dims=False
+        unsupported_reduction = unsupported_reduction_from_node(node)
+        if unsupported_reduction is not None:
+            input_node = node.args[0]
+            if (
+                isinstance(input_node, torch.fx.Node)
+                and input_node in self.grouped_tensors
             ):
-                return
-        elif isinstance(normalized, NormalizedUnsupportedReduction):
-            if normalized.source in self.grouped_tensors:
-                raise local_reduce_unsupported_tensorssa_error(normalized.target)
-        elif isinstance(normalized, (NormalizedSqueeze, NormalizedGetItem)):
-            if self.propagate_local_reduce_match(node, normalized.source):
-                return
+                raise local_reduce_unsupported_tensorssa_error(unsupported_reduction)
+        if self.propagate_local_reduce_match(node, squeeze_source_node(node)):
+            return
+        if node.target is operator.getitem and self.propagate_local_reduce_match(
+            node, node.args[0]
+        ):
+            return
         if is_shape_preserving_pointwise_node(node):
             self.propagate_pointwise_match(node, LOCAL_REDUCE_MIXED_MATCH_ERROR)
 
-    def bind_grouped_layout(
-        self, node: torch.fx.Node, normalized: NormalizedView
-    ) -> bool:
-        """Record the TensorSSA layout when a view exposes grouped GEMM values."""
-        layout = grouped_tensor_layout(
-            normalized.shape, tensor_meta_shape(normalized.source)
+    def bind_grouped_layout(self, node: torch.fx.Node, shape: Any, source: Any) -> bool:
+        """Attach a grouped TensorSSA layout introduced by a reshape."""
+        source_shape = (
+            tensor_meta_shape(source) if isinstance(source, torch.fx.Node) else None
         )
-        if layout is None:
+        layout = grouped_tensor_layout(shape, source_shape)
+        if layout is None or not isinstance(source, torch.fx.Node):
             return False
         self.grouped_tensors[node] = layout
         return True
 
-    def propagate_local_reduce_match(
-        self, node: torch.fx.Node, source: torch.fx.Node
-    ) -> bool:
+    def propagate_local_reduce_match(self, node: torch.fx.Node, source: Any) -> bool:
         """Copy a matched local-reduction value through an FX wrapper."""
+        if not isinstance(source, torch.fx.Node):
+            return False
         match = self.matches.get(source)
         if match is None:
             return False
@@ -418,13 +416,15 @@ class FlexGemmLocalReduceAnalysis:
     def bind_grouped_reduction(
         self,
         node: torch.fx.Node,
-        input_node: torch.fx.Node,
+        input_node: Any,
         dim: Any,
         dtype: Any = None,
         *,
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
+        if not isinstance(input_node, torch.fx.Node):
+            return False
         layout = self.grouped_tensors.get(input_node)
         if layout is None:
             return False
@@ -497,17 +497,17 @@ class FlexGemmLocalReduceAnalysis:
         """Find the grouped reduction that produces a broadcast value."""
         if not isinstance(value, torch.fx.Node):
             return None
-        normalized = self.graph.normalized_nodes.get(value)
-        if isinstance(normalized, NormalizedReduction):
-            if normalized.source is not grouped_source:
-                input_node = normalized.source
+        reduction = reduction_from_node(value)
+        if reduction is not None:
+            input_node, dim, keepdim, dtype, _ = reduction
+            if input_node is not grouped_source:
                 if self.graph.depends_on(input_node, grouped_source):
                     raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             if (
-                normalized.dtype is not None
-                or not normalized.keepdim
-                or not layout.matches_reduction_dim(normalized.dim)
+                dtype is not None
+                or not keepdim
+                or not layout.matches_reduction_dim(dim)
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             return FlexGemmLocalReduceMatch(
@@ -560,11 +560,9 @@ class FlexGemmLocalReduceAnalysis:
         if value in seen:
             return
         seen.add(value)
-        normalized = self.graph.normalized_nodes.get(value)
-        if isinstance(normalized, NormalizedReduction):
-            self.validate_hidden_feed_main_reduction_input(
-                normalized.source, grouped_source
-            )
+        reduction = reduction_from_node(value)
+        if reduction is not None:
+            self.validate_hidden_feed_main_reduction_input(reduction[0], grouped_source)
         for arg in iter_fx_node_inputs((value.args, value.kwargs)):
             self.validate_feed_main_source_reductions(
                 arg, grouped_source, selected_reduction, seen
@@ -578,10 +576,10 @@ class FlexGemmLocalReduceAnalysis:
         """Preserve the one-physical-value ABI across recursive source matching."""
         if match is None:
             return None
-        normalized = self.graph.normalized_nodes.get(match.value_node)
-        if isinstance(normalized, NormalizedReduction):
+        reduction = reduction_from_node(match.value_node)
+        if reduction is not None and isinstance(reduction[0], torch.fx.Node):
             self.validate_feed_main_source_reductions(
-                source, normalized.source, match.value_node
+                source, reduction[0], match.value_node
             )
         return match
 
@@ -608,15 +606,16 @@ class FlexGemmLocalReduceAnalysis:
         """Return whether a candidate contains a grouped feed-main reduction."""
         if not isinstance(value, torch.fx.Node):
             return False
-        normalized = self.graph.normalized_nodes.get(value)
-        if isinstance(normalized, NormalizedReduction):
+        reduction = reduction_from_node(value)
+        if reduction is not None:
+            input_node, dim, keepdim, dtype, _ = reduction
             return (
-                normalized.dtype is None
-                and bool(normalized.keepdim)
-                and layout.matches_reduction_dim(normalized.dim)
+                dtype is None
+                and bool(keepdim)
+                and layout.matches_reduction_dim(dim)
                 and (
-                    normalized.source is grouped_source
-                    or self.graph.depends_on(normalized.source, grouped_source)
+                    input_node is grouped_source
+                    or self.graph.depends_on(input_node, grouped_source)
                 )
             )
         if not is_shape_preserving_pointwise_node(value):
@@ -637,11 +636,13 @@ class FlexGemmLocalReduceAnalysis:
             value, torch.fx.Node
         ):
             return None
-        normalized = self.graph.normalized_nodes.get(grouped_source)
-        if not isinstance(normalized, NormalizedView):
+        view_args = view_or_reshape_args(grouped_source)
+        if view_args is None:
             return None
-        source_node = normalized.source
-        layout = grouped_tensor_layout(normalized.shape, tensor_meta_shape(source_node))
+        source_node, input_shape = view_args
+        if not isinstance(source_node, torch.fx.Node):
+            return None
+        layout = grouped_tensor_layout(input_shape, tensor_meta_shape(source_node))
         if layout is None:
             return None
         if layout.axis != 0:
@@ -705,11 +706,12 @@ class FlexGemmLocalReduceAnalysis:
         output: torch.fx.Node,
     ) -> FlexGemmLocalReduceMatch | None:
         """Match feed-main reductions through trailing pointwise nodes."""
-        normalized = self.graph.normalized_nodes.get(output)
-        if isinstance(normalized, NormalizedView):
-            return self.match_feed_main_source(
-                normalized.source, output.meta.get("val")
-            )
+        view_args = view_or_reshape_args(output)
+        if view_args is not None:
+            source, _ = view_args
+            if not isinstance(source, torch.fx.Node):
+                return None
+            return self.match_feed_main_source(source, output.meta.get("val"))
         if not is_shape_preserving_pointwise_node(output):
             return None
         matches = [
@@ -844,9 +846,9 @@ def output_plan(
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
     feed_main_plan = local_reduce.feed_main_output_plan(output_value)
-    if feed_main_plan is not None:
-        return feed_main_plan
-    return FlexGemmOutputPlan(output_value)
+    return (
+        FlexGemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -854,22 +856,20 @@ class FlexGemmEpilogueAnalysis:
     """Bundle the immutable analysis consumed by FlexGEMM lowering and emission.
 
     Attributes:
-        gemm: The validated GEMM node shared by lowering and emission.
         outputs: Classification of main, auxiliary, and local-reduction outputs.
         local_reduce: Grouped layouts and local-reduction matches from the FX graph.
     """
 
-    gemm: torch.fx.Node
     outputs: FlexGemmOutputPlan
     local_reduce: FlexGemmLocalReduceAnalysis
 
     @classmethod
     def from_graph_module(
-        cls, graph_module: torch.fx.GraphModule, gemm: torch.fx.Node
+        cls, graph_module: torch.fx.GraphModule
     ) -> "FlexGemmEpilogueAnalysis":
         """Run the one-pass local-reduction analysis and classify graph outputs."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
-        return cls(gemm, output_plan(graph_module, local_reduce), local_reduce)
+        return cls(output_plan(graph_module, local_reduce), local_reduce)
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
@@ -884,7 +884,6 @@ class FlexGemmEpilogueAnalysis:
 
 def analyze_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
-    gemm: torch.fx.Node,
 ) -> FlexGemmEpilogueAnalysis:
     """Analyze FlexGEMM body for output planning and epilogue code generation.
 
@@ -895,12 +894,11 @@ def analyze_flex_gemm_epilogue(
 
     Args:
         graph_module: FlexGEMM body graph containing GEMM and epilogue nodes.
-        gemm: The validated GEMM node within ``graph_module``.
 
     Returns:
         Output and local-reduction analysis shared by later lowering phases.
     """
-    return FlexGemmEpilogueAnalysis.from_graph_module(graph_module, gemm)
+    return FlexGemmEpilogueAnalysis.from_graph_module(graph_module)
 
 
 def gemm_node(
@@ -955,6 +953,7 @@ class FlexGemmEpilogueEmitter:
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
+        gemm_op: torch._ops.OpOverload,
         analysis: FlexGemmEpilogueAnalysis,
         epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
         *,
@@ -963,9 +962,8 @@ class FlexGemmEpilogueEmitter:
         self.graph_module = graph_module
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.fast_math = fast_math
-        self.gemm = analysis.gemm
+        self.gemm = gemm_node(graph_module, gemm_op)
         self.outputs = analysis.outputs
-        self.graph = analysis.local_reduce.graph
         self.kernel = FlexGemmCuteDSLKernel()
         self.env: dict[torch.fx.Node, Any] = {
             self.gemm: CuteDSLCSEVariable(
@@ -988,12 +986,10 @@ class FlexGemmEpilogueEmitter:
                 match=local_reduce_match, store=store, feeds_main=True
             ):
                 self.feed_main = local_reduce_match.value_node
-                normalized = self.graph.normalized_nodes.get(
-                    local_reduce_match.value_node
-                )
-                if not isinstance(normalized, NormalizedReduction):
+                reduction = reduction_from_node(local_reduce_match.value_node)
+                if reduction is None or not isinstance(reduction[0], torch.fx.Node):
                     raise AssertionError("feed-main plans require a matched reduction")
-                self.feed_main_input = normalized.source
+                self.feed_main_input = reduction[0]
                 self.aux = None if store is None else store.node
             case FlexGemmOutputLocalReducePlan(
                 store=FlexGemmLocalReduceStore(node=store_node)
@@ -1106,63 +1102,55 @@ class FlexGemmEpilogueEmitter:
         if lowered is not None:
             self.env[node] = lowered
             return
-        normalized = self.graph.normalized_nodes.get(node)
-        match normalized:
-            case NormalizedSqueeze():
-                lowered = lower_squeeze(node, normalized, self.env, self.store_sources)
-                if lowered is not None:
-                    self.env[node] = lowered
-                    self.propagate_physical_reduction(node, normalized.source)
-                    return
-            case NormalizedGetItem():
-                lowered = lower_getitem(node, normalized, self.env, self.store_sources)
-                if lowered is not None:
-                    self.env[node] = lowered
-                    self.propagate_physical_reduction(node, normalized.source)
-                    return
-            case NormalizedPrepareSoftmax():
-                self.env[node] = lower_prepare_softmax_online(
-                    node,
-                    normalized,
-                    self.env,
-                    self.kernel,
-                    self.grouped_tensors,
-                    self.store_sources,
-                )
-                return
-            case NormalizedView():
-                lowered = lower_view_or_reshape(
-                    node,
-                    normalized,
-                    self.env,
-                    self.kernel,
-                    self.grouped_tensors,
-                    self.active_grouped_layouts,
-                    self.store_sources,
-                    node is self.feed_main_input,
-                )
-                if lowered is not None:
-                    self.env[node] = lowered
-                    self.propagate_physical_reduction(node, normalized.source)
-                    return
-            case NormalizedReduction():
-                self.bind_reduction(
-                    node,
-                    lower_tensorssa_reduce(
-                        node,
-                        normalized,
-                        self.env,
-                        self.kernel,
-                        self.grouped_tensors,
-                        self.store_sources,
-                        self.physical_reductions,
-                    ),
-                )
-                return
-            case NormalizedUnsupportedReduction():
-                raise local_reduce_unsupported_tensorssa_error(
-                    normalized.target, value_only=True
-                )
+        lowered = lower_squeeze(node, self.env, self.store_sources)
+        if lowered is not None:
+            self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
+            return
+        lowered = lower_getitem(node, self.env, self.store_sources)
+        if lowered is not None:
+            self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
+            return
+        lowered = lower_prepare_softmax_online(
+            node,
+            self.env,
+            self.kernel,
+            self.grouped_tensors,
+            self.store_sources,
+        )
+        if lowered is not None:
+            self.env[node] = lowered
+            return
+        lowered = lower_view_or_reshape(
+            node,
+            self.env,
+            self.kernel,
+            self.grouped_tensors,
+            self.active_grouped_layouts,
+            self.store_sources,
+            node is self.feed_main_input,
+        )
+        if lowered is not None:
+            self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
+            return
+        lowered = lower_tensorssa_reduce(
+            node,
+            self.env,
+            self.kernel,
+            self.grouped_tensors,
+            self.store_sources,
+            self.physical_reductions,
+        )
+        if lowered is not None:
+            self.bind_reduction(node, lowered)
+            return
+        unsupported_reduction = unsupported_reduction_from_node(node)
+        if unsupported_reduction is not None:
+            raise local_reduce_unsupported_tensorssa_error(
+                unsupported_reduction, value_only=True
+            )
         is_shape_preserving = is_shape_preserving_pointwise_node(node)
         if is_shape_preserving and self.feed_main is None:
             if self.aux is None and any(
@@ -1287,6 +1275,7 @@ class FlexGemmEpilogueEmitter:
 
 def materialize_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
+    gemm_op: torch._ops.OpOverload,
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
     *,
@@ -1301,7 +1290,8 @@ def materialize_flex_gemm_epilogue(
 
     Args:
         graph_module: FlexGEMM body graph containing the GEMM and epilogue nodes.
-        analysis: Shared GEMM, output, and local-reduction analysis for the graph.
+        gemm_op: GEMM overload expected to occur exactly once in the body.
+        analysis: Shared output and local-reduction analysis for the graph.
         epilogue_arg_placeholders: Captured tensor placeholders exposed as
             generated epilogue parameters.
         fast_math: Whether supported CuTeDSL math operations may use approximate
@@ -1312,6 +1302,7 @@ def materialize_flex_gemm_epilogue(
     """
     return FlexGemmEpilogueEmitter(
         graph_module,
+        gemm_op,
         analysis,
         epilogue_arg_placeholders,
         fast_math=fast_math,

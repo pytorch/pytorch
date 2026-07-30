@@ -335,62 +335,6 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         mark_flex_gemm_body_gemm_node(graph_module, gemm_op)
         self.assertFalse(check(match))
 
-    def test_epilogue_graph_normalizes_selected_fx_nodes(self):
-        import operator
-
-        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueGraph
-        from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-            NormalizedGetItem,
-            NormalizedReduction,
-            NormalizedSqueeze,
-            NormalizedUnsupportedReduction,
-            NormalizedView,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        def body(x):
-            grouped = x.view(4, 2, 4)
-            reduced = grouped.sum(dim=-1, keepdim=True)
-            maximum = torch.max(grouped, dim=-1).values
-            return reduced.squeeze(-1), maximum, grouped.var(dim=-1)
-
-        graph_module = make_fx(body)(torch.randn(4, 8))
-        normalized_nodes = FlexGemmEpilogueGraph.from_graph_module(
-            graph_module
-        ).normalized_nodes
-        nodes = {
-            node.target: node
-            for node in graph_module.graph.nodes
-            if node.target is not operator.getitem
-        }
-        placeholder = next(
-            node for node in graph_module.graph.nodes if node.op == "placeholder"
-        )
-        view = nodes[torch.ops.aten.view.default]
-        reduction = nodes[torch.ops.aten.sum.dim_IntList]
-        maximum = nodes[torch.ops.aten.max.dim]
-        getitem = next(
-            node
-            for node in graph_module.graph.nodes
-            if node.target is operator.getitem and node.args == (maximum, 0)
-        )
-        squeeze = nodes[torch.ops.aten.squeeze.dim]
-        unsupported = nodes[torch.ops.aten.var.correction]
-        self.assertEqual(normalized_nodes[view], NormalizedView(placeholder, (4, 2, 4)))
-        self.assertEqual(
-            normalized_nodes[reduction],
-            NormalizedReduction(view, [-1], True, None, "sum"),
-        )
-        self.assertEqual(normalized_nodes[squeeze], NormalizedSqueeze(reduction))
-        self.assertEqual(normalized_nodes[getitem], NormalizedGetItem(maximum, 0))
-        self.assertEqual(
-            normalized_nodes[unsupported],
-            NormalizedUnsupportedReduction(
-                view,
-                str(torch.ops.aten.var.correction),
-            ),
-        )
-
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
         from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
@@ -1482,9 +1426,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
         match = FlexGemmLocalReduceMatch(aux, geometry)
-        analysis = FlexGemmLocalReduceAnalysis(
-            FlexGemmEpilogueGraph(dependencies={}, normalized_nodes={})
-        )
+        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}))
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
