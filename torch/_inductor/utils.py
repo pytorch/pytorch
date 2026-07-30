@@ -2297,35 +2297,25 @@ def use_flex_tdm_descriptor(
         if mat.get_name() in V.graph.unaligned_buffers:
             return False
 
-        if add_guards:
-            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-            strides_i = V.graph.sizevars.guard_int_seq(strides)
-            offset = V.graph.sizevars.guard_int(mat.get_layout().offset)
-        else:
-            sizes_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(size)
-                for size in sizes
-            ]
-            strides_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(stride)
-                for stride in strides
-            ]
-            offset = V.graph.sizevars.replace_backed_symbols_with_hints(
-                mat.get_layout().offset
-            )
+        # Keep layout expressions symbolic so alignment can be proven without
+        # specializing dynamic sequence lengths. Unprovable alignment
+        # conservatively disables TDM.
+        offset = mat.get_layout().offset
         itemsize = mat.get_dtype().itemsize
 
         def aligned(expr: sympy.Expr, alignment: int) -> bool:
             return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
 
-        if not V.graph.sizevars.statically_known_equals(strides_i[-1], 1):
+        # TMA_ALIGNMENT is the existing name for Triton's shared 16-byte tensor
+        # descriptor contract; AMD TDM descriptors have the same requirement.
+        if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
             return False
         if not aligned(offset * itemsize, TMA_ALIGNMENT):
             return False
-        if not aligned(sizes_i[-1] * itemsize, TMA_ALIGNMENT):
+        if not aligned(sizes[-1] * itemsize, TMA_ALIGNMENT):
             return False
         if not all(
-            aligned(stride * itemsize, TMA_ALIGNMENT) for stride in strides_i[:-1]
+            aligned(stride * itemsize, TMA_ALIGNMENT) for stride in strides[:-1]
         ):
             return False
 
@@ -2343,11 +2333,11 @@ def use_flex_tdm_descriptor(
                 return False
 
         return aligned(
-            sizes_i[-1] * itemsize,
+            sizes[-1] * itemsize,
             _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
         ) and all(
             aligned(stride * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES)
-            for stride in strides_i[:-1]
+            for stride in strides[:-1]
         )
 
     return all(
