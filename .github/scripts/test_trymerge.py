@@ -30,6 +30,7 @@ from trymerge import (
     get_classifications,
     get_docker_build_checks,
     get_drci_classifications,
+    get_topmost_docker_pr,
     gh_get_team_members,
     GitHubPR,
     is_docker_affecting_files,
@@ -1460,12 +1461,7 @@ class TestTimelineFunctions(TestCase):
 
 
 class TestDockerCiGates(TestCase):
-    """Unit tests for the pure helpers behind the docker-image merge gates.
-
-    The gate functions themselves (check_docker_builds_ready /
-    check_no_docker_merge_skew) are exercised through a real GitHubPR backed by
-    recorded fixtures; that coverage is left as a follow-up.
-    """
+    """Unit tests for the docker-image merge gates."""
 
     def test_is_docker_affecting_files(self) -> None:
         self.assertTrue(is_docker_affecting_files([".ci/docker/build.sh"]))
@@ -1498,6 +1494,57 @@ class TestDockerCiGates(TestCase):
                 "docker-builds / docker-build (pytorch-linux-jammy)",
                 "docker-builds",
             },
+        )
+
+    def test_get_topmost_docker_pr(self) -> None:
+        lower_docker_pr = mock.MagicMock()
+        lower_docker_pr.is_docker_affecting.return_value = True
+        middle_pr = mock.MagicMock()
+        middle_pr.is_docker_affecting.return_value = False
+        top_docker_pr = mock.MagicMock()
+        top_docker_pr.is_docker_affecting.return_value = True
+
+        self.assertIs(
+            get_topmost_docker_pr([lower_docker_pr, middle_pr]), lower_docker_pr
+        )
+        self.assertIs(
+            get_topmost_docker_pr([lower_docker_pr, middle_pr, top_docker_pr]),
+            top_docker_pr,
+        )
+        self.assertIsNone(get_topmost_docker_pr([middle_pr]))
+
+    @mock.patch("trymerge.check_docker_builds_ready")
+    @mock.patch("trymerge.get_ghstack_prs")
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    def test_merge_into_gates_lower_ghstack_docker_pr(
+        self,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_check_docker_builds_ready: mock.MagicMock,
+    ) -> None:
+        lower_pr = mock.MagicMock(spec=GitHubPR)
+        lower_pr.is_closed.return_value = False
+        lower_pr.is_docker_affecting.return_value = True
+        top_pr = mock.MagicMock(spec=GitHubPR)
+        top_pr.is_ghstack_pr.return_value = True
+        top_pr.is_closed.return_value = False
+        top_pr.is_docker_affecting.return_value = False
+        top_pr.is_dependabot_pr.return_value = False
+        top_pr.merge_changes_locally.side_effect = RuntimeError("stop after gates")
+        repo = mock.MagicMock(spec=GitRepo)
+        ghstack_prs = [(lower_pr, "lower_rev"), (top_pr, "top_rev")]
+        mock_get_ghstack_prs.return_value = ghstack_prs
+        mock_find_matching_merge_rule.return_value = (None, [], [], {})
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(top_pr, repo, comment_id=1)
+
+        mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
+        mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
+        top_pr.merge_changes_locally.assert_called_once_with(
+            repo, False, 1, ghstack_prs=ghstack_prs
         )
 
 

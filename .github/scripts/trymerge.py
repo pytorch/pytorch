@@ -1221,14 +1221,16 @@ class GitHubPR:
         skip_mandatory_checks: bool,
         comment_id: int | None = None,
         skip_all_rule_checks: bool = False,
+        ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
     ) -> list[GitHubPR]:
         if not self.is_ghstack_pr():
             raise AssertionError(
                 f"merge_ghstack_into called on non-ghstack PR #{self.pr_num}"
             )
-        ghstack_prs = get_ghstack_prs(
-            repo, self, open_only=False
-        )  # raises error if out of sync
+        if ghstack_prs is None:
+            ghstack_prs = get_ghstack_prs(
+                repo, self, open_only=False
+            )  # raises error if out of sync
         pr_dependencies = []
         for pr, rev in ghstack_prs:
             if pr.is_closed():
@@ -1326,9 +1328,19 @@ class GitHubPR:
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             ignore_current_checks=ignore_current_checks,
         )
-        # For PRs that touch the CI docker images, require that the images have
-        # been pre-built by ciflow/docker.  Enforced even on force merges.
-        check_docker_builds_ready(self)
+        ghstack_prs: list[tuple[GitHubPR, str]] | None = None
+        prs_to_merge = [self]
+        if self.is_ghstack_pr():
+            ghstack_prs = get_ghstack_prs(repo, self, open_only=False)
+            prs_to_merge = [pr for pr, _ in ghstack_prs if not pr.is_closed()]
+
+        # A ghstack merge lands all open PRs below this one. Use the topmost
+        # docker-affecting PR because its cumulative head has the final docker
+        # tree for which images must have been built. Enforced even on force
+        # merges.
+        docker_pr = get_topmost_docker_pr(prs_to_merge)
+        if docker_pr is not None:
+            check_docker_builds_ready(docker_pr)
 
         # Dependabot commits are authored/signed by the bot; merge them through
         # GitHub's squash+merge API so that signature is preserved and dependabot
@@ -1338,12 +1350,16 @@ class GitHubPR:
             merge_commit_sha = self.merge_via_github_api(dry_run)
         else:
             additional_merged_prs = self.merge_changes_locally(
-                repo, skip_mandatory_checks, comment_id
+                repo,
+                skip_mandatory_checks,
+                comment_id,
+                ghstack_prs=ghstack_prs,
             )
 
             # Now that the merge commit exists locally, make sure it doesn't
             # reference docker images that were never built due to a land race.
-            check_no_docker_merge_skew(repo, self)
+            if docker_pr is not None:
+                check_no_docker_merge_skew(repo, docker_pr)
 
             repo.push(self.default_branch(), dry_run)
             # When the merge process reaches this part, we can assume that the
@@ -1413,6 +1429,7 @@ class GitHubPR:
         comment_id: int | None = None,
         branch: str | None = None,
         skip_all_rule_checks: bool = False,
+        ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
     ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
@@ -1429,6 +1446,7 @@ class GitHubPR:
                 skip_mandatory_checks,
                 comment_id=comment_id,
                 skip_all_rule_checks=skip_all_rule_checks,
+                ghstack_prs=ghstack_prs,
             )
 
         msg = self.gen_commit_message()
@@ -1741,6 +1759,11 @@ def find_matching_merge_rule(
     raise MergeRuleFailedError(reject_reason, rule)
 
 
+def get_topmost_docker_pr(prs: list[GitHubPR]) -> GitHubPR | None:
+    """Find the highest docker-affecting PR in a bottom-to-top stack."""
+    return next((pr for pr in reversed(prs) if pr.is_docker_affecting()), None)
+
+
 def check_docker_builds_ready(pr: GitHubPR) -> None:
     """Block merge of a docker-affecting PR unless its docker images have been
     pre-built.
@@ -1813,12 +1836,13 @@ def check_no_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
         return
 
     # HEAD is the freshly created (squash/cherry-picked) merge commit.
+    # A wholesale deletion of the directory intentionally fails this lookup.
     merge_commit_tree = repo.rev_parse(f"HEAD:{DOCKER_CI_PATH}")
 
     # Compare against the tree that CI actually built and tested on the PR head.
     pr_head_sha = pr.last_commit_sha()
-    # The PR head commit may not be present locally (e.g. for ghstack), so make
-    # sure we have the object before reading its tree.
+    # The PR head commit may not be present locally (for example, for a fork
+    # PR), so make sure we have the object before reading its tree.
     repo.fetch(pr_head_sha)
     pr_head_tree = repo.rev_parse(f"{pr_head_sha}:{DOCKER_CI_PATH}")
 
