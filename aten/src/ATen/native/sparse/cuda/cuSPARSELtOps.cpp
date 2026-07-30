@@ -596,7 +596,7 @@ at::Tensor _cslt_sparse_mm(
       (int)split_k,
       (int)split_k_mode,
       false);
-  return std::get<0>(result);
+  return std::get<0>(std::move(result));
 }
 
 int64_t _cslt_sparse_mm_search(
