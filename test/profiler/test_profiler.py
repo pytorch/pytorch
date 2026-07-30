@@ -4389,7 +4389,6 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
                 lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
 
-    @skipIfRocm(msg="Typed Kineto metadata coverage is backend-specific")
     def test_typed_metadata_matches_chrome_trace(self):
         target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
 
