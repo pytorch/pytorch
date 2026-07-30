@@ -34,6 +34,7 @@ from ...kernel.gemm_epilogue_ir import (
     grouped_reduction_ir,
     single_source_affine_ir,
 )
+from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -269,6 +270,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 store,
                 gemm_node.get_name(),
                 group,
+                gemm_node.get_dtype(),
             )
             if store is not None
             else None
@@ -788,16 +790,31 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 ):
                     removed_buffers_with_gemm.add(original_buffer_name)
 
-                if evt_nodes and feed_main is None:
-                    reads, writes, var_renames, evt_code = (
-                        CutlassEVTCodegen.ir_to_evt_python_code(
-                            original_buffer_name,
-                            evt_nodes,
-                            removed_buffers_with_gemm,
-                            fn_name=EPILOGUE_FN_NAME,
-                            as_standalone_function=True,
+                if evt_nodes:
+                    evt_buffers = [
+                        node.node
+                        for node in evt_nodes
+                        if isinstance(node.node, ComputedBuffer)
+                    ]
+                    try:
+                        reads, writes, var_renames, evt_code = (
+                            LoopIRCuteDSLCodegen.from_buffers(
+                                original_buffer_name,
+                                evt_buffers,
+                                removed_buffers_with_gemm,
+                                EPILOGUE_FN_NAME,
+                            )
                         )
-                    )
+                    except NotImplementedError:
+                        reads, writes, var_renames, evt_code = (
+                            CutlassEVTCodegen.ir_to_evt_python_code(
+                                original_buffer_name,
+                                list(evt_nodes),
+                                removed_buffers_with_gemm,
+                                fn_name=EPILOGUE_FN_NAME,
+                                as_standalone_function=True,
+                            )
+                        )
                     epilogue_fn_code = evt_code
                     epilogue_reads = reads
                     epilogue_writes = writes
