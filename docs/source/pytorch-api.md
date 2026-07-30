@@ -89,6 +89,7 @@ torch.utils.tensorboard <tensorboard>
 torch.utils.module_tracker <module_tracker>
 type_info
 torch.__config__ <config_mod>
+torch.__version__ <torch>
 torch.__future__ <future_mod>
 logging
 torch_environment_variables
