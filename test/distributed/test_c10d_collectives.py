@@ -145,6 +145,24 @@ class AbstractCollectivesTest(C10dBackendTest):
             for rank, result in enumerate(output):
                 self.assertEqual(result, self._expected_tensor(count, dtype, rank))
 
+    def _test_gather_single(self, count, dtype, async_op):
+        tensor = self._tensor(count, dtype)
+        output = (
+            torch.empty(self.world_size * count, dtype=dtype, device=self.device)
+            if self.rank == 0
+            else None
+        )
+        work = dist.gather_single(tensor, output, dst=0, async_op=async_op)
+        self._wait(work, async_op)
+        if self.rank == 0:
+            expected = torch.cat(
+                [
+                    self._expected_tensor(count, dtype, rank)
+                    for rank in range(self.world_size)
+                ]
+            )
+            self.assertEqual(output, expected)
+
     def _test_scatter(self, count, dtype, async_op):
         output = torch.empty(count, dtype=dtype, device=self.device)
         inputs = (
@@ -210,6 +228,35 @@ class AbstractCollectivesTest(C10dBackendTest):
     def test_gather(self):
         self._init_pg()
         self._test_transport_matrix(self._test_gather)
+
+    def test_gather_single(self):
+        self._init_pg()
+        if not self.supports_gather_single:
+            with self.assertRaisesRegex(RuntimeError, "does not support gather_single"):
+                self._test_gather_single(4, torch.float32, False)
+            return
+        self._test_transport_matrix(self._test_gather_single)
+
+    def test_gather_into_tensor_deprecated(self):
+        if not self.supports_gather_single:
+            self.skipTest(f"{self.backend_name} does not support gather_single")
+        self._init_pg()
+        tensor = self._tensor(4, torch.float32)
+        output = (
+            torch.empty(self.world_size * 4, device=self.device)
+            if self.rank == 0
+            else None
+        )
+        with self.assertWarnsRegex(FutureWarning, "gather_into_tensor` is deprecated"):
+            dist.gather_into_tensor(tensor, output, dst=0)
+        if self.rank == 0:
+            expected = torch.cat(
+                [
+                    self._expected_tensor(4, torch.float32, rank)
+                    for rank in range(self.world_size)
+                ]
+            )
+            self.assertEqual(output, expected)
 
     def test_scatter(self):
         self._init_pg()
