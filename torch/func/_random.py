@@ -446,10 +446,10 @@ def _materialized_shards_(
         local_sizes,
     )
     if distribution == "normal":
-        if params[1] < 0:
+        if not params[1] >= 0:
             raise ValueError(f"normal expects std >= 0.0, but found std {params[1]}")
     elif distribution == "uniform":
-        if params[0] > params[1]:
+        if not params[0] <= params[1]:
             raise ValueError(
                 f"uniform expects low <= high, but found {params[0]} > {params[1]}"
             )
@@ -491,6 +491,51 @@ def _materialized_shards_(
     return result
 
 
+def _fused_shards_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    *,
+    global_shape: Sequence[int],
+    global_offsets: Sequence[Sequence[int]],
+    local_offsets: Sequence[Sequence[int]],
+    local_sizes: Sequence[Sequence[int]],
+    distribution: str,
+    params: tuple[float, float],
+) -> torch.Tensor:
+    shape, global_rects, local_rects, sizes = _validate_shard_metadata(
+        key,
+        result,
+        global_shape,
+        global_offsets,
+        local_offsets,
+        local_sizes,
+    )
+    if distribution == "normal":
+        if not params[1] >= 0:
+            raise ValueError(f"normal expects std >= 0.0, but found std {params[1]}")
+        distribution_id = 0
+    elif distribution == "uniform":
+        if not params[0] <= params[1]:
+            raise ValueError(
+                f"uniform expects low <= high, but found {params[0]} > {params[1]}"
+            )
+        distribution_id = 1
+    else:
+        raise ValueError(f"unsupported distribution: {distribution}")
+
+    return torch.ops.aten._philox_keyed_distribution_shards_(
+        result,
+        key,
+        shape,
+        tuple(value for rectangle in global_rects for value in rectangle),
+        tuple(value for rectangle in local_rects for value in rectangle),
+        tuple(value for rectangle in sizes for value in rectangle),
+        len(sizes),
+        distribution_id,
+        params,
+    )
+
+
 def normal_shards_(
     key: torch.Tensor,
     result: torch.Tensor,
@@ -509,7 +554,10 @@ def normal_shards_(
     placed in ``result``. Padding and holes outside the rectangles are not
     modified.
     """
-    return _materialized_shards_(
+    implementation = (
+        _fused_shards_ if result.device.type == "cuda" else _materialized_shards_
+    )
+    return implementation(
         key,
         result,
         global_shape=global_shape,
@@ -539,7 +587,10 @@ def uniform_shards_(
     placed in ``result``. Padding and holes outside the rectangles are not
     modified.
     """
-    return _materialized_shards_(
+    implementation = (
+        _fused_shards_ if result.device.type == "cuda" else _materialized_shards_
+    )
+    return implementation(
         key,
         result,
         global_shape=global_shape,
