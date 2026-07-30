@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import unittest
 import weakref
 from types import SimpleNamespace
 from unittest import mock
@@ -31,6 +32,7 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.utils._triton import has_triton_tensor_descriptor_host_tma
 
 
 if HAS_XPU_AND_TRITON:
@@ -151,6 +153,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
             pass
 
+    @skipIfRocm
     def test_global_scratch_allocation(self):
         import types
 
@@ -1035,6 +1038,108 @@ class TestFastCudaLauncherCompileResult(TestCase):
                 any(results),
                 "_FastCudaLauncher should not be built when config is disabled",
             )
+
+    @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires Triton TensorDescriptor TMA support",
+    )
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_device_tma_gemm_falls_back_from_fast_launcher(self):
+        """A global-scratch kernel repeatedly uses the regular static launcher."""
+
+        @triton.jit
+        def device_tma_gemm(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M: tl.constexpr,
+            N: tl.constexpr,
+            K: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+            BLOCK_K: tl.constexpr,
+        ):
+            a_desc = tl.make_tensor_descriptor(
+                a_ptr,
+                [M, K],
+                [K, 1],
+                [BLOCK_M, BLOCK_K],
+            )
+            b_desc = tl.make_tensor_descriptor(
+                b_ptr,
+                [N, K],
+                [K, 1],
+                [BLOCK_N, BLOCK_K],
+            )
+            c_desc = tl.make_tensor_descriptor(
+                c_ptr,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+
+            pid_m = tl.program_id(0)
+            pid_n = tl.program_id(1)
+            offset_m = pid_m * BLOCK_M
+            offset_n = pid_n * BLOCK_N
+            accumulator = tl.zeros((BLOCK_M, BLOCK_N), tl.float32)
+            for offset_k in range(0, K, BLOCK_K):
+                a = a_desc.load([offset_m, offset_k])
+                b = b_desc.load([offset_n, offset_k])
+                accumulator = tl.dot(a, b.T, accumulator)
+            c_desc.store([offset_m, offset_n], accumulator.to(tl.bfloat16))
+
+        M = 64
+        N = 64
+        K = 32
+        BLOCK_M = 32
+        BLOCK_N = 32
+        BLOCK_K = 32
+
+        @torch.compile(fullgraph=True)
+        def gemm(a, b):
+            out = torch.empty((M, N), device=a.device, dtype=a.dtype)
+            device_tma_gemm[(M // BLOCK_M, N // BLOCK_N)](
+                a,
+                b,
+                out,
+                M=M,
+                N=N,
+                K=K,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                BLOCK_K=BLOCK_K,
+            )
+            return out
+
+        from triton.runtime._allocation import _allocator
+
+        previous_allocator = _allocator.get()
+        patcher, results = self._patch_build_fast_launcher()
+        triton.set_allocator(
+            lambda size, alignment, stream: torch.empty(
+                size, dtype=torch.uint8, device="cuda"
+            )
+        )
+        try:
+            with patcher:
+                for _ in range(3):
+                    a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
+                    b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
+                    torch.testing.assert_close(
+                        gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2
+                    )
+        finally:
+            triton.set_allocator(previous_allocator)
+
+        self.assertTrue(results, "_build_fast_launcher was not reached")
+        self.assertFalse(
+            any(results),
+            "global-scratch kernels must use the regular static launcher",
+        )
 
 
 if __name__ == "__main__":

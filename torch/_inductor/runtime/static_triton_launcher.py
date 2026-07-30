@@ -437,6 +437,8 @@ class StaticallyLaunchedTritonKernel:
                     if hasattr(allocator, "get"):
                         allocator = allocator.get()
                     global_scratch = allocator(
+                        # num_ctas == 1 is required above, so it drops out of
+                        # Triton's grid * num_ctas * global_scratch_size formula.
                         grid_x * grid_y * grid_z * self.global_scratch_size,
                         self.global_scratch_align,
                         stream,
