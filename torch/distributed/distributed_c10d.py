@@ -2980,7 +2980,10 @@ def destroy_process_group(
                     if id(comm) not in finalized_comm_ids:
                         comm.finalize()
                         finalized_comm_ids.add(id(comm))
-            _world.comms.clear()
+            if finalized_comm_ids:
+                _world.comms[:] = [
+                    comm for comm in _world.comms if id(comm) not in finalized_comm_ids
+                ]
         pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
