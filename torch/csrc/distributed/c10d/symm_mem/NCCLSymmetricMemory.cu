@@ -475,6 +475,55 @@ size_t NCCLSymmetricMemory::get_window_offset() {
   return pai_->buffer_offset_ + offset_;
 }
 
+#ifdef NCCL_HAS_HOST_CFT
+// Both CFT queries only succeed once NCCL has created the communicator's
+// logical endpoints. With `hostCftMode` enabled that happens during the first
+// `ncclCommWindowRegister`, i.e. during rendezvous; otherwise the caller would
+// have had to build a CFT-enabled `ncclDevComm` first.
+static constexpr const char* kHostCftHint =
+    "Host-side CFT requires CFT-capable hardware and a process group whose "
+    "communicator was created with `host_cft_mode` enabled "
+    "(ProcessGroupNCCL.NCCLConfig.host_cft_mode).";
+#endif // NCCL_HAS_HOST_CFT
+
+NCCLCftHandle NCCLSymmetricMemory::get_handler(int peer) {
+#ifdef NCCL_HAS_HOST_CFT
+  TORCH_CHECK(
+      peer >= 0 && peer < world_size_,
+      "NCCLSymmetricMemory::get_handler: invalid peer ",
+      peer);
+  ncclCftLeId le_id = 0;
+  size_t le_offset = 0;
+  C10D_NCCL_CHECK(
+      ncclGetPeerDeviceLeInfo(
+          pai_->combined_win_, get_window_offset(), peer, &le_id, &le_offset),
+      c10::str(
+          "ncclGetPeerDeviceLeInfo failed for peer ", peer, ". ", kHostCftHint));
+  return NCCLCftHandle{le_id, le_offset};
+#else
+  TORCH_CHECK(
+      false, "NCCL host-side CFT is not supported. Requires NCCL >= 2.31.0");
+#endif
+}
+
+NCCLCftHandle NCCLSymmetricMemory::get_multimem_handler() {
+#ifdef NCCL_HAS_HOST_CFT
+  // Unlike the unicast query, this one may still have to bind the multicast
+  // team (and barrier over the group) if the endpoint wasn't created eagerly.
+  c10::cuda::CUDAGuard guard(device_idx_);
+  ncclCftLeId le_id = 0;
+  size_t le_offset = 0;
+  C10D_NCCL_CHECK(
+      ncclGetMultimemDeviceLeInfo(
+          pai_->combined_win_, get_window_offset(), &le_id, &le_offset),
+      c10::str("ncclGetMultimemDeviceLeInfo failed. ", kHostCftHint));
+  return NCCLCftHandle{le_id, le_offset};
+#else
+  TORCH_CHECK(
+      false, "NCCL host-side CFT is not supported. Requires NCCL >= 2.31.0");
+#endif
+}
+
 std::string NCCLSymmetricMemory::get_group_name() {
   return pai_->group_name_;
 }
