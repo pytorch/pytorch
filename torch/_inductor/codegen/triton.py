@@ -6211,20 +6211,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         dtype = value.dtype
         assert dtype is not None  # noqa: S101
-        is_float8 = dtype in TRITON_FLOAT8_DTYPES
-        value_expr = str(value)
-        if is_float8:
-            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
-        reshaped = self._reshape_expr(value, reshape_shape, value_expr=value_expr)
-        if not is_float8:
-            self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
-            return
-        raw_part_names = [f"{name}_uint8" for name in part_names]
-        self.compute.writeline(f"{', '.join(raw_part_names)} = tl.split({reshaped})")
-        for raw_name, part_name in zip(raw_part_names, part_names):
-            self.compute.writeline(
-                f"{part_name} = {raw_name}.to({triton_type(dtype)}, bitcast=True)"
-            )
+        reshaped = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        self._emit_recursive_split(reshaped, part_names, reshape_shape, dtype)
+
+    def emit_split_via_reshape_permute(
+        self,
+        value: CSEVariable,
+        reshape_shape: Sequence[sympy.Expr | int | str],
+        permute_dims: Sequence[int],
+        part_names: Sequence[str],
+    ) -> None:
+        dtype = value.dtype
+        assert dtype is not None  # noqa: S101
+        reshaped = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        permuted = f"tl.permute({reshaped}, ({', '.join(map(str, permute_dims))}))"
+        permuted_shape = tuple(reshape_shape[i] for i in permute_dims)
+        self._emit_recursive_split(permuted, part_names, permuted_shape, dtype)
 
     def emit_broadcast_via_reshape(
         self,

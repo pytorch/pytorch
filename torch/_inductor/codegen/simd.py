@@ -1509,7 +1509,15 @@ class _IterationSpace:
     values: Sequence[sympy.Expr]
 
 
-RemappedRangeValue = CSEVariable | tuple[CSEVariable, ...]
+@dataclasses.dataclass(frozen=True)
+class _ContiguousSubParentRemappedValue:
+    parts: tuple[CSEVariable, ...]
+    child_extent: sympy.Expr
+
+
+RemappedRangeValue = (
+    CSEVariable | tuple[CSEVariable, ...] | _ContiguousSubParentRemappedValue
+)
 
 
 def _select_lane(
@@ -1526,14 +1534,40 @@ def _resolve_remapped_value(
     value: RemappedRangeValue,
     index: sympy.Expr,
     name: str,
+    kernel: SIMDKernel[Any],
 ) -> CSEVariable:
+    if isinstance(value, _ContiguousSubParentRemappedValue):
+        factor = len(value.parts)
+        # The lane is the constant chunk offset; fall back to symbolic
+        # simplification for equivalent forms that keep the offset in the index.
+        offset = sympy_subs(index, dict.fromkeys(index.free_symbols, 0))
+        for candidate, simplify in (
+            (offset, V.graph.sizevars.simplify),
+            (index, kernel.simplify_indexing),
+        ):
+            lane = simplify(
+                FloorDiv(
+                    sympy.Mod(candidate, factor * value.child_extent),
+                    value.child_extent,
+                )
+            )
+            part = _select_lane(value.parts, lane)
+            if part is not None:
+                return part
+        raise AssertionError(
+            "sub-parent planner invariant violated: contiguous load "
+            f"for {name!r} has non-constant lane for index {index}"
+        )
     if not isinstance(value, tuple):
         return value
     lane = V.graph.sizevars.simplify(sympy.Mod(index, len(value)))
     part = _select_lane(value, lane)
     if part is not None:
         return part
-    raise AssertionError(f"sub-parent load for {name!r} has non-constant lane {lane}")
+    raise AssertionError(
+        "sub-parent planner invariant violated: "
+        f"load for {name!r} has non-constant lane {lane}"
+    )
 
 
 @dataclasses.dataclass
@@ -1920,7 +1954,7 @@ class _GroupedReductionLayout:
             numel=FloorDiv(self.group_tree.numel, factor),
             block_size=FloorDiv(self.group_tree.block_size(), factor),
             block_offset=FloorDiv(self.group_tree.block_offset(), factor),
-            name_suffix=f"half{factor}",
+            name_suffix=f"lane{factor}",
             named_constants=self._grouped_axis_named_constants(self.group_tree),
         )
         return _DerivedIterationFamily(
@@ -2014,27 +2048,37 @@ class _GroupedReductionLayout:
             return True
         if not self.is_parent_tile_shaped(value):
             return False
-        interleaved = scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
-        if source_layout is not interleaved:
+        if source_layout is None:
             return False
+        source_layout_kind = scheduler.NestedReduction.SubParentSourceLayout
         sub_parent_tree = family.sub_parent_tree()
         child_block = sub_parent_tree.block_size_str()
         factor_dim = str(factor)
         shape = value.shape
         assert shape is not None  # noqa: S101
-        if len(shape) == 2:
-            passthrough_dim = str(shape[1 - self.parent_axis])
-            reshape_shape = (passthrough_dim, child_block, factor_dim)
-            part_shape = (passthrough_dim, child_block)
-        else:
-            reshape_shape = (child_block, factor_dim)
-            part_shape = (child_block,)
+        # parent_dim() only accepts rank-1/2 tiles.
+        prefix = (str(shape[1 - self.parent_axis]),) if len(shape) == 2 else ()
         parts = tuple(
-            kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
+            kernel.cse.newvar(dtype=value.dtype, shape=(*prefix, child_block))
             for _ in range(factor)
         )
-        kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
-        family.remapped_values[name] = parts
+        part_names = tuple(map(str, parts))
+        if source_layout is source_layout_kind.CONTIGUOUS:
+            reshape_shape = (*prefix, factor_dim, child_block)
+            permute_dims = (0, 2, 1) if prefix else (1, 0)
+            kernel.emit_split_via_reshape_permute(
+                value, reshape_shape, permute_dims, part_names
+            )
+            family.remapped_values[name] = _ContiguousSubParentRemappedValue(
+                parts,
+                FloorDiv(self.local_reduction_size, factor),
+            )
+        else:
+            assert source_layout is source_layout_kind.INTERLEAVED  # noqa: S101
+            kernel.emit_split_via_reshape(
+                value, (*prefix, child_block, factor_dim), part_names
+            )
+            family.remapped_values[name] = parts
         return True
 
     def _broadcast_value_to_axis_resolution(
@@ -2220,7 +2264,7 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         value = self._family.remapped_values.get(name)
         if value is not None:
-            return _resolve_remapped_value(value, index, name)
+            return _resolve_remapped_value(value, index, name, self._kernel)
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(self._kernel):
             value = self._inner.load(name, remapped_index)
@@ -2239,35 +2283,6 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(k):
             self._inner.store(name, remapped_index, value, mode=mode)
-
-
-def _materialize_sub_parent_source_load(
-    kernel: TritonKernel,
-    layout: _GroupedReductionLayout,
-    sub_parent_family: _DerivedIterationFamily,
-    sub_parent_factor: int,
-    source_layouts: dict[str, scheduler.NestedReduction.SubParentSourceLayout],
-    name: str,
-    value: CSEVariable,
-) -> None:
-    source_layout = source_layouts.get(name)
-    if source_layout is None:
-        return
-    if name in sub_parent_family.remapped_values:
-        return
-    materialized = layout.materialize_value_at_sub_parent_resolution(
-        kernel,
-        sub_parent_family,
-        sub_parent_factor,
-        name,
-        value,
-        source_layout,
-    )
-    if not materialized:
-        raise AssertionError(
-            "sub-parent stage could not materialize planned "
-            f"parent-tile load for {name!r}"
-        )
 
 
 class _SubParentPointwiseRemapHandler(_PointwiseRemapHandler):
@@ -2625,8 +2640,24 @@ class SIMDScheduling(BaseScheduling):
         epilogue_nodes = plan.epilogue_nodes
         assert self.scheduler is not None  # noqa: S101
         renames = self.scheduler.mutation_renames
+        nested_reduction = scheduler.NestedReduction
         epilogue_node_set = OrderedSet(epilogue_nodes)
-        if not scheduler.NestedReduction._sub_parent_epilogue_outputs_unread(
+        source_names = OrderedSet(
+            renames.get(name, name) for name, _layout in plan.source_layouts
+        )
+        planned_source_deps = tuple(
+            dep.rename(renames)
+            for node in plan.reduction_nodes
+            if node.is_reduction()
+            for dep in node.read_writes.reads
+            if isinstance(dep, MemoryDep)
+            and renames.get(dep.name, dep.name) in source_names
+        )
+        if not nested_reduction._sub_parent_epilogue_source_loads_are_unambiguous(
+            nodes, epilogue_node_set, planned_source_deps, renames
+        ):
+            return True
+        if not nested_reduction._sub_parent_epilogue_outputs_unread(
             nodes, epilogue_node_set, renames
         ):
             return True
@@ -2636,23 +2667,14 @@ class SIMDScheduling(BaseScheduling):
             if node.is_reduction()
             for dep in node.read_writes.reads
         )
-        for node in nodes:
-            if node in epilogue_node_set:
-                continue
-            if not node.is_reduction():
-                _, (node_numel, node_rnumel) = node.group
-                if not (
-                    V.graph.sizevars.statically_known_equals(node_numel, numel)
-                    and V.graph.sizevars.statically_known_equals(node_rnumel, 1)
-                ):
-                    return True
-        nested_reduction = scheduler.NestedReduction
-        source_free = nested_reduction._sub_parent_siblings_are_source_free
-        if not source_free(
-            nodes, epilogue_node_set, numel, parent_source_names, renames
-        ):
-            return True
-        return False
+        return not nested_reduction._sub_parent_siblings_are_source_free(
+            nodes,
+            epilogue_node_set,
+            numel,
+            parent_source_names,
+            renames,
+            reject_group_mismatch=True,
+        )
 
     def _sub_parent_epilogue_plan(
         self,
@@ -3627,7 +3649,10 @@ class SIMDScheduling(BaseScheduling):
         sub_parent_factor = sub_parent_epilogue_plan.sub_parent_factor
         parent_rnumel = sub_parent_epilogue_plan.parent_rnumel
         sub_parent_source_layouts = dict(sub_parent_epilogue_plan.source_layouts)
-        if not V.graph.sizevars.statically_known_equals(numel, 1):
+        if not V.graph.sizevars.statically_known_equals(numel, 1) and not any(
+            layout is scheduler.NestedReduction.SubParentSourceLayout.CONTIGUOUS
+            for layout in sub_parent_source_layouts.values()
+        ):
             # Keep enough rows per program to amortize the parent-tile load and
             # epilogue split for the standalone packing pattern.
             numel_static = V.graph.sizevars.simplify(numel)
@@ -3705,16 +3730,14 @@ class SIMDScheduling(BaseScheduling):
         if len(nodes) == 0:
             return
 
-        has_half_reduction_epilogue = (
-            self._find_sub_parent_epilogue_plan(nodes) is not None
-        )
+        has_sub_parent_epilogue = self._find_sub_parent_epilogue_plan(nodes) is not None
         if torch._inductor.config.triton.coalesce_tiling_analysis:
             if len(nodes) != len(node.get_nodes()):
                 if not self.scheduler:
                     raise AssertionError("expected self.scheduler to be set")
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
             coalesce_analysis = (
-                None if has_half_reduction_epilogue else node.get_coalesce_analysis()
+                None if has_sub_parent_epilogue else node.get_coalesce_analysis()
             )
         else:
             coalesce_analysis = None
