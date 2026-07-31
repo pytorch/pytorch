@@ -79,8 +79,41 @@ log = logging.getLogger(__name__)
 
 
 # =============================== toolchain ===============================
+def _split_compiler_command(compiler: str) -> list[str]:
+    if _IS_WINDOWS:
+        return [compiler]
+    command = shlex.split(compiler)
+    if not command:
+        raise ValueError("empty compiler command")
+    return command
+
+
+def _compiler_command(compiler: str, *args: str) -> list[str]:
+    return [*_split_compiler_command(compiler), *args]
+
+
+@functools.cache
+def _compiler_version_string(cpp_compiler: str) -> str:
+    try:
+        return (
+            subprocess.check_output(
+                _compiler_command(cpp_compiler, "--version"),
+                stderr=subprocess.DEVNULL,
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, ValueError):
+        return ""
+
+
+def _compiler_version_first_line(cpp_compiler: str) -> str:
+    version_string = _compiler_version_string(cpp_compiler)
+    return version_string.splitlines()[0] if version_string else ""
+
+
 @functools.lru_cache(1)
-def cpp_compiler_search(search: str) -> str:
+def cpp_compiler_search(search: Sequence[str | None]) -> str:
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
 
     for cxx in search:
@@ -101,9 +134,14 @@ def cpp_compiler_search(search: str) -> str:
                 )
                 with lock:
                     cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
+            subprocess.check_output(_compiler_command(cxx, "--version"))
             return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
+        except (
+            subprocess.SubprocessError,
+            FileNotFoundError,
+            ImportError,
+            ValueError,
+        ):
             continue
     raise exc.InvalidCxxCompiler
 
@@ -140,7 +178,9 @@ def check_compiler_exist_windows(compiler: str) -> None:
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
     try:
-        subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
+        subprocess.check_output(
+            _compiler_command(compiler, "/help"), stderr=subprocess.STDOUT
+        )
     except FileNotFoundError as e:
         raise exc.InvalidCxxCompiler(compiler) from e
     except subprocess.SubprocessError:
@@ -344,7 +384,9 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     """
     try:
         out = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, text=True
+            _compiler_command(compiler, "-v"),
+            stderr=subprocess.STDOUT,
+            text=True,
         )
     except FileNotFoundError as e:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from e
@@ -482,7 +524,7 @@ def batch_convert_cubins_to_obj(
             )
 
     subprocess.run(
-        [cpp_compiler, "-c", asm_path, "-o", obj_path],
+        _compiler_command(cpp_compiler, "-c", asm_path, "-o", obj_path),
         capture_output=True,
         text=True,
         check=True,
@@ -492,23 +534,30 @@ def batch_convert_cubins_to_obj(
 
 @functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
-    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
+    first_line = _compiler_version_first_line(cpp_compiler)
+    return bool(re.search(r"\bApple\b.*\bclang\b", first_line))
 
 
 @functools.cache
 def _is_clang(cpp_compiler: str) -> bool:
-    # Mac OS apple clang maybe named as gcc, need check compiler info.
-    if sys.platform == "darwin":
-        return _is_apple_clang(cpp_compiler)
-    elif _IS_WINDOWS:
+    if _IS_WINDOWS:
         # clang suite have many compilers, and only clang-cl is supported.
         if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
             raise RuntimeError(
                 "Please use clang-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
             )
         return bool(re.search(r"(clang-cl)", cpp_compiler))
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
+
+    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
+        return True
+
+    first_line = _compiler_version_first_line(cpp_compiler)
+    if "Intel" not in first_line and re.search(
+        r"(^|[\s/-])clang version\b", first_line
+    ):
+        return True
+
+    return bool(re.search(r"(^|[/\s-])(clang\+\+|clang)(?=[\s-]|$)", cpp_compiler))
 
 
 @functools.cache
@@ -516,7 +565,16 @@ def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
         return False
-    return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
+
+    first_line = _compiler_version_first_line(cpp_compiler)
+    if re.search(
+        r"(^|[\s/-])(gcc|g\+\+|gnu-c\+\+)(?=[\s(-]|$)",
+        first_line,
+        re.IGNORECASE,
+    ):
+        return True
+
+    return bool(re.search(r"(^|[/\s-])(gcc|g\+\+|gnu-c\+\+)(?=[\s-]|$)", cpp_compiler))
 
 
 @functools.cache
@@ -527,7 +585,7 @@ def _is_gcc_version_less_than(cpp_compiler: str, major: int) -> bool:
     try:
         output_msg = (
             subprocess.check_output(
-                [cpp_compiler, "-dumpfullversion", "-dumpversion"],
+                _compiler_command(cpp_compiler, "-dumpfullversion", "-dumpversion"),
                 stderr=subprocess.DEVNULL,
             )
             .strip()
@@ -550,16 +608,15 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
     try:
         result = subprocess.run(
-            [cpp_compiler, "/help"],
+            _compiler_command(cpp_compiler, "/help"),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
         )
 
-        output_msg = result.stdout.strip().decode(*SUBPROCESS_DECODE_ARGS)
-        lines = output_msg.splitlines()
+        lines = (result.stdout or b"").strip().splitlines()
 
-        return bool(lines) and "Microsoft" in lines[0]
+        return bool(lines) and b"Microsoft" in lines[0]
 
     except OSError:
         return False
@@ -578,14 +635,9 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
             )
 
     try:
-        output_msg = (
-            subprocess.check_output(
-                [cpp_compiler, "--version"], stderr=subprocess.DEVNULL
-            )
-            .strip()
-            .decode(*SUBPROCESS_DECODE_ARGS)
-        )
-        is_intel_compiler = "Intel" in output_msg.splitlines()[0]
+        output_msg = _compiler_version_string(cpp_compiler)
+        lines = output_msg.splitlines()
+        is_intel_compiler = bool(lines) and "Intel" in lines[0]
         if is_intel_compiler:
             if _IS_WINDOWS:
                 if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
@@ -641,12 +693,16 @@ def get_compiler_version_info(compiler: str) -> str:
     env["LC_ALL"] = "C"  # Don't localize output
     try:
         version_string = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
+            _compiler_command(compiler, "-v"),
+            stderr=subprocess.STDOUT,
+            env=env,
         ).decode(*SUBPROCESS_DECODE_ARGS)
     except Exception:
         try:
             version_string = subprocess.check_output(
-                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
+                _compiler_command(compiler, "--version"),
+                stderr=subprocess.STDOUT,
+                env=env,
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return ""
@@ -1089,14 +1145,14 @@ def _get_optimization_cflags(
     return cflags, ldflags
 
 
-def _get_shared_cflags(do_link: bool) -> list[str]:
+def _get_shared_cflags(cpp_compiler: str, do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
         return ["DLL", "MD"]
-    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
+    if platform.system() == "Darwin" and _is_clang(cpp_compiler):
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
     flags = []
@@ -1126,7 +1182,7 @@ def get_cpp_options(
 
     cflags = (
         opt_cflags
-        + _get_shared_cflags(do_link)
+        + _get_shared_cflags(cpp_compiler, do_link)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -1143,7 +1199,12 @@ def get_cpp_options(
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
         if check_mingw_win32_flavor(MINGW_GXX) == "posix":
-            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
+            # winpthread provides clock_gettime, referenced by static libstdc++'s
+            # chrono. The driver places libstdc++ after these args, so force the
+            # symbol undefined up front to pull winpthread in regardless of order.
+            passthrough_args.append(
+                "-Wl,-u,clock_gettime -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic"
+            )
 
     return (
         definitions,
@@ -1428,9 +1489,9 @@ def homebrew_libomp() -> tuple[bool, str]:
 @functools.cache
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
-        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
-            "utf8"
-        )
+        output = subprocess.check_output(
+            _compiler_command(cpp_compiler, "-print-file-name=bin")
+        ).decode("utf8")
         omp_path = os.path.join(output.rstrip(), omp_name)
         if os.path.isfile(omp_path):
             os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -1444,7 +1505,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:
             output = subprocess.check_output(
-                [cpp_compiler, f"-print-file-name={lib_name}"],
+                _compiler_command(cpp_compiler, f"-print-file-name={lib_name}"),
                 stderr=subprocess.DEVNULL,
             ).decode(*SUBPROCESS_DECODE_ARGS)
             omp_path = output.rstrip()
@@ -1827,18 +1888,27 @@ def _gen_mingw_import_lib(dll_path: str, def_path: str, import_lib_path: str) ->
     log.info("Generated MinGW import library %s from %s", import_lib_path, dll_name)
 
 
-# MSVC /GS buffer security check stubs for MinGW cross-compilation.
-# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference
-# these symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck).
-# When cross-compiling with MinGW, we provide no-op stubs so the linker can
-# resolve them. At runtime on Windows, the CUDA runtime DLL handles its own
-# security checks internally; the static loader code that references these
-# symbols is a thin shim whose /GS instrumentation is safe to stub out.
+# MSVC /GS and Control Flow Guard stubs for MinGW cross-compilation.
+# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference the
+# /GS symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck); the
+# CUDA 13.2 cudart.lib is additionally built with Control Flow Guard (/guard:cf)
+# and references the CFG dispatch/check function pointers. When cross-compiling
+# with MinGW (no MSVC runtime), we provide stubs so the linker can resolve them.
+# At runtime on Windows the CUDA runtime DLL handles its own security/CFG checks;
+# the static loader code that references these symbols is a thin shim. The /GS
+# and CFG-check stubs are safe no-ops, but the CFG *dispatch* stub must tail-jump
+# to the real target (in rax on x86_64) -- a no-op would drop the indirect call.
 _MSVC_GS_STUBS_SOURCE = """\
 #include <stdint.h>
 uint64_t __security_cookie = 0x00002B992DDFA232ULL;
 void __security_check_cookie(uint64_t cookie) { (void)cookie; }
 void __GSHandlerCheck(void) {}
+void __guard_check_icall_nop(void *target) { (void)target; }
+void (*__guard_check_icall_fptr)(void *target) = __guard_check_icall_nop;
+__attribute__((naked)) void __guard_dispatch_icall_nop(void) {
+    __asm__ __volatile__("jmp *%rax");
+}
+void (*__guard_dispatch_icall_fptr)(void) = __guard_dispatch_icall_nop;
 """
 
 
@@ -1993,9 +2063,15 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
 
     # Internal path needs special care, using the SDK lib path directly.
     if config.is_fbcode():
-        stub_dir = Path(build_paths.sdk_lib) / "stubs"
-        if stub_dir.is_dir() and str(stub_dir) not in lpaths:
-            lpaths.append(str(stub_dir))
+        # Add sdk_lib and its stubs/ (which hold the CUDA libs) unconditionally:
+        # an existence gate fails on the not-yet-materialized EdenFS path, and a
+        # nonexistent -L is harmless to the linker.
+        for cuda_lib_dir in (
+            build_paths.sdk_lib,
+            os.path.join(build_paths.sdk_lib, "stubs"),
+        ):
+            if cuda_lib_dir not in lpaths:
+                lpaths.append(cuda_lib_dir)
 
 
 def _transform_rocm_paths(lpaths: list[str]) -> None:
@@ -2034,6 +2110,13 @@ def get_cpp_torch_device_options(
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
+
+    # cpp_extension resolves CUDA_HOME into a module-level global at import time,
+    # so an fbcode process that imported it before the env var above was written
+    # caches None; refresh the global here so the just-set CUDA_HOME env actually
+    # takes effect for include_paths/library_paths below.
+    if cpp_extension.CUDA_HOME is None and os.environ.get("CUDA_HOME"):
+        cpp_extension.CUDA_HOME = os.environ["CUDA_HOME"]
 
     include_dirs = cpp_extension.include_paths(
         device_type, config.aot_inductor.link_libtorch is None
@@ -2415,7 +2498,7 @@ class CppBuilder:
             if _IS_WINDOWS:
                 self._libraries_dirs_args += f'/LIBPATH:"{lib_dir}" '
             else:
-                self._libraries_dirs_args += f"-L{lib_dir} "
+                self._libraries_dirs_args += f"-L{shlex.quote(lib_dir)} "
 
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:
@@ -2487,16 +2570,31 @@ class CppBuilder:
         if not (config.is_fbcode() and self._use_relative_path):
             return args
         rewritten = []
+        rpath_dirs: OrderedSet[str] = OrderedSet()
         for arg in args:
             tokens = shlex.split(arg)
             new_tokens = []
             for tok in tokens:
                 if os.path.isabs(tok) and os.path.isfile(tok):
                     self._orig_source_paths.append(tok)
+                    # Rewriting the absolute path to a basename makes the
+                    # linker record a bare-basename DT_NEEDED entry, because
+                    # the staged kernel .so files carry no DT_SONAME. That
+                    # basename is unresolvable when the wrapper .so is later
+                    # dlopen'd, so add rpath entries the runtime loader can
+                    # search: $ORIGIN for a kernel .so co-staged next to the
+                    # wrapper, and the kernel .so's original directory as a
+                    # fallback when it is loaded from its cache location.
+                    if self._do_link and tok.endswith(".so"):
+                        rpath_dirs.add(os.path.dirname(tok))
                     new_tokens.append(os.path.basename(tok))
                 else:
                     new_tokens.append(tok)
             rewritten.append(" ".join(shlex.quote(t) for t in new_tokens))
+        if rpath_dirs:
+            rewritten.append("-Wl,-rpath," + shlex.quote("$ORIGIN"))
+            for rpath_dir in rpath_dirs:
+                rewritten.append(f"-Wl,-rpath,{shlex.quote(rpath_dir)}")
         return rewritten
 
     def build_fbcode_re(
