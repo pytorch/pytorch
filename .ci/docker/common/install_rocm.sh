@@ -156,7 +156,7 @@ install_rocm() {
         therock_index_url="${THEROCK_NIGHTLY_INDEX_URL:-https://rocm.nightlies.amd.com/whl-multi-arch/}"
         # FIXME: temporarily pin TheRock nightly ROCm to the July 12 build while
         # the rolling nightly index is unstable.
-        local therock_nightly_version="${THEROCK_NIGHTLY_VERSION:-7.14.0a20260712}"
+        local therock_nightly_version="${THEROCK_NIGHTLY_VERSION:-7.15.0a20260712}"
         rocm_pip_spec="rocm[libraries,devel,device-all]==${therock_nightly_version}"
     else
         therock_index_url="${THEROCK_INDEX_URL:-https://repo.amd.com/rocm/whl-multi-arch/}"
