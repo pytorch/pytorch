@@ -57,12 +57,14 @@ std::enable_if_t<
         momentum_vec1 = grad_vec1;
         momentum_vec2 = grad_vec2;
       } else {
-        momentum_vec1 = fVec::loadu(momentum_buf_ptr + d) * fVec(scalar_t(momentum));
-        momentum_vec2 = fVec::loadu(momentum_buf_ptr + d + fVec::size()) * fVec(scalar_t(momentum));
+        auto [momentum_buf_vec1, momentum_buf_vec2] =
+            vec::convert_to_float<scalar_t>(lpVec::loadu(momentum_buf_ptr + d));
+        momentum_vec1 = momentum_buf_vec1 * fVec(scalar_t(momentum));
+        momentum_vec2 = momentum_buf_vec2 * fVec(scalar_t(momentum));
         momentum_vec1 = vec::fmadd(fVec(scalar_t(1 - dampening)), grad_vec1, momentum_vec1);
         momentum_vec2 = vec::fmadd(fVec(scalar_t(1 - dampening)), grad_vec2, momentum_vec2);
       }
-      vec::convert_from_float<scalar_t>(momentum_vec1, momentum_vec2).store(momentum_buf_ptr + d);;
+      vec::convert_from_float<scalar_t>(momentum_vec1, momentum_vec2).store(momentum_buf_ptr + d);
       if (nesterov) {
         grad_vec1 = vec::fmadd(momentum_vec1, fVec(scalar_t(momentum)), grad_vec1);
         grad_vec2 = vec::fmadd(momentum_vec2, fVec(scalar_t(momentum)), grad_vec2);
@@ -71,6 +73,9 @@ std::enable_if_t<
         grad_vec2 = momentum_vec2;
       }
     }
+    param_vec1 = vec::fmadd(grad_vec1, fVec(opmath_t(-lr)), param_vec1);
+    param_vec2 = vec::fmadd(grad_vec2, fVec(opmath_t(-lr)), param_vec2);
+    vec::convert_from_float<scalar_t>(param_vec1, param_vec2).store(param_ptr + d);
   }
   for (; d < size; d++) {
     opmath_t grad_val = grad_ptr[d];

@@ -1197,6 +1197,33 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
+    @onlyCPU
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("momentum", [0.0, 0.9])
+    def test_fused_sgd_cpu_lowp_updates_vectorized_blocks(
+        self, device, dtype, momentum
+    ):
+        # Regression for https://github.com/pytorch/pytorch/issues/191763:
+        # fused CPU SGD's Half/BFloat16 vectorized loop previously omitted the
+        # LR update/store (and mis-loaded momentum buffers as float), so
+        # complete SIMD blocks were left unchanged or wrong. Sizes are well
+        # above typical SIMD widths (8/16/32) so the vectorized path runs.
+        lr = 0.125
+        n_steps = 2 if momentum != 0.0 else 1
+        for size in (64, 65, 256, 257):
+            param_fused = torch.nn.Parameter(
+                torch.ones(size, dtype=dtype, device=device)
+            )
+            param_ref = torch.nn.Parameter(torch.ones(size, dtype=dtype, device=device))
+            opt_fused = SGD([param_fused], lr=lr, momentum=momentum, fused=True)
+            opt_ref = SGD([param_ref], lr=lr, momentum=momentum, fused=False)
+            for _ in range(n_steps):
+                param_fused.grad = torch.ones_like(param_fused)
+                param_ref.grad = torch.ones_like(param_ref)
+                opt_fused.step()
+                opt_ref.step()
+            self.assertEqual(param_fused, param_ref)
+
     @skipMPS  # MPS fused optimizer does not properly handle found_inf
     @onlyAccelerator
     @optims(
