@@ -1541,23 +1541,22 @@ def _resolve_remapped_value(
         # The lane is the constant chunk offset; fall back to symbolic
         # simplification for equivalent forms that keep the offset in the index.
         offset = sympy_subs(index, dict.fromkeys(index.free_symbols, 0))
-        lane = FloorDiv(
-            sympy.Mod(offset, factor * value.child_extent), value.child_extent
-        )
-        lane = V.graph.sizevars.simplify(lane)
-        part = _select_lane(value.parts, lane)
-        if part is not None:
-            return part
-        lane = FloorDiv(
-            sympy.Mod(index, factor * value.child_extent), value.child_extent
-        )
-        lane = kernel.simplify_indexing(lane)
-        part = _select_lane(value.parts, lane)
-        if part is not None:
-            return part
+        for candidate, simplify in (
+            (offset, V.graph.sizevars.simplify),
+            (index, kernel.simplify_indexing),
+        ):
+            lane = simplify(
+                FloorDiv(
+                    sympy.Mod(candidate, factor * value.child_extent),
+                    value.child_extent,
+                )
+            )
+            part = _select_lane(value.parts, lane)
+            if part is not None:
+                return part
         raise AssertionError(
             "sub-parent planner invariant violated: contiguous load "
-            f"for {name!r} has non-constant lane {lane}"
+            f"for {name!r} has non-constant lane for index {index}"
         )
     if not isinstance(value, tuple):
         return value
@@ -1947,9 +1946,6 @@ class _GroupedReductionLayout:
     def child_block(self, factor: int) -> str:
         return str(FloorDiv(self.group_tree.block_size(), factor))
 
-    def child_local_reduction_size_dim(self, factor: int) -> str:
-        return str(FloorDiv(self.local_reduction_size_sym, factor))
-
     def make_sub_parent_family(self, factor: int) -> _DerivedIterationFamily:
         if not self.local_reduction_in_r:
             raise AssertionError("sub-parent iteration requires a reduction in R")
@@ -2047,7 +2043,7 @@ class _GroupedReductionLayout:
                 kernel,
                 value,
                 parent_extent=self.child_block(factor),
-                elems_per_group=self.child_local_reduction_size_dim(factor),
+                elems_per_group=str(FloorDiv(self.local_reduction_size_sym, factor)),
             )
             return True
         if not self.is_parent_tile_shaped(value):
@@ -2060,43 +2056,29 @@ class _GroupedReductionLayout:
         factor_dim = str(factor)
         shape = value.shape
         assert shape is not None  # noqa: S101
+        # parent_dim() only accepts rank-1/2 tiles.
+        prefix = (str(shape[1 - self.parent_axis]),) if len(shape) == 2 else ()
+        parts = tuple(
+            kernel.cse.newvar(dtype=value.dtype, shape=(*prefix, child_block))
+            for _ in range(factor)
+        )
+        part_names = tuple(map(str, parts))
         if source_layout is source_layout_kind.CONTIGUOUS:
-            if len(shape) == 2:
-                passthrough_dim = str(shape[1 - self.parent_axis])
-                reshape_shape = (passthrough_dim, factor_dim, child_block)
-                permute_dims = (0, 2, 1)
-                part_shape = (passthrough_dim, child_block)
-            else:
-                reshape_shape = (factor_dim, child_block)
-                permute_dims = (1, 0)
-                part_shape = (child_block,)
-            parts = tuple(
-                kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
-                for _ in range(factor)
-            )
+            reshape_shape = (*prefix, factor_dim, child_block)
+            permute_dims = (0, 2, 1) if prefix else (1, 0)
             kernel.emit_split_via_reshape_permute(
-                value, reshape_shape, permute_dims, tuple(map(str, parts))
+                value, reshape_shape, permute_dims, part_names
             )
             family.remapped_values[name] = _ContiguousSubParentRemappedValue(
                 parts,
                 FloorDiv(self.local_reduction_size, factor),
             )
-        elif source_layout is source_layout_kind.INTERLEAVED:
-            if len(shape) == 2:
-                passthrough_dim = str(shape[1 - self.parent_axis])
-                reshape_shape = (passthrough_dim, child_block, factor_dim)
-                part_shape = (passthrough_dim, child_block)
-            else:
-                reshape_shape = (child_block, factor_dim)
-                part_shape = (child_block,)
-            parts = tuple(
-                kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
-                for _ in range(factor)
-            )
-            kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
-            family.remapped_values[name] = parts
         else:
-            return False
+            assert source_layout is source_layout_kind.INTERLEAVED  # noqa: S101
+            kernel.emit_split_via_reshape(
+                value, (*prefix, child_block, factor_dim), part_names
+            )
+            family.remapped_values[name] = parts
         return True
 
     def _broadcast_value_to_axis_resolution(
@@ -2114,18 +2096,14 @@ class _GroupedReductionLayout:
             assert V.graph.sizevars.statically_known_equals(  # noqa: S101
                 self.passthrough_tree.numel, 1
             )
-            pre_broadcast_shape = (num_groups, 1)
-            broadcast_shape = (num_groups, elems_per_group)
-            final_shape = (parent_extent,)
+            prefix: tuple[str, ...] = ()
         else:
-            passthrough_extent = self.passthrough_block
-            pre_broadcast_shape = (passthrough_extent, num_groups, 1)
-            broadcast_shape = (passthrough_extent, num_groups, elems_per_group)
-            final_shape = (passthrough_extent, parent_extent)
+            prefix = (self.passthrough_block,)
+        final_shape = (*prefix, parent_extent)
         return kernel.emit_broadcast_via_reshape(
             value=value,
-            pre_broadcast_shape=pre_broadcast_shape,
-            broadcast_shape=broadcast_shape,
+            pre_broadcast_shape=(*prefix, num_groups, 1),
+            broadcast_shape=(*prefix, num_groups, elems_per_group),
             final_shape=final_shape,
             dtype=value.dtype,
             out_shape=final_shape,
@@ -2307,35 +2285,6 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
             self._inner.store(name, remapped_index, value, mode=mode)
 
 
-def _materialize_sub_parent_source_load(
-    kernel: TritonKernel,
-    layout: _GroupedReductionLayout,
-    sub_parent_family: _DerivedIterationFamily,
-    sub_parent_factor: int,
-    source_layouts: dict[str, scheduler.NestedReduction.SubParentSourceLayout],
-    name: str,
-    value: CSEVariable,
-) -> None:
-    source_layout = source_layouts.get(name)
-    if source_layout is None:
-        return
-    if name in sub_parent_family.remapped_values:
-        return
-    materialized = layout.materialize_value_at_sub_parent_resolution(
-        kernel,
-        sub_parent_family,
-        sub_parent_factor,
-        name,
-        value,
-        source_layout,
-    )
-    if not materialized:
-        raise AssertionError(
-            "sub-parent planner invariant violated: could not materialize "
-            f"planned parent-tile load for {name!r}"
-        )
-
-
 class _SubParentPointwiseRemapHandler(_PointwiseRemapHandler):
     def __init__(
         self,
@@ -2368,8 +2317,6 @@ class _SubParentPointwiseRemapHandler(_PointwiseRemapHandler):
             return
         value = self._kernel.cse.store_cache.get(name)
         if value is None:
-            if not required:
-                return
             raise AssertionError(
                 f"sub-parent stage could not materialize required buffer {name!r}"
             )
@@ -2417,15 +2364,22 @@ class _SubParentSourceLoadMaterializer(WrapperHandler):  # type: ignore[type-arg
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         value = self._inner.load(name, index)
-        _materialize_sub_parent_source_load(
+        source_layout = self._source_layouts.get(name)
+        if source_layout is None or name in self._sub_parent_family.remapped_values:
+            return value
+        materialized = self._layout.materialize_value_at_sub_parent_resolution(
             self._kernel,
-            self._layout,
             self._sub_parent_family,
             self._sub_parent_factor,
-            self._source_layouts,
             name,
             value,
+            source_layout,
         )
+        if not materialized:
+            raise AssertionError(
+                "sub-parent planner invariant violated: could not materialize "
+                f"planned parent-tile load for {name!r}"
+            )
         return value
 
 
@@ -2713,22 +2667,14 @@ class SIMDScheduling(BaseScheduling):
             if node.is_reduction()
             for dep in node.read_writes.reads
         )
-        for node in nodes:
-            if node in epilogue_node_set:
-                continue
-            if not node.is_reduction():
-                _, (node_numel, node_rnumel) = node.group
-                if not (
-                    V.graph.sizevars.statically_known_equals(node_numel, numel)
-                    and V.graph.sizevars.statically_known_equals(node_rnumel, 1)
-                ):
-                    return True
-        source_free = nested_reduction._sub_parent_siblings_are_source_free
-        if not source_free(
-            nodes, epilogue_node_set, numel, parent_source_names, renames
-        ):
-            return True
-        return False
+        return not nested_reduction._sub_parent_siblings_are_source_free(
+            nodes,
+            epilogue_node_set,
+            numel,
+            parent_source_names,
+            renames,
+            reject_group_mismatch=True,
+        )
 
     def _sub_parent_epilogue_plan(
         self,
@@ -2743,10 +2689,9 @@ class SIMDScheduling(BaseScheduling):
             or not torch._inductor.config.triton.nested_reduction
         ):
             return None
-        plan = scheduler.NestedReduction.sub_parent_epilogue_plan(
+        return scheduler.NestedReduction.sub_parent_epilogue_plan(
             nodes, numel, rnumel, check_leaves=check_leaves
         )
-        return plan
 
     def _find_sub_parent_epilogue_plan(
         self,
@@ -3423,8 +3368,7 @@ class SIMDScheduling(BaseScheduling):
                     kernel,
                     sn,
                     layout,
-                    iter_remapped,
-                    reduce_remapped,
+                    group_reduction_vars,
                     reduced_output_family,
                     parent_half_family=parent_half_family,
                     source_layouts=parent_half_source_layouts,
@@ -3501,8 +3445,7 @@ class SIMDScheduling(BaseScheduling):
         kernel,
         grouped_reduction: scheduler.SchedulerNode,
         layout: _GroupedReductionLayout,
-        iter_remapped,
-        reduce_remapped,
+        group_reduction_vars: _GroupedReductionVars,
         reduced_output_family,
         parent_half_family: _DerivedIterationFamily | None = None,
         source_layouts: dict[str, scheduler.NestedReduction.SubParentSourceLayout]
@@ -3529,8 +3472,8 @@ class SIMDScheduling(BaseScheduling):
             )
         with V.set_ops_handler(handler), kernel.set_current_node(grouped_reduction):
             grouped_reduction_body(
-                iter_remapped,
-                reduce_remapped,
+                group_reduction_vars.iter_remapped,
+                group_reduction_vars.reduce_remapped,
                 allow_same_symbol_in_index=True,
             )
 
@@ -3698,13 +3641,10 @@ class SIMDScheduling(BaseScheduling):
             "tiling_scores": tiling_score,
             "override_cooperative_reduction": False,
         }
-        kernels = self.create_kernel_choices(
-            kernel_features,
-            [tiling],
-            kernel_kwargs,
+        kernel = cast(
+            "TritonKernel",
+            self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)[0],
         )
-        kernel = kernels[0]
-        kernel = cast("TritonKernel", kernel)
         metrics.codegen_nested_reduction += 1
         sub_parent_factor = sub_parent_epilogue_plan.sub_parent_factor
         parent_rnumel = sub_parent_epilogue_plan.parent_rnumel

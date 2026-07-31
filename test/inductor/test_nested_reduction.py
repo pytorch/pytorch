@@ -1412,6 +1412,27 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_fusion()
 
+    def test_standalone_sub_parent_rejects_mutation(self):
+        """Mutating epilogues must not join a sub-parent plan."""
+        B, D, G = 32, 1024, 16
+
+        def f(x, out):
+            xg = x.view(B, D // G, G)
+            amax = xg.float().abs().amax(dim=-1)
+            scale = (amax / 6.0).clamp(min=1e-12, max=448.0)
+            out.copy_(xg[..., : G // 2].float() / scale.unsqueeze(-1))
+            return scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        out = torch.empty(B, D // G, G // 2, device=GPU_TYPE)
+        ref_out = torch.empty_like(out)
+        ref_scale = f(x, ref_out)
+        act_scale = torch.compile(f)(x, out)
+        self.assertEqual(act_scale, ref_scale, atol=1e-2, rtol=1e-2)
+        self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
+        self.check_no_fusion()
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
     def test_standalone_sub_parent_rejects_mixed_source_layouts(self):
         B, D, G = 32, 1024, 16
 
