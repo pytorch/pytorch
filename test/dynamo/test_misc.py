@@ -99,6 +99,7 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
+    skipIfCppFakeTensor,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -14752,6 +14753,7 @@ fn
         self.assertIn(0, result)
         self.assertTrue(same(result[0], torch.tensor(3)))
 
+    @skipIfCppFakeTensor("no Python dispatch cache support")
     def test_dynamo_reset_clears_cache(self):
         """Test that dynamo bytecode and fake tensor caches are freed
         when dynamo reset is called

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.exc import UserError, UserErrorType
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_real_tensor
 from torch.export import Dim, draft_export, export
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -442,7 +442,7 @@ class TestDraftExport(TestCase):
         # the fake tensors on node.meta["val"] should have real_tensor
         gm = ep.module()
         tensors = [
-            node.meta.get("val").real_tensor
+            maybe_get_real_tensor(node.meta.get("val"))
             for node in gm.graph.nodes
             if node.op == "placeholder"
         ]

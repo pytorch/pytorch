@@ -313,7 +313,10 @@ def _make_prim(
         if any(isinstance(x, torch.device) and x.type == "meta" for x in args):
             return meta(*args, **kwargs)
         else:
-            return _prim_impl(*args, **kwargs)
+            from torch._subclasses.fake_tensor import reenter_cpp_fake_mode
+
+            with reenter_cpp_fake_mode():
+                return _prim_impl(*args, **kwargs)
 
     name = schema.split("(", maxsplit=1)[0]
     schema = schema[len(name) :]

@@ -35,6 +35,30 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     PythonKeyTracer,
 )
+
+
+# Under CPP_FAKETENSOR=1 this whole suite exercises the C++ FakeTensor mode:
+# make_fx builds a CppFakeTensorMode for tracing_mode="fake"/"symbolic" natively.
+
+# Mirror test_fake_tensor.py: under the C++ fake path, make bare FakeTensorMode()
+# construction build a CppFakeTensorMode so the suite exercises it end to end.
+if torch._dynamo.config.use_cpp_fake_tensor:
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorConverter
+
+    def FakeTensorMode(
+        *,
+        shape_env=None,
+        allow_fallback_kernels=True,
+        allow_non_fake_inputs=False,
+        **kwargs,
+    ):
+        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+            FakeTensorConverter(), shape_env
+        )
+        mode.set_allow_fallback_kernels(allow_fallback_kernels)
+        mode.allow_non_fake_inputs = allow_non_fake_inputs
+        return mode
+
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -152,6 +176,7 @@ class UnwrapTensor(torch.Tensor):
         args = tree_map(unwrap, args)
         kwargs = tree_map(unwrap, kwargs)
         return func(*args, **kwargs)
+
 
 class TestGenericProxyTensor(TestCase):
     # WARNING: if any of your inputs are index tensors, DO NOT use this

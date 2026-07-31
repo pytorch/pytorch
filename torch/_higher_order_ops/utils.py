@@ -4,7 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, overload, TypeVar
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -21,6 +21,11 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_get_fake_mode,
 )
+
+
+if TYPE_CHECKING:
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -39,6 +44,23 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
+
+
+def _find_or_create_fake_mode(inputs=None) -> "FakeTensorMode | CppFakeTensorMode":
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    for tensor in pytree.tree_leaves(inputs):
+        if isinstance(tensor, torch.Tensor):
+            fake_mode = maybe_get_fake_mode(tensor)
+            if fake_mode is not None:
+                return fake_mode
+
+    fake_mode = detect_fake_mode()
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    return fake_mode
 
 
 def autograd_not_implemented_inner(
@@ -1187,9 +1209,27 @@ def register_fake(hop, fn=None, *, skip_cache=False):
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
 
     def register(func: F) -> F:
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._C import DispatchKey
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            reenter_cpp_fake_mode,
+        )
 
         redirect_to_mode(hop, FakeTensorMode)
+
+        @hop.py_impl(DispatchKey.Fake)
+        def cpp_fake_tensor_mode(*args, **kwargs):
+            mode = _find_or_create_fake_mode()
+            maybe_ignore_fresh_unbacked_symbols = (
+                contextlib.nullcontext
+                if mode.shape_env is None
+                else mode.shape_env.ignore_fresh_unbacked_symbols
+            )
+            with (
+                reenter_cpp_fake_mode(),
+                maybe_ignore_fresh_unbacked_symbols(),
+            ):
+                return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func
         if skip_cache:

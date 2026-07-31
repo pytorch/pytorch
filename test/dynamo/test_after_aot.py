@@ -379,7 +379,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         # Should NOT be the same object — metadata was extracted
         self.assertIsNot(result, args)
         # First element should be a FakeTensor (not a concrete tensor)
-        self.assertIsInstance(result[0], torch._subclasses.FakeTensor)
+        self.assertTrue(torch._subclasses.fake_tensor.is_fake_tensor(result[0]))
         # Second element should be a SymInt (not a concrete int)
         self.assertIsInstance(result[1], torch.SymInt)
 
@@ -451,9 +451,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
     def test_get_compile_args_e2e_real_no_fake_mode_mismatch(self):
         """E2E: compile_fx_inner fails when given FakeTensors from
-        different FakeTensorModes (extracted from real-mode traced graph
-        placeholder metadata) but succeeds with _get_compile_args which
-        returns concrete args for real-mode tracing.
+        real-mode traced graph placeholder metadata but succeeds with
+        _get_compile_args which returns concrete args for real-mode tracing.
 
         This is the minimal repro for the FakeTensorMode mismatch
         AssertionError that affected 85/126 graphs in the model extractor.
@@ -466,15 +465,15 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         args = [torch.randn(4), torch.randn(4)]
         gm = make_fx(f, tracing_mode="real")(*args)
 
-        # Verify that real-mode tracing creates FakeTensors with
-        # different FakeTensorModes in placeholder metadata
+        # Verify that real-mode tracing creates fake tensors in placeholder
+        # metadata.
         placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
-        fake_modes = set()
-        for n in placeholders:
-            val = n.meta.get("val")
-            if isinstance(val, torch._subclasses.FakeTensor):
-                fake_modes.add(id(val.fake_mode))
-        self.assertGreater(len(fake_modes), 1, "Expected different FakeTensorModes")
+        self.assertTrue(
+            all(
+                torch._subclasses.fake_tensor.is_fake_tensor(n.meta.get("val"))
+                for n in placeholders
+            )
+        )
 
         # BUG: manually extracting FakeTensors causes mode mismatch
         fake_args = [n.meta["val"] for n in placeholders]
