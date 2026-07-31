@@ -70,7 +70,7 @@ from torch._guards import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, make_fake_mode
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
@@ -788,7 +788,7 @@ class OutputGraph(OutputGraphCommon):
         import torch._functorch.config as _config
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = torch._subclasses.FakeTensorMode(
+            fake_mode = make_fake_mode(
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=bool(self.export),
@@ -2968,7 +2968,7 @@ class OutputGraph(OutputGraphCommon):
                     # from scratch when we go to AOTAutograd. But the ShapeEnv must be preserved as
                     # Dynamo made decisions about what is dynamic or not / guards from the user code
                     # that is not in graph.
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
+                    backend_fake_mode = make_fake_mode(
                         shape_env=old_fake_mode.shape_env,
                     )
                 # TODO(voz): Ostensibly, this should be scoped and

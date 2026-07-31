@@ -951,11 +951,11 @@ class CompiledFxGraph(OutputCode):
         )
 
         if self._original_gm is None and self._serialized_original_gm is not None:
-            from torch._subclasses import FakeTensorMode
+            from torch._subclasses import make_fake_mode
             from torch.fx._graph_pickler import GraphPickler
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            fake_mode = FakeTensorMode(
+            fake_mode = make_fake_mode(
                 allow_non_fake_inputs=True,
                 shape_env=ShapeEnv(),
             )
