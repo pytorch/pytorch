@@ -219,6 +219,49 @@ __device__ __forceinline__ void sync_remote_blocks(
   }
 };
 
+// NOTE [one-shot low-latency]
+// The one-shot all-reduce family (one_shot_*, multimem_one_shot_*) brackets its
+// peer read with two cross-rank barriers: an *entry* barrier (make every peer's
+// input visible before we read it) and an *exit* barrier (make the symm buffers
+// safe to be overwritten by a later kernel, i.e. every peer has finished reading
+// this iteration's data). Each barrier is one NVLink round-trip gated by the
+// slowest peer, so at small (latency-bound) sizes the two barriers dominate the
+// kernel time.
+//
+// These helpers factor the barrier out of the reduction core so a "low-latency"
+// variant can drop the exit round-trip (kLowLatency=true), leaving a single
+// entry barrier -- the same 1-round-trip shape NCCL's LL symmetric kernels reach
+// by folding the flag into the data. Dropping the exit barrier is only safe when
+// the symmetric input buffer is not overwritten (by any rank) before this op's
+// stream work completes -- e.g. reducing a persistent buffer, or back-to-back
+// captured replays. If the input is recomputed in-place every step without an
+// external sync, keep the default (kLowLatency=false).
+
+// Entry barrier: make every peer's input visible before this kernel reads it.
+// `hasPrevMemAccess` is true when this kernel wrote the symm buffer first (the
+// copy path); false when the input was already resident (multicast / no-copy).
+template <bool hasPrevMemAccess>
+__device__ __forceinline__ void one_shot_entry_barrier(
+    uint32_t** signal_pads,
+    size_t rank,
+    size_t world_size) {
+  sync_remote_blocks<hasPrevMemAccess, true>(signal_pads, rank, world_size);
+  __syncthreads();
+}
+
+// Exit barrier: guarantee this kernel's peer reads have completed before a later
+// kernel may overwrite the symm buffers. Elided when kLowLatency is set.
+template <bool kLowLatency>
+__device__ __forceinline__ void one_shot_exit_barrier(
+    uint32_t** signal_pads,
+    size_t rank,
+    size_t world_size) {
+  if constexpr (!kLowLatency) {
+    __syncthreads();
+    sync_remote_blocks<true, false>(signal_pads, rank, world_size);
+  }
+}
+
 template <typename T>
 struct MultimemLdReduce {
   template <int Alignment>
