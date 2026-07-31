@@ -4,10 +4,13 @@ import torch
 from torch._inductor.exc import InductorError, LoweringException
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestLoweringExceptionStackTrace(InductorTestCase):
     """Tests that LoweringException includes user stack traces and remains backward-compatible, with diagnostics."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_lowering_exception_includes_stack_trace(self):
         def frame5(x):

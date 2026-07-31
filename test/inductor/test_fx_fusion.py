@@ -13,6 +13,7 @@ from torch._inductor.fx_passes.pre_grad import (
     transpose_matmul,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.fx.passes.shape_prop import ShapeProp
 
 
@@ -45,6 +46,8 @@ def count_call_method(module: torch.fx.GraphModule, target_op: Any) -> int:
 
 
 class TestFxFusion(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sink_cat_after_pointwise(self):
         def test_kwarg(x, y):
             return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
