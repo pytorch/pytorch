@@ -538,7 +538,8 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 # Trace through NumPy or graphbreak
 trace_numpy = True
 
-# Trace through torch.autograd.grad or graphbreak
+# Trace through direct torch.autograd.grad calls or graph break. Tensor.backward
+# uses this machinery internally regardless of the flag.
 trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile

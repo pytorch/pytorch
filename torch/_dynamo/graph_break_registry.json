@@ -3517,6 +3517,36 @@
       ]
     }
   ],
+  "GB8102": [
+    {
+      "Gb_type": "Tensor.backward() with non-strided tensor",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering does not support non-strided tensors.",
+      "Hints": [
+        "Run backward() on this tensor outside the compiled region."
+      ]
+    }
+  ],
+  "GB6484": [
+    {
+      "Gb_type": "Tensor.backward() with post-accumulate-grad hooks",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot preserve post-accumulate-grad hooks.",
+      "Hints": [
+        "Run backward() outside the compiled region."
+      ]
+    }
+  ],
+  "GB6873": [
+    {
+      "Gb_type": "Tensor.backward() with non-strided gradients",
+      "Context": "gradient for backward input {idx}",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot accumulate non-strided gradients.",
+      "Hints": [
+        "Run backward() outside the compiled region."
+      ]
+    }
+  ],
   "GB9760": [
     {
       "Gb_type": "torch.switch: improper operands contents",
@@ -6060,6 +6090,16 @@
       "Hints": [
         "Remove the __post_init__ method from the frozen dataclass.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2897": [
+    {
+      "Gb_type": "backward() with untracked leaf tensors",
+      "Context": "call_method {self} backward",
+      "Explanation": "Tensor.backward() cannot be captured because Dynamo cannot see the leaf tensors that receive gradients. This can happen when the autograd graph crosses a graph-break boundary.",
+      "Hints": [
+        "Call backward() in the same compiled region as the forward computation."
       ]
     }
   ],
