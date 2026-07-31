@@ -400,6 +400,52 @@ class ImplDetailTest(MockSchedulerTest):
             MemoryCoalescing(10, 0).weighted_cost(),
         )
 
+    @parametrize(
+        "fused_cost,reject",
+        [(100_999_999, False), (101_000_000, False), (101_000_001, True)],
+    )
+    def test_reindexing_memory_guard_credits_launch(self, fused_cost, reject):
+        scheduler = Scheduler.__new__(Scheduler)
+        unfused_memory = (
+            MemoryCoalescing(50_000_000, 0),
+            MemoryCoalescing(50_000_000, 0),
+        )
+        fused_memory = MemoryCoalescing(fused_cost, 0)
+
+        with (
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps", return_value=1_000
+            ),
+            mock.patch.object(
+                scheduler, "_selected_tiling_memory", return_value=fused_memory
+            ),
+        ):
+            self.assertEqual(
+                scheduler._reindexing_regresses_memory_coalescing(
+                    mock.Mock(), mock.Mock(), unfused_memory
+                ),
+                reject,
+            )
+
+    def test_reindexing_memory_guard_without_bandwidth(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        with (
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps",
+                side_effect=RuntimeError,
+            ),
+            mock.patch.object(
+                scheduler,
+                "_selected_tiling_memory",
+                return_value=MemoryCoalescing(101, 0),
+            ),
+        ):
+            self.assertTrue(
+                scheduler._reindexing_regresses_memory_coalescing(
+                    mock.Mock(), mock.Mock(), (MemoryCoalescing(100, 0),)
+                )
+            )
+
 
 @inductor_config.patch(
     {

@@ -123,6 +123,7 @@ PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 _FLATTENED_READ_VAR = sympy.Dummy("flattened_read", integer=True, nonnegative=True)
+_REINDEXING_FUSION_LAUNCH_OVERHEAD_NS = 1_000
 
 
 @dataclasses.dataclass
@@ -7609,16 +7610,28 @@ class Scheduler:
         # materialization traffic offsets coalescing regressions here.
         unfused_cost = sum(memory.weighted_cost() for memory in unfused_memory)
         fused_cost = fused_memory.weighted_cost()
-        if fused_cost > unfused_cost:
+        # Fusing also saves one kernel launch. GB/s is numerically bytes/ns, so
+        # bandwidth times 1 us gives a byte-equivalent launch credit.
+        try:
+            dram_gbps = get_gpu_dram_gbps()
+        except Exception:
+            dram_gbps = 0
+        launch_credit = (
+            int(dram_gbps * _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS)
+            if math.isfinite(dram_gbps) and dram_gbps > 0
+            else 0
+        )
+        if fused_cost > unfused_cost + launch_credit:
             loop_ordering_log.debug(
                 "rejecting reindex of %s and %s: unfused memory %s (cost=%d), "
-                "fused memory %s (cost=%d)",
+                "fused memory %s (cost=%d), launch credit=%d",
                 node1.get_name(),
                 node2.get_name(),
                 unfused_memory,
                 unfused_cost,
                 fused_memory,
                 fused_cost,
+                launch_credit,
             )
             return True
         return False
@@ -8274,17 +8287,6 @@ class Scheduler:
             index_equivalent_dep_names=index_equivalent_dep_names,
         )
 
-        if (
-            can_reorder
-            and shared_data_score < config.score_fusion_memory_threshold
-            and (
-                config.loop_ordering_after_fusion or config.loop_reindexing_after_fusion
-            )
-        ):
-            new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
-            if new_shared_data_score >= 0:
-                shared_data_score = new_shared_data_score
-
         if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
@@ -8295,6 +8297,17 @@ class Scheduler:
                 node2,
                 index_equivalent_dep_names=index_equivalent_dep_names,
             )
+
+        if (
+            can_reorder
+            and shared_data_score < config.score_fusion_memory_threshold
+            and (
+                config.loop_ordering_after_fusion or config.loop_reindexing_after_fusion
+            )
+        ):
+            new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
+            if new_shared_data_score >= 0:
+                shared_data_score = new_shared_data_score
 
         if (
             config.loop_index_inversion_in_fusion
