@@ -456,6 +456,62 @@ graph():
             with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
                 torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
 
+    def test_dispatch_key_set_preserved_across_compile(self):
+        # compile_wrapper snapshots and restores the local dispatch key set
+        # around every compiled call. Make sure cache-hit calls, and a call that
+        # raises a user error, leave the include/exclude sets unchanged.
+        def f(x):
+            return x + 1
+
+        cf = torch.compile(f, backend="eager")
+        x = torch.randn(3)
+        cf(x)  # warm up / compile
+
+        include = torch._C._dispatch_tls_local_include_set()
+        exclude = torch._C._dispatch_tls_local_exclude_set()
+        for _ in range(5):
+            cf(x)
+        self.assertEqual(include, torch._C._dispatch_tls_local_include_set())
+        self.assertEqual(exclude, torch._C._dispatch_tls_local_exclude_set())
+
+        def raises(x):
+            raise ValueError("boom")
+
+        with self.assertRaises(ValueError):
+            torch.compile(raises, backend="eager")(x)
+        self.assertEqual(include, torch._C._dispatch_tls_local_include_set())
+        self.assertEqual(exclude, torch._C._dispatch_tls_local_exclude_set())
+
+    def test_dispatch_key_set_stack_balanced_on_fullgraph_error(self):
+        # compile_wrapper pushes the local dispatch key set onto a C++ stack and
+        # must pop it even when the wrapper's own finally raises. The
+        # fullgraph=True "found no compiled frames" error is raised from inside
+        # that finally, so a naive restore-at-end-of-finally would be skipped and
+        # leak a stack entry. Verify the save/restore stack stays balanced.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            for _ in range(3):
+                with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                    torch.compile(torch.add, backend="eager", fullgraph=True)(x, x)
+
+        # A normal compiled call after the error loop must still work. This
+        # guards against an over-restore / double-pop regression, which would
+        # leave the stack empty and make the wrapper's own restore raise.
+        cf = torch.compile(lambda t: t + 1, backend="eager")
+        self.assertEqual(cf(x), x + 1)
+
+        # If any push had leaked, the stack would be non-empty here. When
+        # balanced it is empty, so a manual restore raises instead of silently
+        # popping a stale entry.
+        with self.assertRaisesRegex(RuntimeError, "empty stack"):
+            torch._C._dynamo_restore_local_dispatch_key_set()
+
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -1944,6 +2000,122 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = opt_fn()
         self.assertEqual(result, ((1, 2), (3, 4)))
 
+    def test_min_max_key_and_default(self):
+        # Items are non-constant (tensors), so the fully-constant fold path is
+        # skipped; the key maps each to a compile-time-constant (ndim), which is
+        # what the key comparison requires. Comparison is on key(item) but the
+        # original tensor is returned.
+        def fn(x, y, z):
+            tensors = [x, y, z]
+            return (
+                max(tensors, key=lambda t: t.ndim).sum(),
+                min(tensors, key=lambda t: t.ndim).sum(),
+                max(tensors, key=lambda t: t.ndim, default=x).sum(),
+                max([], default=y).sum(),
+                min([x + 1], default=z).sum(),
+                max(x, z, key=lambda t: t.ndim).sum(),
+                min(x, z, key=lambda t: t.ndim).sum(),
+            )
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x, y, z = torch.randn(2), torch.randn(2, 2), torch.randn(2, 2, 2)
+        self.assertEqual(opt(x, y, z), fn(x, y, z))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_min_max_key_none(self):
+        # key=None behaves like no key argument at all.
+        def fn(x):
+            return x + max([4, 1, 7], key=None) + min([4, 1, 7], key=None)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_min_max_default_none_sentinel(self):
+        # A real default=None must be honored for empty iterables and not be
+        # confused with the internal "omitted" sentinel (which raises).
+        def fn(x):
+            return (
+                max((), default=None),
+                min((), default=None),
+                max((), default=0),
+                x + 1,
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(opt(x)[:3], (None, None, 0))
+
+    def test_min_max_default_varargs_type_error(self):
+        def fn(a, b):
+            return max(a, b, default=0)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(1, 2)
+        with self.assertRaises(TypeError):
+            opt(1, 2)
+
+    def test_min_max_empty_no_default_value_error(self):
+        def fn(xs):
+            return max(xs)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_indexable(self):
+        # int(x, base) resolves base via __index__ (PyNumber_AsSsize_t), so a
+        # non-constant __index__-able base must be accepted. Previously this
+        # raised an "invalid call to builtin op handler" graph break because
+        # call_int ignored the base argument entirely.
+        class MyIndexable:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn(x):
+            a = int("101", base=MyIndexable(2))
+            b = int("101", MyIndexable(36))
+            c = int(b"ff", base=MyIndexable(16))
+            return x + a + b + c
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_int_base_out_of_range_value_error(self):
+        class MyIndexable:
+            def __index__(self):
+                return 37
+
+        def fn(xs):
+            return int("43", base=MyIndexable())
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_non_string_type_error(self):
+        def fn(n):
+            return int(n, base=16)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(5)
+        with self.assertRaises(TypeError):
+            opt(5)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -3274,6 +3446,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, foo2)
         self.assertEqual(ref, res)
         self.assertEqual(foo1.field, foo2.field)
+
+    def test_member_descriptor_set_delete_slot(self):
+        # member_descriptor (a __slots__ field) exposes __set__/__delete__ via
+        # the shared tp_descr_set slot; explicit calls should trace.
+        class Slotted:
+            __slots__ = ("a",)
+
+        def set_fn(x):
+            o = Slotted()
+            type(o).a.__set__(o, 9)
+            return x + o.a
+
+        def del_fn(x):
+            o = Slotted()
+            o.a = 4
+            type(o).a.__delete__(o)
+            return x + (0 if hasattr(o, "a") else 100)
+
+        for fn in (set_fn, del_fn):
+            opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+            self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
+    def test_tuplegetter_readonly_slot(self):
+        # namedtuple field accessors are read-only; __set__/__delete__ raise
+        # AttributeError through the tp_descr_set slot.
+        P = collections.namedtuple("P", ["x", "y"])
+
+        def fn(t):
+            p = P(1, 2)
+            try:
+                type(p).x.__set__(p, 5)
+                return t + 1
+            except AttributeError as e:
+                return t, str(e)
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
 
     def test_dict_with_descriptor(self):
         class MyDescriptor:
@@ -10824,7 +11033,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend=counter)
         def fn(x):
-            return x * x
+            return torch.ones(2) * x
 
         fn(0)
         fn(1)
@@ -14377,9 +14586,10 @@ fn
         self.assertTrue(same(result[0], torch.tensor(3)))
 
     def test_dynamo_reset_clears_cache(self):
-        """Test that dynamo bytecode cache is freed
+        """Test that dynamo bytecode and fake tensor caches are freed
         when dynamo reset is called
         """
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x):
             return torch.sin(x)
@@ -14390,9 +14600,16 @@ fn
         c1 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c1), 1)
 
+        # Under symbolic shapes the dispatch cache lives on the ShapeEnv rather
+        # than the process-global FakeTensorMode.cache, so only check the latter
+        # is populated when shapes are static.
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertGreater(len(FakeTensorMode.cache), 0)
+
         torch._dynamo.reset()
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
+        self.assertEqual(len(FakeTensorMode.cache), 0)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_check_simplification(self):
@@ -17093,7 +17310,6 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(opt(), "1:2:3")
 
     @unittest.skipIf(sys.version_info >= (3, 12), "comprehensions inlined in 3.12+")
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_listcomp_implicit_iterator_survives_graph_break(self):
         """Regression test: the implicit .0 iterator in a list comprehension
         must survive graph breaks under NGB.
@@ -17121,7 +17337,6 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt(x)
         self.assertTrue(torch.all(result > x))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_module_hooks_dict_reconstructed_as_ordered_dict(self):
         """Empty hooks dicts on nn.Module must be reconstructed as OrderedDict,
         not plain dict, so that weakref.ref() works in RemovableHandle.
