@@ -6,4 +6,5 @@
 
 using namespace metal;
 #include <ATen/native/mps/kernels/DecodeAttention.h>
+#include <ATen/native/mps/kernels/MppAttention.h>
 #include <ATen/native/mps/kernels/PrefillAttention.h>
