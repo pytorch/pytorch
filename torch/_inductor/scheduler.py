@@ -643,8 +643,10 @@ class NestedReduction:
 
         reduction_names = OrderedSet[str]()
         reduction_buffer_names = OrderedSet[str]()
+        fused_buffer_names = OrderedSet[str]()
         reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
         for node in nodes:
+            fused_buffer_names |= node.get_buffer_names()
             if node.is_reduction():
                 reduction_names |= node.get_operation_names()
                 reduction_buffer_names |= node.get_buffer_names()
@@ -654,17 +656,19 @@ class NestedReduction:
         if not reduction_names:
             return None
 
-        fused_buffer_names = OrderedSet[str]()
-        for node in nodes:
-            fused_buffer_names |= node.get_buffer_names()
-
+        full_numel = V.graph.sizevars.simplify(numel * rnumel)
         candidate = cls._sub_parent_epilogue_candidate_nodes(
-            nodes, numel, rnumel, reduction_names, reduction_buffer_names
+            nodes,
+            numel,
+            rnumel,
+            full_numel=full_numel,
+            parent_rnumel=parent_rnumel,
+            reduction_names=reduction_names,
+            reduction_buffer_names=reduction_buffer_names,
         )
         if candidate is None:
             return None
         epilogue_nodes, sub_parent_factor = candidate
-        full_numel = V.graph.sizevars.simplify(numel * rnumel)
         source_deps = cls._sub_parent_epilogue_source_deps(
             epilogue_nodes,
             fused_buffer_names,
@@ -708,28 +712,15 @@ class NestedReduction:
         nodes: Sequence[BaseSchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
-        reduction_names: OrderedSet[str] | None = None,
-        reduction_buffer_names: OrderedSet[str] | None = None,
+        *,
+        full_numel: sympy.Expr,
+        parent_rnumel: int,
+        reduction_names: OrderedSet[str],
+        reduction_buffer_names: OrderedSet[str],
     ) -> tuple[tuple[SchedulerNode, ...], int] | None:
         from .codegen.simd import SIMDKernel
 
-        parent_rnumel = cls._sub_parent_epilogue_parent_rnumel(rnumel)
-        if parent_rnumel is None:
-            return None
-
-        if reduction_names is None:
-            reduction_names = OrderedSet[str]()
-            reduction_buffer_names = OrderedSet[str]()
-            for node in nodes:
-                if node.is_reduction():
-                    reduction_names |= node.get_operation_names()
-                    reduction_buffer_names |= node.get_buffer_names()
-        if not reduction_names:
-            return None
-        assert reduction_buffer_names is not None  # noqa: S101
-
         candidates: list[tuple[SchedulerNode, int]] = []
-        full_numel = V.graph.sizevars.simplify(numel * rnumel)
         for node in nodes:
             if node.is_reduction():
                 continue
@@ -764,8 +755,6 @@ class NestedReduction:
 
     @staticmethod
     def _sub_parent_epilogue_parent_rnumel(rnumel: sympy.Expr) -> int | None:
-        if V.graph.sizevars.statically_known_equals(rnumel, 1):
-            return None
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
         if not isinstance(parent_rnumel, (int, sympy.Integer)):
             return None
@@ -3552,15 +3541,14 @@ class FusedNestedReductions(FusedSchedulerNode):
         self.grouped_pointwise_domains: tuple[
             tuple[SchedulerNode, NestedReduction.PointwiseDomain], ...
         ] = tuple(grouped_pointwise_domains)
-        self.grouped_reduced_output_names: OrderedSet[str] = OrderedSet(
+        self.sub_parent_broadcast_source_names: OrderedSet[str] = OrderedSet(
             name
             for sn, domain in self.grouped_pointwise_domains
             if domain is NestedReduction.PointwiseDomain.REDUCED
             for name in sn.get_buffer_names()
         )
-        self.grouped_reduced_output_names.update(grouped_reduction.get_buffer_names())
-        self.sub_parent_broadcast_source_names: OrderedSet[str] = OrderedSet(
-            self.grouped_reduced_output_names
+        self.sub_parent_broadcast_source_names.update(
+            grouped_reduction.get_buffer_names()
         )
         for sn in self.node1.get_nodes():
             if sn.is_reduction():
@@ -3626,12 +3614,7 @@ class FusedNestedReductions(FusedSchedulerNode):
         # that read a half-resolution output buffer are rejected. Checking the
         # whole combined set makes this independent of fusion order.
         combined_nodes = [*self.node2.get_nodes(), *other.get_nodes()]
-        candidate_domains = NestedReduction._classify_grouped_pointwise_nodes(
-            self.domain_context,
-            combined_nodes,
-        )
-        if candidate_domains is None:
-            return False
+        candidate_domains = [*self.grouped_pointwise_domains, *pointwise_domains]
         candidate_half_resolution_nodes = [
             sn
             for sn, domain in candidate_domains
@@ -3652,19 +3635,12 @@ class FusedNestedReductions(FusedSchedulerNode):
         ):
             return False
 
-        if half_resolution_nodes:
-            return self.scheduler._can_fuse_nested_reduction_append(
-                self.node2,
-                other,
-                pointwise_domains,
-                can_reorder=can_reorder,
-                producer_node=self,
-            )
         return self.scheduler._can_fuse_nested_reduction_append(
             self.node2,
             other,
             pointwise_domains,
             can_reorder=can_reorder,
+            producer_node=self if half_resolution_nodes else None,
         )
 
     def _parent_half_source_layouts(
@@ -8476,19 +8452,12 @@ class Scheduler:
         # Parent-full consumers may read grouped-stage outputs through
         # broadcasted parent-tile views. Relax matching only for those named
         # producer outputs; all other deps use normal vertical legality.
-        if producer_node is not None:
-            return self._can_fuse(
-                producer_node,
-                other,
-                can_reorder=can_reorder,
-                index_equivalent_dep_names=index_equivalent_dep_names,
-                _skip_fused_nested_dispatch=True,
-            )
         return self._can_fuse(
-            grouped_node,
+            producer_node if producer_node is not None else grouped_node,
             other,
             can_reorder=can_reorder,
             index_equivalent_dep_names=index_equivalent_dep_names,
+            _skip_fused_nested_dispatch=True,
         )
 
     def can_fuse(
