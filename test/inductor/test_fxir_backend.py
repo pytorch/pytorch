@@ -13,15 +13,16 @@ import sympy
 import torch
 import torch._inductor.codegen.common as common
 import torch.utils._pytree as pytree
-from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.utils import same
+from torch._higher_order_ops.compiled_kernel_wrap import (
+    compiled_kernel_wrapper_mutation,
+)
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
-from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.codegen.wrapper_fxir import (
@@ -774,27 +775,6 @@ class FxirTestCase(InductorTestCase):
         pred_tensor = torch.tensor([pred], device=self.device)
         self._compile_and_check(foo, [pred_tensor], expected_num_triton_kernels=2)
 
-    def test_cpp_raises(self):
-        """
-        Test the C++ CPU backend. C++ kernels are not yet supported, so for now check
-        that we get the expected exception.
-        """
-
-        def foo(x, y):
-            return x + y * 5
-
-        device = torch.device("cpu")
-        args = [torch.randn(5, device=device) for _ in range(2)]
-
-        cpp_backend = common.DeviceCodegen(CppScheduling, WrapperFxCodegen, None)
-        with (
-            unittest.mock.patch.dict(
-                common.device_codegens, {device.type: cpp_backend}
-            ),
-            self.assertRaisesRegex(BackendCompilerFailed, "Triton"),
-        ):
-            self._compile_and_check(foo, args)
-
     @parametrize("enable_tuning", (False, True))
     @parametrize("use_dynamic_shapes", (False, True))
     def test_autotune(self, use_dynamic_shapes: bool, enable_tuning: bool):
@@ -1497,6 +1477,55 @@ class TestReplaceFloorDiv(InductorTestCase):
         x, y = sympy.symbols("x y")
         expr = sympy.floor(-FloorDiv(x * y, 2) / FloorDiv(-x * y, 131070))
         self._check(expr)
+
+
+@config.patch({**test_config, "fx_wrapper": True})
+class FxirCpuCompiledKernelTestCase(InductorTestCase):
+    """The FX backend embeds non-Triton CPU cpp_fused_* kernels as
+    compiled_kernel_wrapper_mutation HOP nodes instead of raising on them."""
+
+    def _compile_and_capture(self, func, args):
+        gms = []
+        orig_generate = FxConverter.generate
+
+        def generate(self):
+            gm = orig_generate(self)
+            gms.append(gm)
+            return gm
+
+        with unittest.mock.patch.object(FxConverter, "generate", generate):
+            result = torch.compile(func)(*args)
+
+        num_hop = sum(
+            len(
+                gm.graph.find_nodes(
+                    op="call_function", target=compiled_kernel_wrapper_mutation
+                )
+            )
+            for gm in gms
+        )
+        return result, num_hop
+
+    def test_cpp_fused_kernel(self):
+        # x + y fuses with relu and the * 2 into a single cpp_fused_* kernel,
+        # which becomes a compiled_kernel_wrapper_mutation HOP node.
+        def foo(x, y):
+            return (x + y).relu() * 2.0
+
+        args = [torch.randn(8, 8) for _ in range(2)]  # cpu
+        result, num_hop = self._compile_and_capture(foo, args)
+        self.assertTrue(same(foo(*args), result))
+        self.assertGreater(num_hop, 0)
+
+    def test_cpp_fused_kernel_with_extern(self):
+        # a @ b stays an aten extern; the pointwise tail fuses into a cpp kernel.
+        def foo(a, b):
+            return torch.relu(a @ b + a) * 2.0
+
+        args = [torch.randn(16, 16) for _ in range(2)]  # cpu
+        result, num_hop = self._compile_and_capture(foo, args)
+        self.assertTrue(same(foo(*args), result))
+        self.assertGreater(num_hop, 0)
 
 
 if __name__ == "__main__":

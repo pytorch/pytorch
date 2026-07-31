@@ -172,11 +172,15 @@ def reset() -> None:
 
         # Reset cudagraph trees unconditionally since they are global state
         # not tied to a specific backend instance
+        from torch._higher_order_ops.compiled_kernel_wrap import (
+            compiled_kernel_side_table,
+        )
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._higher_order_ops.wrap import inductor_code_side_table
 
         kernel_side_table.reset_table()
         inductor_code_side_table.reset_table()
+        compiled_kernel_side_table.reset_table()
 
         # The fake tensor dispatch cache is process-global (shared across
         # FakeTensorMode instances), so it survives into later compiles. That
