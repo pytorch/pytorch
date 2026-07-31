@@ -203,7 +203,9 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=7.2
+    ROCM_VERSION=7.14
+    THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+    ROCM_PIP_SPEC="rocm[libraries,devel,device-all]==7.14.*"
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
@@ -214,10 +216,13 @@ case "$tag" in
   pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=preview
+    ROCM_VERSION=7.15.0a20260712
+    THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
+    ROCM_PIP_SPEC="rocm[libraries,devel,device-all]==7.15.0a20260712"
+    USE_MSLK=0
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx942;gfx950"
+    PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -405,6 +410,9 @@ build_image() {
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
+       --build-arg "ROCM_PIP_SPEC=${ROCM_PIP_SPEC:-}" \
+       --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}" \
+       --build-arg "USE_MSLK=${USE_MSLK:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "TRITON=${TRITON}" \

@@ -186,11 +186,12 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ARG ROCM_VERSION
 # ROCm is installed from the multi-arch TheRock wheel index instead of the
 # rocm/dev-almalinux-8 OS packages. install_rocm.sh dispatches to install_rocm
-# on this AlmaLinux base. ROCM_VERSION and THEROCK_INDEX_URL come from
+# on this AlmaLinux base. ROCM_VERSION, ROCM_PIP_SPEC, and THEROCK_INDEX_URL come from
 # manywheel/build.sh --build-arg; it pip-installs the ROCm SDK and
 # writes /etc/rocm_env.sh pointing at the real _rocm_sdk_* root; build_env_setup.py /
 # repair_wheel.py discover ROCM_HOME from there. No /opt/rocm symlink.
 ARG THEROCK_INDEX_URL
+ARG ROCM_PIP_SPEC
 ENV MKLROOT /opt/intel
 # cmake-3.28.4 from pip to get enable_language(HIP)
 RUN python3 -m pip install --upgrade pip && \

@@ -46,28 +46,17 @@ RUN bash ./install_clang.sh && rm install_clang.sh
 
 # Install rocm
 ARG ROCM_VERSION
+ARG ROCM_PIP_SPEC
+ARG THEROCK_INDEX_URL
+ARG USE_MSLK
 ENV ROCM_VERSION=${ROCM_VERSION}
-RUN mkdir ci_commit_pins
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
 COPY ./common/install_rocm.sh install_rocm.sh
-RUN bash ./install_rocm.sh
-RUN rm install_rocm.sh common_utils.sh
-RUN rm -r ci_commit_pins
-COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN if [ "${ROCM_VERSION}" != "preview" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
-RUN rm install_rocm_magma.sh
+RUN bash ./install_rocm.sh && rm install_rocm.sh
 COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
-RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION}
-RUN rm install_rocSHMEM.sh
-ADD ./common/install_miopen.sh install_miopen.sh
-RUN if [ "${ROCM_VERSION}" != "preview" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
-ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
-RUN if [ "${ROCM_VERSION}" != "preview" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
+RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION} && rm install_rocSHMEM.sh
 
 # ROCm environment is written by install_rocm.sh to /etc/rocm_env.sh and sourced
-# by CI scripts. Do not set /opt/rocm defaults here: ROCM_VERSION=preview
-# installs ROCm from TheRock wheels under the Python environment instead.
+# by CI scripts. TheRock installs ROCm under the Python environment, not /opt/rocm.
 
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
@@ -120,7 +109,7 @@ RUN rm install_openmpi.sh
 # Install rocm-origami
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
-RUN bash -c 'source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
+RUN bash -c 'source /etc/rocm_env.sh && source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
 
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

@@ -85,7 +85,8 @@ case ${image} in
             TARGET=rocm_final
             GPU_IMAGE=amd64/almalinux:8
             THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
-            DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
+            ROCM_PIP_SPEC="rocm[libraries,devel,device-all]==${GPU_ARCH_VERSION}.*"
+            DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg ROCM_PIP_SPEC=${ROCM_PIP_SPEC} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
         else
             # Earlier ROCm versions install from the rocm/dev-almalinux-8 OS packages.
             # we want the patch version of 7.2 instead
