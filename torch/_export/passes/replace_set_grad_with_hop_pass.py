@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import torch
@@ -20,6 +21,11 @@ from .replace_with_hop_pass_util import (
 
 if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
+
+
+_REPEATED_STACK_FRAME_RE = re.compile(
+    r"\s*\[Previous line repeated (\d+) more times?\]"
+)
 
 
 def _is_set_grad_enabled_node(node: torch.fx.Node) -> torch.fx.Node | bool:
@@ -46,7 +52,7 @@ def _is_set_grad_enabled_sub_mod(
             and first_non_ph.target is torch._C._set_grad_enabled
         ):
             return (
-                first_non_ph.args[0] != torch.is_grad_enabled()
+                first_non_ph.args[0] != torch.is_grad_enabled()  # type: ignore[bad-return]
                 if omit_if_same_with_ambient
                 else True
             )
@@ -65,19 +71,39 @@ def _get_reentrant_checkpoint_stack_trace_key(
     ):
         return None
 
-    lines = stack_trace.splitlines()
-    for i, line in enumerate(lines):
+    lines = []
+    for line in stack_trace.splitlines():
+        repeat_match = _REPEATED_STACK_FRAME_RE.fullmatch(line)
+        if repeat_match is None:
+            lines.append(line)
+            continue
+
+        frame_start = next(
+            (
+                i
+                for i in range(len(lines) - 1, -1, -1)
+                if lines[i].lstrip().startswith("File ")
+            ),
+            None,
+        )
+        if frame_start is None:
+            return None
+        repeated_frame = lines[frame_start:]
+        for _ in range(int(repeat_match.group(1))):
+            lines.extend(repeated_frame)
+
+    for i in range(len(lines) - 2, -1, -1):
+        line = lines[i]
         if (
             "torch/utils/checkpoint.py" in line
             and "in forward" in line
-            and i + 1 < len(lines)
             and frame_marker in lines[i + 1]
         ):
-            # Key by the user checkpoint callsite. Repeated calls from the same
-            # source line share a key, but they are still separated by
-            # checkpoint boundary nodes.
-            return lines[i - 1] if i > 0 else line
-    return stack_trace
+            # Key by the complete caller stack. Its depth distinguishes nested
+            # checkpoints, while repeated calls from the same source line are
+            # still separated by checkpoint boundary nodes.
+            return "\n".join(lines[:i]) if i > 0 else line
+    return None
 
 
 def _get_reentrant_checkpoint_boundary_key(node: torch.fx.Node) -> str | None:
@@ -103,9 +129,8 @@ def _split_set_grad_and_reentrant_checkpoints(
     split_after_checkpoint = False
 
     # Keep each reentrant checkpoint's outer no_grad enter/body/exit in one
-    # submodule so it can be replaced by a single AC HOP. User-authored
-    # grad-mode changes inside the checkpoint body are handled recursively after
-    # the AC HOP body has been installed.
+    # submodule so it can be replaced by a single AC HOP. Nested checkpoint
+    # boundaries are handled recursively after the outer AC HOP is installed.
     for node in gm.graph.nodes:
         started_new_split = False
         if split_after_checkpoint:
@@ -129,6 +154,9 @@ def _split_set_grad_and_reentrant_checkpoints(
             split_id += 1
         split_map[node] = split_id
 
+    if active_checkpoint_key is not None:
+        raise AssertionError("expected a matching reentrant checkpoint boundary")
+
     new_gm = split_module(
         gm,
         gm,
@@ -147,7 +175,9 @@ def _get_reentrant_checkpoint_sub_mod_key(node: torch.fx.Node) -> str | None:
     if not isinstance(node.target, str):
         raise AssertionError(f"expected str target, got {type(node.target)}")
     subgm = getattr(node.graph.owning_module, node.target)
-    first_non_ph = nodes_first(subgm.graph.nodes, lambda node: node.op != "placeholder")
+    first_non_ph = nodes_first(
+        subgm.graph.nodes, lambda sub_node: sub_node.op != "placeholder"
+    )
     if first_non_ph is None:
         return None
     boundary_key = _get_reentrant_checkpoint_boundary_key(first_non_ph)
@@ -168,8 +198,8 @@ def _get_reentrant_checkpoint_sub_mod_key(node: torch.fx.Node) -> str | None:
 
 def _replace_with_hop(
     node: torch.fx.Node,
-    wrap_hoo=wrap_with_set_grad_enabled,
     *,
+    wrap_hoo=wrap_with_set_grad_enabled,
     include_enter_block_args: bool = True,
 ) -> None:
     if node.op != "call_module":
@@ -219,6 +249,20 @@ def _replace_reentrant_checkpoint_with_hop(
     if len(boundary_nodes) != 2:
         raise AssertionError(
             f"expected exactly 2 checkpoint boundary nodes, got {len(boundary_nodes)}"
+        )
+    user_set_grad_nodes = [
+        sub_node
+        for sub_node in sub_graph.nodes
+        if _is_set_grad_enabled_node(sub_node)
+        and _get_reentrant_checkpoint_boundary_key(sub_node) is None
+    ]
+    if user_set_grad_nodes:
+        # Context exits restore the checkpoint's outer no_grad state in the
+        # trace. That stale False value cannot be replayed in the AC HOP's
+        # grad-enabled recomputation without structured enter/exit provenance.
+        raise NotImplementedError(
+            "non-strict export of a reentrant checkpoint does not support "
+            "grad-mode changes inside the checkpointed function"
         )
     _replace_with_hop_helper(
         node,
