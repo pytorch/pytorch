@@ -463,6 +463,73 @@ class ComboKernelTests(TestCase):
         self.assertIn("dtype=torch.int64", full_code)
 
     @requires_gpu_and_triton
+    def test_uniform_dispatch_identical_non_persistent_reductions(self):
+        # Regression test for the R0_BLOCK constexpr collision.
+        #
+        # A large reduction dimension forces a NON-persistent (looped) reduction,
+        # where R0_BLOCK is a runtime `tl.constexpr` kernel PARAMETER (not a baked
+        # compile-time constant). Uniform dispatch must not also emit
+        # `R0_BLOCK: tl.constexpr = ...` in the body -- doing so raised
+        # `ValueError('R0_BLOCK is already defined. constexpr cannot be
+        # reassigned.')` at Triton compile time, which the identical-persistent
+        # test above never exercised (it only covers persistent reductions).
+        def big_sum(x):
+            return x.sum(dim=-1)
+
+        def fn(a, b, c, d):
+            return big_sum(a), big_sum(b), big_sum(c), big_sum(d)
+
+        # Reduction numel 2**16 is far above the persistent-reduction threshold,
+        # so each sub-kernel is a looped (non-persistent) reduction. Identical
+        # shapes/dtypes keep all four structurally identical -> uniform dispatch.
+        inps = [torch.rand(8, 65536, device=GPU_TYPE) for _ in range(4)]
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            out_eager = fn(*inps)
+            # Before the fix this raises during Triton compilation; the assertion
+            # below (correct results) is only reachable once codegen is fixed.
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+
+        self.assertEqual(out_eager, out_compiled)
+
+        # Prove the uniform-dispatch path was actually taken (not a silent bail),
+        # so this genuinely guards the non-persistent uniform-dispatch codegen.
+        uniform_srcs = [
+            c for c in code if "kernel_idx = pid // num_blocks_per_kernel" in c
+        ]
+        self.assertEqual(
+            len(uniform_srcs),
+            1,
+            "expected exactly one generated kernel using uniform dispatch",
+        )
+
+    @requires_gpu_and_triton
+    def test_uniform_dispatch_mixed_persistent_and_non_persistent(self):
+        # A combo group that mixes a persistent reduction (small reduction numel)
+        # with a non-persistent one (large reduction numel). These sub-kernels are
+        # NOT structurally identical, so the uniform-dispatch structural pre-check
+        # must bail and fall back to sequential dispatch -- which handles R0_BLOCK
+        # per sub-kernel correctly. This documents the fallback and guards against
+        # the mixed group ever crashing.
+        def fn(a, b):
+            return a.sum(dim=-1), b.sum(dim=-1)
+
+        inps = (
+            torch.rand(64, 32, device=GPU_TYPE),  # small numel -> persistent
+            torch.rand(64, 65536, device=GPU_TYPE),  # large numel -> non-persistent
+        )
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            out_eager = fn(*inps)
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+
+        self.assertEqual(out_eager, out_compiled)
+
+        # Uniform dispatch must NOT engage for a non-identical (mixed) group.
+        full_code = "\n".join(code)
+        self.assertNotIn("kernel_idx = pid // num_blocks_per_kernel", full_code)
+
+    @requires_gpu_and_triton
     def test_mutated_args(self):
         def test_mutated(a, b, c, d):
             a.add_(1)

@@ -1876,9 +1876,17 @@ class ComboKernel(Kernel):
                 if isinstance(simplified, (Integer, int)):
                     code.writeline(f"{tree.prefix}numel = {int(simplified)}")
 
-            # Emit reduction block size constexpr if needed (persistent reductions)
+            # Emit the reduction block-size constexpr in the body ONLY for
+            # persistent reductions. For a persistent reduction R0_BLOCK is a
+            # baked compile-time constant (not a kernel parameter), so it must be
+            # defined here. For a non-persistent (looped) reduction, R0_BLOCK is
+            # instead a tl.constexpr KERNEL PARAMETER (added from get_block_args()
+            # when autotuning, see above), so emitting it here as well would raise
+            # "R0_BLOCK is already defined. constexpr cannot be reassigned." at
+            # Triton compile time. This is the bug that broke uniform dispatch on
+            # non-persistent / mixed reduction combo groups in training.
             for tree in ref_sub.range_trees:
-                if tree.is_reduction:
+                if tree.is_reduction and ref_sub.persistent_reduction:
                     simplified = V.graph.sizevars.simplify(tree.numel)
                     if isinstance(simplified, (Integer, int)):
                         rblock_size = next_power_of_2(int(simplified))
