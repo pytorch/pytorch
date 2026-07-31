@@ -108,6 +108,7 @@ class Embedding(torch.nn.Module):
                          shape :math:`(\text{num\_embeddings}, \text{embedding\_dim})`.
 
     Examples::
+        >>> warnings.filterwarnings("ignore", message=".*quantized tensor creation functions")  # docs: hide
         >>> m = nn.quantized.Embedding(num_embeddings=10, embedding_dim=12)
         >>> indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8])
         >>> output = m(indices)
