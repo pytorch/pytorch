@@ -645,7 +645,7 @@ def insert_deferred_runtime_asserts(
                 # https://github.com/pytorch/pytorch/pull/119043
                 # which didn't work.
                 #
-                # Another ideas for how to do this:
+                # Another idea for how to do this:
                 # - Have bound_sympy be the source of truth of the ranges of any expression
                 # - Cache intermediate results for every subexpression of bound_sympy
                 # - This cache should be possible to edit to refine ranges

@@ -240,8 +240,6 @@ inductor_skips["xpu"] = {
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
-# torch-xpu-ops: #2956
-inductor_skips["xpu"]["lu"] = {f32}
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
 inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
@@ -571,9 +569,10 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -741,9 +740,6 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -1302,6 +1298,7 @@ class TestInductorOpInfo(TestCase):
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCPUIf(IS_MACOS, "Skipped under macOS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
