@@ -622,8 +622,10 @@ class NestedReduction:
 
         reduction_names = OrderedSet[str]()
         reduction_buffer_names = OrderedSet[str]()
+        fused_buffer_names = OrderedSet[str]()
         reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
         for node in nodes:
+            fused_buffer_names |= node.get_buffer_names()
             if node.is_reduction():
                 reduction_names |= node.get_operation_names()
                 reduction_buffer_names |= node.get_buffer_names()
@@ -633,17 +635,19 @@ class NestedReduction:
         if not reduction_names:
             return None
 
-        fused_buffer_names = OrderedSet[str]()
-        for node in nodes:
-            fused_buffer_names |= node.get_buffer_names()
-
+        full_numel = V.graph.sizevars.simplify(numel * rnumel)
         candidate = cls._sub_parent_epilogue_candidate_nodes(
-            nodes, numel, rnumel, reduction_names, reduction_buffer_names
+            nodes,
+            numel,
+            rnumel,
+            full_numel=full_numel,
+            parent_rnumel=parent_rnumel,
+            reduction_names=reduction_names,
+            reduction_buffer_names=reduction_buffer_names,
         )
         if candidate is None:
             return None
         epilogue_nodes, sub_parent_factor = candidate
-        full_numel = V.graph.sizevars.simplify(numel * rnumel)
         source_deps = cls._sub_parent_epilogue_source_deps(
             epilogue_nodes,
             fused_buffer_names,
@@ -686,28 +690,15 @@ class NestedReduction:
         nodes: Sequence[BaseSchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
-        reduction_names: OrderedSet[str] | None = None,
-        reduction_buffer_names: OrderedSet[str] | None = None,
+        *,
+        full_numel: sympy.Expr,
+        parent_rnumel: int,
+        reduction_names: OrderedSet[str],
+        reduction_buffer_names: OrderedSet[str],
     ) -> tuple[tuple[SchedulerNode, ...], int] | None:
         from .codegen.simd import SIMDKernel
 
-        parent_rnumel = cls._sub_parent_epilogue_parent_rnumel(rnumel)
-        if parent_rnumel is None:
-            return None
-
-        if reduction_names is None:
-            reduction_names = OrderedSet[str]()
-            reduction_buffer_names = OrderedSet[str]()
-            for node in nodes:
-                if node.is_reduction():
-                    reduction_names |= node.get_operation_names()
-                    reduction_buffer_names |= node.get_buffer_names()
-        if not reduction_names:
-            return None
-        assert reduction_buffer_names is not None  # noqa: S101
-
         candidates: list[tuple[SchedulerNode, int]] = []
-        full_numel = V.graph.sizevars.simplify(numel * rnumel)
         for node in nodes:
             if node.is_reduction():
                 continue
@@ -742,8 +733,6 @@ class NestedReduction:
 
     @staticmethod
     def _sub_parent_epilogue_parent_rnumel(rnumel: sympy.Expr) -> int | None:
-        if V.graph.sizevars.statically_known_equals(rnumel, 1):
-            return None
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
         if not isinstance(parent_rnumel, (int, sympy.Integer)):
             return None
