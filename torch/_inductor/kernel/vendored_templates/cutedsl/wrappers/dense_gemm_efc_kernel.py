@@ -36,6 +36,8 @@ from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
 
 
 class _EFCOpScope:
+    """Expose an EFC configuration through the shared CuTeDSL op namespace."""
+
     def __init__(self, efc_config):
         self.efc_config = efc_config
         self.math = self
@@ -45,6 +47,8 @@ class _EFCOpScope:
 
 
 def _direct_cutedsl_epilogue(metadata):
+    """Adapt generated CuTeDSL source to EFC's accumulator and parameter API."""
+
     import cutlass.cute as cute
 
     scope = gemm_epilogue_op_scope(cute)
