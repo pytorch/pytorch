@@ -487,7 +487,6 @@ class TestMkldnn(TestCase):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=dtype, prec=prec)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=dtype, prec=prec)
 
-
     @reduced_f32_on_and_off()
     def test_conv_transpose_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
@@ -808,7 +807,6 @@ class TestMkldnn(TestCase):
         for D, H, W in [(64, 64, 64), (35, 39, 35), (16, 19, 20), [7, 8, 9]]:
             x = torch.randn(N, C, D, H, W, dtype=torch.float32) * 10
             self._test_max_pool_base(dim=3, input=x)
-
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_max_pool_bf16_base(self, dim, input):
@@ -1674,7 +1672,7 @@ class TestMkldnn(TestCase):
             ]:
                 common(self, shape1, shape2, op, dtype)
 
-    def test_mkldnn_setflags_nowarn(self, device):
+    def test_mkldnn_setflags_nowarn(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/149829
         with warnings.catch_warnings(record=True) as w:
             rc = torch.backends.mkldnn.set_flags()
@@ -1684,7 +1682,7 @@ class TestMkldnn(TestCase):
         # Above should trigger no warnings regardless of configuration
         self.assertEqual(len(w), 0)
 
-    def test_mkldnn_error_on_zero_stride(self, device):
+    def test_mkldnn_error_on_zero_stride(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/149274
         x = torch.rand(1, 2, 3, 3).to_mkldnn()
         with self.assertRaises(ValueError):
@@ -1718,7 +1716,6 @@ class TestMkldnn(TestCase):
             if out_dtype is not None:
                 self.assertEqual(out_dtype, out.dtype)
             self.assertEqual(out_emulated.float(), out.float(), atol=5e-2, rtol=5e-2)
-
 
     @recover_orig_fp32_precision
     def test_mlkdnn_get_set(self):
