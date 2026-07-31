@@ -427,7 +427,27 @@ class ImplDetailTest(MockSchedulerTest):
                 reject,
             )
 
-    def test_reindexing_memory_guard_without_bandwidth(self):
+    @parametrize("dram_gbps", [None, 0, -1, float("nan"), float("inf")])
+    def test_reindexing_memory_guard_with_invalid_bandwidth(self, dram_gbps):
+        scheduler = Scheduler.__new__(Scheduler)
+        with (
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps",
+                return_value=dram_gbps,
+            ),
+            mock.patch.object(
+                scheduler,
+                "_selected_tiling_memory",
+                return_value=MemoryCoalescing(101, 0),
+            ),
+        ):
+            self.assertTrue(
+                scheduler._reindexing_regresses_memory_coalescing(
+                    mock.Mock(), mock.Mock(), (MemoryCoalescing(100, 0),)
+                )
+            )
+
+    def test_reindexing_memory_guard_when_bandwidth_lookup_fails(self):
         scheduler = Scheduler.__new__(Scheduler)
         with (
             mock.patch(
