@@ -285,6 +285,8 @@ struct C10_API FakeTensorMode {
       c10::StorageImpl*,
       std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
       constant_storage_mapping_;
+  // protecting the two constant tracking maps tensor_to_constant_ and
+  // constant_storage_mapping
   mutable std::mutex constant_mutex_;
 };
 
