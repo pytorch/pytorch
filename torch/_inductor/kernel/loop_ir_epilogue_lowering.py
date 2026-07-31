@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-"""Typed GEMM epilogue IR contracts and lowered-loop semantic analysis."""
+"""Lower GEMM epilogue loop IR to shared epilogue contracts."""
 
 import dataclasses
 import math
@@ -10,6 +10,7 @@ import sympy
 
 import torch
 from torch._inductor.ir import ComputedBuffer
+from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
 from torch._inductor.ops_handler import DefaultHandler
 from torch._inductor.virtualized import V
 
@@ -53,6 +54,15 @@ class GemmEpilogueIROutputRole:
 
     transitive_inputs: frozenset[str]
     reduction_inputs: frozenset[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmEpilogueIRFinalizer:
+    """Normalized operation applied to a completed grouped reduction."""
+
+    output_name: str
+    source_name: str
+    kind: str
 
 
 class _GemmEpilogueIRHandler(DefaultHandler):
@@ -139,6 +149,51 @@ class GemmEpilogueIRAnalysis:
             transitive_inputs,
             transitive_inputs & self.reduction_stores,
         )
+
+    def grouped_reduction(
+        self,
+        output_name: str,
+        source_name: str,
+        group: int,
+        axis: int,
+        source_dtype: torch.dtype,
+    ) -> GemmReductionConfig | None:
+        store = self.store(output_name)
+        classified = (
+            grouped_reduction_ir(store, source_name, group, source_dtype)
+            if store is not None
+            else None
+        )
+        if classified is None:
+            return None
+        reduction_type, source_type = classified
+        return GemmReductionConfig(
+            output_name, group, axis, reduction_type, source_type
+        )
+
+    def reduction_finalizer(
+        self,
+        output_name: str,
+        source_name: str,
+        group: int | None = None,
+    ) -> GemmEpilogueIRFinalizer | None:
+        store = self.store(output_name)
+        if store is None:
+            return None
+        if operation_names_ir(store).issubset(
+            ("load", "to_dtype", "to_dtype_bitcast", "identity")
+        ):
+            kind = "identity"
+        elif group is not None and single_source_affine_ir(store, source_name) == (
+            1.0 / group,
+            0.0,
+        ):
+            kind = "mean"
+        elif is_absmax_scale_finalizer_ir(store, source_name):
+            kind = "absmax_scale"
+        else:
+            return None
+        return GemmEpilogueIRFinalizer(output_name, source_name, kind)
 
     @property
     def reduction_stores(self) -> frozenset[str]:
