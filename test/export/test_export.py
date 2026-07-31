@@ -12238,6 +12238,52 @@ graph():
             ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs))
         )
 
+    def test_export_stateful_cache_tensor_scalar_slice_assignment(self):
+        class StatefulCache(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.zeros(1, 100, 8)
+
+            def forward(self, x, start):
+                self.buffer[:, start : start + 2, :] = x
+                return self.buffer
+
+        inputs = (torch.randn(1, 2, 8), torch.tensor(5))
+        ep = torch.export.export(StatefulCache().eval(), inputs)
+        FileCheck().check("torch.ops.aten.item.default").check(
+            "torch.ops.aten.slice.Tensor"
+        ).check("torch.ops.aten.copy_.default").run(ep.graph_module.code)
+
+        exported_module = ep.module()
+        eager_module = StatefulCache().eval()
+        for start in (11, 17):
+            runtime_inputs = (torch.randn(1, 2, 8), torch.tensor(start))
+            self.assertEqual(
+                exported_module(runtime_inputs[0].clone(), runtime_inputs[1].clone()),
+                eager_module(runtime_inputs[0].clone(), runtime_inputs[1].clone()),
+            )
+
+    def test_export_tensor_scalar_slice_assignment_mask_index_not_rewritten(self):
+        class MaskedStateUpdate(torch.nn.Module):
+            def forward(self, x, mask, start):
+                x = x.clone()
+                x[mask, start : start + 2, :] = 1
+                return x
+
+        for mask in (
+            True,
+            torch.tensor(True),
+            torch.tensor(1, dtype=torch.uint8),
+        ):
+            with self.subTest(mask=mask):
+                with self.assertRaises(
+                    torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+                ):
+                    torch.export.export(
+                        MaskedStateUpdate(),
+                        (torch.zeros(3, 4, 5), mask, torch.tensor(1)),
+                    )
+
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
