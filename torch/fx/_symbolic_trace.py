@@ -18,7 +18,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
+from torch._library.opaque_object import is_custom_class, is_opaque_symbolic_type
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
@@ -68,6 +68,16 @@ def _set_is_fx_tracing(value: bool) -> None:
 
 def _get_is_fx_tracing() -> bool:
     return getattr(_is_fx_tracing_tls, "flag", False)
+
+
+@contextlib.contextmanager
+def _is_fx_tracing_context(value: bool) -> Iterator[None]:
+    previous = _get_is_fx_tracing()
+    _set_is_fx_tracing(value)
+    try:
+        yield
+    finally:
+        _set_is_fx_tracing(previous)
 
 
 def is_fx_tracing() -> bool:
@@ -253,7 +263,7 @@ class PHWithMeta(PHBase):
     def __init__(self, ph_key: str | None = None) -> None:
         super().__init__()
 
-        # Provide a hey for user to identify placeholder node during analysis
+        # Provide a key for user to identify placeholder node during analysis
         self.ph_key = ph_key
 
 
@@ -437,7 +447,7 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, _constant_attribute_types) or (
-            is_opaque_reference_type(type(a))
+            is_opaque_symbolic_type(type(a))
         ):
             qualname: str | None = self.tensor_attrs.get(a)
 
@@ -450,7 +460,7 @@ class Tracer(TracerBase):
                     base_name = "_torchbind_obj"
                 elif isinstance(a, pytree.TreeSpec):
                     base_name = "_tree_spec_constant"
-                elif is_opaque_type(type(a)):
+                elif is_custom_class(type(a)):
                     base_name = "_opaque_obj"
                 else:
                     raise RuntimeError(
