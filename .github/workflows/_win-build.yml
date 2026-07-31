@@ -151,7 +151,7 @@ jobs:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BUILD_WHEEL: 1
-          MAX_JOBS: 8
+          MAX_JOBS: 2
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTHON_VERSION: "3.10"
           SCCACHE_BUCKET: "ossci-compiler-cache"
