@@ -21,7 +21,7 @@ from torch._higher_order_ops.cudagraph_conditional_nodes import (
     CUDAGraphCaptureControlFlowOpDispatchMode,
 )
 from torch._higher_order_ops.map import _fake_map
-from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._higher_order_ops.scan import _fake_scan, _FULL_UNROLL, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
@@ -2594,6 +2594,74 @@ class <lambda>(torch.nn.Module):
         exp_out = _fake_scan(combine_fn, init, xs, dim=dim)
         self.assertEqual(out, exp_out)
 
+    @parametrize("reverse", [False, True])
+    @parametrize("unroll", [False, 1, 2, 3, True])
+    def test_scan_unroll(self, reverse, unroll):
+        def combine_fn(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.sin()
+
+        init = torch.randn(2, 3)
+        xs = torch.randn(5, 2, 3)
+        out = scan(combine_fn, init, xs, reverse=reverse, unroll=unroll)
+        exp_out = _fake_scan(combine_fn, init, xs, reverse=reverse, unroll=unroll)
+        self.assertEqual(out, exp_out)
+
+    def test_scan_unroll_validation(self):
+        def combine_fn(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(2, 3)
+        xs = torch.randn(5, 2, 3)
+        for unroll in (0, -1, 1.5, "2"):
+            with self.assertRaisesRegex(RuntimeError, "Unroll must be"):
+                scan(combine_fn, init, xs, unroll=unroll)
+            with self.assertRaisesRegex(RuntimeError, "Unroll must be"):
+                scan(combine_fn, init, (), unroll=unroll)
+
+    @parametrize("unroll", [2, True])
+    def test_scan_unroll_autograd(self, unroll):
+        def combine_fn(carry, x):
+            next_carry = carry.sin() + x
+            return next_carry, next_carry.cos()
+
+        init = torch.randn(2, 3, requires_grad=True)
+        xs = torch.randn(5, 2, 3, requires_grad=True)
+        result = scan(combine_fn, init, xs, unroll=unroll)
+        expected = _fake_scan(combine_fn, init, xs, unroll=unroll)
+        self.assertEqual(result, expected)
+        self.check_autograd(result, expected, (init, xs))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_scan_unroll_graph(self):
+        def combine_fn(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.clone()
+
+        def f(init, xs):
+            return scan(combine_fn, init, xs, unroll=2)
+
+        def f_full(init, xs):
+            return scan(combine_fn, init, xs, unroll=True)
+
+        init = torch.randn(2, 3)
+        xs = torch.randn(5, 2, 3)
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)(init, xs)
+        self.assertIn(
+            "torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [], 2)",
+            backend.graphs[0].code,
+        )
+        backend = EagerAndRecordGraphs()
+        torch.compile(f_full, backend=backend)(init, xs)
+        self.assertIn(
+            f"torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [], {_FULL_UNROLL})",
+            backend.graphs[0].code,
+        )
+
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
@@ -3361,7 +3429,8 @@ class <lambda>(torch.nn.Module):
     @skipIfTorchDynamo("don't test compile on compile")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    def test_scan_zero_length(self, reverse, compile_mode):
+    @parametrize("unroll", [1, 2, True])
+    def test_scan_zero_length(self, reverse, compile_mode, unroll):
         def body_same(c, x):
             y = c + x
             return y, y.clone()
@@ -3385,13 +3454,16 @@ class <lambda>(torch.nn.Module):
         ]
         scan_fct = compile_mode_helper(scan, compile_mode)
         for body, init, xs, dim in cases:
-            result = scan_fct(body, init, xs, dim=dim, reverse=reverse)
-            expected = _fake_scan(body, init, xs, dim=dim, reverse=reverse)
+            result = scan_fct(body, init, xs, dim=dim, reverse=reverse, unroll=unroll)
+            expected = _fake_scan(
+                body, init, xs, dim=dim, reverse=reverse, unroll=unroll
+            )
             self.assertEqual(result, expected)
 
     @skipIfTorchDynamo("don't test compile on compile")
     @parametrize("reverse", [False, True])
-    def test_scan_zero_length_autograd(self, reverse):
+    @parametrize("unroll", [1, 2, True])
+    def test_scan_zero_length_autograd(self, reverse, unroll):
         init = torch.randn(2, 3, requires_grad=True)
         xs = torch.randn(0, 2, 3, requires_grad=True)
 
@@ -3399,7 +3471,7 @@ class <lambda>(torch.nn.Module):
             y = torch.sin(c + x)
             return y, y.clone()
 
-        carry, ys = scan(body, init, xs, reverse=reverse)
+        carry, ys = scan(body, init, xs, reverse=reverse, unroll=unroll)
         (carry.sum() + ys.sum()).backward()
         # No steps run, so the carry passes through to init (grad of ones) and xs
         # receives a correctly-shaped zero-length gradient.
@@ -3852,7 +3924,7 @@ class GraphModule(torch.nn.Module):
 
         flip: "f32[3, 10, 2]" = torch.flip(l_xs_, [0]);  l_xs_ = None
         scan_combine_fn_0 = self.scan_combine_fn_0
-        scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [flip], []);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = flip = None
+        scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [flip], [], 1);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = flip = None
         getitem: "f32[1, 10, 2]" = scan[0]
         getitem_1: "f32[1, 10, 2]" = scan[1]
         out: "f32[3, 1, 10, 2]" = scan[2];  scan = None
@@ -4585,7 +4657,7 @@ def forward(self, fct_1, init_1, xs_1):
     sym_size_int_2 = torch.ops.aten.sym_size.int(xs_1, 1)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3), 1);  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
@@ -4605,7 +4677,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_xs_ = L_xs_
     flip = torch.flip(l_xs_, [0]);  l_xs_ = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [flip], []);  scan_combine_fn_0 = l_init_ = flip = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [flip], [], 1);  scan_combine_fn_0 = l_init_ = flip = None
     carry = scan[0]
     out = scan[1];  scan = None
     out_1 = out.flip([0]);  out = None
@@ -9926,9 +9998,16 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         with self.assertRaisesRegex(TypeError, "WrongHop"):
             WrongHop("wrong_hop")
 
-    def test_scan_functionalized(self):
+    @parametrize("unroll", [2, True])
+    def test_scan_functionalized(self, unroll):
         def f(init, xs):
-            return scan(get_scan_combine_fn("add", False), init, xs, dim=1)
+            return scan(
+                get_scan_combine_fn("add", False),
+                init,
+                xs,
+                dim=1,
+                unroll=unroll,
+            )
 
         example_inputs = torch.ones(5, 7, 4)
         example_init = torch.ones(5, 4)
@@ -10037,7 +10116,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_], 1);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     carry = scan[0]
     out = scan[1];  scan = None
     return (carry, out)""",
@@ -10052,7 +10131,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_], 1);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     carry = scan[0]
     out = scan[1];  scan = None
     return (carry, out)""",
@@ -10061,7 +10140,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(compiled_out, exp_out)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_scan_in_vmap_simple(self):
+    @parametrize("unroll", [2, True])
+    def test_scan_in_vmap_simple(self, unroll):
         x = torch.randn(3, 4, 4)
         y = torch.randn(4, 2)
         zeros = torch.zeros(2, 3)
@@ -10077,6 +10157,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
                     combine_fn,
                     zeros,
                     x,
+                    unroll=unroll,
                 )
 
             return torch.vmap(inner_fn, in_dims=(1, 0, None))(zeros, x, y)
@@ -12157,7 +12238,8 @@ class <lambda>(torch.nn.Module):
 
     @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
-    def test_scan_auto_functionalize_buffer_mutation(self, dynamic):
+    @parametrize("unroll", [2, True])
+    def test_scan_auto_functionalize_buffer_mutation(self, dynamic, unroll):
         device = "cpu"
 
         class M(torch.nn.Module):
@@ -12172,7 +12254,7 @@ class <lambda>(torch.nn.Module):
                     self.buf.add_(x)
                     return carry + x, carry * x + self.buf.sum()
 
-                return scan(combine_fn, init, xs, dim=0)
+                return scan(combine_fn, init, xs, dim=0, unroll=unroll)
 
         init = torch.zeros(4, requires_grad=False)
         xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
@@ -12180,6 +12262,8 @@ class <lambda>(torch.nn.Module):
         graph_str = fw_gm.print_readable(print_output=False)
         self.assertIn("auto_functionalized_v2", graph_str)
         self.assertIn("torch.ops.higher_order.scan", graph_str)
+        expected_unroll = _FULL_UNROLL if unroll is True else unroll
+        self.assertIn(f"unroll = {expected_unroll}", graph_str)
 
     @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
@@ -12763,7 +12847,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, int unroll=1) -> (Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_with_additional_inputs(self):
@@ -12778,7 +12862,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, int unroll=1) -> (Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_multiple_inputs(self):
@@ -12793,7 +12877,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1, int unroll=1) -> (Tensor, Tensor, Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_with_mutated_arg_indices_kwarg(self):
@@ -12805,11 +12889,12 @@ class TestHopSchema(TestCase):
             (torch.randn(3, 4),),
             (torch.randn(5, 3, 4),),
             (torch.randn(3, 4), torch.randn(3, 4)),
-            "3",
+            unroll=2,
+            mutated_arg_indices="3",
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, Tensor(a4!) additional_input1) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, Tensor(a4!) additional_input1, int unroll=1) -> (Tensor, Tensor)""",
         )
 
     def test_scan_gen_schema_multiple_additional_mutation_via_kwarg(self):
@@ -12823,11 +12908,11 @@ class TestHopSchema(TestCase):
             (torch.randn(3, 4),),
             (torch.randn(5, 3, 4),),
             (torch.randn(3, 4), torch.randn(3, 4), torch.randn(3, 4)),
-            "3,4",
+            mutated_arg_indices="3,4",
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, Tensor(a4!) additional_input1, Tensor(a5!) additional_input2) -> (Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, Tensor(a4!) additional_input1, Tensor(a5!) additional_input2, int unroll=1) -> (Tensor, Tensor)""",
         )
 
     def test_associative_scan_gen_schema_tensor_inputs(self):

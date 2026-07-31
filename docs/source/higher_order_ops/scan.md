@@ -16,6 +16,9 @@ mystnb:
 It is commonly used for cumulative operations like cumsum, cumprod, or more general recurrences.
 It can logically be seen as implemented as follows:
 
+The `unroll` argument controls how many scan iterations are emitted in each compiled loop iteration.
+Passing `True` fully unrolls the scan length, while `False` is equivalent to `1`.
+
 ```python
 def scan(
     combine_fn: Callable[[PyTree, PyTree], tuple[PyTree, PyTree]],
@@ -24,6 +27,7 @@ def scan(
     *,
     dim: int = 0,
     reverse: bool = False,
+    unroll: int | bool = 1,
 ) -> tuple[PyTree, PyTree]:
     carry = init
     ys = []
