@@ -447,42 +447,23 @@ class TestCuptiRecords(TestCase):
         # No event nodes -> empty list.
         self.assertEqual(order_event_nodes([node(0, "kernel", 100, [])]), [])
 
-    def test_event_node_recorder_learn_resolve(self):
-        # The passive learner maps event_id -> graph_node_id by matching a launch's ordered
-        # event records to the graph's ordered event nodes; it refuses to learn on a count
-        # mismatch, an unknown graph, or an ambiguous (None) graph.
+    def test_event_node_recorder_purge(self):
+        # The recorder holds each graph's ordered event nodes; purge drops a destroyed graph.
         from torch.profiler._cupti._event_nodes import _EventNodeRecorder
 
         r = _EventNodeRecorder()
         r.graph_event_nodes = {7: [11, 13], 8: None}
-
-        r.learn(7, [5, 6])  # 2 records, 2 nodes -> learned in order
-        self.assertEqual(r.resolve(5), 11)
-        self.assertEqual(r.resolve(6), 13)
-
-        r.learn(7, [9])  # count mismatch -> ignored
-        self.assertIsNone(r.resolve(9))
-        r.learn(999, [1, 2])  # unknown graph -> ignored
-        self.assertIsNone(r.resolve(1))
-        r.learn(8, [1, 2])  # ambiguous graph -> ignored
-        self.assertIsNone(r.resolve(1))
-
-        # A learned event id is stable: relearning does not overwrite it.
-        r.learn(7, [5, 6])
-        self.assertEqual(r.resolve(5), 11)
-
-        # Purge drops a destroyed graph's nodes and their learned event ids.
         r.purge_exec_ids({7})
         self.assertNotIn(7, r.graph_event_nodes)
-        self.assertIsNone(r.resolve(5))
+        self.assertIn(8, r.graph_event_nodes)
 
-    def test_learn_and_resolve_window(self):
+    def test_resolve_window(self):
         # The window orchestration: keys each launch by correlation id -> exec graph id (from a
         # graphed work record's graph_node_id), orders that launch's event records by sync id,
-        # learns, and resolves each event record to its node. Pure (no numpy/CUDA).
+        # and resolves each record to its node POSITIONALLY. Pure (no numpy/CUDA).
         from torch.profiler._cupti._event_nodes import (
             _EventNodeRecorder,
-            learn_and_resolve_window,
+            resolve_window,
         )
 
         exec_id = 7
@@ -494,16 +475,21 @@ class TestCuptiRecords(TestCase):
             (900, (exec_id << 32) | 55)
         ]  # a graphed kernel in launch 900
         # Two event records for launch 900, delivered out of sync-id order.
-        event_rows = [(900, 2, 6), (900, 1, 5)]
-        resolved = learn_and_resolve_window(r, corr_exec_pairs, event_rows)
+        event_rows = [(900, 2), (900, 1)]
+        resolved = resolve_window(r, corr_exec_pairs, event_rows)
         self.assertEqual(resolved, [n1, n0])  # sync 2 -> node1, sync 1 -> node0
 
-        # A later window with no graphed work records but the same events still resolves them
-        # (already learned; object-keyed event ids are stable).
-        self.assertEqual(learn_and_resolve_window(r, [], [(0, 9, 5)]), [n0])
+        # A recycled CUDA event object would give both records the same event_id; positional
+        # resolution keys on sync-id order, not the object, so the two records still map to
+        # distinct nodes instead of collapsing onto the first.
+        second = resolve_window(r, corr_exec_pairs, [(900, 10), (900, 20)])
+        self.assertEqual(second, [n0, n1])
 
-        # An event id from an unlearned launch stays unresolved.
-        self.assertEqual(learn_and_resolve_window(r, [], [(0, 0, 404)]), [None])
+        # A launch whose event-record count does not match the graph's stays unresolved.
+        self.assertEqual(resolve_window(r, corr_exec_pairs, [(900, 1)]), [None])
+
+        # Event records with no matching graphed work record (unknown launch) stay unresolved.
+        self.assertEqual(resolve_window(r, [], [(0, 0)]), [None])
 
     def test_add_graph_event_node_spans(self):
         # The window-bucketed event-node span frame keeps only rows resolved to a graph node
