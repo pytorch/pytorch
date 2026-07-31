@@ -1439,12 +1439,12 @@ def _build_render_stages(
             addr_l = addr_c.tolist() if addr_c is not None else [None] * n
             blobs = []
             for a, m, f, ad in zip(al, ml, fl, addr_l):
-                extra = {}
+                host_extra: dict[str, str] = {}
                 if f:
-                    extra["host fn"] = f
+                    host_extra["host fn"] = f
                 if ad:
-                    extra["host fn addr"] = hex(ad)
-                blobs.append(_merge_annotation_metadata(a, m, extra or None))
+                    host_extra["host fn addr"] = hex(ad)
+                blobs.append(_merge_annotation_metadata(a, m, host_extra or None))
             meta_p.append(blobs)
     if not ts_p:
         return None
