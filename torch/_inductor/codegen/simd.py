@@ -2594,6 +2594,28 @@ class SIMDScheduling(BaseScheduling):
             node in plan.epilogue_nodes for node in consumer_node.get_nodes()
         )
 
+    @staticmethod
+    def _is_sub_parent_shaped(
+        node: scheduler.BaseSchedulerNode,
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> bool:
+        """Whether ``node`` runs at a fraction of the parent tile.
+
+        A group member is normally reduced ``(numel, 1)``, full resolution
+        ``(numel * rnumel, 1)``, or the reduction itself. Anything else only has
+        meaning under a sub-parent plan.
+        """
+        if node.is_reduction():
+            return False
+        _, (node_numel, node_rnumel) = node.group
+        if not V.graph.sizevars.statically_known_equals(node_rnumel, 1):
+            return False
+        return not (
+            V.graph.sizevars.statically_known_equals(node_numel, numel)
+            or V.graph.sizevars.statically_known_equals(node_numel, numel * rnumel)
+        )
+
     def _sub_parent_epilogue_leaf_violation(
         self,
         node1: scheduler.BaseSchedulerNode,
@@ -2621,7 +2643,18 @@ class SIMDScheduling(BaseScheduling):
         nodes = [*node1.get_nodes(), *node2.get_nodes()]
         plan = self._sub_parent_epilogue_plan(nodes, numel, rnumel, check_leaves=False)
         if plan is None:
-            return False
+            # No sub-parent plan covers the combined set, so a sub-parent-shaped
+            # member would reach generic tiling and scheduling, neither of which
+            # models a fraction of the parent tile. Keep it out of the group.
+            # The nested append path owns its own sub-parent stage, so leave
+            # those pairs to FusedNestedReductions.can_fuse_with.
+            if isinstance(node1, scheduler.FusedNestedReductions) or isinstance(
+                node2, scheduler.FusedNestedReductions
+            ):
+                return False
+            return any(
+                self._is_sub_parent_shaped(node, numel, rnumel) for node in nodes
+            )
         epilogue_nodes = plan.epilogue_nodes
         assert self.scheduler is not None  # noqa: S101
         renames = self.scheduler.mutation_renames
@@ -3229,8 +3262,7 @@ class SIMDScheduling(BaseScheduling):
                 grouped_schedule,
                 grouped_reduction,
                 layout,
-                group_reduction_vars.iter_remapped,
-                group_reduction_vars.reduce_remapped,
+                group_reduction_vars,
                 local_reduction_source,
                 parent_full_source,
                 pointwise_domain_by_node,
@@ -3302,8 +3334,7 @@ class SIMDScheduling(BaseScheduling):
         grouped_schedule,
         grouped_reduction: scheduler.SchedulerNode,
         layout: _GroupedReductionLayout,
-        iter_remapped,
-        reduce_remapped,
+        group_reduction_vars: _GroupedReductionVars,
         local_reduction_source: _IterationSpace,
         parent_full_source: _IterationSpace,
         pointwise_domain_by_node: dict[
@@ -3329,7 +3360,7 @@ class SIMDScheduling(BaseScheduling):
                 grouped_reduction_body.var_ranges[v]
                 for v in grouped_reduction_body.iter_vars
             ],
-            iter_remapped,
+            group_reduction_vars.iter_remapped,
         )
         parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
         for sn in grouped_schedule:
@@ -3629,13 +3660,11 @@ class SIMDScheduling(BaseScheduling):
         sub_parent_source_layouts = dict(sub_parent_epilogue_plan.source_layouts)
         if not V.graph.sizevars.statically_known_equals(numel, 1):
             # Keep enough rows per program to amortize the parent-tile load and
-            # epilogue split for the standalone packing pattern.
-            numel_static = V.graph.sizevars.simplify(numel)
-            kernel.min_xblock = (
-                min(int(numel_static), 128)
-                if isinstance(numel_static, (int, sympy.Integer))
-                else 128
-            )
+            # epilogue split for the standalone packing pattern. The floor is
+            # applied with max() to an autotuned XBLOCK, which must divide
+            # TRITON_MAX_BLOCK["X"], so it has to be a power of two itself.
+            x_hint = V.graph.sizevars.optimization_hint(numel, fallback=128)
+            kernel.min_xblock = next_power_of_2(min(x_hint, 128))
         kernel.min_rblock = (
             parent_rnumel if kernel.persistent_reduction else sub_parent_factor
         )
