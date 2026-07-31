@@ -235,6 +235,39 @@ def _is_torchcomms_backend(backend: str) -> bool:
     )
 
 
+def _torchcomms_handles_backend(backend) -> bool:
+    """True if TorchComms can create a comm for *backend*.
+
+    Backends TorchComms doesn't own -- custom c10d plugins such as ``mooncake``
+    or ``ucc`` -- must fall through to the normal ProcessGroup path even when
+    TorchComms is enabled, rather than being routed through ``new_comm`` /
+    ``split_group`` (which cannot construct them).
+
+    ``backend`` may be ``None`` (inherits the parent's TorchComms-owned
+    backend), a bare name (``"nccl"``), or a device-qualified string
+    (``"cpu:gloo,cuda:nccl"``). A built-in backend reports via
+    ``is_backend_built``; a backend dynamically registered through
+    ``torchcomms.register_backend`` (e.g. a Python adapter) reports via
+    ``_is_backend_registered`` -- so registering such an adapter is enough to
+    move that backend onto the native TorchComms path with no change here.
+    """
+    if not _TORCHCOMM_AVAILABLE:
+        return False
+    if backend is None:
+        return True
+    for part in str(backend).lower().split(","):
+        part = part.strip()
+        name = part.split(":", 1)[1] if ":" in part else part
+        if not name:
+            continue
+        if not (
+            _torchcomms_is_backend_registered(name)
+            or _torchcomms_is_backend_built(name)
+        ):
+            return False
+    return True
+
+
 def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
     """Convert ProcessGroupNCCL.Options to a torchcomms hints dict."""
     if pg_options is None:
@@ -999,23 +1032,43 @@ def _parse_backend_string(
 
 def _get_default_backend_type_for_backend_config(
     backend_config: BackendConfig,
+    device_id: torch.device | None = None,
 ) -> ProcessGroup.BackendType:
-    if Backend.NCCL in backend_config.device_backend_map.values():
-        return ProcessGroup.BackendType.NCCL
+    def _resolve_backend_type(backend: str) -> ProcessGroup.BackendType:
+        # Must mirror _new_process_group_helper's per-device
+        # `backend_type_map.get(backend_str, CUSTOM)`, or the default type
+        # names a backend that never gets registered.
+        known_type = Backend.backend_type_map.get(backend)
+        if known_type is not None:
+            return known_type
+        if _is_torchcomms_backend(backend):
+            return ProcessGroup.BackendType.CUSTOM
+        # Unreachable for a group that actually gets built
+        return ProcessGroup.BackendType.GLOO
 
-    custom_backend = next(
-        (
-            backend
-            for backend in backend_config.device_backend_map.values()
-            if Backend.backend_type_map.get(str(backend))
-            == ProcessGroup.BackendType.CUSTOM
-            or _is_torchcomms_backend(str(backend))
-        ),
-        None,
-    )
-    if custom_backend is not None:
-        return ProcessGroup.BackendType.CUSTOM
-    return ProcessGroup.BackendType.GLOO
+    device_backend_map = backend_config.device_backend_map
+    if not device_backend_map:
+        return ProcessGroup.BackendType.GLOO
+
+    accelerator = torch.accelerator.current_accelerator()
+
+    def _device_priority(device: str) -> int:
+        # Prefer this group's accelerator backend over the host one, because
+        # ``ProcessGroup::barrier()`` derives its tensor device from the default
+        # backend type -- a host default silently downgrades barrier() on a
+        # mixed "cpu:<host>,<acc>:<acc backend>" group to a CPU barrier.
+        if device_id is not None and device == device_id.type:
+            return 0
+        if accelerator is not None and device == accelerator.type:
+            return 1
+        if device != "cpu":
+            return 2
+        return 3
+
+    # `min` keeps the first device of the winning priority, so ties resolve in
+    # the order the devices were named in the backend string.
+    device = min(device_backend_map, key=_device_priority)
+    return _resolve_backend_type(str(device_backend_map[device]))
 
 
 class _reduce_op:
@@ -2420,6 +2473,7 @@ def init_process_group(
         and device_id is not None
         and ":" not in backend
         and backend not in (Backend.UNDEFINED, Backend.MPI, Backend.FAKE)
+        and _torchcomms_handles_backend(backend)
     ):
         bare = backend.lower()
         qualified: dict[str, str] = {}
@@ -2691,7 +2745,7 @@ def _new_process_group_helper(
     # when multi backend is passed in
     if not pg_backend_set:
         pg._set_default_backend(
-            _get_default_backend_type_for_backend_config(backend_config)
+            _get_default_backend_type_for_backend_config(backend_config, device_id)
         )
 
     if device_id:
@@ -2702,7 +2756,11 @@ def _new_process_group_helper(
         # a single store can be reused by multiple groups.
         backend_prefix_store = PrefixStore(f"{device}/", prefix_store)
 
-        if _use_torchcomms_enabled() and backend_str not in [Backend.FAKE]:
+        if (
+            _use_torchcomms_enabled()
+            and backend_str not in [Backend.FAKE]
+            and _torchcomms_handles_backend(backend_str)
+        ):
             torch_device = torch.device(device)
             # Pass this rank's actual device WITH its index. A device-type-only
             # torch.device(device) makes the TorchComms bootstrap default the
