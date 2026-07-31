@@ -868,21 +868,18 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
     }
   }
 
-  void visitValue(
-      const libkineto::MetadataField<int64_t>& field,
-      int64_t value) override {
+  void visitValue(const libkineto::MetadataField<int64_t>& field, int64_t value)
+      override {
     addValue(field.name, c10::IValue(value));
   }
 
-  void visitValue(
-      const libkineto::MetadataField<double>& field,
-      double value) override {
+  void visitValue(const libkineto::MetadataField<double>& field, double value)
+      override {
     addValue(field.name, c10::IValue(value));
   }
 
-  void visitValue(
-      const libkineto::MetadataField<bool>& field,
-      bool value) override {
+  void visitValue(const libkineto::MetadataField<bool>& field, bool value)
+      override {
     addValue(field.name, c10::IValue(value));
   }
 
