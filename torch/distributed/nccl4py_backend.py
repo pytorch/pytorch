@@ -75,6 +75,7 @@ class NCCL4PyBackend(C10DBackend):
 
         self._comm = nccl.Communicator.init(nranks=size, rank=rank, unique_id=uid)
         self._internal_stream = torch.cuda.Stream(device=self._device)
+        self._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
 
     @property
     def options(self):
@@ -349,9 +350,10 @@ class NCCL4PyBackend(C10DBackend):
     def barrier(self, opts):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
-        with torch.cuda.stream(stream):
-            scratch = torch.zeros(1, dtype=torch.float32, device=self._device)
-        self._comm.allreduce(scratch, scratch, nccl.SUM, stream=s)
+        self._barrier_tensor.zero_()
+        self._comm.allreduce(
+            self._barrier_tensor, self._barrier_tensor, nccl.SUM, stream=s
+        )
         return self._make_work(stream)
 
     def split(self, store, ranks, opts):
@@ -375,6 +377,7 @@ class NCCL4PyBackend(C10DBackend):
         child._device = self._device
         child._comm = new_comm
         child._internal_stream = torch.cuda.Stream(device=self._device)
+        child._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
         return child
 
     def shutdown(self):
