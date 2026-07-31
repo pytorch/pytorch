@@ -6,7 +6,7 @@ import yaml
 import textwrap
 import torch
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, HardwareClassification
 from collections import namedtuple
 
 
@@ -35,6 +35,7 @@ all_operators_with_namedtuple_return_skip_list = {
 
 
 class TestNamedTupleAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_import_return_types(self):
         import torch.return_types  # noqa: F401
