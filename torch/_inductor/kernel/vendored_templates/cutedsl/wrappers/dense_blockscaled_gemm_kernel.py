@@ -48,6 +48,8 @@ _ONES_ALPHA: dict = {}
 
 @dataclasses.dataclass(frozen=True)
 class _EpilogueABI:
+    """Runtime tensors and metadata derived from a traced epilogue signature."""
+
     inputs: tuple
     input_kinds: tuple[int, ...]
     outputs: tuple
@@ -105,10 +107,6 @@ def _epilogue_signature(epilogue_fn) -> tuple[tuple[str, ...], tuple[str, ...]]:
     )
 
 
-def _epilogue_input_names(epilogue_fn) -> tuple[str, ...]:
-    return _epilogue_signature(epilogue_fn)[0]
-
-
 def _epilogue_tensors(args, attr: str) -> tuple:
     epilogue = getattr(args, "epilogue", None)
     tensors = (
@@ -116,7 +114,7 @@ def _epilogue_tensors(args, attr: str) -> tuple:
         if epilogue is None
         else tuple(
             getattr(_epilogue_abi_tensor(epilogue.tensors[name]), attr)
-            for name in _epilogue_input_names(epilogue.epilogue_fn)
+            for name in _epilogue_signature(epilogue.epilogue_fn)[0]
         )
     )
     return tensors
@@ -147,7 +145,7 @@ def _epilogue_tensor_kinds(args) -> tuple[int, ...]:
         return ()
     kinds = []
     output_m, output_n = args.out.shape[-2:]
-    for name in _epilogue_input_names(epilogue.epilogue_fn):
+    for name in _epilogue_signature(epilogue.epilogue_fn)[0]:
         shape = epilogue.tensors[name].shape
         if shape[-1] == 1 and (len(shape) == 1 or shape[-2] == 1):
             if output_n == 1:
