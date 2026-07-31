@@ -357,8 +357,13 @@ class _KinetoProfile:
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
                 ),
+                # GPU environment counters (power/clock/thermal/cooling) are periodically
+                # sampled; opt-in since the sampling adds overhead.
+                enable_environment_counters=bool(
+                    self._custom_profiler_config.get("enable_environment_counters")
+                ),
                 # PM sampling (true SM-active % + DRAM-throughput % counters) is a CUPTI-monitor
-                # feature, opt-in (not always-on like env counters). The metrics are per-profile
+                # feature, opt-in like the env counters. The metrics are per-profile
                 # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
                 enable_pm_sampling=bool(
                     self._custom_profiler_config.get("enable_pm_sampling")
