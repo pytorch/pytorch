@@ -331,8 +331,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     # If the output is copied back into the input, this forces both to be
     # realized as the output is a user of the input
     if (
-        src_is_realized
-        and isinstance(inp, torch.fx.Node)
+        isinstance(inp, torch.fx.Node)
         and inp.op in ("placeholder", "get_attr")
         and any(
             user.target is aten.copy_.default and user.args[0] is inp
