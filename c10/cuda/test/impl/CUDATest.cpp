@@ -3,7 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAException.h>
-#if !defined(USE_ROCM)
+#if !defined(USE_ROCM) && !defined(__HIP_PLATFORM_AMD__)
 #include <c10/cuda/driver_api.h>
 #endif
 #include <c10/cuda/impl/CUDAGuardImpl.h>
@@ -31,7 +31,8 @@ TEST(CUDAGuardImplTest, UncheckedSetDeviceSwallowsErrorAndDoesNotTerminate) {
       impl.uncheckedSetDevice(c10::Device(c10::DeviceType::CUDA, -1)));
 }
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
+#if !defined(USE_ROCM) && !defined(__HIP_PLATFORM_AMD__) && \
+    defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
 TEST(CUDAErrorTest, IncludesDriverErrorLog) {
   int device_count = 0;
   if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
