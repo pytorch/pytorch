@@ -68,6 +68,14 @@ class CUDAErrorLogCallbackRegistration {
     }
   }
 
+  CUDAErrorLogCallbackRegistration(const CUDAErrorLogCallbackRegistration&) =
+      delete;
+  CUDAErrorLogCallbackRegistration& operator=(
+      const CUDAErrorLogCallbackRegistration&) = delete;
+  CUDAErrorLogCallbackRegistration(CUDAErrorLogCallbackRegistration&&) = delete;
+  CUDAErrorLogCallbackRegistration& operator=(
+      CUDAErrorLogCallbackRegistration&&) = delete;
+
   ~CUDAErrorLogCallbackRegistration() noexcept {
     if (unregister_callback_) {
       (void)unregister_callback_(callback_handle_);
