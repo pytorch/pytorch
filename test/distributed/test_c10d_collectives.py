@@ -218,6 +218,19 @@ class AbstractCollectivesTest(C10dBackendTest):
                     with self.subTest(count=count, dtype=dtype, async_op=async_op):
                         test(count, dtype, async_op)
 
+    def test_collective_preserves_current_device(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        tensor = torch.ones(4, device=self.device)
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        torch.cuda.set_device(other_device)
+
+        dist.all_reduce(tensor)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
     def test_broadcast(self):
         self._init_pg()
         self._test_transport_matrix(self._test_broadcast)
@@ -225,6 +238,29 @@ class AbstractCollectivesTest(C10dBackendTest):
     def test_all_gather(self):
         self._init_pg()
         self._test_transport_matrix(self._test_all_gather)
+
+    def test_all_gather_mixed_devices(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        tensor = self._tensor(4, torch.float32)
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
+        outputs[-1] = torch.empty(4, device=other_device)
+        torch.cuda.set_device(other_device)
+
+        work = dist.all_gather(outputs, tensor, async_op=True)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        work.wait()
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        torch.cuda.synchronize(self.device)
+        torch.cuda.synchronize(other_device)
+        for rank, output in enumerate(outputs):
+            self.assertEqual(
+                output,
+                torch.full_like(output, self._value(rank, output.dtype)),
+            )
 
     def test_all_gather_single(self):
         self._init_pg()
@@ -279,6 +315,23 @@ class AbstractCollectivesTest(C10dBackendTest):
     def test_all_to_all(self):
         self._init_pg()
         self._test_transport_matrix(self._test_all_to_all)
+
+    def test_all_to_all_rejects_mixed_devices(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        inputs = [
+            torch.full((1,), float(self.rank), device=self.device)
+            for _ in range(self.world_size)
+        ]
+        inputs[-1] = torch.full((1,), float(self.rank), device=other_device)
+        outputs = [torch.empty(1, device=self.device) for _ in range(self.world_size)]
+
+        with self.assertRaisesRegex(
+            (RuntimeError, ValueError), "same device|Expected tensor on"
+        ):
+            dist.all_to_all(outputs, inputs)
 
     def test_all_to_all_single(self):
         self._init_pg()
