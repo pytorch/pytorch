@@ -519,6 +519,10 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
+
         result = False
 
         if name in fn_known_dunder_attrs or name == "__dict__":
@@ -567,6 +571,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
+
+    def get_value_for_setattr(self) -> object | None:
+        return self.fn
 
     def __init__(
         self,
@@ -1199,7 +1206,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def pygen_yf(self) -> VariableTracker | None:
         if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
-            return self.inline_tracer.stack[-1]
+            if sys.version_info >= (3, 15):
+                ind = -2
+            else:
+                ind = -1
+            return self.inline_tracer.stack[ind]
         return None
 
     def gen_send_ex2(
@@ -2283,6 +2294,12 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
+    def get_value_for_setattr(self) -> object | None:
+        mod = getattr(self.value, "__module__", None) or ""
+        if mod == "torch" or mod.startswith(("torch.", "torch_")):
+            return None
+        return self.value
+
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -2305,7 +2322,9 @@ class SkipFunctionVariable(VariableTracker):
             guard_on_source = source
             guard_on_value = value
 
-            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
+            while inspect.getattr_static(
+                guard_on_value, "_torchdynamo_orig_callable", False
+            ):
                 guard_on_value = guard_on_value._torchdynamo_orig_callable
                 guard_on_source = AttrSource(
                     guard_on_source, "_torchdynamo_orig_callable"
@@ -2687,9 +2706,11 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
             self.attr_to_trace == "_torchdynamo_inline"
-            and getattr(self.wrapper_obj, "_is_torch_compile", False)
+            and inspect.getattr_static(self.wrapper_obj, "_is_torch_compile", False)
             and getattr(
-                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
+                inspect.getattr_static(
+                    self.wrapper_obj, "_torchdynamo_orig_callable", None
+                ),
                 "__code__",
                 None,
             )
@@ -2925,6 +2946,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
         if self.fn in (
             dist.all_reduce,
+            dist.reduce_scatter,
             dist.reduce_scatter_single,
             # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
@@ -3108,6 +3130,9 @@ class PolyfilledFunctionVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
+
+    def get_value_for_setattr(self) -> object | None:
+        return self.fn
 
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -3939,6 +3964,37 @@ class TritonSetAllocatorVariable(VariableTracker):
 # ---------------------------------------------------------------------------
 
 
+def _check_descriptor_obj_type(
+    tx: "InstructionTranslatorBase",
+    descriptor: types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.GetSetDescriptorType,
+    obj: "VariableTracker",
+) -> None:
+    """Check that obj's type is compatible with descriptor.__objclass__.
+
+    Mirrors CPython's descr_check which raises TypeError when a C descriptor
+    is bound to an object whose type is not a subtype of the descriptor's
+    __objclass__.
+
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L96
+    """
+    if obj is None:
+        return
+    try:
+        obj_type = obj.python_type()
+    except NotImplementedError:
+        return
+    if not issubclass(obj_type, descriptor.__objclass__):
+        raise_type_error(
+            tx,
+            f"descriptor '{descriptor.__name__}' for "
+            f"'{descriptor.__objclass__.__name__}' objects "
+            f"doesn't apply to a '{obj_type.__name__}' object",
+        )
+
+
 class WrapperDescriptorVariable(VariableTracker):
     """Unbound C slot wrapper (wrapper_descriptor on a type).
 
@@ -4009,6 +4065,7 @@ class WrapperDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
@@ -4027,6 +4084,7 @@ class WrapperDescriptorVariable(VariableTracker):
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4193,17 +4251,7 @@ class MethodDescriptorVariable(VariableTracker):
             )
         obj, *rest = args
         name = self.descriptor.__name__
-        try:
-            obj_type = obj.python_type()
-            if not issubclass(obj_type, self.descriptor.__objclass__):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for "
-                    f"'{self.descriptor.__objclass__.__name__}' objects "
-                    f"doesn't apply to a '{obj_type.__name__}' object",
-                )
-        except NotImplementedError:
-            pass
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses.
@@ -4219,6 +4267,7 @@ class MethodDescriptorVariable(VariableTracker):
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 
@@ -4513,6 +4562,7 @@ class MemberDescriptorVariable(VariableTracker):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
         attr_name = self.descriptor.__name__
@@ -4534,6 +4584,21 @@ class MemberDescriptorVariable(VariableTracker):
             )
         result_source = obj.source and AttrSource(obj.source, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
+        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
+        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
+        # value is None for __delete__.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
+        stored = variables.DeletedVariable() if value is None else value
+        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
+        return variables.ConstantVariable.create(None)
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -4603,6 +4668,7 @@ class GetSetDescriptorVariable(VariableTracker):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to getattro_impl for
         # proxy-based VTs like TensorVariable.
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             from .object_protocol import _UnhandledDescriptorError
@@ -4740,3 +4806,15 @@ class TupleGetterVariable(VariableTracker):
         return obj.call_method(
             tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
         )
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # _tuplegetter fields are read-only; tuplegetter_descr_set always
+        # raises AttributeError for both set and delete.
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
+        msg = "can't delete attribute" if value is None else "can't set attribute"
+        raise_observed_exception(AttributeError, tx, args=[msg])
