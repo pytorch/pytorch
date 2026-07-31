@@ -7974,6 +7974,10 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
+        if node1.is_template() and self.get_backend(
+            node1.get_device()
+        ).can_fuse_reduction_epilogue(node1, node2):
+            return True
 
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
@@ -8148,9 +8152,13 @@ class Scheduler:
             atomic_add_mutation_epilogue = _can_fuse_atomic_add_template_epilogue(
                 node1, node2
             )
+            backend = self.get_backend(node1.get_device())
             if (
                 (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
-                or node2.is_reduction()
+                or (
+                    node2.is_reduction()
+                    and not backend.can_fuse_reduction_epilogue(node1, node2)
+                )
                 or not _is_epilogue_fusion_enabled(node1)
             ):
                 why("template epilogue not satisfied")
@@ -10419,6 +10427,11 @@ class BaseScheduling:  # noqa: docstring_linter
         Check whether node1 and node2 can be horizontally fused or not.
         """
         raise NotImplementedError
+
+    def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return False
 
     def can_fuse_multi_outputs_template(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
