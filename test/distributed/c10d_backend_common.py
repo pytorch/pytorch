@@ -88,8 +88,8 @@ C10D_BACKENDS = (
         float8_dtypes=FLOAT8_DTYPES,
     ),
     # nccl-lazy wraps a primary ProcessGroupNCCL (all collectives delegate to
-    # it) plus lazily-built per-peer P2P comms, so it matches nccl2's
-    # capabilities except that it does not implement sequence numbers.
+    # it) plus lazily-built per-peer P2P comms. Timing and sequence APIs are not
+    # forwarded.
     BackendConfig(
         "nccl-lazy",
         "cuda",
@@ -97,6 +97,9 @@ C10D_BACKENDS = (
         supports_cuda_graph_barrier=True,
         supports_dropped_p2p_work=True,
         supports_sequence_numbers=False,
+        supports_work_result=True,
+        supports_gather_single=True,
+        supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
     ),
 )
