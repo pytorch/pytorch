@@ -7,7 +7,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLCCA.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -266,7 +266,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         break;
       }
       if (comm_state_ != CommState::NORMAL &&
-          options_c10d_->abort_process_on_timeout_or_error &&
+          abort_process_on_timeout_or_error_ &&
           !options_c10d_->enable_reconfigure) {
         if (comm_state_ == CommState::TIMEOUT) {
           TC_LOG(ERROR, this)
@@ -360,7 +360,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       throw std::runtime_error("NCCL operation timed out");
     } else {
       abortNcclComm();
-      if (options_c10d_->abort_process_on_timeout_or_error) {
+      if (abort_process_on_timeout_or_error_) {
         TC_LOG(ERROR, this) << "Aborting process due to timeout";
         runAbortHooks();
         ::abort();
@@ -384,7 +384,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       throw std::move(ncclException);
     }
     abortNcclComm();
-    if (options_c10d_->abort_process_on_timeout_or_error) {
+    if (abort_process_on_timeout_or_error_) {
       TC_LOG(ERROR, this) << "Aborting process due to error: "
                           << ncclException.what();
       runAbortHooks();
@@ -407,6 +407,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
   // Only create the work object without enqueuing it
   auto work =
       c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensors);
+  work->setSequenceNumber(sequence_number_);
   return work;
 }
 
@@ -416,6 +417,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     const at::Tensor& inputTensor) {
   // Single-tensor overload to avoid vector allocation
   auto work = c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensor);
+  work->setSequenceNumber(sequence_number_);
   return work;
 }
 
@@ -512,32 +514,47 @@ void ProcessGroupNCCL::checkTensorsDevice(
 }
 
 // Protected methods (not in the private section of the header)
-std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent() {
+std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent(
+    bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (!event_pool_.empty()) {
+  if (timing_enabled == timing_enabled_.load() && !event_pool_.empty()) {
     auto event = std::move(event_pool_.front());
     event_pool_.pop();
     return event;
   }
 
-  return std::make_unique<at::cuda::CUDAEvent>(cudaEventDisableTiming);
+  return std::make_unique<at::cuda::CUDAEvent>(
+      timing_enabled ? cudaEventDefault : cudaEventDisableTiming);
 }
 
-void ProcessGroupNCCL::returnEvent(std::unique_ptr<at::cuda::CUDAEvent> event) {
+void ProcessGroupNCCL::returnEvent(
+    std::unique_ptr<at::cuda::CUDAEvent> event,
+    bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (event_pool_.size() < max_event_pool_size_) {
+  if (timing_enabled == timing_enabled_.load() &&
+      event_pool_.size() < max_event_pool_size_) {
     event_pool_.push(std::move(event));
   }
 }
 
+void ProcessGroupNCCL::enableCollectivesTiming() {
+  std::lock_guard<std::mutex> lock(event_pool_mutex_);
+  if (timing_enabled_.exchange(true)) {
+    return;
+  }
+  // Pooled events were created with timing disabled and cannot serve
+  // getDuration(); drop them so later works get timing-capable events.
+  std::queue<std::unique_ptr<at::cuda::CUDAEvent>>().swap(event_pool_);
+}
+
 void ProcessGroupNCCL::attachMemoryHook() {
-  NcclCachingAllocatorHook::getInstance().registerComm(this);
+  NCCLCachingAllocatorHook::getInstance().registerComm(this);
 }
 
 void ProcessGroupNCCL::detachMemoryHook() {
-  NcclCachingAllocatorHook::getInstance().deregisterComm(this);
+  NCCLCachingAllocatorHook::getInstance().deregisterComm(this);
 }
 
 void ProcessGroupNCCL::register_address(void* addr, size_t len) {
