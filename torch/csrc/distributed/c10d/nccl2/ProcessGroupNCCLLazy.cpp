@@ -28,9 +28,7 @@ ProcessGroupNCCLLazy::PairFactory makePairFactory(
     auto pair_options = ProcessGroupNCCL::Options::create();
     pair_options->timeout = options->timeout;
     pair_options->is_high_priority_stream = options->is_high_priority_stream;
-    pair_options->abort_process_on_timeout_or_error =
-        options->abort_process_on_timeout_or_error;
-    pair_options->hints = options->hints;
+    pair_options->config = cloneNcclConfig(options->config);
     pair_options->group_name = pair_name;
     return c10::make_intrusive<ProcessGroupNCCL>(
         pair_store, pair_rank, /*size=*/2, pair_options);
@@ -40,10 +38,10 @@ ProcessGroupNCCLLazy::PairFactory makePairFactory(
 } // namespace
 
 ProcessGroupNCCLLazy::ProcessGroupNCCLLazy(
-    c10::intrusive_ptr<::c10d::Store> store,
+    const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,
-    c10::intrusive_ptr<ProcessGroupNCCL::Options> options)
+    const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options)
     : LazyBackend(
           rank,
           size,
