@@ -130,11 +130,11 @@ ExportedProgram:
             sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(x, 0)
             ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            return (sum_1,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            return (sum_dim_int_list,)
 Graph signature:
     x: USER_INPUT
-    sum_1: USER_OUTPUT
+    sum_dim_int_list: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo]}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -271,19 +271,19 @@ ExportedProgram:
             sym_size_int_1: "Sym(u1)" = torch.ops.aten.sym_size.int(y, 0)
             ge_1: "Sym(u1 >= 0)" = sym_size_int_1 >= 0;  sym_size_int_1 = None
             _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
-            add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
-            sum_3: "f32[3]" = torch.ops.aten.sum.dim_IntList(z, [0]);  z = None
-            mul: "f32[3]" = torch.ops.aten.mul.Tensor(sum_3, 2);  sum_3 = None
-            add_1: "f32[3]" = torch.ops.aten.add.Tensor(add, mul);  add = mul = None
-            return (add_1,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            sum_dim_int_list_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(z, [0]);  z = None
+            mul_tensor: "f32[3]" = torch.ops.aten.mul.Tensor(sum_dim_int_list_1, 2);  sum_dim_int_list_1 = None
+            sum_dim_int_list_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
+            add_tensor: "f32[3]" = torch.ops.aten.add.Tensor(sum_dim_int_list, sum_dim_int_list_2);  sum_dim_int_list = sum_dim_int_list_2 = None
+            add_tensor_1: "f32[3]" = torch.ops.aten.add.Tensor(add_tensor, mul_tensor);  add_tensor = mul_tensor = None
+            return (add_tensor_1,)
 Graph signature:
     x: USER_INPUT
     z: USER_INPUT
     n: USER_INPUT
     y: USER_INPUT
-    add_1: USER_OUTPUT
+    add_tensor_1: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -411,11 +411,11 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
 ExportedProgram:
     class GraphModule(torch.nn.Module):
         def forward(self, x: "f32[{legacy_sym}, 3]"):
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            return (sum_1,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            return (sum_dim_int_list,)
 Graph signature:
     x: USER_INPUT
-    sum_1: USER_OUTPUT
+    sum_dim_int_list: USER_OUTPUT
 Range constraints: {{{legacy_sym}: VR[0, int_oo]}}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -430,11 +430,11 @@ ExportedProgram:
             sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(x, 0)
             ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            return (sum_1,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            return (sum_dim_int_list,)
 Graph signature:
     x: USER_INPUT
-    sum_1: USER_OUTPUT
+    sum_dim_int_list: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo]}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -487,15 +487,15 @@ Range constraints: {u0: VR[0, int_oo]}""",
 ExportedProgram:
     class GraphModule(torch.nn.Module):
         def forward(self, x: "f32[{sx}, 3]", y: "f32[{sy}, 3]"):
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
-            mul: "f32[3]" = torch.ops.aten.mul.Tensor(sum_2, 1);  sum_2 = None
-            add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, mul);  sum_1 = mul = None
-            return (add,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            sum_dim_int_list_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
+            mul_tensor: "f32[3]" = torch.ops.aten.mul.Tensor(sum_dim_int_list_1, 1);  sum_dim_int_list_1 = None
+            add_tensor: "f32[3]" = torch.ops.aten.add.Tensor(sum_dim_int_list, mul_tensor);  sum_dim_int_list = mul_tensor = None
+            return (add_tensor,)
 Graph signature:
     x: USER_INPUT
     y: USER_INPUT
-    add: USER_OUTPUT
+    add_tensor: USER_OUTPUT
 Range constraints: {{{sx}: VR[0, int_oo], {sy}: VR[0, int_oo]}}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -514,15 +514,15 @@ ExportedProgram:
             sym_size_int_1: "Sym(u1)" = torch.ops.aten.sym_size.int(y, 0)
             ge_1: "Sym(u1 >= 0)" = sym_size_int_1 >= 0;  sym_size_int_1 = None
             _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
-            mul: "f32[3]" = torch.ops.aten.mul.Tensor(sum_2, 1);  sum_2 = None
-            add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, mul);  sum_1 = mul = None
-            return (add,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            sum_dim_int_list_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
+            mul_tensor: "f32[3]" = torch.ops.aten.mul.Tensor(sum_dim_int_list_1, 1);  sum_dim_int_list_1 = None
+            add_tensor: "f32[3]" = torch.ops.aten.add.Tensor(sum_dim_int_list, mul_tensor);  sum_dim_int_list = mul_tensor = None
+            return (add_tensor,)
 Graph signature:
     x: USER_INPUT
     y: USER_INPUT
-    add: USER_OUTPUT
+    add_tensor: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -563,11 +563,11 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
 ExportedProgram:
     class GraphModule(torch.nn.Module):
         def forward(self, x: "f32[{legacy_sym}, 3]"):
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            return (sum_1,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            return (sum_dim_int_list,)
 Graph signature:
     x: USER_INPUT
-    sum_1: USER_OUTPUT
+    sum_dim_int_list: USER_OUTPUT
 Range constraints: {{{legacy_sym}: VR[0, int_oo]}}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -582,11 +582,11 @@ ExportedProgram:
             sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(x, 0)
             ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            return (sum_1,)
+            sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            return (sum_dim_int_list,)
 Graph signature:
     x: USER_INPUT
-    sum_1: USER_OUTPUT
+    sum_dim_int_list: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo]}""",
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -946,8 +946,8 @@ class <lambda>(torch.nn.Module):
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(x, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-        sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-        return (sum_1,)""",
+        sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+        return (sum_dim_int_list,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -978,8 +978,8 @@ class <lambda>(torch.nn.Module):
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(x, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-        sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-        return (sum_1,)""",
+        sum_dim_int_list: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+        return (sum_dim_int_list,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
