@@ -171,10 +171,7 @@ class TestSharedDict(TestCase):
 
     def test_iter(self) -> None:
         sd = SharedDict({"a": 1, "b": 2})
-        keys = []
-        for k in sd:
-            keys.append(k)
-        self.assertEqual(set(keys), {"a", "b"})
+        self.assertEqual(set(sd), {"a", "b"})
 
     def test_kwargs_init(self) -> None:
         sd = SharedDict(x=1, y=2)
