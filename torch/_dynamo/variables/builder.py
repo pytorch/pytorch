@@ -18,6 +18,7 @@ VariableTracker instances based on their type and usage context.
 """
 
 import abc
+import builtins
 import collections
 import contextlib
 import contextvars
@@ -60,6 +61,7 @@ from torch._dynamo.utils import (
     normalize_count_iter,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -162,6 +164,7 @@ from ..source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -171,10 +174,10 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     enumerate_items_with_dict_position,
+    get_dict_backing_dict,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
-    get_underlying_dict,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -221,7 +224,7 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable, OrderedItemsDictVariable
+from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -281,6 +284,11 @@ from .misc import (
     TypingVariable,
     WeakRefVariable,
 )
+
+
+if sys.version_info >= (3, 15):
+    from .misc import SentinelVariable
+
 from .nn_module import (
     FSDPManagedNNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
@@ -324,7 +332,6 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
-    OrderedDictVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -849,6 +856,11 @@ class VariableBuilder:
             if self.allow_lazy_constant or not isinstance(
                 cached_vt, LazyVariableTracker
             ):
+                unwrapped_cached_vt = cached_vt.unwrap()
+                if isinstance(unwrapped_cached_vt, DictKeySetVariable):
+                    self.tx.output.side_effects.check_dict_view_loaded_after_mutation(
+                        unwrapped_cached_vt.backing_dict_id, self.source
+                    )
                 return cached_vt
 
         vt = self._wrap(value)
@@ -1001,7 +1013,7 @@ class VariableBuilder:
         # This might be suboptimal compared to dict guards. But mappingproxy is
         # not very common, so its ok to guard on all keys.
         self.install_guards(GuardBuilder.MAPPING_KEYS_CHECK)
-        backing_dict = get_underlying_dict(value)
+        backing_dict = get_dict_backing_dict(value)
         all_const = all(ConstantVariable.is_literal(k) for k in value)
 
         if not all_const:
@@ -1238,13 +1250,10 @@ class VariableBuilder:
                 )
                 return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
-                dict_vt = OrderedItemsDictVariable(
+                result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
-                    mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-                return self.tx.output.side_effects.track_object_existing(value, result)
             else:
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
@@ -2007,7 +2016,7 @@ class VariableBuilder:
             # and source chains through C-level descriptors break guard
             # evaluation.
             mod = getattr(value, "__module__", None) or ""
-            if not mod.startswith(("torch.", "torch_")):
+            if mod != "torch" and not mod.startswith(("torch.", "torch_")):
                 if value not in self.tx.output.side_effects:
                     return self.tx.output.side_effects.track_object_existing(
                         value, result
@@ -2170,9 +2179,10 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            is_ordered_dict = isinstance(value, collections.OrderedDict)
             dict_vt_cls = (
-                OrderedItemsDictVariable if is_ordered_dict else ConstDictVariable
+                OrderedDictVariable
+                if isinstance(value, collections.OrderedDict)
+                else ConstDictVariable
             )
             dict_vt = dict_vt_cls(
                 result,
@@ -2183,12 +2193,7 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            if is_ordered_dict:
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-            else:
-                result = UserDefinedDictVariable(
-                    value, dict_vt=dict_vt, source=self.source
-                )
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -2303,20 +2308,11 @@ class VariableBuilder:
                 # - If it is passed along with the dict, the dict object itself is already guarded.
                 # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
                 #   to ensure it remains unchanged across multiple runs.
-                backing_dict = get_underlying_dict(value)
+                backing_dict = get_dict_backing_dict(value)
                 backing_dict_id = id(backing_dict) if backing_dict is not None else None
-                if self.tx.output.side_effects.has_mutated_dict_backing_id(
-                    backing_dict_id
-                ):
-                    unimplemented(
-                        gb_type="Dict view loaded after dictionary mutation",
-                        context=f"Backing dict id: {backing_dict_id}",
-                        explanation=(
-                            "Dynamo cannot safely trace use of a dict view after "
-                            "the dictionary it aliases was mutated."
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
+                self.tx.output.side_effects.check_dict_view_loaded_after_mutation(
+                    backing_dict_id, self.source
+                )
                 items = [SourcelessBuilder.create(self.tx, v) for v in value]
                 install_guard(
                     self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
@@ -2366,6 +2362,12 @@ class VariableBuilder:
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return ObjectVariable(value, source=self.source)
+        elif (
+            sys.version_info >= (3, 15)
+            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
+        ):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return SentinelVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -3123,7 +3125,28 @@ class VariableBuilder:
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
         )
-        if not is_dtensor:
+
+        # An AsyncCollectiveTensor (ACT) flattens to a single inner tensor whose
+        # metadata mirrors the wrapper, and the AOTAutograd runtime wrapper
+        # unwraps ACT inputs before the compiled graph. So a graph traced on an
+        # ACT is equivalent to one traced on its resolved plain Tensor. Guard on
+        # the unwrapped inner tensor (via UnwrapCollectiveTensorSource) instead
+        # of the ACT-locked type/metadata guards, so the ACT class no longer
+        # forces a recompile when the runtime value alternates between an
+        # un-awaited ACT and an awaited Tensor. Type-introspecting code stays
+        # sound because observation sites reinstall the class guard on demand
+        # (see BuiltinVariable.call_isinstance and TensorVariable.var_getattr).
+        # Caveat: ACT-only member access (e.g. w.wait()) is not a class-observation
+        # channel and does not reinstall the guard, so such code reuses the
+        # ACT-traced graph for a resolved plain Tensor. It stays numerically
+        # correct (ACT desugars ops to the inner tensor), but a compiled region
+        # can succeed where eager would raise AttributeError on the plain Tensor;
+        # that only bites user code already broken in eager on the resolved input.
+        is_polymorphic_act = not is_dtensor and is_async_collective_tensor_type(
+            type(value)
+        )
+
+        if not is_dtensor and not is_polymorphic_act:
             # We guard on the _local_tensor and the _spec, and therefore we don't
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -3175,6 +3198,11 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+            elif is_polymorphic_act:
+                # Guard only on the unwrapped inner tensor (inner_source below).
+                # Installing no type/metadata guard on the ACT wrapper is what
+                # lets the resolved plain Tensor reuse this cache entry.
+                pass
             else:
                 self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
                 self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -3183,6 +3211,16 @@ class VariableBuilder:
                 )
 
             attrs, _ = value.__tensor_flatten__()
+            if is_polymorphic_act and attrs != ["elem"]:
+                # The unwrap accessor below assumes ACT's single inner tensor.
+                # Unreachable today (ACT always flattens to ["elem"]); if that
+                # ever changes we fail hard rather than misguard -- the wrapper's
+                # type/metadata guards were already skipped above, so there is no
+                # safe fallback left at this point.
+                raise RuntimeError(
+                    f"Expected AsyncCollectiveTensor to flatten to ['elem'], "
+                    f"got {attrs}"
+                )
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 # FakeScriptObject wraps the real opaque object during
@@ -3202,7 +3240,13 @@ class VariableBuilder:
                         "Only tensors and reference-type opaques are allowed "
                         "in tensor attrs."
                     )
-                inner_source = AttrSource(self.source, attr)
+                if is_polymorphic_act:
+                    # ACT flattens to the single attr "elem"; guard it through
+                    # an unwrap accessor so a plain Tensor at runtime (the
+                    # resolved collective) matches the same guard.
+                    inner_source = UnwrapCollectiveTensorSource(self.source)
+                else:
+                    inner_source = AttrSource(self.source, attr)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )
@@ -5207,6 +5251,11 @@ class SourcelessBuilder:
             return UnspecializedNNModuleVariable(value)
         elif istype(value, object):
             return ObjectVariable(value)
+        elif (
+            sys.version_info >= (3, 15)
+            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
+        ):
+            return SentinelVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
@@ -5249,7 +5298,7 @@ class SourcelessBuilder:
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
         )
-        handlers[collections.OrderedDict] = lambda tx, value: OrderedItemsDictVariable(
+        handlers[collections.OrderedDict] = lambda tx, value: OrderedDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
             mutation_type=ValueMutationNew(),
         )

@@ -213,6 +213,8 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    mp_length = sq_length
+
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
@@ -328,7 +330,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # list_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L335-L351
         # tuple_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/tupleobject.c#L421-L430
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
@@ -710,6 +712,9 @@ class RangeVariable(BaseListVariable):
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
 
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.sq_length(tx)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
             raise AssertionError("'range' must not be shadowed in f_globals")
@@ -793,7 +798,7 @@ class RangeVariable(BaseListVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # range_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L405-L416
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  Unlike mp_subscript (range_subscript), no slices.
         index = key.as_python_constant()
         return self.apply_index(tx, index)
@@ -923,20 +928,23 @@ class CommonListMethodsVariable(BaseListVariable):
             from .sets import SetVariable
             from .user_defined import UserDefinedObjectVariable
 
+            arg = args[0].realize()
             sz = len(self.items)
-            if isinstance(args[0], (ListVariable, TupleVariable)):
-                self.items.extend(args[0].items)
-            elif isinstance(args[0], UserDefinedObjectVariable):
-                self.items.extend(unpack_iterable(tx, args[0]))
-            elif isinstance(args[0], (ConstDictVariable, SetVariable)):
-                items = [item.vt for item in args[0].items]
+            if isinstance(arg, (ListVariable, TupleVariable)):
+                self.items.extend(arg.items)
+            elif isinstance(arg, UserDefinedObjectVariable):
+                self.items.extend(unpack_iterable(tx, arg))
+            elif isinstance(arg, (ConstDictVariable, SetVariable)):
+                if isinstance(arg, SetVariable):
+                    arg._check_read_guard(tx)
+                items = [item.vt for item in arg.items]
                 self.items.extend(items)
-            elif isinstance(args[0], ConstantVariable):
-                items = unpack_iterable(tx, args[0])
+            elif isinstance(arg, ConstantVariable):
+                items = unpack_iterable(tx, arg)
                 self.items.extend(items)
             else:
                 unpack_and_apply_fn(
-                    tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
+                    tx, arg, lambda item: self.call_method(tx, "append", [item], {})
                 )
 
             if len(self.items) > sz:
@@ -1437,7 +1445,7 @@ class DequeVariable(CommonListMethodsVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # deque_item: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1888
-        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
         try:
@@ -2177,7 +2185,7 @@ class SliceVariable(VariableTracker):
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(member.nb_index_impl(tx).as_python_constant())
+            members.append(pynumber_index(tx, member).as_python_constant())
         return slice(*members)
 
     def is_hashable(self) -> bool:

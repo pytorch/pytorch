@@ -2,12 +2,23 @@
 
 import enum
 import itertools
+import sys
 import types
+import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    make_dynamo_test,
+    xfailIfPy313AndEarlier,
+)
+
+
+_test_store_global_module_keys = None
+_test_cached_attribute_dict_keys_holder = None
+_test_cached_attribute_dict_keys_dict = None
 
 
 class CustomIterable:
@@ -954,6 +965,30 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         finally:
             d.clear()
 
+    def test_store_global_marks_module_dict_view_stale(self):
+        global _test_store_global_module_keys
+
+        name = "_test_store_global_marks_module_dict_view_stale"
+        globals().pop(name, None)
+        _test_store_global_module_keys = globals().keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            global _test_store_global_marks_module_dict_view_stale
+            _test_store_global_marks_module_dict_view_stale = 1
+            return t + (1 if name in _test_store_global_module_keys else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertNotIn(name, globals())
+        finally:
+            globals().pop(name, None)
+            _test_store_global_module_keys = None
+
     def test_unrelated_future_global_container_dict_keys_view_no_graph_break(self):
         d = {}
         holder = {"view": d.keys(), "n": 0}
@@ -971,7 +1006,8 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
     def test_unrelated_module_attribute_dict_keys_view_no_graph_break(self):
         d = {}
-        module = types.ModuleType("test_unrelated_module_attribute_dict_keys_view")
+        module_name = "test_unrelated_module_attribute_dict_keys_view"
+        module = types.ModuleType(module_name)
         module.keys = d.keys()
 
         @torch.compile(backend="eager", fullgraph=True)
@@ -981,7 +1017,9 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             return t + len(h.__name__)
 
         try:
-            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([46.0]))
+            self.assertEqual(
+                fn(torch.tensor([0.0])), torch.tensor([float(len(module_name))])
+            )
             self.assertEqual(d, {"foo": 1})
         finally:
             d.clear()
@@ -1083,6 +1121,27 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             self.assertEqual(out, torch.tensor([1.0]))
             self.assertEqual(list(keys), ["foo"])
             self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_preexisting_cell_container_dict_keys_view_blocks_mutation(self):
+        d = {}
+        views = [d.keys()]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            before = 1 if "foo" in views[0] else 0
+            d["foo"] = 1
+            after = 1 if "foo" in views[0] else 0
+            return t + before + after
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
         finally:
             d.clear()
 
@@ -1223,6 +1282,115 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             d.clear()
             del Holder.class_keys
 
+    def test_cached_attribute_dict_keys_view_rechecked_after_mutation(self):
+        global _test_cached_attribute_dict_keys_dict
+        global _test_cached_attribute_dict_keys_holder
+
+        class Holder:
+            pass
+
+        d = {}
+        holder = Holder()
+        holder.keys = d.keys()
+        _test_cached_attribute_dict_keys_holder = holder
+        _test_cached_attribute_dict_keys_dict = d
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            before = 1 if "foo" in _test_cached_attribute_dict_keys_holder.keys else 0
+            _test_cached_attribute_dict_keys_dict["foo"] = 1
+            after = 1 if "foo" in _test_cached_attribute_dict_keys_holder.keys else 0
+            return t + before + after
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+            _test_cached_attribute_dict_keys_holder = None
+            _test_cached_attribute_dict_keys_dict = None
+
+    def test_cached_dict_keys_rhs_set_operation_rechecked_after_mutation(self):
+        d = {}
+        holder = {"view": d.keys()}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            _ = holder["view"].__class__
+            d["foo"] = 1
+            return t + len({"foo"} - holder["view"])
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_cached_dict_keys_consumers_rechecked_after_mutation(self):
+        def extend(keys):
+            result = []
+            result.extend(keys)
+            return len(result)
+
+        operations = {
+            "len": len,
+            "not": lambda keys: int(not keys),
+            "frozenset": lambda keys: len(frozenset(keys)),
+            "fromkeys": lambda keys: len(dict.fromkeys(keys)),
+            "extend": extend,
+        }
+
+        for name, operation in operations.items():
+            with self.subTest(name=name):
+                d = {}
+                holder = {"view": d.keys()}
+
+                @torch.compile(backend="eager", fullgraph=True)
+                def fn(t):
+                    _ = holder["view"].__class__
+                    d["foo"] = 1
+                    return t + operation(holder["view"])
+
+                try:
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported,
+                        "Dict view loaded after dictionary mutation",
+                    ):
+                        fn(torch.tensor([0.0]))
+                    self.assertEqual(d, {})
+                finally:
+                    d.clear()
+                    torch._dynamo.reset()
+
+    def test_preexisting_dict_keys_set_operations(self):
+        keys = {"a": 1, "b": 2}.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return (
+                t + len({"a", "c"} - keys),
+                t + len({"a", "c"} & keys),
+                t + len({"a", "c"} ^ keys),
+                t + len({"a", "c"} | keys),
+                t + int({"a", "b"} == keys),
+                t + len(frozenset(keys)),
+                t + len(dict.fromkeys(keys)),
+            )
+
+        actual = fn(torch.tensor([0.0]))
+        expected = tuple(
+            torch.tensor([float(value)]) for value in (1, 1, 2, 3, 1, 2, 2)
+        )
+        self.assertEqual(actual, expected)
+
     def test_rebound_instance_attribute_dict_keys_view_does_not_block_mutation(self):
         class Holder:
             pass
@@ -1245,6 +1413,8 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             d.clear()
 
     def test_dict_view_liveness_scan_does_not_guard_scalar_locals(self):
+        # A scalar live local must not be realized or guarded while checking
+        # unrelated attribute writes for live dict views.
         class Holder:
             def __init__(self):
                 self.global_var = None
@@ -1280,7 +1450,30 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(torch.tensor([0.0]), True), torch.tensor([2.0]))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_dict_view_liveness_analysis_cached_for_loop_mutations(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            for i in range(20):
+                d[i] = i  # noqa: PERF403 - repeated mutation instruction is the test
+            return t
+
+        real_livevars_analysis = torch._dynamo.side_effects.livevars_analysis
+        with mock.patch.object(
+            torch._dynamo.side_effects,
+            "livevars_analysis",
+            wraps=real_livevars_analysis,
+        ) as wrapped_livevars_analysis:
+            try:
+                self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+                self.assertEqual(wrapped_livevars_analysis.call_count, 1)
+            finally:
+                d.clear()
+
     def test_dict_view_liveness_scan_handles_deep_tee_state(self):
+        # The tee buffer forms a deep linked VT graph; scanning it must stay
+        # iterative to avoid recursion limits during iterator mutations.
         class MutatingIterator:
             def __init__(self, values):
                 self.values = values
@@ -1349,8 +1542,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             self.assertEqual(d, {})
         finally:
             d.clear()
-            if hasattr(holder, "keys"):
-                del holder.keys
 
     def test_dead_new_object_dict_keys_view_does_not_block_mutation(self):
         class Holder:
@@ -2125,6 +2316,280 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
     def test_len_blocked_slot_raises_type_error(self):
         with self.assertRaises(TypeError):
             len(BlockedLen())
+
+
+class IterPropAttrErrorWithGetItem:
+    def __init__(self, data):
+        self.data = data
+
+    @property
+    def __iter__(self):
+        raise AttributeError("no __iter__")
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+
+class IterPropAttrErrorNoGetItem:
+    @property
+    def __iter__(self):
+        raise AttributeError("no __iter__")
+
+
+class IterPropReturnsCallable:
+    def __init__(self, data):
+        self.data = data
+
+    @property
+    def __iter__(self):
+        return lambda: iter(self.data)
+
+
+class IterPropRaisesValueError:
+    @property
+    def __iter__(self):
+        raise ValueError("boom")
+
+
+class BlockedIterWithGetItem:
+    __iter__ = None
+
+    def __getitem__(self, index):
+        return [1, 2, 3][index]
+
+
+class _IterDescriptor:
+    def __get__(self, obj, owner):
+        return lambda: iter(obj.data)
+
+
+class _AttrErrorDescriptor:
+    def __get__(self, obj, owner):
+        raise AttributeError("no attr")
+
+
+class IterViaDescriptor:
+    __iter__ = _IterDescriptor()
+
+    def __init__(self, data):
+        self.data = data
+
+
+class IterDescriptorAttrErrorWithGetItem:
+    __iter__ = _AttrErrorDescriptor()
+
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+
+class IterNotCallable:
+    __iter__ = 42
+
+
+class IterStaticMethod:
+    __iter__ = staticmethod(lambda: iter([1, 2, 3]))
+
+
+class NextProp:
+    def __init__(self, n):
+        self.n = n
+        self.i = 0
+
+    def __iter__(self):
+        return self
+
+    @property
+    def __next__(self):
+        def inner():
+            if self.i >= self.n:
+                raise StopIteration
+            self.i += 1
+            return self.i
+
+        return inner
+
+
+class NextNone:
+    def __iter__(self):
+        return self
+
+    __next__ = None
+
+
+class NextPropAttrError:
+    def __iter__(self):
+        return self
+
+    @property
+    def __next__(self):
+        raise AttributeError("gone")
+
+
+class TestSpecialMethodIterLookup(torch._dynamo.test_case.TestCase):
+    """slot_tp_iter / slot_tp_iternext lookup semantics: __iter__ / __next__
+    resolved via MRO-only special lookup with descriptor binding
+    (lookup_maybe_method in Objects/typeobject.c)."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # Pre-3.14 slot_tp_iter blanket-clears lookup errors (PyErr_Clear) before
+    # the __getitem__ probe; Dynamo does not encode this yet.
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_iter_property_attribute_error_with_getitem(self):
+        # __iter__ bind raises AttributeError -> swallowed -> seqiter fallback
+        self.assertEqual(list(IterPropAttrErrorWithGetItem([1, 2, 3])), [1, 2, 3])
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_iter_property_attribute_error_no_getitem(self):
+        with self.assertRaises(TypeError):
+            iter(IterPropAttrErrorNoGetItem())
+
+    @make_dynamo_test
+    def test_iter_property_returns_callable(self):
+        self.assertEqual(list(IterPropReturnsCallable([1, 2, 3])), [1, 2, 3])
+
+    @xfailIfPy313AndEarlier
+    @make_dynamo_test
+    def test_iter_property_raises_value_error(self):
+        # Pre-3.14 slot_tp_iter swallows any lookup error (blanket
+        # PyErr_Clear) and falls through to the absent __getitem__ probe
+        # -> TypeError; 3.14 only swallows AttributeError, so ValueError
+        # propagates
+        expected = ValueError if sys.version_info >= (3, 14) else TypeError
+        with self.assertRaises(expected):
+            iter(IterPropRaisesValueError())
+
+    @make_dynamo_test
+    def test_iter_none_with_getitem(self):
+        # __iter__ = None wins over the __getitem__ fallback
+        with self.assertRaises(TypeError):
+            iter(BlockedIterWithGetItem())
+
+    @make_dynamo_test
+    def test_iter_via_descriptor(self):
+        self.assertEqual(list(IterViaDescriptor([1, 2, 3])), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_iter_descriptor_attribute_error_with_getitem(self):
+        self.assertEqual(list(IterDescriptorAttrErrorWithGetItem([4, 5, 6])), [4, 5, 6])
+
+    @make_dynamo_test
+    def test_iter_not_callable(self):
+        with self.assertRaises(TypeError):
+            iter(IterNotCallable())
+
+    @make_dynamo_test
+    def test_iter_staticmethod(self):
+        self.assertEqual(list(IterStaticMethod()), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_next_property(self):
+        self.assertEqual(list(NextProp(3)), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_next_none_raises_type_error(self):
+        it = iter(NextNone())
+        with self.assertRaises(TypeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_next_missing_raises_type_error(self):
+        # builtin next() gates on PyIter_Check
+        with self.assertRaises(TypeError):
+            next(NoIterNoGetitem())
+
+    @make_dynamo_test
+    def test_next_property_attribute_error_propagates(self):
+        # slot_tp_iternext uses the raising lookup variant: AttributeError
+        # from the bind is NOT swallowed
+        it = iter(NextPropAttrError())
+        with self.assertRaises(AttributeError):
+            next(it)
+
+
+class ColorInt(enum.IntEnum):
+    RED = 1
+
+
+class TestSpecialMethodLookupRegressions(torch._dynamo.test_case.TestCase):
+    """Regressions for the special-method lookup engine: C-slot dunders must
+    never recurse, and error messages must match eager."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    def test_iter_on_c_iterable_object_graph_breaks(self):
+        # zip object as graph input: its __iter__ is a C wrapper descriptor
+        # with no traceable body.  Must graph break cleanly (Unsupported),
+        # never RecursionError.
+        from torch._dynamo.exc import Unsupported
+
+        def fn(it, x):
+            return [v + 1 for v in it] and x + 1
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                zip([1, 2], [3, 4]), torch.ones(2)
+            )
+
+    def test_iter_on_dict_items_object_graph_breaks(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(items, x):
+            it = iter(items)
+            return next(it) and x + 1
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                {"a": 1}.items(), torch.ones(2)
+            )
+
+    @make_dynamo_test
+    def test_intenum_unary_neg(self):
+        # int.__neg__ on an IntEnum member: inherited C slot of a modeled
+        # constant base -- must fold/delegate, never recurse.
+        self.assertEqual(-ColorInt.RED, -1)
+
+    @make_dynamo_test
+    def test_iter_none_with_getitem_message(self):
+        # slot_tp_iter's attr_is_none branch: message is "is not iterable",
+        # not "'NoneType' object is not callable"
+        raised = False
+        try:
+            iter(BlockedIterWithGetItem())
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not iterable", str(e))
+        self.assertTrue(raised)
+
+    @make_dynamo_test
+    def test_next_missing_message(self):
+        # builtin next() gates on PyIter_Check: "is not an iterator"
+        raised = False
+        try:
+            next(NoIterNoGetitem())
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not an iterator", str(e))
+        self.assertTrue(raised)
 
 
 if __name__ == "__main__":

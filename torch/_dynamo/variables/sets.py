@@ -143,6 +143,9 @@ class SetVariable(VariableTracker):
         # Variable to fill in the keys of the dictionary
         return ConstantVariable.create(None)
 
+    def _check_read_guard(self, tx: "InstructionTranslatorBase") -> None:
+        pass
+
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
 
@@ -159,6 +162,7 @@ class SetVariable(VariableTracker):
         return {k.vt.as_python_constant() for k in self.set_items}
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        self._check_read_guard(tx)
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         if not self.items:
             return VariableTracker.build(tx, f"{self.python_type_name()}()")
@@ -197,6 +201,7 @@ class SetVariable(VariableTracker):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
+        self._check_read_guard(tx)
         return [x.vt for x in self.items]
 
     def clone(self, **kwargs: Any) -> VariableTracker:
@@ -277,7 +282,10 @@ class SetVariable(VariableTracker):
         # matching CPython's hash-at-insert behavior.
         from .dicts import ConstDictVariable
 
+        other = other.realize()
         if isinstance(other, (SetVariable, ConstDictVariable)):
+            if isinstance(other, SetVariable):
+                other._check_read_guard(tx)
             yield from other.items.keys()
             return
 
@@ -291,7 +299,10 @@ class SetVariable(VariableTracker):
         # protocol.
         from .dicts import ConstDictVariable
 
+        other = other.realize()
         if isinstance(other, (SetVariable, ConstDictVariable)):
+            if isinstance(other, SetVariable):
+                other._check_read_guard(tx)
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
 
@@ -304,6 +315,7 @@ class SetVariable(VariableTracker):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
+        self._check_read_guard(tx)
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2131-L2149
         if not is_hashable(item):
             # Mirror CPython's set_contains: if hashing fails with TypeError due to
@@ -330,6 +342,8 @@ class SetVariable(VariableTracker):
         from ..utils import check_constant_args
         from .builder import SourcelessBuilder
         from .dicts import ConstDictVariable
+
+        self._check_read_guard(tx)
 
         if (
             name
@@ -582,6 +596,7 @@ class SetVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import SetIterator
 
+        self._check_read_guard(tx)
         if self.source and not is_constant_source(self.source):
             tx.output.guard_on_key_order.add(self.source)
         return SetIterator(self.items)
@@ -593,7 +608,13 @@ class SetVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1318-L1338
+        other = other.realize()
         self_, other_ = (other, self) if reverse else (self, other)
+
+        if isinstance(self_, SetVariable):
+            self_._check_read_guard(tx)
+        if isinstance(other_, SetVariable):
+            other_._check_read_guard(tx)
 
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
@@ -608,9 +629,12 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1340-L1350
+        other = other.realize()
+        self._check_read_guard(tx)
+        if isinstance(other, SetVariable):
+            other._check_read_guard(tx)
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
-
         tx.output.side_effects.mutation(self)
         self.items.update(other.items)  # type: ignore[missing-attribute]
         return self
@@ -622,7 +646,13 @@ class SetVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1801-L1812
+        other = other.realize()
         self_, other_ = (other, self) if reverse else (self, other)
+
+        if isinstance(self_, SetVariable):
+            self_._check_read_guard(tx)
+        if isinstance(other_, SetVariable):
+            other_._check_read_guard(tx)
 
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
@@ -636,9 +666,12 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1814-L1828
+        other = other.realize()
+        self._check_read_guard(tx)
+        if isinstance(other, SetVariable):
+            other._check_read_guard(tx)
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
-
         tx.output.side_effects.mutation(self)
         for k in list(other.items.keys()):  # type: ignore[missing-attribute]
             self.items.pop(k, None)
@@ -651,7 +684,13 @@ class SetVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
+        other = other.realize()
         self_, other_ = (other, self) if reverse else (self, other)
+
+        if isinstance(self_, SetVariable):
+            self_._check_read_guard(tx)
+        if isinstance(other_, SetVariable):
+            other_._check_read_guard(tx)
 
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
@@ -662,9 +701,12 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1520-L1536 (set_iand)
+        other = other.realize()
+        self._check_read_guard(tx)
+        if isinstance(other, SetVariable):
+            other._check_read_guard(tx)
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
-
         self.call_method(tx, "intersection_update", [other], {})
         return self
 
@@ -675,7 +717,13 @@ class SetVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
+        other = other.realize()
         self_, other_ = (other, self) if reverse else (self, other)
+
+        if isinstance(self_, SetVariable):
+            self_._check_read_guard(tx)
+        if isinstance(other_, SetVariable):
+            other_._check_read_guard(tx)
 
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
@@ -686,13 +734,17 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1992-L2004 (set_ixor)
+        other = other.realize()
+        self._check_read_guard(tx)
+        if isinstance(other, SetVariable):
+            other._check_read_guard(tx)
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
-
         self.call_method(tx, "symmetric_difference_update", [other], {})
         return self
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_read_guard(tx)
         return VariableTracker.build(tx, len(self.set_items))
 
     def richcompare_impl(
@@ -706,7 +758,11 @@ class SetVariable(VariableTracker):
         https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2097
         CPython uses PyAnySet_Check: only accepts set/frozenset (not dict views).
         """
-        if not isinstance(other, SetVariable):
+        self._check_read_guard(tx)
+        other = other.realize()
+        if isinstance(other, SetVariable):
+            other._check_read_guard(tx)
+        else:
             try:
                 other_type = other.python_type()
             except NotImplementedError:
@@ -996,6 +1052,13 @@ class FrozensetVariable(SetVariable):
 
 
 class DictKeySetVariable(SetVariable):
+    """A guarded snapshot of a pre-existing ``dict_keys`` object.
+
+    Mutation-time liveness and builder load/cache-hit checks avoid stale
+    snapshots where possible. Use-time guards cover views nested inside a
+    cached container, where no later builder call occurs.
+    """
+
     _nonvar_fields = {"backing_dict_id", *SetVariable._nonvar_fields}
 
     def __init__(
@@ -1007,7 +1070,13 @@ class DictKeySetVariable(SetVariable):
         super().__init__(*args, **kwargs)
         self.backing_dict_id = backing_dict_id
 
-    # Mutation-time liveness and builder load-time checks make a use-time guard unnecessary.
+    def _check_read_guard(self, tx: "InstructionTranslatorBase") -> None:
+        if self.source is None:
+            raise AssertionError("DictKeySetVariable must have a source")
+        tx.output.side_effects.check_dict_view_loaded_after_mutation(
+            self.backing_dict_id, self.source
+        )
+
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"
@@ -1025,8 +1094,8 @@ class DictKeySetVariable(SetVariable):
         pass
 
     @property
-    def set_items(self) -> Any:
-        return self.items
+    def set_items(self) -> set[HashableTracker]:
+        return set(self.items)
 
     def python_type(self) -> type:
         from ..utils import dict_keys
@@ -1037,6 +1106,67 @@ class DictKeySetVariable(SetVariable):
         return dict.fromkeys(
             {k.vt.as_python_constant() for k in self.set_items}, None
         ).keys()
+
+    def is_python_constant(self) -> bool:
+        # A dict view is live even when every current key is constant.
+        return False
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        self._check_read_guard(tx)
+        other = other.realize()
+        result = SourcelessBuilder.create(tx, set).call_function(tx, [self], {})
+        result.call_method(tx, "update", [other], {})
+        return result
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        self._check_read_guard(tx)
+        other = other.realize()
+        self_, other_ = (other, self) if reverse else (self, other)
+        result = SourcelessBuilder.create(tx, set).call_function(tx, [self_], {})
+        result.call_method(tx, "difference_update", [other_], {})
+        return result
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        self._check_read_guard(tx)
+        other = other.realize()
+        result = SourcelessBuilder.create(tx, set).call_function(tx, [self], {})
+        result.call_method(tx, "intersection_update", [other], {})
+        return result
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        self._check_read_guard(tx)
+        other = other.realize()
+        result = SourcelessBuilder.create(tx, set).call_function(tx, [self], {})
+        result.call_method(tx, "symmetric_difference_update", [other], {})
+        return result
 
     def call_method(
         self,

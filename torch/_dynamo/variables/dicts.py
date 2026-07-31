@@ -19,6 +19,7 @@ in sets.py.
 
 import collections
 import functools
+import sys
 import types
 from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
@@ -56,6 +57,7 @@ from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
+    Method,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
@@ -64,9 +66,9 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
+    generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
-    vt_getitem,
 )
 
 
@@ -665,7 +667,7 @@ class ConstDictVariable(VariableTracker):
                 ):
                     keys = other.call_method(tx, "keys", [], {})
                     for key in unpack_iterable(tx, keys):
-                        self.items[Hashable(key)] = vt_getitem(tx, other, key)
+                        self.items[Hashable(key)] = generic_getitem(tx, other, key)
                 else:
                     for idx, item in enumerate(unpack_iterable(tx, other)):
                         pair = unpack_iterable(tx, item)
@@ -851,11 +853,130 @@ class ConstDictVariable(VariableTracker):
         return super().getattro_impl(tx, name)
 
 
-class OrderedItemsDictVariable(ConstDictVariable):
-    # Storage VT backing OrderedDictVariable._base_vt. The OrderedDict container
-    # (via _cpython_type) provides move_to_end / popitem(last=), and reconstruct
-    # emits `OrderedDict(...)` rather than a bare dict literal.
+class OrderedDictVariable(ConstDictVariable):
     _cpython_type = collections.OrderedDict
+
+    # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
+    # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
+    # OrderedDict exposes no tp_getset / tp_members.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+
+    def move_to_end(
+        self: "OrderedDictVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self.install_dict_keys_match_guard()
+        tx.output.side_effects.mutation(self)
+        if args[0] not in self:
+            raise_observed_exception(KeyError, tx)
+
+        last = True
+        if len(args) == 2 and args[0].is_python_constant():
+            last = args[1].as_python_constant()
+        if "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
+
+        self.items.move_to_end(HashableTracker(args[0]), last=last)
+        return ConstantVariable.create(None)
+
+    def popitem(
+        self: "OrderedDictVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not self.items:
+            raise_observed_exception(
+                KeyError, tx, args=["popitem(): dictionary is empty"]
+            )
+
+        last = True
+        if len(args) == 1 and args[0].is_python_constant():
+            last = args[0].as_python_constant()
+        if "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
+
+        k, v = self.items.popitem(last=last)
+        self.should_reconstruct_all = True
+        tx.output.side_effects.mutation(self)
+        return variables.TupleVariable([k.vt, v])
+
+    tp_methods = {
+        "move_to_end": Method(move_to_end),
+        "popitem": Method(popitem),
+    }
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Consult tp_methods before ConstDictVariable's own dispatch, whose
+        # bare-dict popitem() branch would otherwise shadow the OrderedDict
+        # popitem(last=) handler.
+        method = self.lookup_tp_method(name)
+        if method is not None:
+            result = method(self, tx, name, args, kwargs)
+            if result is not None:
+                return result
+        return super().call_method(tx, name, args, kwargs)
+
+    def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
+        return collections.OrderedDict(super().as_python_constant())
+
+    @staticmethod
+    def _ordered_dict_repr(items: list[tuple[str, str]]) -> str:
+        if not items:
+            return "OrderedDict()"
+        if sys.version_info >= (3, 12):
+            return (
+                "OrderedDict({"
+                + ", ".join(f"{key}: {value}" for key, value in items)
+                + "})"
+            )
+        return (
+            "OrderedDict(["
+            + ", ".join(f"({key}, {value})" for key, value in items)
+            + "])"
+        )
+
+    def debug_repr(self) -> str:
+        items = [(k.vt.debug_repr(), v.debug_repr()) for k, v in self.items.items()]
+        return self._ordered_dict_repr(items)
+
+    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
+        # uses dict-style formatting.
+        items = [
+            (tracked_repr(tx, key.vt), tracked_repr(tx, value))
+            for key, value in self.items.items()
+        ]
+        return VariableTracker.build(tx, self._ordered_dict_repr(items))
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # OrderedDict.__or__/__ror__ preserve the OrderedDict type, unlike
+        # dict.__or__ which returns a plain dict for a subclass operand.
+        # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327-L339
+        if not issubclass(other.python_type(), dict):
+            return ConstantVariable.create(NotImplemented)
+        if reverse:
+            new = VariableTracker.build(tx, self.python_type()).call_function(
+                tx, [other], {}
+            )
+            new.call_method(tx, "update", [self], {})
+        else:
+            new = self.call_method(tx, "copy", [], {})
+            new.call_method(tx, "update", [other], {})
+        return new
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # emit `OrderedDict(constructed_dict)`
@@ -1015,23 +1136,17 @@ class MappingProxyVariable(VariableTracker):
             name in ("keys", "values", "items")
             and not args
             and not kwargs
-            and self.backing_dict_id is not None
+            and isinstance(result, DictViewVariable)
         ):
-            if isinstance(result, DictViewVariable):
+            if self.backing_dict_id is not None:
                 result.backing_dict_id = self.backing_dict_id
                 result.backing_dict_mutation_version = (
                     tx.output.side_effects.dict_backing_mutation_version(
                         self.backing_dict_id
                     )
                 )
-        if (
-            name in ("keys", "values", "items")
-            and not args
-            and not kwargs
-            and isinstance(result, DictViewVariable)
-            and self.source is not None
-        ):
-            result.source = CallMethodNoArgsSource(self.source, name)
+            if self.source is not None:
+                result.source = CallMethodNoArgsSource(self.source, name)
         return result
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1067,7 +1182,7 @@ class MappingProxyVariable(VariableTracker):
         return super().call_obj_hasattr(tx, name)
 
 
-class NNModuleHooksDictVariable(OrderedItemsDictVariable):
+class NNModuleHooksDictVariable(OrderedDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
     # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
     def install_dict_keys_match_guard(self) -> None:
@@ -1117,7 +1232,7 @@ class DictViewVariable(VariableTracker):
         ):
             unimplemented(
                 gb_type="Dict view used after dictionary mutation",
-                context=f"Backing dict id: {self.backing_dict_id}",
+                context=f"View type: {self.python_type_name()}",
                 explanation=(
                     "Dynamo cannot safely trace use of a dict view after the "
                     "dictionary it aliases was mutated."
@@ -1155,6 +1270,8 @@ class DictViewVariable(VariableTracker):
         if self.kv is None:
             raise AssertionError("kv must not be None for reconstruct")
         if self.source is not None:
+            # A sourced view must stay connected to its real backing dict even
+            # when a caller disables normal source/cache codegen.
             codegen(self.source)
             return
         codegen(self.dv_dict)
@@ -1215,6 +1332,7 @@ class DictViewVariable(VariableTracker):
                     "0 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_mutation_guard(tx)
             if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
                 tx.output.guard_on_key_order.add(self.dv_dict.source)
             return variables.ListIteratorVariable(
@@ -1260,6 +1378,7 @@ class DictViewVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L6105-L6188 (_PyDictView_Intersect)
+        self._check_mutation_guard(tx)
         s = VariableTracker.build(tx, set).call_function(tx, [self], {})
         s.call_method(tx, "intersection_update", [other], {})
         return s
@@ -1271,6 +1390,7 @@ class DictViewVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L6305-L6325 (dictviews_xor)
+        self._check_mutation_guard(tx)
         s = VariableTracker.build(tx, set).call_function(tx, [self], {})
         s.call_method(tx, "symmetric_difference_update", [other], {})
         return s
@@ -1523,6 +1643,11 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             return {}
         elif isinstance(vt, variables.LocalGeneratorFunctionVariable):
             return SideEffectsProxyDict.get_example_value_dict(vt.vt)
+        elif istype(vt, variables.ExceptionVariable):
+            # Synthetic exceptions created during tracing have no backing
+            # Python object; their __dict__ starts empty and any custom
+            # attribute is recorded in the side effects table.
+            return {}
         else:
             value = vt.get_real_python_backed_value()
             if value is not NO_SUCH_SUBOBJ:
