@@ -52,6 +52,7 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     GatherOptions,
     get_debug_level,
+    NanCheckHook,
     PrefixStore,
     ProcessGroup,
     ReconfigureOptions,
@@ -119,6 +120,7 @@ __all__ = [
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
+    "gather_single",
     "gather_into_tensor",
     "gather_object",
     "get_backend_config",
@@ -683,19 +685,24 @@ def _create_nccl_process_group(
     return backend_class
 
 
+def _nccl2_options(
+    backend_options: object | None,
+) -> "ProcessGroupNCCL.Options":
+    if backend_options is None:
+        return ProcessGroupNCCL.Options()
+    if not isinstance(backend_options, ProcessGroupNCCL.Options):
+        raise AssertionError(
+            "Expected backend_options argument to be of type ProcessGroupNCCL.Options"
+        )
+    return backend_options
+
+
 def _create_nccl2_process_group(
     opts: _DistributedBackendOptions, backend_options: object | None
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    # Accept a ProcessGroupNCCL2.Options if given; otherwise (None, or a
-    # ProcessGroupNCCL.Options passed through the generic path) build a fresh one.
-    if backend_options is not None and isinstance(
-        backend_options, ProcessGroupNCCL2.Options
-    ):
-        pg_options = backend_options
-    else:
-        pg_options = ProcessGroupNCCL2.Options()
+    pg_options = _nccl2_options(backend_options)
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -710,12 +717,7 @@ def _create_nccl_lazy_process_group(
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    if backend_options is not None and isinstance(
-        backend_options, ProcessGroupNCCL2.Options
-    ):
-        pg_options = backend_options
-    else:
-        pg_options = ProcessGroupNCCL2.Options()
+    pg_options = _nccl2_options(backend_options)
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -997,23 +999,43 @@ def _parse_backend_string(
 
 def _get_default_backend_type_for_backend_config(
     backend_config: BackendConfig,
+    device_id: torch.device | None = None,
 ) -> ProcessGroup.BackendType:
-    if Backend.NCCL in backend_config.device_backend_map.values():
-        return ProcessGroup.BackendType.NCCL
+    def _resolve_backend_type(backend: str) -> ProcessGroup.BackendType:
+        # Must mirror _new_process_group_helper's per-device
+        # `backend_type_map.get(backend_str, CUSTOM)`, or the default type
+        # names a backend that never gets registered.
+        known_type = Backend.backend_type_map.get(backend)
+        if known_type is not None:
+            return known_type
+        if _is_torchcomms_backend(backend):
+            return ProcessGroup.BackendType.CUSTOM
+        # Unreachable for a group that actually gets built
+        return ProcessGroup.BackendType.GLOO
 
-    custom_backend = next(
-        (
-            backend
-            for backend in backend_config.device_backend_map.values()
-            if Backend.backend_type_map.get(str(backend))
-            == ProcessGroup.BackendType.CUSTOM
-            or _is_torchcomms_backend(str(backend))
-        ),
-        None,
-    )
-    if custom_backend is not None:
-        return ProcessGroup.BackendType.CUSTOM
-    return ProcessGroup.BackendType.GLOO
+    device_backend_map = backend_config.device_backend_map
+    if not device_backend_map:
+        return ProcessGroup.BackendType.GLOO
+
+    accelerator = torch.accelerator.current_accelerator()
+
+    def _device_priority(device: str) -> int:
+        # Prefer this group's accelerator backend over the host one, because
+        # ``ProcessGroup::barrier()`` derives its tensor device from the default
+        # backend type -- a host default silently downgrades barrier() on a
+        # mixed "cpu:<host>,<acc>:<acc backend>" group to a CPU barrier.
+        if device_id is not None and device == device_id.type:
+            return 0
+        if accelerator is not None and device == accelerator.type:
+            return 1
+        if device != "cpu":
+            return 2
+        return 3
+
+    # `min` keeps the first device of the winning priority, so ties resolve in
+    # the order the devices were named in the backend string.
+    device = min(device_backend_map, key=_device_priority)
+    return _resolve_backend_type(str(device_backend_map[device]))
 
 
 class _reduce_op:
@@ -2689,7 +2711,7 @@ def _new_process_group_helper(
     # when multi backend is passed in
     if not pg_backend_set:
         pg._set_default_backend(
-            _get_default_backend_type_for_backend_config(backend_config)
+            _get_default_backend_type_for_backend_config(backend_config, device_id)
         )
 
     if device_id:
@@ -2867,6 +2889,12 @@ def _new_process_group_helper(
         raise AssertionError("group_desc must not be None")
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
+
+    # Backend-agnostic NaN checking, for backends without a native checker
+    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself). The group owns the
+    # hook, so there is no handle to keep alive here.
+    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
+        NanCheckHook.attach(pg)
 
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
@@ -5386,7 +5414,7 @@ def gather(
 
 
 @_exception_logger
-def gather_into_tensor(
+def gather_single(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
     dst: int | None = None,
@@ -5439,7 +5467,7 @@ def gather_into_tensor(
         >>>     gather_tensor = torch.zeros(2 * 2, dtype=torch.int64, device=device)
         >>> else:
         >>>     gather_tensor = None
-        >>> dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        >>> dist.gather_single(tensor, gather_tensor, dst=0)
         >>> gather_tensor
         tensor([1, 2, 3, 4], device='cuda:0')  # Rank 0
         None                                    # Rank 1
@@ -5448,7 +5476,7 @@ def gather_into_tensor(
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
-            gather_into_tensor,
+            gather_single,
             relevant_args,
             tensor,
             gather_tensor=gather_tensor,
@@ -5461,7 +5489,7 @@ def gather_into_tensor(
     _check_single_tensor(tensor, "tensor")
     group = _group_or_default_group(group)
     if _rank_not_in_group(group):
-        _warn_not_in_group("gather_into_tensor")
+        _warn_not_in_group("gather_single")
         return
     if dst is None and group_dst is None:
         dst = 0
@@ -5482,7 +5510,7 @@ def gather_into_tensor(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    work = group.gather_into_tensor(output_tensor, tensor, opts)
+    work = group.gather_single(output_tensor, tensor, opts)
 
     if async_op:
         return work
@@ -5491,6 +5519,31 @@ def gather_into_tensor(
     ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
+
+
+@_exception_logger
+@deprecated(
+    "`torch.distributed.gather_into_tensor` is deprecated. "
+    "Please use `torch.distributed.gather_single` instead.",
+    category=FutureWarning,
+)
+def gather_into_tensor(
+    tensor: torch.Tensor,
+    gather_tensor: torch.Tensor | None = None,
+    dst: int | None = None,
+    group: ProcessGroup | None = None,
+    async_op: bool = False,
+    group_dst: int | None = None,
+):
+    """
+    Gather the input tensor from all ranks into a single output tensor on ``dst``.
+
+    .. warning::
+        `gather_into_tensor` is deprecated. Users should use `gather_single`
+        instead.
+
+    """
+    return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
 
 
 @_exception_logger
@@ -6330,8 +6383,15 @@ def monitored_barrier(
         _warn_not_in_group("monitored_barrier")
         return
 
-    if get_backend(group) != Backend.GLOO:
-        raise ValueError("monitored_barrier is only implemented for GLOO backend.")
+    # monitored_barrier runs on a CPU backend (GLOO, or its torchcomms
+    # BackendWrapper equivalent). Require the group to have a CPU backend rather
+    # than matching the "gloo" name, so a device-qualified group (e.g.
+    # "cpu:gloo,cuda:nccl") is accepted for its CPU backend.
+    group_to_use = group or _get_default_group()
+    if torch.device("cpu") not in group_to_use._device_types:
+        raise ValueError(
+            "monitored_barrier requires a group with a CPU-capable backend (e.g. GLOO)."
+        )
 
     if timeout is None:
         timeout = _get_default_timeout(get_backend(group))
@@ -6346,7 +6406,6 @@ def monitored_barrier(
 
     _check_valid_timeout(timeout)
 
-    group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
         timeout, wait_all_ranks=wait_all_ranks
     )
