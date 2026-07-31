@@ -48,19 +48,18 @@ jobs:
         id: metadata
         shell: bash
         run: |
-          set -ex
-          if [ ! -f docs-preview-staging/pr-metadata.txt ]; then
+          set -eu
+          meta="docs-preview-staging/pr-metadata.txt"
+          if [ ! -f "${meta}" ]; then
             echo "pr-metadata.txt missing from artifact, aborting."
             exit 1
           fi
-          # shellcheck disable=SC1091
-          source docs-preview-staging/pr-metadata.txt
-          if [ -z "${PR_NUMBER:-}" ]; then
-            echo "PR_NUMBER is empty, aborting."
+          PR_NUMBER="$(grep -m1 '^PR_NUMBER=' "${meta}" | cut -d= -f2- || true)"
+          if ! [[ "${PR_NUMBER}" =~ ^[0-9]+$ ]]; then
+            echo "PR_NUMBER is not a positive integer, aborting."
             exit 1
           fi
           echo "pr_number=${PR_NUMBER}" >> "${GITHUB_OUTPUT}"
-          echo "docs_type=${DOCS_TYPE}" >> "${GITHUB_OUTPUT}"
 
       - name: Configure AWS credentials
         if: steps.download.outcome == 'success'
