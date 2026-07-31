@@ -202,6 +202,6 @@ class LoopIRCuteDSLCodegen:
         body = [*(f"    {line}" for line in codegen.kernel.body.lines)]
         body.append(f"    return {result}")
         return (
-            f"def {fn_name}(accumulator, primary_reduction, secondary_reduction):\n"
+            f"def {fn_name}(accumulator, primary_reduction, _secondary_reduction):\n"
             + "\n".join(body)
         )

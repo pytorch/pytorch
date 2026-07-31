@@ -273,7 +273,7 @@ class NVGemmEpilogueLowering:
                 expected_strides = [group * n, 1]
             else:
                 return None
-        if group <= 1 or (axis == 0 and group > 128):
+        if group <= 1:
             return None
 
         analysis = analysis or GemmEpilogueIRAnalysis.from_buffers((node,))
@@ -420,7 +420,7 @@ class NVGemmEpilogueLowering:
         if out_n <= 0 or n % out_n != 0:
             return None
         group = n // out_n
-        if group > 32 or not cls._n_axis_grouped_pointwise_reads_match(
+        if not cls._n_axis_grouped_pointwise_reads_match(
             gemm_node, buffer, scheduler_node, group
         ):
             return None
@@ -693,28 +693,19 @@ class NVGemmEpilogueLowering:
                 m, n = map(V.graph.sizevars.optimization_hint, context.gemm.get_size())
             except (GuardOnDataDependentSymNode, TypeError, ValueError):
                 continue
-            regions = [
-                (group, region)
-                for group in range(2, min(max(m, n), 64) + 1)
-                if (m % group == 0 or n % group == 0)
-                and (
-                    region := context.analysis.reduction_region(
-                        buffer.get_name(),
-                        gemm_name,
-                        group,
-                        V.graph.get_dtype(gemm_name),
-                    )
-                )
-                is not None
-                and len(region.reductions) == 1
-            ]
-            if not regions:
+            group = len(direct_reads)
+            region = context.analysis.reduction_region(
+                buffer.get_name(),
+                gemm_name,
+                group,
+                V.graph.get_dtype(gemm_name),
+            )
+            if region is None or len(region.reductions) != 1:
                 continue
-            group, region = max(regions, key=lambda candidate: candidate[0])
             axis = grouped_reduction_axis_ir(region.reductions[0], group, n)
             if axis is None:
                 continue
-            if group > (64 if axis == 0 else 32) or (m, n)[axis] % group != 0:
+            if (m, n)[axis] % group != 0:
                 continue
             geometry = GemmReductionGeometry(group=group, axis=axis)
             if not geometry.matches_output_shape(
@@ -836,13 +827,17 @@ class NVGemmEpilogueLowering:
         candidate, buffer, finalizer = matches[0]
         if finalizer.kind == "mean" and config.reduction_type == "sum":
             config = dataclasses.replace(config, reduction_type="mean")
+            materialize = True
         elif finalizer.kind == "absmax_scale" and (
             config.reduction_type,
             config.source_type,
         ) == ("max", "abs"):
             config = dataclasses.replace(config, source_type="abs_scale")
+            materialize = False
+        else:
+            materialize = finalizer.kind != "identity"
         config = dataclasses.replace(config, output_name=buffer.get_name())
-        return config, candidate, finalizer.kind != "identity"
+        return config, candidate, materialize
 
     @classmethod
     def _partition_local_reductions(
@@ -960,7 +955,7 @@ class NVGemmEpilogueLowering:
         gemm_node: Buffer,
         nodes: Sequence[BaseSchedulerNode],
         feed_main: GemmReductionConfig,
-    ) -> NVGemmFeedOutputs:
+    ) -> NVGemmFeedOutputs | None:
         output_name = feed_main.output_name
         typed = (
             output_name
@@ -1038,12 +1033,16 @@ class NVGemmEpilogueLowering:
             elif secondary is None:
                 secondary = buffer.get_name()
                 secondary_consumer = candidate_source
+            else:
+                return None
         for output in equivalent:
             if typed is None:
                 typed = output
             elif output != typed and secondary is None:
                 secondary = output
                 secondary_type = feed_main.reduction_type
+            elif output != typed:
+                return None
         return NVGemmFeedOutputs(
             output_name,
             typed,

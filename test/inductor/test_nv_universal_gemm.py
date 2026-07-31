@@ -2166,6 +2166,24 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("_LOCAL_REDUCE_SECONDARY_CONSUMER_FN_SRC", code)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
 
+    def test_grouped_reduction_three_consumers_falls_back(self):
+        m, n, k, group = 128, 64, 64, 8
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            grouped = (a @ b).float().view(-1, group, n)
+            reduced = grouped.sum(1, keepdim=True)
+            return (
+                (grouped / reduced).reshape(m, n),
+                (grouped * reduced).reshape(m, n),
+                (grouped + reduced).square().reshape(m, n),
+            )
+
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=None)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertGreater(code.count(".run("), 1)
+
     def test_bf16_grouped_m_regrouped_reduction_reuse(self):
         m, n, k, group = 128, 64, 64, 8
         a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
