@@ -27,6 +27,7 @@ register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("autograd", "torch.autograd")
 register_log("inductor", ["torch._inductor", "torch._inductor.cudagraph_trees"])
+register_log("flex_gemm", "torch._inductor.kernel.flex_gemm.debug")
 
 register_artifact(
     "cudagraphs",
