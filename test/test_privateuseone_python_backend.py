@@ -38,6 +38,13 @@ def wrap(arr, shape, dtype):
     return MyDeviceTensor(shape, dtype, arr)
 
 
+def wrap_view(source, arr, shape, strides, storage_offset=0):
+    res = torch._C._acc.create_view_tensor(source, shape, strides, storage_offset)
+    res.__class__ = MyDeviceTensor
+    res.raw_data = arr
+    return res
+
+
 def unwrap(arr):
     return arr.raw_data
 
@@ -113,7 +120,14 @@ def ones_like(
 @torch.library.impl("aten::expand", "privateuseone")
 def expand(self, size, *, implicit=False):
     ans = np.broadcast_to(self.raw_data, size)
-    return wrap(ans, ans.shape, torch.float32)
+    offset = len(size) - self.dim()
+    in_shape, in_strides = list(self.shape), list(self.stride())
+    strides = [0] * len(size)
+    for j in range(len(size)):
+        i = j - offset
+        if i >= 0 and not (in_shape[i] == 1 and size[j] != 1):
+            strides[j] = in_strides[i]
+    return wrap_view(self, ans, tuple(size), tuple(strides), self.storage_offset())
 
 
 @torch.library.impl("aten::as_strided", "privateuseone")
