@@ -1,18 +1,21 @@
 # Owner(s): ["module: custom-operators"]
 
 import contextlib
+import copy
 import enum
+import functools
 import gc
 import random
 import re
 import unittest
+from collections import namedtuple, OrderedDict
 from contextlib import ExitStack
 from dataclasses import dataclass
 
 import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
-from torch._custom_class_base import CustomClassBase
+from torch._custom_class_base import CustomClassBase, CustomClassBaseMeta
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -215,7 +218,9 @@ class NestedCounters(CustomClassBase):
 
     def __getitem__(self, idx):
         counter = self.c[idx]
-        # Create a new counter to match device mesh's __getitem__
+        # Model DeviceMesh.__getitem__: the graph records this method call, and
+        # runtime execution creates an opaque object derived from the guarded
+        # parent rather than baking in a compile-time constant.
         return Counter(counter.start, counter.end)
 
 
@@ -358,6 +363,99 @@ register_custom_class(NestedValueSize, typ="constant")
 register_custom_class(OpaqueMultiplier, typ="symbolic")
 register_custom_class(Color, typ="symbolic")
 register_custom_class(ColorWithDescriptor, typ="symbolic")
+
+
+class Issue175968Meta(CustomClassBase):
+    pass
+
+
+register_custom_class(Issue175968Meta, typ="symbolic")
+
+ISSUE_175968_GLOBAL_META = Issue175968Meta()
+ISSUE_175968_USE_GLOBAL_META = False
+
+
+@torch.library.custom_op("_issue_175968_base::apply", mutates_args=())
+def issue_175968_apply(data: torch.Tensor, meta: Issue175968Meta) -> torch.Tensor:
+    if meta is None:
+        raise RuntimeError("opaque object is None at runtime")
+    return data * 2
+
+
+@issue_175968_apply.register_fake
+def _(data: torch.Tensor, meta: Issue175968Meta) -> torch.Tensor:
+    return torch.empty_like(data)
+
+
+issue_175968_apply.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2, None),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+@torch.library.custom_op("_issue_175968::call", mutates_args=())
+def issue_175968_call(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@issue_175968_call.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
+issue_175968_call.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2,),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+class Issue175968Tensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, data):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            requires_grad=data.requires_grad,
+        )
+
+    def __init__(self, data):
+        self._data = data
+
+    def __repr__(self):
+        return f"Issue175968Tensor(shape={tuple(self.shape)})"
+
+    def __tensor_flatten__(self):
+        return ["_data"], {}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        return Issue175968Tensor(inner_tensors["_data"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(t):
+            return t._data if isinstance(t, Issue175968Tensor) else t
+
+        out = func(
+            *pytree.tree_map(unwrap, args),
+            **pytree.tree_map(unwrap, kwargs or {}),
+        )
+        return pytree.tree_map(
+            lambda t: Issue175968Tensor(t) if isinstance(t, torch.Tensor) else t,
+            out,
+        )
+
+
+@issue_175968_call.register_torch_dispatch(Issue175968Tensor)
+def _(mode, func, types, args, kwargs):
+    x = args[0]
+    meta = (
+        ISSUE_175968_GLOBAL_META if ISSUE_175968_USE_GLOBAL_META else Issue175968Meta()
+    )
+    out_data = torch.ops._issue_175968_base.apply(x._data, meta)
+    return Issue175968Tensor(out_data)
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -3115,6 +3213,717 @@ def forward(self, G_Color_GREEN : {_illegal_char_regex.sub("_", get_opaque_type_
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+    def test_reference_opaque_errors_on_custom_op_dispatch_creation(self):
+        def fn(x):
+            return torch.ops._issue_175968.call(x)
+
+        x = Issue175968Tensor(torch.randn(4, requires_grad=True))
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "untracked symbolic custom class object",
+                    lambda: torch.compile(fn, fullgraph=True, backend=backend)(x),
+                )
+
+    def test_reference_opaque_input_is_tracked(self):
+        def fn(meta, x):
+            return torch.ops._issue_175968_base.apply(x, meta)
+
+        meta = Issue175968Meta()
+        gm = make_fx(fn, tracing_mode="fake")(meta, torch.randn(4))
+        apply_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops._issue_175968_base.apply.default
+        )
+        self.assertEqual(apply_node.args[1].op, "placeholder")
+        self.assertNotIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_closure_constant(self):
+        meta = Issue175968Meta()
+
+        def fn(x):
+            return torch.ops._issue_175968_base.apply(x, meta)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_copied_constant_errors(self):
+        meta = Issue175968Meta()
+
+        def fn(x):
+            return torch.ops._issue_175968_base.apply(x, copy.copy(meta))
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
+        )
+
+    def test_reference_opaque_cached_singleton_constant(self):
+        class SingletonMeta(Issue175968Meta):
+            instance = None
+
+            def __new__(cls):
+                if cls.instance is None:
+                    cls.instance = super().__new__(cls)
+                return cls.instance
+
+        singleton = SingletonMeta()
+
+        def fn(x):
+            return torch.ops._issue_175968_base.apply(x, SingletonMeta())
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        self.assertIs(SingletonMeta(), singleton)
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_metaclass_only_factory_tracking(self):
+        class MetaOnly(metaclass=CustomClassBaseMeta):
+            pass
+
+        register_custom_class(MetaOnly, typ="symbolic")
+        original = MetaOnly()
+
+        from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+
+        tracer = PythonKeyTracer()
+        tracer.trace(lambda x: x + 1)
+        self.assertTrue(tracer._allow_constant_opaque(original))
+        self.assertFalse(tracer._allow_constant_opaque(copy.copy(original)))
+        self.assertFalse(tracer._allow_constant_opaque(object.__new__(MetaOnly)))
+
+    def test_reference_opaque_canonical_creation_tracks_all_wrappers(self):
+        from torch._custom_class_base import (
+            _get_custom_class_creation_serial,
+            _record_creation,
+        )
+
+        class Generator(CustomClassBase):
+            __module__ = "torch._C"
+
+            def __init__(self, cdata):
+                self._cdata = cdata
+
+        first = object.__new__(Generator)
+        first._cdata = 123
+        _record_creation(first)
+        second = object.__new__(Generator)
+        second._cdata = 123
+        _record_creation(second)
+        serial = _get_custom_class_creation_serial(first)
+        self.assertEqual(_get_custom_class_creation_serial(second), serial)
+
+        del first
+        gc.collect()
+        self.assertEqual(_get_custom_class_creation_serial(second), serial)
+
+    def test_equal_reference_opaque_is_still_untracked(self):
+        def fn(tracked_counter, x):
+            equal_but_distinct = Counter(1, 5)
+            return x + torch.ops._TestOpaqueObject.counter_start(equal_but_distinct)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(fn, tracing_mode="fake")(Counter(1, 5), torch.randn(4)),
+        )
+
+    def test_reference_opaque_subclass_creation_errors(self):
+        class Issue175968ChildMeta(Issue175968Meta):
+            def __init__(self):
+                self.value = 1
+
+        def fn(x):
+            meta = Issue175968ChildMeta()
+            return torch.ops._issue_175968_base.apply(x, meta)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
+        )
+
+    def test_reference_opaque_subclass_class_constant(self):
+        class Issue175968ChildMeta(Issue175968Meta):
+            pass
+
+        Issue175968ChildMeta.SINGLETON = Issue175968ChildMeta()
+
+        def fn(x):
+            return torch.ops._issue_175968_base.apply(x, Issue175968ChildMeta.SINGLETON)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_replaced_class_constant_errors(self):
+        class Issue175968ChildMeta(Issue175968Meta):
+            pass
+
+        Issue175968ChildMeta.SINGLETON = Issue175968ChildMeta()
+
+        def fn(x):
+            del Issue175968ChildMeta.SINGLETON
+            Issue175968ChildMeta.SINGLETON = Issue175968ChildMeta()
+            return torch.ops._issue_175968_base.apply(x, Issue175968ChildMeta.SINGLETON)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
+        )
+
+    def test_reference_opaque_module_instance_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.meta = Issue175968Meta()
+
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, self.meta)
+
+        gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_module_container_constants(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.meta_list = [Issue175968Meta()]
+                self.meta_dict = {"meta": Issue175968Meta()}
+
+            def forward(self, x):
+                x = torch.ops._issue_175968_base.apply(x, self.meta_list[0])
+                return torch.ops._issue_175968_base.apply(x, self.meta_dict["meta"])
+
+        gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+        opaque_attrs = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "get_attr" and str(node.target).startswith("_opaque_obj")
+        ]
+        self.assertEqual(len(opaque_attrs), 2)
+
+        ep = torch.export.export(M(), (torch.randn(4),), strict=False)
+        custom_obj_inputs = [
+            spec
+            for spec in ep.graph_signature.input_specs
+            if spec.kind.name == "CUSTOM_OBJ"
+        ]
+        self.assertEqual(len(custom_obj_inputs), 2)
+
+    def test_reference_opaque_module_container_cycle(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cycle = []
+                self.cycle.append(self.cycle)
+
+            def forward(self, x):
+                return x + 1
+
+        gm = make_fx(M())(torch.randn(4))
+        self.assertIn("aten.add", gm.code)
+
+    def test_reference_opaque_replaced_container_constant_errors(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.metas = [Issue175968Meta()]
+
+            def forward(self, x):
+                self.metas[0] = Issue175968Meta()
+                return torch.ops._issue_175968_base.apply(x, self.metas[0])
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(M(), tracing_mode="fake")(torch.randn(4)),
+        )
+
+    def test_reference_opaque_global_constant(self):
+        def fn(x):
+            return torch.ops._issue_175968_base.apply(x, ISSUE_175968_GLOBAL_META)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, ISSUE_175968_GLOBAL_META)
+
+        self.assertIn(
+            "_opaque_obj", make_fx(fn, tracing_mode="fake")(torch.randn(4)).code
+        )
+        self.assertIn(
+            "_opaque_obj", make_fx(M(), tracing_mode="fake")(torch.randn(4)).code
+        )
+
+    def test_reference_opaque_nested_module_global_constant(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, ISSUE_175968_GLOBAL_META)
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                return self.child(x)
+
+        for _ in range(3):
+            gm = make_fx(Root(), tracing_mode="fake")(torch.randn(4))
+            self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_module_helper_global_constant(self):
+        class M(torch.nn.Module):
+            def helper(self, x):
+                return torch.ops._issue_175968_base.apply(x, ISSUE_175968_GLOBAL_META)
+
+            def forward(self, x):
+                return self.helper(x)
+
+        gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_python_reachability(self):
+        class Holder:
+            def __init__(self, value):
+                self.value = value
+
+        Pair = namedtuple("Pair", ("meta",))
+        cases = (
+            ("holder", Holder(Issue175968Meta()), lambda state: state.value),
+            (
+                "nested_holder",
+                Holder(Holder(Issue175968Meta())),
+                lambda state: state.value.value,
+            ),
+            ("set", {Issue175968Meta()}, lambda state: next(iter(state))),
+            (
+                "ordered_dict",
+                OrderedDict((("meta", Issue175968Meta()),)),
+                lambda state: state["meta"],
+            ),
+            ("namedtuple", Pair(Issue175968Meta()), lambda state: state.meta),
+            (
+                "dict_key",
+                {Issue175968Meta(): None},
+                lambda state: next(iter(state)),
+            ),
+        )
+
+        for name, state, get_meta in cases:
+            with self.subTest(name=name):
+
+                class M(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.state = state
+
+                    def forward(self, x):
+                        return torch.ops._issue_175968_base.apply(
+                            x, get_meta(self.state)
+                        )
+
+                gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+                self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_partial_and_callable_helpers(self):
+        def apply(meta, x):
+            return torch.ops._issue_175968_base.apply(x, meta)
+
+        class CallableHelper:
+            def __call__(self, x):
+                return torch.ops._issue_175968_base.apply(x, ISSUE_175968_GLOBAL_META)
+
+        helpers = (
+            functools.partial(apply, Issue175968Meta()),
+            CallableHelper(),
+        )
+        for helper in helpers:
+            with self.subTest(helper=type(helper)):
+
+                class M(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.helper = helper
+
+                    def forward(self, x):
+                        return self.helper(x)
+
+                gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+                self.assertIn("_opaque_obj", gm.code)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_reference_opaque_preexisting_custom_dispatch_constant(self):
+        global ISSUE_175968_USE_GLOBAL_META
+        ISSUE_175968_USE_GLOBAL_META = True
+
+        def fn(x):
+            return torch.ops._issue_175968.call(x)
+
+        try:
+            x = Issue175968Tensor(torch.randn(4))
+            result = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+            self.assertEqual(result._data, x._data * 2)
+
+            torch._dynamo.reset()
+            counters.clear()
+            with fresh_inductor_cache():
+                compiled = torch.compile(fn, fullgraph=True)
+                for _ in range(2):
+                    result = compiled(x)
+                    self.assertEqual(result._data, x._data * 2)
+                    torch._dynamo.reset()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertGreaterEqual(counters["inductor"]["fxgraph_cache_bypass"], 2)
+        finally:
+            ISSUE_175968_USE_GLOBAL_META = False
+            torch._dynamo.reset()
+
+    def test_reference_opaque_ordinary_helper_method(self):
+        meta = Issue175968Meta()
+
+        class Helper:
+            def get_meta(self):
+                return meta
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.helper = Helper()
+
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, self.helper.get_meta())
+
+        gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_large_and_deep_module_state(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.state = [None] * 10_000 + [Issue175968Meta()]
+                self.unused = None
+                for _ in range(1_500):
+                    self.unused = [self.unused]
+
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, self.state[-1])
+
+        gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_module_qualified_default_generator(self):
+        def fn(x):
+            return torch.randn(x.shape, generator=torch.default_generator)
+
+        gm = make_fx(fn)(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    def test_reference_opaque_cuda_default_generator(self):
+        generator = torch.cuda.default_generators[0]
+
+        def fn(x):
+            return torch.randn(x.shape, device=x.device, generator=generator)
+
+        gm = make_fx(fn, tracing_mode="real")(torch.randn(4, device="cuda"))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_tracking_avoids_module_overrides(self):
+        class M(torch.nn.Module):
+            def modules(self):
+                raise AssertionError("modules override must not run during tracing")
+
+            def forward(self, x):
+                return x + 1
+
+        gm = make_fx(M())(torch.randn(4))
+        self.assertIn("aten.add", gm.code)
+
+    def test_reference_opaque_tracking_resets_between_traces(self):
+        from torch.fx.experimental.proxy_tensor import (
+            get_proxy_slot,
+            PythonKeyTracer,
+            set_proxy_slot,
+        )
+
+        tracer = PythonKeyTracer()
+        created = []
+
+        def first(x):
+            created.append(Issue175968Meta())
+            return x + 1
+
+        tracer.trace(first)
+        self.assertFalse(tracer._allow_constant_opaque(created[0]))
+        old_graph = torch.fx.Graph()
+        old_proxy = torch.fx.Proxy(old_graph.placeholder("old"), tracer)
+        set_proxy_slot(created[0], tracer, old_proxy)
+        tracer._opaque_real_obj_proxy[id(created[0])] = old_proxy
+        tracer.trace(lambda x: x + 1)
+        self.assertTrue(tracer._allow_constant_opaque(created[0]))
+        self.assertIsNone(get_proxy_slot(created[0], tracer, None))
+        self.assertNotIn(id(created[0]), tracer._opaque_real_obj_proxy)
+
+    def test_reference_opaque_nested_tracer_creation_errors(self):
+        from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+
+        def outer(x):
+            meta = Issue175968Meta()
+
+            def inner(y):
+                return torch.ops._issue_175968_base.apply(y, meta)
+
+            return PythonKeyTracer().trace(inner)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: PythonKeyTracer().trace(outer),
+        )
+
+    def test_reference_opaque_replaced_global_constant_errors(self):
+        global ISSUE_175968_GLOBAL_META
+        original_meta = ISSUE_175968_GLOBAL_META
+
+        def fn(x):
+            global ISSUE_175968_GLOBAL_META
+            ISSUE_175968_GLOBAL_META = Issue175968Meta()
+            return torch.ops._issue_175968_base.apply(x, ISSUE_175968_GLOBAL_META)
+
+        try:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "untracked symbolic custom class object",
+                lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
+            )
+        finally:
+            ISSUE_175968_GLOBAL_META = original_meta
+
+    def test_reference_opaque_module_class_constant(self):
+        class M(torch.nn.Module):
+            META = Issue175968Meta()
+
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, self.META)
+
+        gm = make_fx(M(), tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_generator_input_constant(self):
+        def fn(x, generator):
+            return torch.randn(x.shape, generator=generator) + x
+
+        gm = make_fx(fn)(torch.randn(4), torch.Generator().clone_state())
+        self.assertNotIn("_opaque_obj", gm.code)
+        self.assertIn("generator_1", gm.code)
+
+    def test_reference_opaque_generator_module_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.generator = torch.Generator()
+
+            def forward(self, x):
+                return torch.randn(x.shape, generator=self.generator) + x
+
+        gm = make_fx(M())(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_fresh_generator_errors(self):
+        def fn(x):
+            return torch.randn(x.shape, generator=torch.Generator()) + x
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object.*Create the Generator outside",
+            lambda: make_fx(fn)(torch.randn(4)),
+        )
+
+    def test_reference_opaque_cloned_generator_errors(self):
+        generator = torch.Generator()
+
+        def fn(x):
+            return torch.randn(x.shape, generator=generator.clone_state()) + x
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object.*Create the Generator outside",
+            lambda: make_fx(fn)(torch.randn(4)),
+        )
+
+    def test_reference_opaque_export_creation_errors(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                meta = Issue175968Meta()
+                return torch.ops._issue_175968_base.apply(x, meta)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: torch.export.export(M(), (torch.randn(4),), strict=False),
+        )
+
+        class MutatingModule(torch.nn.Module):
+            def forward(self, x):
+                self.meta = Issue175968Meta()
+                return torch.ops._issue_175968_base.apply(x, self.meta)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: torch.export.export(
+                MutatingModule(), (torch.randn(4),), strict=False
+            ),
+        )
+
+    def test_reference_opaque_dynamic_class_constant_errors(self):
+        def dynamic_class_attr(x):
+            Issue175968Meta.SINGLETON = Issue175968Meta()
+            return torch.ops._issue_175968_base.apply(x, Issue175968Meta.SINGLETON)
+
+        try:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "untracked symbolic custom class object",
+                lambda: make_fx(dynamic_class_attr, tracing_mode="fake")(
+                    torch.randn(4)
+                ),
+            )
+        finally:
+            if hasattr(Issue175968Meta, "SINGLETON"):
+                delattr(Issue175968Meta, "SINGLETON")
+
+    def test_reference_opaque_dynamic_module_errors(self):
+        module_type = get_opaque_type_name(AddModule)
+        self.lib.define(
+            f"dynamic_module_mul({module_type} m, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::dynamic_module_mul",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def dynamic_module_mul_impl(m: AddModule, x: torch.Tensor) -> torch.Tensor:
+            return m(x, 2)
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::dynamic_module_mul", lib=self.lib
+        )
+        def dynamic_module_mul_fake(m: AddModule, x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        def dynamic_module(x):
+            return torch.ops._TestOpaqueObject.dynamic_module_mul(AddModule(), x)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(dynamic_module, tracing_mode="fake")(torch.randn(4)),
+        )
+
+    def test_reference_opaque_dynamic_child_attr_errors(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, self.meta)
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                self.child.meta = Issue175968Meta()
+                return self.child(x)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(Parent(), tracing_mode="fake")(torch.randn(4)),
+        )
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_reference_opaque_dynamic_device_mesh_errors(self):
+        from torch.distributed.device_mesh import (
+            _register_distributed_opaque_types,
+            DeviceMesh,
+        )
+
+        _register_distributed_opaque_types()
+        mesh_type = get_opaque_type_name(DeviceMesh)
+        self.lib.define(
+            f"dynamic_device_mesh_use({mesh_type} m, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::dynamic_device_mesh_use",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def dynamic_device_mesh_use_impl(
+            m: DeviceMesh, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x + 1
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::dynamic_device_mesh_use", lib=self.lib
+        )
+        def dynamic_device_mesh_use_fake(
+            m: DeviceMesh, x: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        def dynamic_device_mesh(x):
+            mesh = DeviceMesh("cpu", [0], _init_backend=False, _rank=0)
+            return torch.ops._TestOpaqueObject.dynamic_device_mesh_use(mesh, x)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked symbolic custom class object",
+            lambda: make_fx(dynamic_device_mesh, tracing_mode="fake")(torch.randn(4)),
+        )
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_reference_opaque_root_device_mesh_closure_constant(self):
+        from torch.distributed.device_mesh import (
+            _register_distributed_opaque_types,
+            DeviceMesh,
+        )
+
+        _register_distributed_opaque_types()
+        from torch.distributed._ops import device_mesh as _dm_ops  # noqa: F401
+
+        self.assertTrue(hasattr(torch.ops.device_mesh, "_get_submesh"))
+
+        def make_fn():
+            mesh = DeviceMesh(
+                "cpu",
+                [0],
+                mesh_dim_names=("x",),
+                _init_backend=False,
+                _rank=0,
+            )
+
+            def fn(x):
+                torch.ops.device_mesh._get_submesh(mesh, [0])
+                return x + 1
+
+            return fn
+
+        gm = make_fx(make_fn(), tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
 
     def test_hoisted_value_type_make_fx(self):
         def foo(x, hoisted_str):

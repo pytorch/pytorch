@@ -39,7 +39,13 @@ import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
-from torch._custom_class_base import CustomClassBase
+from torch._custom_class_base import (
+    _enter_custom_class_creation_epoch,
+    _exit_custom_class_creation_epoch,
+    _get_custom_class_creation_serial,
+    _record_creation,
+    CustomClassBase,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
@@ -1576,6 +1582,28 @@ class PythonKeyTracer(Tracer):
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
         _init_proxy_trackers(self)
+        self._custom_class_creation_epoch = 0
+
+    def trace(  # type: ignore[override]
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
+    ) -> fx.Graph:
+        # Nested tracers inherit the outer epoch, so an object created by an
+        # outer trace cannot become a constant in an inner graph.
+        (
+            self._custom_class_creation_epoch,
+            creation_epoch_token,
+        ) = _enter_custom_class_creation_epoch()
+        self.script_object_tracker = WeakIdKeyDictionary(
+            dict=None, ref_type=_WeakHashRef
+        )
+        self.opaque_tracker = WeakIdKeyDictionary()
+        self._opaque_real_obj_proxy = {}
+        try:
+            return super().trace(root, concrete_args)
+        finally:
+            _exit_custom_class_creation_epoch(creation_epoch_token)
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -1611,27 +1639,133 @@ class PythonKeyTracer(Tracer):
             # pyrefly: ignore [bad-return]
             return a.constant
 
-        # Try reconstructing untracked opaque reference types from existing
+        # Try reconstructing untracked symbolic custom classes from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
         if isinstance(a, (FakeScriptObject, CustomClassBase)):
+            proxy = self._get_tracked_opaque_proxy(a)
+            if proxy is not None:
+                return proxy.node
             node = self._try_reconstruct_opaque(a)
             if node is not None:
                 return node
+            real_obj = self._opaque_real_obj(a)
+            if is_opaque_symbolic_type(
+                type(real_obj)
+            ) and not self._allow_constant_opaque(real_obj):
+                if isinstance(real_obj, torch.Generator):
+                    guidance = (
+                        "Create the Generator outside the traced function and pass "
+                        "it as an input."
+                    )
+                else:
+                    guidance = (
+                        "Pass the object as a graph input or create it before tracing "
+                        "and capture it in a module/class attribute, closure, or "
+                        "referenced global. Alternatively, register a reconstruct_fn "
+                        "that derives it from tracked inputs."
+                    )
+                raise RuntimeError(
+                    f"An untracked symbolic custom class object "
+                    f"({type(real_obj).__name__}) reached FX graph creation. "
+                    "FX would otherwise bake this object into the graph as "
+                    "a get_attr constant with no input guard, which can "
+                    "produce stale or missing objects when the graph is reused. "
+                    f"{guidance}"
+                )
 
         return super().create_arg(a)  # type: ignore[return-value]
+
+    def _opaque_real_obj(
+        self, a: FakeScriptObject | CustomClassBase
+    ) -> CustomClassBase:
+        return a.real_obj if isinstance(a, FakeScriptObject) else a
+
+    @staticmethod
+    def _is_default_generator(obj: torch.Generator) -> bool:
+        obj_any = typing.cast(Any, obj)
+        cdata = obj_any._cdata
+        device = obj_any.device
+        if device.type == "cpu":
+            return cdata == typing.cast(Any, torch.default_generator)._cdata
+        if device.type == "mps":
+            default = getattr(torch.mps, "_default_mps_generator", None)
+            return default is not None and cdata == typing.cast(Any, default)._cdata
+        device_module = getattr(torch, device.type, None)
+        default_generators = getattr(device_module, "default_generators", ())
+        index = device.index or 0
+        return (
+            index < len(default_generators)
+            and cdata == typing.cast(Any, default_generators[index])._cdata
+        )
+
+    def _allow_constant_opaque(self, obj: CustomClassBase) -> bool:
+        # Internal compiler-owned opaque types can opt into FX constants.
+        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
+
+        if type(obj) is _LeafCallable:
+            return True
+        if isinstance(obj, torch.Generator) and self._is_default_generator(obj):
+            return True
+        creation_serial = _get_custom_class_creation_serial(obj)
+        return (
+            creation_serial is not None
+            and creation_serial <= self._custom_class_creation_epoch
+        )
+
+    def _get_tracked_opaque_proxy(
+        self, obj: FakeScriptObject | CustomClassBase
+    ) -> Proxy | None:
+        return self._get_tracked_opaque_proxy_impl(obj, allow_equal_real_obj=False)
+
+    def _get_reconstruct_opaque_proxy(self, obj: CustomClassBase) -> Proxy | None:
+        return self._get_tracked_opaque_proxy_impl(obj, allow_equal_real_obj=True)
+
+    def _get_tracked_opaque_proxy_impl(
+        self,
+        obj: FakeScriptObject | CustomClassBase,
+        *,
+        allow_equal_real_obj: bool,
+    ) -> Proxy | None:
+        proxy = get_proxy_slot(obj, self, None)
+        if proxy is not None:
+            return proxy
+
+        real_obj = self._opaque_real_obj(obj)
+        proxy = self._opaque_real_obj_proxy.get(id(real_obj))
+        if proxy is not None:
+            return proxy
+
+        if real_obj is not obj:
+            proxy = get_proxy_slot(real_obj, self, None)
+            if proxy is not None:
+                return proxy
+
+        if not allow_equal_real_obj:
+            return None
+
+        # The object may be identity-different but equal to a tracked
+        # FSO's real_obj. This happens because maybe_to_fake_obj creates
+        # a new DeviceMesh wrapper, so the FSO's real_obj is a distinct
+        # object from the one held by submesh._root_mesh. Equality
+        # comparison is needed, not identity.
+        for tracked_obj, p in self.opaque_tracker.items():
+            if not isinstance(tracked_obj, FakeScriptObject):
+                continue
+            if tracked_obj.real_obj == real_obj:
+                return p
+        return None
 
     def _try_reconstruct_opaque(
         self, a: FakeScriptObject | CustomClassBase
     ) -> fx.node.Node | None:
-        """Try to reconstruct an opaque object from existing graph inputs.
+        """Try to reconstruct a symbolic custom class from existing graph inputs.
 
-        When make_fx encounters an untracked opaque reference type (e.g. a
-        DeviceMesh submesh captured by a backward closure), this method checks
-        if the type has a registered reconstruct_fn that can derive the object
-        from inputs already in the graph.  Returns an FX Node on success,
-        None on failure (falls back to get_attr constant).
+        When make_fx encounters an untracked object (e.g. a DeviceMesh submesh
+        captured by a backward closure), this method checks if the type has a
+        registered reconstruct_fn that can derive the object from inputs already
+        in the graph. Returns an FX Node on success, or None on failure.
         """
-        real_obj: CustomClassBase = a.real_obj if isinstance(a, FakeScriptObject) else a
+        real_obj = self._opaque_real_obj(a)
 
         if not is_opaque_symbolic_type(type(real_obj)):
             return None
@@ -1641,23 +1775,7 @@ class PythonKeyTracer(Tracer):
             return None
 
         def get_tracked_proxy(obj: CustomClassBase) -> Proxy | None:
-            proxy = self._opaque_real_obj_proxy.get(id(obj))
-            if proxy is not None:
-                return proxy
-            proxy = get_proxy_slot(obj, self, None)
-            if proxy is not None:
-                return proxy
-            # The object may be identity-different but equal to a tracked
-            # FSO's real_obj. This happens because maybe_to_fake_obj creates
-            # a new DeviceMesh wrapper, so the FSO's real_obj is a distinct
-            # object from the one held by submesh._root_mesh. Equality
-            # comparison is needed, not identity.
-            for tracked_obj, p in self.opaque_tracker.items():
-                if not isinstance(tracked_obj, FakeScriptObject):
-                    continue
-                if tracked_obj.real_obj == obj:
-                    return p
-            return None
+            return self._get_reconstruct_opaque_proxy(obj)
 
         result = reconstruct_fn(real_obj, get_tracked_proxy, self)
         if result is None:
@@ -3157,6 +3275,10 @@ class _MakefxTracer:
         # such as some torch API(torch.ones and so on) in populate_builtin_to_tensor_fn_map() will be affected
         # by the context set before dispatch_trace.
         import torch._dynamo
+
+        for value in pytree.tree_leaves(args):
+            if isinstance(value, torch.Generator):
+                _record_creation(value)
 
         phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
 
