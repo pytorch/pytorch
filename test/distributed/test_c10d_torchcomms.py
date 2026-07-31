@@ -222,6 +222,21 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # If we reach this point, the barrier succeeded without deadlock
         self.assertTrue(True)
 
+    def test_monitored_barrier(self):
+        # monitored_barrier is gloo-only; the default PG is gloo only on the
+        # cpu variant (nccl on cuda/xpu), so run there. This drives the full
+        # dist.monitored_barrier dispatch onto BackendWrapper::monitoredBarrier
+        # (the torchcomms reimplementation of ProcessGroupGloo::monitoredBarrier).
+        if self.device_type != "cpu":
+            return
+        self.assertEqual(dist.get_backend(self.pg), dist.Backend.GLOO)
+        # All ranks check in -> the health-checking barrier returns cleanly.
+        dist.monitored_barrier(
+            group=self.pg,
+            timeout=datetime.timedelta(seconds=30),
+            wait_all_ranks=True,
+        )
+
     def test_new_group_delegates_to_split_group(self):
         # Under torchcomms, `new_group` routes through `split_group`. The
         # resulting subgroup must contain the requested ranks and be usable
@@ -356,6 +371,24 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
+
+    def test_monitored_barrier_on_multi_backend_group(self):
+        # A device-bound world reports a multi-backend string from get_backend
+        # (e.g. "cpu:gloo,cuda:nccl"), which is NOT equal to Backend.GLOO. The
+        # relaxed monitored_barrier guard must still accept it under torchcomms
+        # (because it has a CPU-capable backend) and dispatch to the gloo CPU
+        # backend's BackendWrapper::monitoredBarrier, rather than rejecting it
+        # for not being a plain gloo group.
+        backend = dist.get_backend(self.pg)
+        self.assertNotEqual(backend, dist.Backend.GLOO)
+        self.assertIn("gloo", str(backend))
+        # All ranks check in -> the barrier returns cleanly. Reaching past this
+        # call proves the guard accepted the group and the barrier ran.
+        dist.monitored_barrier(
+            group=self.pg,
+            timeout=datetime.timedelta(seconds=30),
+            wait_all_ranks=True,
+        )
 
 
 instantiate_device_type_tests(
