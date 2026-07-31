@@ -839,26 +839,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 }
 
 #ifdef USE_KINETO
-extra_meta_t metadataFromJson(const std::string& json) {
-  if (json.empty()) {
-    return {};
-  }
-  auto parsed = nlohmann::json::parse("{" + json + "}", nullptr, false);
-  if (!parsed.is_object()) {
-    return {};
-  }
-
-  extra_meta_t metadata;
-  for (const auto& [key, value] : parsed.items()) {
-    metadata.emplace(
-        key, value.is_string() ? value.get<std::string>() : value.dump());
-  }
-  return metadata;
-}
-
-template <typename T>
-using metadata_field_t = libkineto::MetadataField<T>;
-
+// Materializes Kineto's typed metadata into profiler-owned IValues.
 class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
  public:
   typed_metadata_t metadata() {
@@ -886,49 +867,54 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
     }
   }
 
-  void visitValue(const metadata_field_t<int64_t>& field, int64_t value)
-      override {
-    addValue(field.name, c10::IValue(value));
-  }
-
-  void visitValue(const metadata_field_t<double>& field, double value)
-      override {
-    addValue(field.name, c10::IValue(value));
-  }
-
-  void visitValue(const metadata_field_t<bool>& field, bool value) override {
+  void visitValue(
+      const libkineto::MetadataField<int64_t>& field,
+      int64_t value) override {
     addValue(field.name, c10::IValue(value));
   }
 
   void visitValue(
-      const metadata_field_t<std::string>& field,
+      const libkineto::MetadataField<double>& field,
+      double value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const libkineto::MetadataField<bool>& field,
+      bool value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const libkineto::MetadataField<std::string>& field,
       std::string_view value) override {
     addValue(field.name, c10::IValue(value));
   }
 
   void visitValue(
-      const metadata_field_t<std::vector<int64_t>>& field,
+      const libkineto::MetadataField<std::vector<int64_t>>& field,
       const std::vector<int64_t>& value) override {
     addValue(field.name, c10::IValue(value));
   }
 
   void visitValue(
-      const metadata_field_t<std::vector<std::string>>& field,
+      const libkineto::MetadataField<std::vector<std::string>>& field,
       const std::vector<std::string>& value) override {
     addValue(field.name, c10::IValue(value));
   }
 
   void visitValue(
-      const metadata_field_t<libkineto::RawJson>& /*field*/,
+      const libkineto::MetadataField<libkineto::RawJson>& /*field*/,
       const libkineto::RawJson& /*value*/) override {}
 
-  void visitValue(const metadata_field_t<uint64_t>& field, uint64_t value)
-      override {
+  void visitValue(
+      const libkineto::MetadataField<uint64_t>& field,
+      uint64_t value) override {
     addValue(field.name, c10::IValue(value));
   }
 
   void visitValue(
-      const metadata_field_t<libkineto::InputShapes>& field,
+      const libkineto::MetadataField<libkineto::InputShapes>& field,
       const libkineto::InputShapes& value) override {
     auto inputs = c10::impl::GenericList(at::AnyType::get());
     inputs.reserve(value.size());
@@ -1309,14 +1295,36 @@ class TransferEvents {
             },
             [](auto&) {}));
         if (config_.get().experimental_config.expose_kineto_event_metadata) {
-          const auto metadata_json = activity->metadataJson();
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
-                i.metadata_json_ = metadata_json;
+                i.metadata_json_ = activity->metadataJson();
               },
               [&](ExtraFields<EventType::Kineto>& i) {
-                i.metadata_json_ = metadata_json;
-                i.extra_meta_ = metadataFromJson(metadata_json);
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [](auto&) { return; }));
+          // Parse metadataJson() into extra_meta_ so events() exposes
+          // Kineto metadata as typed fields without export_chrome_trace().
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                auto json_str = activity->metadataJson();
+                if (!json_str.empty()) {
+                  auto j = nlohmann::json::parse(
+                      "{" + json_str + "}", nullptr, false);
+                  if (!j.is_discarded()) {
+                    for (auto& [key, val] : j.items()) {
+                      i.extra_meta_.emplace(
+                          key,
+                          val.is_string() ? val.get<std::string>()
+                                          : val.dump());
+                    }
+                  }
+                }
+              },
+              [](auto&) {}));
+          // Populate the data exposed as FunctionEvent.metadata.
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
                 IValueMetadataVisitor visitor;
                 activity->visitTypedMetadata(visitor);
                 i.typed_metadata_ = visitor.metadata();
