@@ -1334,7 +1334,7 @@ class TestPassesDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_move_device_to(self, device):
-        device_type = str(device).split(":", 1)[0]
+        device_type = torch.device(device).type
         device0 = f"{device_type}:0"
 
         class M(torch.nn.Module):
@@ -1357,7 +1357,7 @@ def forward(self, x):
         )
 
     def test_move_device_submod(self, device):
-        device_type = str(device).split(":", 1)[0]
+        device_type = torch.device(device).type
         device0 = f"{device_type}:0"
 
         class M(torch.nn.Module):
@@ -1381,7 +1381,7 @@ def forward(self, arg0_1):
         )
 
     def test_move_device_example_inputs(self, device):
-        device_type = str(device).split(":", 1)[0]
+        device_type = torch.device(device).type
         device0 = f"{device_type}:0"
 
         class Model(torch.nn.Module):
@@ -1414,10 +1414,15 @@ def forward(self, arg0_1):
         self.assertEqual(ep_moved.example_inputs[0][1].device, torch.device(device0))
         self.assertEqual(ep_moved.example_inputs[1]["z"].device, torch.device(device0))
 
+
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+class TestPassesRNN(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_move_to_device_pass(self, device):
-        device_type = str(device).split(":", 1)[0]
-        if device_type not in ("cuda", "xpu"):
-            self.skipTest("move_to_device_pass RNN is supported only on cuda/xpu")
+        # NPU fp32 GRU fails after move_to_device_pass (DynamicGRUV2); keep cuda/xpu.
+        device_type = torch.device(device).type
         device0 = f"{device_type}:0"
 
         class Model(torch.nn.Module):
@@ -1456,6 +1461,7 @@ def forward(self, arg0_1):
 
 
 instantiate_device_type_tests(TestPassesDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestPassesRNN, globals(), only_for=("cuda", "xpu"))
 
 
 if __name__ == "__main__":
