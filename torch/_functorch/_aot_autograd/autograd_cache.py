@@ -172,12 +172,9 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
-        # Dynamo-inserted autocast CM nodes. _enter_autocast is only cache-safe
-        # when dtype is a non-None constant in node.args (enforced below):
-        # ambient get_autocast_dtype is keyed in _record_runtime_state only for
-        # devices where autocast is already enabled. cache_enabled=None is OK
-        # because AOT tracing disables the autocast weight cache
-        # (disable_autocast_cache), so ambient cache_enabled is inert.
+        # Dynamo-inserted autocast CM nodes. dtype=None is resolved from ambient
+        # get_autocast_dtype at call time; that ambient state (enabled + dtype +
+        # cache_enabled) is recorded unconditionally in _record_runtime_state.
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
     )
@@ -255,23 +252,6 @@ def check_node_safe(node: Node) -> None:
             raise BypassAOTAutogradCache(
                 f"Unsupported call_function target {node.target}. \n Function module: {module}, \nFunction name: {name}"
             )
-        # _enter_autocast(*vals) with dtype=None resolves via
-        # torch.get_autocast_dtype at call time. That ambient default is not
-        # part of the AOTAutograd cache key unless autocast is already enabled,
-        # so refuse to cache the unresolved form.
-        if (
-            getattr(node.target, "__module__", None) == "torch.amp.autocast_mode"
-            and getattr(node.target, "__name__", None) == "_enter_autocast"
-        ):
-            # Expected args: (device_type, dtype, enabled, cache_enabled)
-            dtype_arg = node.args[1] if len(node.args) > 1 else None
-            if isinstance(dtype_arg, Node) or dtype_arg is None:
-                raise BypassAOTAutogradCache(
-                    "_enter_autocast with dtype=None (or non-constant dtype) is "
-                    "not cacheable: effective dtype is resolved from ambient "
-                    "torch.get_autocast_dtype, which is only keyed when "
-                    "autocast is already enabled"
-                )
     elif node.op == "call_method":
         method_name = node.target
         method_target = node.args[0]
@@ -561,13 +541,25 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        # Include per-device autocast dtype in cache key to avoid reusing
-        # a graph compiled for one autocast dtype (e.g. bfloat16) when
-        # running under a different autocast dtype (e.g. float16).
-        self.autocast_state: dict[str, torch.dtype] = {}
-        for device_type in torch._C._autocast_supported_devices():
-            if torch.is_autocast_enabled(device_type):
-                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
+        # Full ambient autocast snapshot for every supported device.
+        #
+        # dtype must be recorded even when autocast is disabled: in-graph
+        # torch.autocast(dev) with dtype=None resolves via get_autocast_dtype
+        # at call time, and GraphModule.__reduce__ strips node.meta, so that
+        # resolved dtype would otherwise be missing from the key.
+        #
+        # enabled must be recorded too: ambient-on vs ambient-off with the same
+        # default dtype must not share a key (AOT tracing under ambient
+        # autocast bakes casts into the artifact). Matches the shape of
+        # _get_autocast_states() / Dynamo's AutocastState snapshot.
+        self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
+            device_type: (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+            )
+            for device_type in torch._C._autocast_supported_devices()
+        }
+        self.autocast_cache_enabled = torch.is_autocast_cache_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
