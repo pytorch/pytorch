@@ -19,6 +19,7 @@ from functorch.compile import (
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import tracing, TracingContext
+from torch._higher_order_ops.cond import cond_op
 from torch._higher_order_ops.effects import (
     _EffectType,
     _get_effect,
@@ -912,6 +913,144 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
             )
         finally:
             handle.destroy()
+
+    def test_compile_aot_eager_cond_with_effect_in_branch(self):
+        with torch.library._scoped_library("mylib_aot_eager_cond_effect", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_aot_eager_cond_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_aot_eager_cond_effect.record.default)
+
+            def fn(x, pred):
+                def true_fn(x):
+                    torch.ops.mylib_aot_eager_cond_effect.record(x, "true")
+                    return x + 1
+
+                def false_fn(x):
+                    return x - 1
+
+                return torch.cond(pred, true_fn, false_fn, (x,))
+
+            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            x = torch.ones(2)
+
+            recorded.clear()
+            self.assertEqual(compiled(x, torch.tensor(True)), x + 1)
+            self.assertEqual(recorded, ["true"])
+
+            recorded.clear()
+            self.assertEqual(compiled(x, torch.tensor(False)), x - 1)
+            self.assertEqual(recorded, [])
+
+    def test_compile_cond_rejects_none_operand(self):
+        def fn(x, pred):
+            def true_fn(x, unused):
+                return x + 1
+
+            def false_fn(x, unused):
+                return x - 1
+
+            return torch.cond(pred, true_fn, false_fn, (x, None))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Observed exception",
+        ):
+            compiled(torch.ones(2), torch.tensor(True))
+
+    def test_functionalize_cond_with_effect_in_branch(self):
+        with torch.library._scoped_library(
+            "mylib_functionalize_cond_effect", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_functionalize_cond_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_functionalize_cond_effect.record.default)
+
+            def fn(x, pred):
+                def true_fn(x):
+                    torch.ops.mylib_functionalize_cond_effect.record(x, "true")
+                    return x + 1
+
+                def false_fn(x):
+                    return x - 1
+
+                return torch.cond(pred, true_fn, false_fn, (x,))
+
+            functionalized = torch.func.functionalize(fn)
+            x = torch.ones(2)
+
+            recorded.clear()
+            self.assertEqual(functionalized(x, torch.tensor(True)), x + 1)
+            self.assertEqual(recorded, ["true"])
+
+            recorded.clear()
+            self.assertEqual(functionalized(x, torch.tensor(False)), x - 1)
+            self.assertEqual(recorded, [])
+
+    def test_cond_preserves_backward_only_effect(self):
+        with torch.library._scoped_library("mylib_cond_backward_effect", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_cond_backward_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_cond_backward_effect.record.default)
+
+            class IdentityWithBackwardEffect(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad):
+                    torch.ops.mylib_cond_backward_effect.record(grad, "backward")
+                    return grad
+
+            def true_fn(x):
+                torch.ops.mylib_cond_backward_effect.record(x, "forward")
+                return (IdentityWithBackwardEffect.apply(x),)
+
+            def false_fn(x):
+                return (IdentityWithBackwardEffect.apply(x),)
+
+            for pred, expected in (
+                (torch.tensor(True), ["forward", "backward"]),
+                (torch.tensor(False), ["backward"]),
+            ):
+                x = torch.ones(2, requires_grad=True)
+                recorded.clear()
+                cond_op(pred, true_fn, false_fn, (x,))[0].sum().backward()
+                self.assertEqual(recorded, expected)
 
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not TEST_CUDA, "triton")

@@ -22,8 +22,8 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    create_fn_remove_none,
     fill_none_with_masks,
-    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_values_for_backward,
@@ -50,7 +50,16 @@ class CondOp(HigherOrderOperator):
         super().__init__("cond")
 
     def __call__(self, pred, true_fn, false_fn, operands):
-        validate_subgraph_args_types(operands)
+        # Lifted AOT effect tokens are represented as None at runtime. They are
+        # opaque to cond and consumed only by with_effects inside the branches.
+        # During Dynamo capture, None can only be a user operand and must retain
+        # the public torch.cond validation behavior.
+        args_to_validate = (
+            operands
+            if torch.compiler.is_dynamo_compiling()
+            else [arg for arg in operands if arg is not None]
+        )
+        validate_subgraph_args_types(args_to_validate)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(pred, true_fn, false_fn, operands)
 
@@ -194,12 +203,19 @@ def cond(
 
     """
     if torch.compiler.is_dynamo_compiling():
+        if not isinstance(operands, (tuple, list)) or pytree.tree_any(
+            lambda t: not isinstance(t, torch.Tensor), operands
+        ):
+            raise RuntimeError(
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only "
+                f"consists of tensor leaves, but got {operands}."
+            )
         return cond_op(pred, true_fn, false_fn, operands)
 
     if isinstance(pred, (bool, int, float)):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
-        if torch.compiler.is_compiling():
+        if torch.compiler.is_exporting():
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
@@ -301,9 +317,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
-    if not all(isinstance(o, (torch.Tensor, int)) for o in operands):
+    if not all(isinstance(o, (torch.Tensor, int, type(None))) for o in operands):
         raise AssertionError(
-            f"Dense implementation operands must be a list of tensors and ints {operands}"
+            "Dense implementation operands must be a list of tensors, ints, "
+            f"and effect tokens {operands}"
         )
     mode = _get_current_dispatch_mode()
     if mode is not None:
@@ -333,7 +350,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_fn,
             operands,
         )
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -348,31 +365,17 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
-
-        grads_tensor_masks = []
-
-        def create_fn_remove_none(fn):
-            @functools.wraps(fn)
-            def wrapped(*args):
-                nonlocal grads_tensor_masks
-
-                true_outputs = fn(*args)
-                grads_tensor_masks = [
-                    bool(isinstance(out, torch.Tensor)) for out in true_outputs
-                ]
-                return filter_with_masks(true_outputs, grads_tensor_masks)
-
-            return wrapped
-
+        true_wrapped, grads_tensor_masks = create_fn_remove_none(ctx._true_bw_fn)
         true_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._true_bw_fn),
+            true_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
+        false_wrapped, _ = create_fn_remove_none(ctx._false_bw_fn)
         false_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._false_bw_fn),
+            false_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
@@ -451,6 +454,22 @@ def check_tensor_meta_match(
         )
 
 
+def _merge_ints_to_symint(
+    values: list[int], mode: FakeTensorMode
+) -> int | torch.SymInt:
+    """Merge N concrete ints into a single unbacked SymInt bounded [min, max].
+
+    Returns the value unchanged when all values are equal.
+    """
+    if all(v == values[0] for v in values):
+        return values[0]
+    if mode.shape_env is None:
+        raise AssertionError("mode.shape_env is None")
+    merged = mode.shape_env.create_unbacked_symint()
+    mode.shape_env.constrain_symbol_range(merged.node.expr, min(values), max(values))
+    return merged
+
+
 def _merge_output(
     a: torch.Tensor | int | None,
     b: torch.Tensor | int | None,
@@ -481,13 +500,7 @@ def _merge_output(
         )
 
     if type(a) is int and type(b) is int:
-        if a == b:
-            return a
-        if mode.shape_env is None:
-            raise AssertionError("mode.shape_env is None")
-        merged_out = mode.shape_env.create_unbacked_symint()
-        mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
-        return merged_out
+        return _merge_ints_to_symint([a, b], mode)
 
     if not (type(a) is FakeTensor and type(b) is FakeTensor):
         raise AssertionError(
@@ -698,6 +711,11 @@ def _merge_output(
             nxt_merged_stride_expr = merged_strides[i] * merged_size[i]
             a_stride_expr[_maybe_expr(a_val * a_ex_size[i])] = nxt_merged_stride_expr
             b_stride_expr[_maybe_expr(b_val * b_ex_size[i])] = nxt_merged_stride_expr
+            # fake tensors accumulate contiguous strides as stride * max(size, 1)
+            a_max_key = _maybe_expr(a_val * torch.sym_max(a_ex_size[i], 1))
+            b_max_key = _maybe_expr(b_val * torch.sym_max(b_ex_size[i], 1))
+            a_stride_expr.setdefault(a_max_key, nxt_merged_stride_expr)
+            b_stride_expr.setdefault(b_max_key, nxt_merged_stride_expr)
         return merged_strides
 
     merged_stride: list[int | torch.SymInt] = _bound_stride(
@@ -729,6 +747,7 @@ def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
         if (
             effect_node.op != "call_function"
             or effect_node.target is not torch.ops.higher_order.with_effects
+            or effect_node.meta.get("partitioner_tag") != "is_forward"
         ):
             return None
 
@@ -794,6 +813,7 @@ def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
                     node.target, (torch._ops.HigherOrderOperator, torch._ops.OpOverload)
                 )
                 and _get_effect(node.target) is not None
+                and node.meta.get("partitioner_tag") == "is_forward"
             ):
                 module.graph.erase_node(node)
 
@@ -926,7 +946,7 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
 
         token_keys = ()
         output_spec = None
-        if branch_effects:
+        if branch_effects and hasattr(ctx, "mode"):
             tokens = ctx.mode._tokens
             for effect in branch_effects:
                 _get_or_create_token(
