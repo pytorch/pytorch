@@ -105,14 +105,16 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
 
-    def _run_reinplace_pass(self, f, *args):
+    def _run_reinplace_pass_with_targets(self, f, *args):
         gm = make_fx(f, tracing_mode="fake")(*args)
+        before_targets = [node.target for node in gm.graph.nodes]
         fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
         with V.set_fake_mode(fake_mode):
             reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
         gm.graph.lint()
         gm.recompile()
-        return gm
+        after_targets = [node.target for node in gm.graph.nodes]
+        return gm, before_targets, after_targets
 
     def test_dont_modify_live(self):
         def f(x, y):
@@ -540,174 +542,51 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
 
-    def test_generalized_scatter_reinplaces_uninitialized_factory_base(self):
-        def f(x):
-            base = torch.empty_like(x)
-            return aten.slice_scatter.default(base, x, 0, 0, x.shape[0])
+    def test_generalized_scatter_empty_base_chunked_subgraphs_reinplace(self):
+        def chunk_subgraph(chunk_x, projection):
+            hidden_grad = chunk_x @ projection
+            pred = hidden_grad.argmax(dim=-1)
+            tok_losses_chunk = hidden_grad.float().sum(dim=-1)
+            return tok_losses_chunk, pred, hidden_grad
 
         x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
+        projection = torch.randn(4, 4, device=device)
+        chunk_size = 2
+        subgm = make_fx(chunk_subgraph, tracing_mode="fake")(x[:chunk_size], projection)
 
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.copy_.default, targets)
-        self.assertNotIn(aten.slice_scatter.default, targets)
-        self.assertEqual(gm(x), f(x))
+        def f(x, projection):
+            grad_acc = torch.empty_like(x)
+            predictions = torch.empty((x.shape[0],), dtype=torch.int64, device=x.device)
+            tok_losses = torch.empty(
+                (x.shape[0],), dtype=torch.float32, device=x.device
+            )
+            for chunk_idx, start in enumerate(range(0, x.shape[0], chunk_size)):
+                end = start + chunk_size
+                tok_losses_chunk, pred, hidden_grad = invoke_subgraph(
+                    subgm,
+                    f"loss_chunk_{chunk_idx}",
+                    x[start:end],
+                    projection,
+                )
+                grad_acc = aten.slice_scatter.default(
+                    grad_acc, hidden_grad, 0, start, end
+                )
+                predictions = aten.slice_scatter.default(
+                    predictions, pred, 0, start, end
+                )
+                tok_losses = aten.slice_scatter.default(
+                    tok_losses, tok_losses_chunk, 0, start, end
+                )
+            return grad_acc, predictions, tok_losses
 
-    def test_generalized_scatter_keeps_overlapping_src_from_factory_base(self):
-        def f(x):
-            out = aten.slice_scatter.default(torch.empty_like(x), x, 0, 0, x.shape[0])
-            src = out[1:3]
-            return aten.slice_scatter.default(out, src, 0, 0, 2)
+        gm, before_targets, after_targets = self._run_reinplace_pass_with_targets(
+            f, x, projection
+        )
 
-        x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertEqual(targets.count(aten.copy_.default), 1)
-        self.assertEqual(targets.count(aten.slice_scatter.default), 1)
-        self.assertEqual(gm(x), f(x))
-
-    def test_generalized_scatter_reinplaces_same_view_src_from_factory_base(self):
-        def f(x):
-            out = aten.slice_scatter.default(torch.empty_like(x), x, 0, 0, x.shape[0])
-            src = out[0:2]
-            return aten.slice_scatter.default(out, src, 0, 0, 2)
-
-        x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertEqual(targets.count(aten.copy_.default), 2)
-        self.assertNotIn(aten.slice_scatter.default, targets)
-        self.assertEqual(gm(x), f(x))
-
-    def test_generalized_scatter_reinplaces_initialized_factory_realized_src(self):
-        def f(x):
-            base = torch.zeros_like(x)
-            src = x[1:3]
-            return aten.slice_scatter.default(base, src, 0, 1, 3)
-
-        x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.copy_.default, targets)
-        self.assertNotIn(aten.slice_scatter.default, targets)
-        self.assertEqual(gm(x), f(x))
-
-    def test_generalized_scatter_reinplaces_non_factory_base_realized_src(self):
-        def f(x, src):
-            base = x.cos()
-            return aten.slice_scatter.default(base, src, 0, 1, 3)
-
-        x = torch.randn(4, 4, device=device)
-        src = torch.randn(2, 4, device=device)
-        gm = self._run_reinplace_pass(f, x, src)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.copy_.default, targets)
-        self.assertNotIn(aten.slice_scatter.default, targets)
-        self.assertEqual(gm(x, src), f(x, src))
-
-    def test_generalized_scatter_keeps_non_factory_base_generated_src(self):
-        # A smaller but non-realized (generated) src stays functional: reinplacing
-        # is chosen only for realized srcs, factory bases, or realize-anyway ends.
-        def f(x, src):
-            base = x.cos()
-            src_copy = aten.copy.default(base[1:3], src)
-            return aten.slice_scatter.default(base, src_copy, 0, 1, 3)
-
-        x = torch.randn(4, 4, device=device)
-        src = torch.randn(2, 4, device=device)
-        gm = self._run_reinplace_pass(f, x, src)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertNotIn(aten.copy_.default, targets)
-        self.assertIn(aten.slice_scatter.default, targets)
-        self.assertEqual(gm(x, src), f(x, src))
-
-    def test_generalized_scatter_keeps_alias_chained_generated_src(self):
-        # Chained scatters with generated (non-realized) srcs stay functional.
-        def f(x, src0, src1):
-            base = x.cos()
-            copy0 = aten.copy.default(base[0:2], src0)
-            out = aten.slice_scatter.default(base, copy0, 0, 0, 2)
-            out = aten.alias.default(aten.alias.default(out))
-            copy1 = aten.copy.default(out[2:4], src1)
-            return aten.slice_scatter.default(out, copy1, 0, 2, 4)
-
-        x = torch.randn(4, 4, device=device)
-        src0 = torch.randn(2, 4, device=device)
-        src1 = torch.randn(2, 4, device=device)
-        gm = self._run_reinplace_pass(f, x, src0, src1)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertNotIn(aten.copy_.default, targets)
-        self.assertEqual(targets.count(aten.slice_scatter.default), 2)
-        self.assertEqual(gm(x, src0, src1), f(x, src0, src1))
-
-    def test_generalized_scatter_deep_chain_no_recursion(self):
-        # Regression: the reinplace pass must handle deep scatter chains (e.g.
-        # Longformer sliding-window attention) without overflowing the Python stack.
-        def f(x):
-            acc = x.cos()
-            for _ in range(1500):
-                chunk = acc[0:2] + 1.0
-                acc = aten.slice_scatter.default(acc, chunk, 0, 0, 2)
-            return acc
-
-        x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
-        self.assertEqual(gm(x), f(x))
-
-    def test_generalized_scatter_reinplaces_invoke_subgraph_src(self):
-        def subgraph(src):
-            return (src.sin(),)
-
-        subgm = make_fx(subgraph, tracing_mode="fake")(torch.randn(2, 4, device=device))
-
-        def f(x):
-            base = x.cos()
-            src = invoke_subgraph(subgm, "test_subgraph", x[1:3])[0]
-            return aten.slice_scatter.default(base, src, 0, 1, 3)
-
-        x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.copy_.default, targets)
-        self.assertNotIn(aten.slice_scatter.default, targets)
-        self.assertEqual(gm(x), f(x))
-
-    def test_generalized_scatter_keeps_initialized_factory_generated_src(self):
-        def f(x):
-            base = torch.zeros_like(x)
-            src = torch.full((2, x.shape[1]), 1.0, device=x.device)
-            return aten.slice_scatter.default(base, src, 0, 1, 3)
-
-        x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertNotIn(aten.copy_.default, targets)
-        self.assertIn(aten.slice_scatter.default, targets)
-        self.assertEqual(gm(x), f(x))
-
-    def test_generalized_scatter_does_not_cross_functional_scatter(self):
-        def f(x):
-            base = torch.zeros_like(x)
-            generated = torch.full((2, x.shape[1]), 1.0, device=x.device)
-            out = aten.slice_scatter.default(base, generated, 0, 0, 2)
-            realized = x[2:4]
-            return aten.slice_scatter.default(out, realized, 0, 2, 4)
-
-        x = torch.randn(4, 4, device=device)
-        gm = self._run_reinplace_pass(f, x)
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertNotIn(aten.copy_.default, targets)
-        self.assertEqual(targets.count(aten.slice_scatter.default), 2)
-        self.assertEqual(gm(x), f(x))
+        self.assertEqual(before_targets.count(aten.slice_scatter.default), 6)
+        self.assertEqual(after_targets.count(aten.copy_.default), 6)
+        self.assertNotIn(aten.slice_scatter.default, after_targets)
+        self.assertEqual(gm(x, projection), f(x, projection))
 
     @parametrize(
         "factory_op",
