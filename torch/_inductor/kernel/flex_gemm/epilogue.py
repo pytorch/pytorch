@@ -892,9 +892,8 @@ def match_grouped_main_lane(
 ) -> GroupedMainLaneMatch | None:
     """Normalize one supported grouped-N output spelling.
 
-    The accepted leaves are ``split(...)[i]`` for chunked lanes,
-    ``view(...).select(..., i)`` for interleaved or chunked lanes, and
-    ``nvfp4_pack(view(...))`` for the two interleaved packed lanes.
+    The accepted leaves are ``split(...)[i]`` for chunked lanes and
+    ``view(...).select(..., i)`` for interleaved or chunked lanes.
     """
     if gemm_shape is None:
         return None
