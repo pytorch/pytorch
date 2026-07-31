@@ -216,7 +216,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(
             len(missing_stats),
             0,
-            f"Missing expected memory statistics: {missing_stats}",
+            lambda msg: f"{msg}\nMissing expected memory statistics: {missing_stats}",
         )
 
         prev_allocated = torch.accelerator.memory_allocated()
