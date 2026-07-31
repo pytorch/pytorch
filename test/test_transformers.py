@@ -3913,6 +3913,53 @@ class TestSDPACudaOnly(NNTestCase):
             )
         self.assertEqual(attn_output_math, attn_output_cudnn, atol=5e-3, rtol=3e-3)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("mask_dtype", [torch.float32, None])
+    def test_cudnn_attention_attn_mask_dtype(self, device, dtype, mask_dtype):
+        # scaled_dot_product_attention accepts an attn_mask that is float32 as well as one matching
+        # query's dtype. The cuDNN graph declared the bias with the graph-wide io data type, so an
+        # fp32 mask reached cuDNN described as half and was reinterpreted element by element:
+        # silently wrong output and gradients. mask_dtype=None is the matched-dtype control.
+        #
+        # Both dtypes are issued back to back at one shape. They have identical sizes and strides,
+        # so before the bias dtype was added to the execution-plan cache key they shared one
+        # cached plan and the result depended on which dtype the process saw first.
+        batch, num_heads, seq_len, head_dim = 2, 8, 128, 64
+        make_tensor = partial(torch.randn, device=device, dtype=dtype, requires_grad=True)
+        shape = SdpaShape(batch, num_heads, seq_len, head_dim)
+        query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        mask = torch.randn(batch, 1, seq_len, seq_len, device=device, dtype=dtype)
+        if mask_dtype is None:
+            masks = (mask,)   # control: the matched-dtype path must stay correct
+        else:
+            # the same logical mask in the other dtype, with identical sizes and strides, so
+            # before the dtype entered the key these two shared one cached plan. Alternate them
+            # so both orders are exercised regardless of the order pytest runs the variants in.
+            other = mask.to(mask_dtype)
+            self.assertEqual(mask.stride(), other.stride())
+            masks = (mask, other, mask, other)
+
+        atol, rtol = (5e-3, 5e-3) if dtype == torch.float16 else (2e-2, 2e-2)
+        with sdpa_kernel(SDPBackend.MATH):
+            ref = F.scaled_dot_product_attention(query, key, value, attn_mask=mask)
+
+        for m in masks:
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                out = F.scaled_dot_product_attention(query, key, value, attn_mask=m)
+            self.assertTrue(out.isfinite().all(), f"non-finite output for a {m.dtype} mask")
+            self.assertEqual(out, ref, atol=atol, rtol=rtol, msg=f"wrong result for a {m.dtype} mask")
+
+        # autograd.grad is intentionally outside the sdpa_kernel context: the backward op is fixed
+        # by the autograd node recorded during the forward, so it still dispatches to
+        # _scaled_dot_product_cudnn_attention_backward.
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (query, key, value), grad_out)
+        grads_ref = torch.autograd.grad(ref, (query, key, value), grad_out)
+        for grad, grad_ref in zip(grads, grads_ref):
+            self.assertTrue(grad.isfinite().all())
+            self.assertEqual(grad, grad_ref, atol=4 * atol, rtol=4 * rtol)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attention_mask_variants(self, device, mask_dim: list[int]):
