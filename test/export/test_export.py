@@ -2023,6 +2023,133 @@ def forward(self, primals, tangents):
     return pytree.tree_unflatten([addmm_1, t_9, view_1, t_5, view, mm_2], self._out_spec)""",
             )
 
+    def test_non_strict_reentrant_checkpoint_joint_export(self):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear2(self.relu(self.linear1(x)))
+
+        class CheckpointedBlock(torch.nn.Module):
+            def __init__(self, num_checkpoints):
+                super().__init__()
+                self.block = Block()
+                self.num_checkpoints = num_checkpoints
+
+            def forward(self, x):
+                for _ in range(self.num_checkpoints):
+                    x = torch.utils.checkpoint.checkpoint(
+                        self.block, x, use_reentrant=True
+                    )
+                return x
+
+        class NestedCheckpointedBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+
+            def forward(self, x):
+                def checkpoint_inner(x):
+                    return torch.utils.checkpoint.checkpoint(
+                        self.block, x, use_reentrant=True
+                    )
+
+                return torch.utils.checkpoint.checkpoint(
+                    checkpoint_inner, x, use_reentrant=True
+                )
+
+        class RecursiveCheckpointedBlock(torch.nn.Module):
+            def __init__(self, depth):
+                super().__init__()
+                self.block = Block()
+                self.depth = depth
+
+            def checkpoint_n(self, x, depth):
+                if depth == 0:
+                    return self.block(x)
+                return torch.utils.checkpoint.checkpoint(
+                    lambda x: self.checkpoint_n(x, depth - 1),
+                    x,
+                    use_reentrant=True,
+                )
+
+            def forward(self, x):
+                return self.checkpoint_n(x, self.depth)
+
+        class CheckpointWithGradMode(torch.nn.Module):
+            def __init__(self, enable_grad):
+                super().__init__()
+                self.enable_grad = enable_grad
+
+            def forward(self, x):
+                def checkpointed(x):
+                    if self.enable_grad:
+                        with torch.enable_grad():
+                            y = x.sin()
+                    else:
+                        y = x.sin()
+                        with torch.no_grad():
+                            y = y.cos()
+                    return y + x
+
+                return torch.utils.checkpoint.checkpoint(
+                    checkpointed, x, use_reentrant=True
+                )
+
+        cases = (
+            ("single", CheckpointedBlock(1), 1),
+            ("same_callsite", CheckpointedBlock(2), 2),
+            ("nested", NestedCheckpointedBlock(), 2),
+            ("deeply_nested_same_callsite", RecursiveCheckpointedBlock(4), 4),
+        )
+        for name, model, num_checkpoints in cases:
+            with self.subTest(name=name):
+                x = torch.randn(2, 4, requires_grad=True)
+                ep = torch.export.export(model, (x,), strict=False)
+                checkpoint_nodes = [
+                    node
+                    for module in ep.graph_module.modules()
+                    if isinstance(module, torch.fx.GraphModule)
+                    for node in module.graph.nodes
+                    if node.op == "call_function"
+                    and node.target is torch.ops.higher_order.tag_activation_checkpoint
+                ]
+                self.assertEqual(len(checkpoint_nodes), num_checkpoints)
+
+                with contextlib.ExitStack() as stack:
+                    jwd = aot_export_joint_with_descriptors(stack, ep.module(), (x,))
+
+                FileCheck().check("tangents").check("threshold_backward").run(
+                    str(jwd.graph_module.code)
+                )
+                recompute_nodes = [
+                    node
+                    for node in jwd.graph_module.graph.nodes
+                    if "recompute" in node.meta
+                ]
+                self.assertTrue(recompute_nodes)
+                for node in recompute_nodes:
+                    self.assertEqual(
+                        node.meta["recompute"],
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE,
+                    )
+
+        for enable_grad in (True, False):
+            with self.subTest(internal_grad_mode=enable_grad):
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "does not support grad-mode changes inside the checkpointed function",
+                ):
+                    torch.export.export(
+                        CheckpointWithGradMode(enable_grad),
+                        (torch.randn(2, 4, requires_grad=True),),
+                        strict=False,
+                    )
+
     def test_inline_script_class_method_recursive(self):
         f = 0.4
         i = 2

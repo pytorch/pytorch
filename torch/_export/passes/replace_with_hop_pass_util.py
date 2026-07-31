@@ -22,6 +22,8 @@ def _replace_with_hop_helper(
     node: torch.fx.Node,
     enter_block_node: torch.fx.Node,
     wrap_hoo: HigherOrderOperator,
+    *,
+    include_enter_block_args: bool = True,
 ) -> None:
     graph: torch.fx.Graph = node.graph
     if graph.owning_module is None:
@@ -63,7 +65,9 @@ def _replace_with_hop_helper(
                     f"expected 1 output arg, got {len(output_node.args)}"
                 )
             output_args = output_node.args[0]
-            enter_block_node_args = enter_block_node.args
+            enter_block_node_args = (
+                enter_block_node.args if include_enter_block_args else ()
+            )
             if isinstance(output_args, (tuple, list)):
                 call_func_node = graph.call_function(
                     wrap_hoo,
