@@ -19,6 +19,8 @@
 // don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
+#include <utility>
+
 #if !AT_ROCM_ENABLED()
 
 namespace at::native {
@@ -242,7 +244,7 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   MIOPEN_CHECK(miopenDestroyTensorDescriptor(grads_desc));
   MIOPEN_CHECK(miopenDestroyCTCLossDescriptor(ctc_desc));
 
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 std::tuple<Tensor, Tensor> miopen_ctc_loss_tensor(

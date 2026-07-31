@@ -204,6 +204,9 @@ template <> inline std::string typeName<bool>(){
 template <> inline std::string typeName<c10::complex<at::Half>>(){
     return "std::complex<at::Half>";
 }
+template <> inline std::string typeName<c10::complex<at::BFloat16>>(){
+    return "std::complex<at::BFloat16>";
+}
 template <> inline std::string typeName<c10::complex<float>>(){
     return "std::complex<float>";
 }
@@ -234,10 +237,12 @@ template <> inline std::string typeName<at::Float8_e8m0fnu>() {
 }
 
 #define TYPE_NAME_CASE(ctype, scalartype)                    \
-  case ScalarType::scalartype:  return typeName<ctype>();
+  case scalartype:  return typeName<ctype>();
 inline std::string typeName(ScalarType t) {
     switch (t) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(TYPE_NAME_CASE)
+      AT_FORALL_SCALAR_TYPES_V2(
+        AT_WRAP(TYPE_NAME_CASE),
+        AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX))
       default:
           TORCH_CHECK(false, "invalid type for jiterator");
     }
