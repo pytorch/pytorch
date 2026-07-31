@@ -3608,7 +3608,7 @@ class TestReductions(TestCase):
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
     @onlyAccelerator
-    @largeTensorTest("8GB")
+    @largeTensorTest(lambda self, device, dtype: 2**31 * dtype.itemsize)
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
     # skip chalf and half when XPU, see issues https://github.com/intel/torch-xpu-ops/issues/1973
     @dtypesIfXPU(torch.bfloat16)

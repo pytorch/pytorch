@@ -1636,6 +1636,11 @@ def _has_sufficient_memory(device, size):
     if device_type not in ["cpu", "mps"]:
         raise unittest.SkipTest("Unknown device type")
 
+    # A single Metal buffer can never exceed the device's maxBufferLength, no
+    # matter how much system memory happens to be free.
+    if device_type == "mps" and size >= torch._C._mps_maxBufferLength():
+        return False
+
     # CPU
     if not HAS_PSUTIL:
         raise unittest.SkipTest("Need psutil to determine if memory is sufficient")
