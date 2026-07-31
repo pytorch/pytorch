@@ -171,14 +171,6 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Overhead.END,
         Overhead.CORRELATION_ID,
     },
-    # Periodically-sampled GPU environment (power/clock/thermal/cooling). Always on; rendered
-    # as counter tracks. DATA is the 20-byte metric union, split by ENVIRONMENT_KIND.
-    ActivityKind.ENVIRONMENT: {
-        Environment.DEVICE_ID,
-        Environment.TIMESTAMP,
-        Environment.ENVIRONMENT_KIND,
-        Environment.ENVIRONMENT_KIND_DATA,
-    },
 }
 
 
@@ -207,6 +199,19 @@ SYNC_FIELDS: dict[ActivityKind, set[Field]] = {
 }
 
 
+# Periodically-sampled GPU environment (power/clock/thermal/cooling), selected only under
+# enable_environment_counters. Rendered as counter tracks; DATA is the 20-byte metric union,
+# split by ENVIRONMENT_KIND. Opt-in: the sampling adds overhead, so it is off by default.
+ENVIRONMENT_FIELDS: dict[ActivityKind, set[Field]] = {
+    ActivityKind.ENVIRONMENT: {
+        Environment.DEVICE_ID,
+        Environment.TIMESTAMP,
+        Environment.ENVIRONMENT_KIND,
+        Environment.ENVIRONMENT_KIND_DATA,
+    },
+}
+
+
 class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
     """Accumulates decoded records and exports them as chrome-trace windows. A window opens
     at trace start (:meth:`open_window`), closes at stop (:meth:`close_window`), and its
@@ -217,6 +222,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         self,
         metadata_resolver: Callable[[int], str | None] | None = None,
         enable_cuda_sync: bool = False,
+        enable_environment_counters: bool = False,
         defer_export: bool = True,
         enable_pm_sampling: bool = False,
         pm_metrics: Iterable[str] | None = None,
@@ -248,6 +254,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         selection = {k: set(v) for k, v in PROFILER_FIELDS.items()}
         if enable_cuda_sync:
             selection.update({k: set(v) for k, v in SYNC_FIELDS.items()})
+        if enable_environment_counters:
+            selection.update({k: set(v) for k, v in ENVIRONMENT_FIELDS.items()})
         # Graph naming on via the default registry resolver (the profiler always wants graph
         # captures named -- it's free when there are none and a no-op for eager-only runs).
         # Eager naming stays off (the default): the full profiler already selects
