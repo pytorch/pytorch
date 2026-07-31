@@ -248,12 +248,6 @@ case "$tag" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
-    ANACONDA_PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
-    CLANG_VERSION=18
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=21
