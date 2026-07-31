@@ -10843,6 +10843,35 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    @parametrize("C,O", [(65536, 8), (8, 65536)])  # input-plane / output-plane overflow
+    def test_conv3d_int32_overflow(self, C, O):
+        x = torch.randn(1, C, 1, 182, 181, dtype=torch.float16, device='mps')
+        w = torch.randn(O, C, 1, 1, 1, dtype=torch.float16, device='mps') * 0.01
+        y = F.conv3d(x, w)
+        hs, ws = [0, 91, 181], [0, 90, 180]
+        ref = w.view(O, C).float().cpu() @ x[0, :, 0, hs, ws].float().cpu()
+        self.assertEqual(y[0, :, 0, hs, ws].float().cpu(), ref, atol=2e-2, rtol=2e-2)
+        del x, w, y
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    def test_conv3d_tile_count_int32_overflow(self):
+        output_channels = torch.iinfo(torch.int32).max - 1
+        # Stride 2 bypasses the pointwise matmul path while keeping the output
+        # spatial volume at one, so only the channel tile count is large.
+        x = torch.ones(1, 1, 1, 1, 1, dtype=torch.float16, device="mps")
+        w = torch.ones(output_channels, 1, 1, 1, 1, dtype=torch.float16, device="mps")
+        y = F.conv3d(x, w, stride=2)
+        indices = torch.tensor([0, output_channels // 2, output_channels - 1], device="mps")
+        self.assertEqual(y[0, indices, 0, 0, 0].cpu(), torch.ones(3, dtype=torch.float16))
+        del x, w, y, indices
+        gc.collect()
+        torch.mps.empty_cache()
+
     @serialTest()
     def test_64bit_index_copy(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
@@ -11878,7 +11907,11 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
         y_mps_cl = m_mps_cl(x_mps_cl)
 
         # Fast-path invariant: CL output must match contiguous in same dtype.
-        cl_vs_cont = dict(atol=1e-5, rtol=1e-5) if dtype == torch.float32 else dict(atol=1e-3, rtol=1e-3)
+        cl_vs_cont = {
+            torch.float32: dict(atol=1e-5, rtol=1e-5),
+            torch.float16: dict(atol=1e-3, rtol=1e-3),
+            torch.bfloat16: dict(atol=1e-3, rtol=1.6e-2),
+        }[dtype]
         self.assertEqual(y_mps_cont, y_mps_cl, **cl_vs_cont)
         self.assertTrue(y_mps_cl.is_contiguous(memory_format=torch.channels_last_3d))
         if dtype == torch.float32:
@@ -14277,6 +14310,34 @@ class TestConvolutionMPS(TestCaseMPS):
             x_cpu = conv_cpu(y_cpu)
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+
+    @parametrize("case", ["catalog", "simd_miss"])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv3d_precompiled_and_simd_miss(self, dtype, case):
+        torch.manual_seed(0)
+        if case == "catalog":
+            input_shape = (2, 3, 7, 9, 11)
+            weight_shape = (8, 3, 3, 3, 3)
+            stride, padding = (1, 1, 1), (1, 1, 1)
+            bias = torch.randn(weight_shape[0]).to(dtype).float()
+        else:
+            input_shape = (2, 5, 8, 10, 12)
+            weight_shape = (7, 5, 2, 3, 2)
+            stride, padding = (1, 2, 1), (0, 1, 0)
+            bias = None
+
+        x = torch.randn(input_shape).to(dtype).float()
+        weight = torch.randn(weight_shape).to(dtype).float()
+        expected = F.conv3d(x, weight, bias, stride=stride, padding=padding)
+        actual = F.conv3d(
+            x.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            stride=stride,
+            padding=padding,
+        )
+        tol = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
 
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad):
@@ -17145,6 +17206,8 @@ instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
 instantiate_parametrized_tests(TestConv3dChannelsLast3dMPS)
+instantiate_parametrized_tests(TestConvolutionMPS)
+instantiate_parametrized_tests(TestLargeTensors)
 
 if __name__ == "__main__":
     run_tests()
