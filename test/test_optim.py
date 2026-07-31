@@ -189,6 +189,20 @@ class TestOptimRenewed(TestCase):
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
+    @onlyCPU
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_with_empty_param_group(self, device, dtype, optim_info):
+        # An empty param group means there is nothing to optimize, so step() should
+        # be a no-op rather than raising. See https://github.com/pytorch/pytorch/issues/70352
+        optim_cls = optim_info.optim_cls
+        optimizer = optim_cls([{"params": []}])
+
+        if optim_info.step_requires_closure:
+            loss = torch.tensor(3.0, device=device, dtype=dtype)
+            self.assertEqual(optimizer.step(lambda: loss), loss)
+        else:
+            self.assertIsNone(optimizer.step())
+
     @parametrize("contiguous", [True, False])
     @parametrize("with_lrsched", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
