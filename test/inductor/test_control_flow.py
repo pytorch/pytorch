@@ -10,6 +10,7 @@ import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._higher_order_ops.switch import switch
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
@@ -2480,11 +2481,184 @@ class MapTests(TestCase):
         )
 
 
+class SwitchModels:
+    class Simple(torch.nn.Module):
+        def forward(self, idx, x):
+            return switch(
+                idx,
+                [
+                    lambda a: a + 1.0,
+                    lambda a: a * 2.0,
+                    lambda a: -a,
+                ],
+                (x,),
+            )
+
+    class MultipleOutputs(torch.nn.Module):
+        def forward(self, idx, x, y):
+            return switch(
+                idx,
+                [
+                    lambda a, b: (a + b, a * b),
+                    lambda a, b: (a - b, a / (b + 1e-6)),
+                    lambda a, b: (a * 3.0, b - 1.0),
+                ],
+                (x, y),
+            )
+
+    class OuterCode(torch.nn.Module):
+        def forward(self, idx, x):
+            c = x * 2.0
+            result = switch(
+                idx,
+                [
+                    lambda a: a.sin(),
+                    lambda a: a.cos(),
+                    lambda a: a.abs(),
+                ],
+                (c,),
+            )
+            return result + 1.0
+
+    class OuterBuffers(torch.nn.Module):
+        def forward(self, idx, x, y):
+            scale = x.sum()
+
+            return switch(
+                idx,
+                [
+                    lambda a: a * scale,
+                    lambda a: a / (scale + 1.0),
+                    lambda a: a - scale,
+                ],
+                (y,),
+            )
+
+    class WithNNModuleParams(torch.nn.Module):
+        class Branch(torch.nn.Module):
+            def __init__(self, scale):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.scale = scale
+
+            def forward(self, x):
+                return self.linear(x) * self.scale
+
+        def __init__(self, device):
+            super().__init__()
+            self.b0 = self.Branch(1.0).to(device)
+            self.b1 = self.Branch(2.0).to(device)
+            self.b2 = self.Branch(3.0).to(device)
+
+        def forward(self, idx, x):
+            return switch(idx, [self.b0, self.b1, self.b2], (x,))
+
+
+class SwitchTests(TestCase):
+    def _run_test(
+        self,
+        model,
+        inputs,
+        device,
+        dynamic=False,
+        num_branches=3,
+    ):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        inputs = [inp.to(device=device) for inp in inputs]
+        input_sets = [inputs]
+        if dynamic:
+            larger_inputs = []
+            for inp in inputs:
+                if inp.ndim > 0:
+                    tiling = [5] + [1] * (inp.ndim - 1)
+                    larger_inputs.append(torch.tile(inp, tiling))
+                else:
+                    larger_inputs.append(inp)
+            input_sets.append(larger_inputs)
+            for inputs in input_sets:
+                for inp in inputs:
+                    torch._dynamo.mark_dynamic(inp, 0)
+
+        # Exercise every branch index (0 .. num_branches-1) so that all
+        # generated code paths are verified against the eager reference.
+        for inputs in input_sets:
+            for branch_idx in range(num_branches):
+                idx_tensor = torch.tensor(branch_idx, device=device)
+                inputs_with_idx = [idx_tensor, *inputs]
+                cloned = [inp.clone() for inp in inputs_with_idx]
+                result = model(*inputs_with_idx)
+                result_compiled = compiled_model(*inputs_with_idx)
+                # operands must not be mutated
+                torch.testing.assert_close(cloned, inputs_with_idx)
+                torch.testing.assert_close(result, result_compiled)
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_simple(self, device, dynamic):
+        self._run_test(
+            model=SwitchModels.Simple(),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_multiple_outputs(self, device, dynamic):
+        # each branch returns a tuple — exercises MultiOutput IR node fan-out
+        self._run_test(
+            model=SwitchModels.MultipleOutputs(),
+            inputs=(torch.randn(10, 20), torch.randn(10, 20)),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_outer_code_before_after(self, device, dynamic):
+        # ops surrounding the switch fuse into the outer graph
+        self._run_test(
+            model=SwitchModels.OuterCode(),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_outer_buffers_captured(self, device, dynamic):
+        # branches close over tensors computed outside the switch
+        self._run_test(
+            model=SwitchModels.OuterBuffers(),
+            inputs=(torch.randn(10, 20), torch.randn(10, 20)),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_switch_nn_module_params(self, device):
+        self._run_test(
+            model=SwitchModels.WithNNModuleParams(device),
+            inputs=(torch.randn(4, 4),),
+            device=device,
+        )
+
+
 instantiate_parametrized_tests(CondTests)
 instantiate_parametrized_tests(WhileLoopTests)
 instantiate_parametrized_tests(AssociativeScanTests)
 instantiate_parametrized_tests(ScanTests)
 instantiate_parametrized_tests(MapTests)
+instantiate_parametrized_tests(SwitchTests)
 
 
 if __name__ == "__main__":

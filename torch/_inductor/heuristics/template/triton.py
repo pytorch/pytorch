@@ -18,6 +18,7 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
+from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -62,7 +63,7 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+USE_META_WS = meta_ws_enabled()
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
@@ -2206,7 +2207,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # usable selection, so restrict origami to fully static problems and let
         # symbolic shapes fall through to the regular config generator below.
         mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
-        if origami is not None and not mnk_static:
+        if (
+            origami is not None
+            and not mnk_static
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+        ):
             log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
         # `origami is not None` encodes the module-load gate (see top of file);
         # only DEFAULT search space is supported here.
@@ -2677,7 +2682,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and USE_META_WS
+                and not USE_META_WS
             )
             yield {
                 **template_kwargs,
