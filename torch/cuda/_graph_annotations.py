@@ -280,16 +280,71 @@ def _get_annotatable_types() -> set[Any]:
     return _ANNOTATABLE_TYPES
 
 
-# Pending scopes: (annotation, toolsIds discovered for the scope). Scopes are
-# recorded in completion order and resolution merges first-recorded-wins, so
-# dynamically inner scopes (which complete first) win common keys.
+# Pending scopes: (annotation, toolsIds discovered for the scope).
+#
+# Notably, this is NOT the current dynamic scope; instead, we fill this in
+# after we exit each mark_kernels region, and this holds the FULL extra
+# CUDA graph node attribution, steadily growing as we execute.
+#
+# Scopes are recorded as we exit a `mark_kernels`.  Later, when we resolve
+# all of the annotations, we do merges on the annotations where
+# first-recorded-wins (it works: you end up preferring inner scopes over
+# outer scopes, what you'd expect).  For example:
+#
+#     with mark_kernels({"name": "outer", "color": "red"}):
+#         with mark_kernels({"name": "inner"}):
+#             y = x + 1  # toolsId: 101
+#         z = y * 2      # toolsId: 102
+#
+# where the add captures kernel node with toolsId 101 and the mul 102. After
+# executing ALL of this code, the _pending_scopes would be (inner exits first,
+# so it is recorded first):
+#
+#     ({"name": "inner"}, [101])
+#     ({"name": "outer", "color": "red"}, [101, 102])
+#
+# toolsId 101 appears in both lists, and so the first-recorded-wins rule then
+# means we merge all the dicts to {"name": "inner", "color": "red"}.
 _pending_scopes: list[tuple[Any, list[int]]] = []
 
 
-# node.metadata key under which a hooked node's scope annotations collect
-# (outermost first); the node's single backward hook pair reads the list.
-# An identity sentinel so no other metadata user can collide with it.
-_NODE_ANNOTATIONS_KEY: Any = object()
+# TLS slot carrying the current annotation region: the annotations of every
+# open backward-annotating ``mark_kernels`` scope collapsed into one dict
+# (inner scopes win common keys). It lives in ThreadLocalPythonObjects rather
+# than a ContextVar or threading.local because that is the one Python-writable
+# TLS that ``at::ThreadLocalState`` snapshots into autograd engine worker and
+# device threads, so a backward bracket can re-establish the region for nodes
+# created while it executes (higher-order grad, checkpoint recomputation) even
+# across engine thread hops. Region dicts are never mutated after creation, so
+# holding a reference is a snapshot.
+_REGION_TLS_KEY = "cuda_graph_annotation_region"
+
+
+def _current_region() -> dict[str, Any] | None:
+    if torch._C._is_key_in_tls(_REGION_TLS_KEY):
+        return torch._C._get_obj_in_tls(_REGION_TLS_KEY)
+    return None
+
+
+def _enter_region(collapsed: dict[str, Any]) -> dict[str, Any] | None:
+    """Install ``collapsed`` as the current region; return the previous one."""
+    prev = _current_region()
+    torch._C._stash_obj_in_tls(_REGION_TLS_KEY, collapsed)
+    return prev
+
+
+def _exit_region(prev: dict[str, Any] | None) -> None:
+    if prev is None:
+        torch._C._remove_obj_from_tls(_REGION_TLS_KEY)
+    else:
+        torch._C._stash_obj_in_tls(_REGION_TLS_KEY, prev)
+
+
+# node.metadata marker recording that a node's backward hook pair is already
+# installed, so redundant firings of ``_freeze_region_hook`` (one per live
+# push, e.g. nested scopes) attach only once. An identity sentinel so no
+# other metadata user can collide with it.
+_HOOKED_KEY: Any = object()
 
 # Bumped by clear_kernel_annotations. Node hooks record only while the
 # generation they were created under is current, so clearing revokes
@@ -369,27 +424,25 @@ class _BracketState(threading.local):
     """
 
     def __init__(self) -> None:
-        self.stack: list[_KernelScope | None] = []
+        # Entries are (scope, prev_region, merged_region) or _SKIPPED.
+        self.stack: list[Any] = []
 
 
-# Bracket-stack marker for "prehook did nothing": distinct from None, which
-# means the creation hook was pushed but no capture was active (the posthook
-# must still pop).
+# Bracket-stack marker for "prehook did nothing": distinct from an entry with
+# scope=None, which means the region and creation hook were installed but no
+# capture was active (the posthook must still pop them).
 _SKIPPED: Any = object()
 
 
-def _collect_node_annotations(
-    node: Any, annotations: list[dict[str, Any]], generation: int
-) -> None:
-    """Add ``annotations`` to ``node``'s collection, hooking it on first touch.
+def _freeze_region_hook(node: Any, generation: int) -> None:
+    """Node creation hook: freeze the current region into ``node``'s bracket.
 
-    Called by the creation hooks of every enclosing ``mark_kernels`` scope
-    (and, during backward, of every executing hooked node propagating its
-    inherited annotations): they fire for a new node in one synchronous
-    burst, dynamically outermost first. The first call stashes the
-    collection in ``node.metadata`` -- keying the burst to the node itself
-    -- and installs the node's single backward hook pair; later calls in
-    the burst just extend it, keeping the list ordered outermost-first.
+    Reads the region TLS slot and, if a region is open, installs the node's
+    single backward hook pair closing over that snapshot. Every backward-
+    annotating ``mark_kernels`` scope pushes one of these (and so does an
+    executing hooked node, to cover nodes created during its backward), so
+    a node created under nested scopes sees several identical firings; the
+    ``node.metadata`` marker makes only the first attach.
 
     AccumulateGrad is always excluded: a leaf's node is created once and
     cached (possibly during warmup), so which scope would own it is an
@@ -400,42 +453,42 @@ def _collect_node_annotations(
     """
     if isinstance(node, torch._C._functions.AccumulateGrad):
         return
-    collected = node.metadata.get(_NODE_ANNOTATIONS_KEY)
-    if collected is None:
-        node.metadata[_NODE_ANNOTATIONS_KEY] = list(annotations)
-        _attach_backward_hooks(node, node.metadata[_NODE_ANNOTATIONS_KEY], generation)
-    else:
-        collected.extend(annotations)
+    if _HOOKED_KEY in node.metadata:
+        return
+    frozen = _current_region()
+    if frozen is None:
+        return
+    node.metadata[_HOOKED_KEY] = True
+    _attach_backward_hooks(node, frozen, generation)
 
 
-def _attach_backward_hooks(
-    node: Any, annotations: list[dict[str, Any]], generation: int
-) -> None:
+def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -> None:
     """Register one pre/post hook pair bracketing ``node``'s backward execution.
 
-    ``annotations`` holds the annotations of every scope that was open when
-    the node was created, outermost first. The pair brackets the node's
-    execution the same way ``mark_kernels`` brackets forward work: snapshot
-    the capture frontier before, collect the new nodes after. It runs on
-    the autograd engine thread executing the node, which during a
-    whole-graph capture participates in the capture; when backward runs
-    outside a capture the prehook sees no active capture and the pair is a
-    no-op.
+    ``frozen`` is the region that was current when the node was created:
+    the annotations of every scope then open, already collapsed inner-wins.
+    The pair brackets the node's execution the same way ``mark_kernels``
+    brackets forward work: snapshot the capture frontier before, collect
+    the new nodes after. It runs on the autograd engine thread executing
+    the node, which during a whole-graph capture participates in the
+    capture; when backward runs outside a capture the prehook sees no
+    active capture and the pair is a no-op.
 
-    The posthook records the annotations innermost-first, so completion
-    order alone yields the merge precedence of dynamic nesting: a
-    ``mark_kernels`` opened inside the node's execution (e.g. checkpoint
-    recomputation) closes earlier and outranks these; a ``mark_kernels``
-    enclosing the whole ``backward()`` call closes later and is outranked;
-    nested forward scopes keep inner-over-outer among themselves.
+    Executing the node is semantically re-entering its frozen region, so
+    the prehook merges ``frozen`` over the live region (a ``mark_kernels``
+    enclosing the whole ``backward()`` call, if any) and installs the
+    result while the node runs. That gives nodes created during its
+    backward (``create_graph=True``, checkpoint recomputation) the forward
+    region's ownership -- a creation hook is pushed alongside so they get
+    hooked even when this backward runs eagerly and no scope's hook is
+    live -- and it puts a ``mark_kernels`` opened inside the execution
+    dynamically inner, so it outranks ``frozen``, which outranks the
+    enclosing scope. The posthook records the merged region once; scope
+    completion order then yields exactly that precedence at resolve.
 
-    While the node executes, a node creation hook carrying ``annotations``
-    is pushed so autograd nodes created during its backward (e.g. with
-    ``create_graph=True``) inherit the forward region's ownership; a later
-    grad-of-grad pass then attributes their kernels to the same scopes.
-    The pop is exception-safe without a finally: each engine task runs
-    under an ``at::ThreadLocalStateGuard`` that restores the creation-hook
-    TLS even when the node throws.
+    The pops are exception-safe without a finally: each engine task runs
+    under an ``at::ThreadLocalStateGuard`` that restores both the
+    creation-hook TLS and the region slot even when the node throws.
 
     ``generation`` is the annotation generation the owning scope was opened
     under; the bracket only records (and only propagates to created nodes)
@@ -445,32 +498,36 @@ def _attach_backward_hooks(
     state = _BracketState()
 
     def creation_hook(child: Any) -> None:
-        _collect_node_annotations(child, annotations, generation)
+        _freeze_region_hook(child, generation)
 
     def prehook(_grad_outputs: Any) -> None:
         if generation != _annotation_generation or _is_tools_id_unavailable():
             state.stack.append(_SKIPPED)
             return
-        # Propagate ownership to nodes created during execution even when
-        # this backward is not itself captured: their kernels may be
-        # captured by a later (e.g. second-order) annotated capture.
+        # Re-establish ownership even when this backward is not itself
+        # captured: kernels of nodes created here may be captured by a
+        # later (e.g. second-order) annotated capture.
+        merged = {**(_current_region() or {}), **frozen}
+        prev = _enter_region(merged)
         torch._C._autograd._push_node_creation_hook(creation_hook)
-        state.stack.append(_begin_kernel_scope() if _annotations_enabled else None)
+        scope = _begin_kernel_scope() if _annotations_enabled else None
+        state.stack.append((scope, prev, merged))
 
     def posthook(_grad_inputs: Any, _grad_outputs: Any) -> None:
         if not state.stack:
             return
-        scope = state.stack.pop()
-        if scope is _SKIPPED:
+        entry = state.stack.pop()
+        if entry is _SKIPPED:
             return
+        scope, prev, merged = entry
         torch._C._autograd._pop_node_creation_hook()
+        _exit_region(prev)
         if scope is None:
             return
         tools_ids = _end_kernel_scope(scope)
         if tools_ids:
-            for annotation in reversed(annotations):
-                tagged = {**annotation, "autograd_phase": "backward"}
-                _pending_scopes.append((tagged, tools_ids))
+            tagged = {**merged, "autograd_phase": "backward"}
+            _pending_scopes.append((tagged, tools_ids))
 
     node.register_prehook(prehook)
     node.register_hook(posthook)
@@ -557,11 +614,15 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
     generation = _annotation_generation
 
     def creation_hook(node: Any) -> None:
-        _collect_node_annotations(node, [annotation], generation)
+        _freeze_region_hook(node, generation)
 
     if backward:
-        with torch.autograd.graph.node_creation_hook(creation_hook):
-            yield
+        prev = _enter_region({**(_current_region() or {}), **annotation})
+        try:
+            with torch.autograd.graph.node_creation_hook(creation_hook):
+                yield
+        finally:
+            _exit_region(prev)
     else:
         yield
 
