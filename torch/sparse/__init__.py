@@ -244,7 +244,8 @@ def sum(input: Tensor, dim: DimOrDims = None, dtype: DType | None = None) -> Ten
         >>> V = torch.randn(nnz, dims[2], dims[3])
         >>> size = torch.Size(dims)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> S = torch.sparse_coo_tensor(I, V, size)
+        >>> with torch.sparse.check_sparse_tensor_invariants():
+        ...     S = torch.sparse_coo_tensor(I, V, size)
         >>> S
         tensor(indices=tensor([[2, 0, 3],
                                [2, 4, 1]]),
@@ -575,6 +576,9 @@ def as_sparse_gradcheck(gradcheck):
 
     For example:
 
+    >>> warnings.filterwarnings(
+    ...     "ignore", message=".*Sparse CSR tensor support is in beta state"
+    ... )  # docs: hide
     >>> gradcheck = torch.sparse.as_sparse_gradcheck(torch.autograd.gradcheck)
     >>> x = (
     ...     torch.tensor([[0, 1], [2, 3]], dtype=torch.float64)

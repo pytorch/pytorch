@@ -1968,17 +1968,12 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return true;
   }
 
-  // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
-  // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
   const auto t1_shape = t1->sym_sizes();
-  const auto t1_strides = t1->sym_strides();
-  for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
-    if (TORCH_GUARD_OR_TRUE(
-            t1_strides[i].sym_ne(t1_strides[i + 1] * t1_shape[i + 1]))) {
-      return false;
-    }
-  }
-  return true;
+  const c10::SymDimVector leading_shape(t1_shape.begin(), t1_shape.end() - 1);
+  const c10::SymDimVector folded_shape{
+      c10::multiply_integers(leading_shape), t1_shape.back()};
+  return at::detail::computeStride(t1_shape, t1->sym_strides(), folded_shape)
+      .has_value();
 }
 
 /*
@@ -2132,7 +2127,9 @@ static Tensor _matmul_impl(
 
     // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{
-      c10::SymDimVector ret(output_shape);
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + 2);
+      ret.append(output_shape.begin(), output_shape.end());
       ret.append({n, m1});
       return ret;
     }();
@@ -2143,7 +2140,9 @@ static Tensor _matmul_impl(
     // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
     auto vector_rhs = dim_tensor2 == 1;
     const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
-      c10::SymDimVector ret(output_shape);
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + (vector_rhs ? 1 : 2));
+      ret.append(output_shape.begin(), output_shape.end());
       if (vector_rhs) {
         ret.push_back(m2);
       } else {

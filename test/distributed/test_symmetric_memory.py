@@ -1316,6 +1316,27 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_channel_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        num_slots = symm_mem_hdl.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+
+        # channel == max_channel must be rejected
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.barrier(channel=max_channel)
+        torch.cuda.synchronize()
+
+        # channel == max_channel - 1 must be accepted
+        if max_channel > 1:
+            symm_mem_hdl.barrier(channel=max_channel - 1)
+        torch.cuda.synchronize()
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
@@ -2352,6 +2373,67 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         mempool = symm_mem.get_mem_pool(self.device)
         numel, dtype = 4 * 1024 * 1024, torch.float
         self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_storage_reuse(self):
+        """MemPool with no_split=True returns the same VA for same-size allocs."""
+        self._init_process()
+
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel = 1024
+        dtype = torch.float
+
+        with torch.cuda.use_mem_pool(mempool):
+            t1 = torch.empty(numel, dtype=dtype, device=self.device)
+        ptr1 = t1.data_ptr()
+        del t1
+
+        with torch.cuda.use_mem_pool(mempool):
+            t2 = torch.empty(numel, dtype=dtype, device=self.device)
+        ptr2 = t2.data_ptr()
+
+        self.assertEqual(
+            ptr1,
+            ptr2,
+            "MemPool should return the same storage block for same-size re-allocation",
+        )
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_symm_mem_empty_storage_reuse(self):
+        """symm_mem.empty() reuses storage across alloc/free cycles via the MemPool."""
+        self._init_process()
+
+        size = (1024,)
+        stride = (1,)
+        alloc_id = 13 + random.randint(0, 2147483647)
+        dtype = torch.float
+
+        # We must use the alloc_id argument to guarantee the reuse of previously
+        # allocated memory
+        t1 = _SymmetricMemory.empty_strided_p2p(
+            size, stride, dtype=dtype, device=self.device, alloc_id=alloc_id
+        )
+        ptr1 = t1.data_ptr()
+        del t1
+
+        t2 = _SymmetricMemory.empty_strided_p2p(
+            size, stride, dtype=dtype, device=self.device, alloc_id=alloc_id
+        )
+        ptr2 = t2.data_ptr()
+
+        self.assertEqual(
+            ptr1,
+            ptr2,
+            "symm_mem.empty() should reuse the same storage block via the implicit MemPool",
+        )
 
 
 @instantiate_parametrized_tests
