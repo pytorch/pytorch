@@ -43,6 +43,7 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -183,6 +184,48 @@ class TestTritonHeuristics(TestCase):
         )[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    @parametrize("major,baseline_rblock", [(8, 2048), (10, 1024)])
+    def test_scalar_online_softmax_reduction_configs(self, major, baseline_rblock):
+        device = self._fake_cuda_device_properties()._replace(major=major)
+        size_hints = {"x": 128, "r0_": 32768}
+        triton_meta = {"device": device}
+
+        def rblocks(autotune_hints):
+            configs = _reduction_configs(
+                size_hints=size_hints,
+                inductor_meta={
+                    "autotune_hints": autotune_hints,
+                    "reduction_hint": ReductionHint.INNER,
+                },
+                triton_meta=triton_meta,
+            )
+            return {config.kwargs["R0_BLOCK"] for config in configs}
+
+        def tiled_block_product(autotune_hints):
+            configs = _reduction_configs(
+                size_hints={"x": 128, "y": 8, "r0_": 32768},
+                inductor_meta={
+                    "autotune_hints": autotune_hints,
+                    "reduction_hint": ReductionHint.INNER,
+                },
+                triton_meta=triton_meta,
+            )
+            product = 1
+            for name, value in configs[0].kwargs.items():
+                if name.endswith("BLOCK"):
+                    product *= value
+            return product
+
+        self.assertEqual(rblocks(set()), {baseline_rblock})
+        self.assertEqual(
+            rblocks({AutotuneHint.SCALAR_ONLINE_SOFTMAX}),
+            {4096, 8192, 16384},
+        )
+        self.assertEqual(tiled_block_product(set()), baseline_rblock)
+        self.assertEqual(
+            tiled_block_product({AutotuneHint.SCALAR_ONLINE_SOFTMAX}), 4096
+        )
 
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
@@ -434,6 +477,15 @@ class TestTritonHeuristics(TestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
+        self.assertEqual(
+            autotune_hints_to_configs(
+                {AutotuneHint.SCALAR_ONLINE_SOFTMAX},
+                size_hints,
+                block_size,
+                device_props,
+            ),
+            [],
+        )
 
     @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
     def test_template_function_ws(self):
