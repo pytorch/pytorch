@@ -298,11 +298,7 @@ struct C10_API ExtraMeta {
   // set when this fake tensor has a tracked constant in
   // fake_tensor_mode_->tensor_to_constant_. Deliberately NOT copied: a cloned
   // ExtraMeta belongs to a different (unregistered) fake tensor.
-  bool is_fake_constant_ = false;
-  // the constant's storage (or nullptr), recorded so remove_constant can prune
-  // this tensor's weak entry from fake_tensor_mode_->constant_storage_mapping_
-  // on destruction. Deliberately NOT copied (see is_fake_constant_).
-  c10::StorageImpl* constant_storage_ = nullptr;
+  bool has_fake_constant_ = false;
 
   ExtraMeta() = default;
   // erases this fake tensor's entry from fake_tensor_mode_ so it never outlives
