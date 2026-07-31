@@ -2344,10 +2344,6 @@ def use_flex_tdm_descriptor(
         # dynamic sequence lengths to their current values.
         if not _descriptor_shape_fits_in_int32(sizes, add_guards=True):
             return reject("descriptor shape does not fit in int32")
-        if block_shape and not _descriptor_shape_fits_in_int32(
-            block_shape, add_guards=True
-        ):
-            return reject("block shape does not fit in int32")
         return True
 
     return all(
