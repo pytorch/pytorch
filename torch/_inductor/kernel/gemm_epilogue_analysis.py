@@ -39,6 +39,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
 from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
     GemmReductionGeometry,
+    GemmReductionPlan,
     iter_fx_node_inputs,
 )
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
@@ -186,6 +187,30 @@ class GemmOutputPlan:
             isinstance(aux_output, torch.fx.Node) for aux_output in self.aux_outputs
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
+
+    @property
+    def reduction_plan(self) -> GemmReductionPlan | None:
+        """Finalize FX ownership metadata into the shared reduction contract."""
+        local_reduce = self.local_reduce
+        if local_reduce is None:
+            return None
+        match = local_reduce.match
+        reduction_type = match.reduction_type
+        if reduction_type is None:
+            return None
+        reduction_output = (
+            local_reduce.store.node.name if local_reduce.store is not None else None
+        )
+        return GemmReductionPlan(
+            reduction_output,
+            match.geometry.group,
+            match.geometry.axis,
+            reduction_type,
+            "identity",
+            self.output.name,
+            feeds_main=local_reduce.feeds_main,
+            feed_output=self.output.name if local_reduce.feeds_main else None,
+        )
 
 
 @dataclasses.dataclass

@@ -16,7 +16,9 @@ from torch._logging import LazyString, trace_structured
 if TYPE_CHECKING:
     from torch._inductor import ir
     from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
-    from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueAnalysis
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+        FlexGemmEpilogueAnalysis,
+    )
 
 
 flex_gemm_log = logging.getLogger(__name__)
