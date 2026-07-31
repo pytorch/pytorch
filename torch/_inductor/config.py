@@ -1081,7 +1081,7 @@ compute_all_bounds = False
 
 # enable the combo kernel that combines data-independent kernels (additional
 # to foreach kernels) into a single one (Experimental)
-combo_kernels = False
+combo_kernels = True
 # benchmark combo kernels and only allow ones with perf gains
 benchmark_combo_kernel = False
 # combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
@@ -1111,7 +1111,7 @@ combo_kernel_per_subkernel_blocks: bool = Config(
 combo_kernel_compile_time_autotune: bool = Config(
     justknob="pytorch/inductor:combo_kernel_compile_time_autotune",
     env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
-    default=False,
+    default=True,
 )
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
