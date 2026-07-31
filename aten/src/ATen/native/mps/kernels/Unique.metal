@@ -7,7 +7,6 @@ template <typename T>
 kernel void unique_mark_boundaries(
     constant T* sorted [[buffer(0)]],
     device int* mask [[buffer(1)]],
-    constant ulong& numel [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   if (tid == 0) {
     mask[0] = 1;
@@ -29,7 +28,6 @@ kernel void unique_emit(
     constant SCAN_T* scan [[buffer(2)]],
     device T* unique_values [[buffer(3)]],
     device long* bound_pos [[buffer(4)]],
-    constant ulong& numel [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
   if (mask[tid]) {
     long k = long(scan[tid]) - 1;
@@ -56,7 +54,6 @@ kernel void unique_inverse(
     constant long* sort_idx [[buffer(0)]],
     constant SCAN_T* scan [[buffer(1)]],
     device long* inverse [[buffer(2)]],
-    constant ulong& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   inverse[sort_idx[tid]] = long(scan[tid]) - 1;
 }
@@ -66,7 +63,6 @@ kernel void unique_inverse(
   unique_mark_boundaries<T>(                                          \
       constant T * sorted [[buffer(0)]],                              \
       device int* mask [[buffer(1)]],                                 \
-      constant ulong& numel [[buffer(2)]],                            \
       uint tid [[thread_position_in_grid]]);                          \
   template [[host_name("unique_emit_" #NAME "_32")]] kernel void      \
   unique_emit<T, int>(                                                \
@@ -75,7 +71,6 @@ kernel void unique_inverse(
       constant int* scan [[buffer(2)]],                               \
       device T* unique_values [[buffer(3)]],                          \
       device long* bound_pos [[buffer(4)]],                           \
-      constant ulong& numel [[buffer(5)]],                            \
       uint tid [[thread_position_in_grid]]);                          \
   template [[host_name("unique_emit_" #NAME "_64")]] kernel void      \
   unique_emit<T, long>(                                               \
@@ -84,7 +79,6 @@ kernel void unique_inverse(
       constant long* scan [[buffer(2)]],                              \
       device T* unique_values [[buffer(3)]],                          \
       device long* bound_pos [[buffer(4)]],                           \
-      constant ulong& numel [[buffer(5)]],                            \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_UNIQUE_FOR_T(float, float)
@@ -101,12 +95,10 @@ template [[host_name("unique_inverse_32")]] kernel void unique_inverse<int>(
     constant long* sort_idx [[buffer(0)]],
     constant int* scan [[buffer(1)]],
     device long* inverse [[buffer(2)]],
-    constant ulong& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]);
 
 template [[host_name("unique_inverse_64")]] kernel void unique_inverse<long>(
     constant long* sort_idx [[buffer(0)]],
     constant long* scan [[buffer(1)]],
     device long* inverse [[buffer(2)]],
-    constant ulong& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]);
