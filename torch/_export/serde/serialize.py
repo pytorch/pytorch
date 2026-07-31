@@ -1416,6 +1416,16 @@ class GraphModuleSerializer(metaclass=Final):
                         return Argument.create(as_strings=[])
                     elif isinstance(elem_type, torch.TensorType):
                         return Argument.create(as_tensors=[])
+                    elif isinstance(elem_type, torch.ListType):
+                        inner_elem_type = elem_type.getElementType()
+                        if isinstance(inner_elem_type, torch.IntType):
+                            return Argument.create(as_int_lists=[])
+                        elif isinstance(inner_elem_type, torch.FloatType):
+                            return Argument.create(as_float_lists=[])
+                        else:
+                            raise SerializeError(
+                                f"Empty list with nested type {elem_type} nyi."
+                            )
                     else:
                         # I believe empty symint lists default to ints, but
                         # please file an issue if this is not the case
@@ -1543,9 +1553,10 @@ class GraphModuleSerializer(metaclass=Final):
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
             elif all(
-                isinstance(a, tuple) and all(type(x) is int for x in a) for a in arg
+                isinstance(a, (list, tuple)) and all(type(x) is int for x in a)
+                for a in arg
             ):
-                # list of int tuples
+                # list of int lists (List[List[int]])
                 return Argument.create(as_int_lists=[list(t) for t in arg])
             elif all(
                 isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)

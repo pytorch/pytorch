@@ -1224,27 +1224,14 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     ) -> tuple[Callable[..., object], Sequence[Any], dict[str, Any]]:
         if torch.distributed.is_available():
             from torch.distributed._functional_collectives import (
-                REDUCE_OP_TO_STR,
-                traceable_collective_remaps,
+                _remap_traceable_collective,
             )
 
-            if func in traceable_collective_remaps:
-                # Redirect to a corresponding functional collective, following Dynamo.
-                # See torch/distributed/_functional_collectives.py for details.
-                # The following is an adaptation of CollectiveFunctionRewriteVariable.
-                mapped_func = traceable_collective_remaps[func]
-                signature = inspect.signature(func)
-                kwargs = dict(signature.bind(*args, **kwargs).arguments)
-                args = ()
-                if func in (
-                    torch.distributed.all_reduce,
-                    torch.distributed.reduce_scatter_single,
-                    torch.distributed.reduce_scatter_tensor,
-                    torch.distributed._reduce_scatter_base,
-                ):
-                    if "op" in kwargs:
-                        kwargs["op"] = REDUCE_OP_TO_STR[kwargs["op"]]
-                return mapped_func, args, kwargs
+            # Redirect legacy collectives to functional collectives, following
+            # Dynamo. See torch/distributed/_functional_collectives.py for details.
+            remapped = _remap_traceable_collective(func, args, kwargs)
+            if remapped is not None:
+                return remapped
         if func is torch.tensor:
             # Redirect to Python implementation of torch.tensor for data with symints.
             # NOTE(avik): We don't unconditionally redirect to this implementation

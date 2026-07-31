@@ -563,6 +563,7 @@ import torch
 from torch import tensor, device
 import torch.fx as fx
 from torch._dynamo.testing import rand_strided
+import math
 from math import inf
 import torch._inductor.inductor_prims
 {distributed_imports}
