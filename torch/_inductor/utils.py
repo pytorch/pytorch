@@ -2342,8 +2342,9 @@ def use_flex_tdm_descriptor(
                 f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
             )
 
-        # Descriptor bounds may install int32 range guards. These do not pin
-        # dynamic sequence lengths to their current values.
+        # Install bounds only after this operand passes its guard-free checks.
+        # These range guards do not pin dynamic sequence lengths to their
+        # current values.
         if not _descriptor_shape_fits_in_int32(sizes, add_guards=True):
             return reject("descriptor shape does not fit in int32")
         return True
