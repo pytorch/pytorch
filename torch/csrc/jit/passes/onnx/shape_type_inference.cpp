@@ -260,7 +260,7 @@ Value* CloneValueFromListConstruct(
   // prim::ListConstruct is converted to onnx::Concat. The conversion should
   // eventually be moved to symbolic. For now, treat this operator as
   // special case, and change from list type to tensor type. The scalar type
-  // is preserved. If the elemtype is Int, insert a onnx::Concat node into
+  // is preserved. If the elemtype is Int, insert an onnx::Concat node into
   // the graph.
   TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
   std::optional<at::ScalarType> scalar_type = std::nullopt;

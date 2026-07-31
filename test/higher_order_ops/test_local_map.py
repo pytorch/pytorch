@@ -405,6 +405,12 @@ class GraphModule(torch.nn.Module):
         from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 
         backend = AotEagerAndRecordGraphs()
+        saw_deferred_sac_failure = False
+
+        def check_deferred_sac_failure(e):
+            nonlocal saw_deferred_sac_failure
+            saw_deferred_sac_failure = True
+            self.assertIn("expected_fw_outputs", str(e))
 
         model = create_model(
             cp_decorated, nheads, dim1, dim2, sac_policy=save_scalar_muls
@@ -416,12 +422,10 @@ class GraphModule(torch.nn.Module):
             with enable_local_map_wrapping():
                 out = torch.compile(model, backend=backend)(*inputs)
             out.sum().backward()
-        except AttributeError as e:
-            # TODO: get rid of this when we can install as a subgraph
-            self.assertTrue(
-                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
-                in str(e)
-            )
+        except AssertionError as e:
+            # TODO: deferred local_map + SAC still needs local_map installed
+            # as a subgraph throughout the runtime path.
+            check_deferred_sac_failure(e)
 
         model = create_model(
             cp_function, nheads, dim1, dim2, sac_policy=save_scalar_muls
@@ -433,15 +437,13 @@ class GraphModule(torch.nn.Module):
             with enable_local_map_wrapping():
                 out = torch.compile(model, backend=backend)(*inputs)
             out.sum().backward()
-        except AttributeError as e:
-            # TODO: get rid of this when we can install as a subgraph
-            self.assertTrue(
-                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
-                in str(e)
-            )
+        except AssertionError as e:
+            # TODO: deferred local_map + SAC still needs local_map installed
+            # as a subgraph throughout the runtime path.
+            check_deferred_sac_failure(e)
 
         # TODO: re-enable tests on backward when we can install as a subgraph
-        if not TEST_WITH_CROSSREF:
+        if not TEST_WITH_CROSSREF and not saw_deferred_sac_failure:
             self.assertEqual(len(backend.graphs), 2)
             self.assertEqual(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
@@ -629,22 +631,27 @@ class GraphModule(torch.nn.Module):
             return (torch.randn(80, 80, requires_grad=True),)
 
         gm = ap_style_initial_capture(model, inputs_fn)
-        fw_node, bw_node = [n for n in gm.graph.nodes if "call_local_map" in n.name]
+        fw_node, bw_node = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and n.target is torch.ops.higher_order.local_map_hop
+        ]
 
         # Graph should not be aware that Fake key used local shapes
-        fw_inputs = fw_node.args
+        fw_inputs = fw_node.args[1:]
         if len(fw_inputs) != 1:
             raise AssertionError(f"Expected len(fw_inputs) == 1, got {len(fw_inputs)}")
         self.assertEqual(fw_inputs[0].meta["val"].shape, (80, 80))
 
-        fw_outputs = fw_node.args
+        fw_outputs = fw_node.args[1:]
         if len(fw_outputs) != 1:
             raise AssertionError(
                 f"Expected len(fw_outputs) == 1, got {len(fw_outputs)}"
             )
         self.assertEqual(fw_outputs[0].meta["val"].shape, (80, 80))
 
-        bw_inputs = bw_node.args
+        bw_inputs = bw_node.args[1:]
         if len(bw_inputs) != 1:
             raise AssertionError(f"Expected len(bw_inputs) == 1, got {len(bw_inputs)}")
         self.assertEqual(bw_inputs[0].meta["val"].shape, (80, 80))
@@ -655,6 +662,59 @@ class GraphModule(torch.nn.Module):
                 f"Expected len(bw_outputs) == 1, got {len(bw_outputs)}"
             )
         self.assertEqual(bw_outputs[0].shape, (80, 80))
+
+    @unittest.skipIf(*get_skip_reasons())
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_deferred_local_map_inside_nested_compile_region_export(self):
+        placement = (Shard(0), Shard(1), Replicate(), Replicate())
+
+        class Inner(nn.Module):
+            def __init__(self, dim, mesh):
+                super().__init__()
+                self.lin = nn.Linear(dim, dim, bias=False)
+                self.mesh = mesh
+
+            def forward(self, x):
+                x = self.lin(x)
+
+                def ident(t):
+                    return t.clone()
+
+                return local_map(
+                    ident,
+                    out_placements=(placement,),
+                    in_placements=(placement,),
+                    device_mesh=self.mesh,
+                    redistribute_inputs=True,
+                )(x)
+
+        class NestedRegion(nn.Module):
+            def __init__(self, layer):
+                super().__init__()
+                self.layer = layer
+
+            @nested_compile_region
+            def forward(self, *args, **kwargs):
+                return self.layer(*args, **kwargs)
+
+        def run_export(model, x, expect_invoke_subgraph):
+            with enable_local_map_wrapping():
+                gm = dynamo_graph_capture_for_export(model)(x)
+                has_invoke_subgraph = any(
+                    n.op == "call_function"
+                    and n.target is torch.ops.higher_order.invoke_subgraph
+                    for n in gm.graph.nodes
+                )
+                self.assertEqual(has_invoke_subgraph, expect_invoke_subgraph)
+                with ExitStack() as stack:
+                    aot_export_joint_with_descriptors(stack, gm, (x,))
+
+        x = torch.randn(8, 32, 16, requires_grad=True)
+        inner = Inner(16, self.mesh)
+        run_export(inner, x, expect_invoke_subgraph=False)
+
+        torch._dynamo.reset()
+        run_export(NestedRegion(inner), x, expect_invoke_subgraph=True)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_none_gradients(self):

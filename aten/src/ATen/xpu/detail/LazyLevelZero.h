@@ -5,6 +5,8 @@ namespace at::xpu {
 struct LevelZero;
 
 namespace detail {
+// extern declaration defines no storage; clang-tidy 21 false positive
+// NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
 extern LevelZero lazyLevelZero;
 } // namespace detail
 
