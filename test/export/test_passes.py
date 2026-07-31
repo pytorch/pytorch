@@ -48,6 +48,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -374,6 +375,8 @@ def _sequential_split_inline_tests():
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.MIXED_AUTOCAST_SET_GRAD_TESTS = _with_mixed_autocast_set_grad_tests()
@@ -1328,6 +1331,8 @@ default](args = (%x, %b_state), kwargs = {})
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPassesDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_move_device_to(self, device):
         device_type = str(device).split(":", 1)[0]
         device0 = f"{device_type}:0"
