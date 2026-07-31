@@ -1113,6 +1113,13 @@ combo_kernel_compile_time_autotune: bool = Config(
     env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
     default=True,
 )
+# Experimental CUDA-only screen for combo groups whose launch and
+# wave-quantization cost model cannot reach the profitability threshold.
+combo_kernel_precompile_screen: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_precompile_screen",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_PRECOMPILE_SCREEN",
+    default=False,
+)
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
