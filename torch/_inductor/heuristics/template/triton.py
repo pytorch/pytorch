@@ -63,6 +63,36 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
+def _is_hopper_cuda(device: torch.device | None) -> bool:
+    if device is None or device.type != "cuda":
+        return False
+    try:
+        if not torch.cuda.is_available():
+            return False
+        major, _ = torch.cuda.get_device_capability(device)
+        return major == 9
+    except (AssertionError, RuntimeError):
+        # Capability lookup can fail for fake or invalid CUDA devices while
+        # constructing candidate configs; leave pruning disabled in that case.
+        return False
+
+
+def _effective_num_warps(conf: BaseConfig) -> int:
+    # Each warp computes a 16x16 tile = 256 elements.
+    return min(conf.num_warps, conf.block_m * conf.block_n // 256)
+
+
+def _is_slow_hopper_wgmma_config(conf: BaseConfig) -> bool:
+    # Hopper WGMMA codegen can hit pathological ptxas compile times. Keep the
+    # default search space focused on lower-pipeline-pressure configs, while
+    # retaining a post-scaling 128x256x64 tile that wins on large matmuls.
+    if conf.num_stages >= 5:
+        return True
+    if conf.num_stages >= 4 and _effective_num_warps(conf) >= 8:
+        return (conf.block_m, conf.block_n, conf.block_k) != (128, 256, 64)
+    return False
+
+
 USE_META_WS = meta_ws_enabled()
 
 # Check if running on ROCm
@@ -852,8 +882,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         max_mm_configs = config.test_configs.max_mm_configs
 
         for conf in configs:
-            # Each warp computes a 16x16 tile = 256 elements
-            num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
+            num_warps = _effective_num_warps(conf)
 
             # Construct key for finding duplicate configs
             key: tuple[int | None, ...] = (
@@ -1108,6 +1137,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         return configs
 
+    def _filter_scaled_configs(
+        self, configs: list[BaseConfig], **kwargs: Any
+    ) -> list[BaseConfig]:
+        """Filter configs after applying shape-dependent scaling."""
+        return configs
+
     def preprocess_mm_configs(
         self,
         m: int,
@@ -1127,6 +1162,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scaled_configs = self._scale_mm_configs(
             m, n, k, configs, scale, has_int8_tensor, exclude
         )
+        scaled_configs = self._filter_scaled_configs(scaled_configs, **kwargs)
 
         # Filter out configs that require more shared memory than is available.
         # Theoretical upper bound, will over-prune configs. Off by default for maximum
@@ -2200,6 +2236,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
+        target_device = kernel_inputs.device()
         # Get the appropriate config generator
         configs = self._get_config_generator()
         # origami is a C++ perf model that requires concrete m, n, k; feeding it
@@ -2258,6 +2295,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 configs=exhaustive,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                target_device=target_device,
             )
             selector = origami.OrigamiMatmulSelector(
                 allcfgs,
@@ -2405,6 +2443,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     k,
                     dtype_size=dtype.itemsize,
                     op_name=op_name,
+                    target_device=target_device,
                     **kwargs,
                 ):
                     template_kwargs = self._convert_config_to_template_kwargs(
@@ -2434,6 +2473,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 k,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                target_device=target_device,
                 **kwargs,
             ):
                 template_kwargs = self._convert_config_to_template_kwargs(
@@ -2972,6 +3012,31 @@ class ScaledBlackwellTMAConfigMixin(
 )
 class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
     """Standard MM template heuristic for CUDA"""
+
+    def _filter_scaled_configs(
+        self,
+        configs: list[BaseConfig],
+        target_device: torch.device | None = None,
+        **kwargs: Any,
+    ) -> list[BaseConfig]:
+        # This is intentionally limited to standard MM. The reported ptxas
+        # pathology is from its BF16 WGMMA codegen; int8, scaled, and TMA
+        # templates use different codegen and need separate evidence before
+        # inheriting the same performance tradeoff.
+        if config.max_autotune_gemm_search_space == "DEFAULT" and _is_hopper_cuda(
+            target_device
+        ):
+            original_count = len(configs)
+            configs = [c for c in configs if not _is_slow_hopper_wgmma_config(c)]
+            if len(configs) != original_count:
+                log.debug(
+                    "Hopper WGMMA: pruned %d/%d slow standard MM configs",
+                    original_count - len(configs),
+                    original_count,
+                )
+        return super()._filter_scaled_configs(
+            configs, target_device=target_device, **kwargs
+        )
 
 
 @register_template_heuristic(
