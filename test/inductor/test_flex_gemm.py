@@ -344,11 +344,32 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         mark_flex_gemm_body_gemm_node(graph_module, gemm_op)
         self.assertFalse(check(match))
 
+    def test_epilogue_analysis_matches_prepare_softmax(self):
+        from torch._inductor import inductor_prims
+        from torch._inductor.kernel.gemm_epilogue_analysis import (
+            GemmLocalReduceAnalysis,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(x):
+            grouped = x.view(4, 4, 2)
+            return inductor_prims.prepare_softmax_online(grouped, -1)[0]
+
+        graph_module = make_fx(body)(torch.randn(4, 8))
+        analysis = GemmLocalReduceAnalysis.from_graph_module(graph_module)
+        prepare_softmax = next(
+            node
+            for node in graph_module.graph.nodes
+            if node.target is inductor_prims.prepare_softmax_online
+        )
+        self.assertIn(prepare_softmax, analysis.matches)
+        self.assertIsNone(analysis.matches[prepare_softmax].reduction_type)
+
     def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
 
-        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueGraph
-        from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
+        from torch._inductor.kernel.gemm_epilogue import (
+            GemmEpilogueGraph,
             NormalizedGetItem,
             NormalizedReduction,
             NormalizedSqueeze,
@@ -364,8 +385,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             return reduced.squeeze(-1), maximum, grouped.var(dim=-1)
 
         graph_module = make_fx(body)(torch.randn(4, 8))
-        normalized_nodes = FlexGemmEpilogueGraph.from_graph_module(
-            graph_module
+        normalized_nodes = GemmEpilogueGraph.from_nodes(
+            tuple(graph_module.graph.nodes)
         ).normalized_nodes
         nodes = {
             node.target: node
@@ -1645,7 +1666,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmEpilogueGraph,
             FlexGemmLocalReduceAnalysis,
             FlexGemmLocalReduceMatch,
             FlexGemmLocalReduceStore,
@@ -1653,6 +1673,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmOutputPlan,
             tuple_output_plan,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmEpilogueGraph
 
         graph = torch.fx.Graph()
         node = graph.placeholder("x")
@@ -1660,7 +1681,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         geometry = FlexGemmLocalReduceGeometry(8, 0)
         match = FlexGemmLocalReduceMatch(aux, geometry)
         analysis = FlexGemmLocalReduceAnalysis(
-            FlexGemmEpilogueGraph(dependencies={}, normalized_nodes={})
+            GemmEpilogueGraph(dependencies={}, normalized_nodes={})
         )
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
