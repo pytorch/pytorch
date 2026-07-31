@@ -847,6 +847,7 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
   }
 
  private:
+  // Accumulates nested fields between beginDict() and endDict().
   struct DictFrame {
     explicit DictFrame(std::string name)
         : name_{std::move(name)},
