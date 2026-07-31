@@ -8,11 +8,13 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
+    grouped_main_output_config_supported,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
@@ -366,7 +368,8 @@ def dispatch_gemm_act(
     ``out``/``C``/``aux_outs`` views, and swaps the row/col broadcast roles of
     captured epilogue tensors so each still aligns with the transposed accumulator.
     Tuple epilogues route the main result through QuACK ``D`` and aux outputs through
-    ``PostAct``/``mAuxOut``.
+    ``PostAct``/``mAuxOut``. Grouped-main epilogues instead leave ``D`` unused and
+    use ``PostAct``/``mAuxOut`` as the contracted logical main store.
     """
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
@@ -469,6 +472,7 @@ def gemm_epilogue(
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey | None = None,
+    config_is_lowering_validated: bool = False,
     expected_ndim: int | None = None,
     device_capacity_override: tuple[int, int] | None = None,
     stream: int | None = None,
@@ -490,6 +494,8 @@ def gemm_epilogue(
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, ``col``, or ``scalar`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
+        config_is_lowering_validated: Whether generated lowering already checked the
+            config against the grouped-main output contract.
         expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
         stream: Optional raw CUDA stream pointer supplied by the generated wrapper.
@@ -515,10 +521,17 @@ def gemm_epilogue(
     local_reduce = output_plan.local_reduce
     main_transform = output_plan.main_transform
     logical_output_shape = output_plan.output_shape(physical_output_shape)
-    if main_transform is not None and (
-        a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args
-    ):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+    if main_transform is not None:
+        device_capacity = (
+            torch.cuda.get_device_capability(a.device)
+            if device_capacity_override is None
+            else device_capacity_override
+        )
+        main_transform.validate_quack(device_capacity[0])
+        if main_transform.chunked and b.stride(-1) == 1:
+            raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
+        if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args:
+            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     expected_dtype = out_dtype
     if expected_dtype is None:
         expected_dtype = out.dtype if out is not None else a.dtype
@@ -602,6 +615,37 @@ def gemm_epilogue(
     )
     from torch._vendor.quack.cache import cache_dir_override
 
+    config = gemm_config_from_key(config_key) if config_key is not None else None
+    if config is None or (
+        main_transform is not None and not config_is_lowering_validated
+    ):
+        candidates = candidate_gemm_configs_for_device(a.device)
+        if config is not None and config not in candidates:
+            raise NotImplementedError(
+                "FlexGEMM explicit QUACK config is not supported on this device"
+            )
+        if main_transform is None:
+            config = candidates[0]
+        elif config is None:
+            config = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if grouped_main_output_config_supported(
+                        candidate, physical_output_shape[-1]
+                    )
+                ),
+                None,
+            )
+        elif not grouped_main_output_config_supported(
+            config, physical_output_shape[-1]
+        ):
+            config = None
+        if config is None:
+            raise NotImplementedError(
+                "FlexGEMM QUACK config is incompatible with grouped main output"
+            )
+
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None
@@ -623,11 +667,7 @@ def gemm_epilogue(
             scalar_args,
             alpha,
             beta,
-            config=(
-                gemm_config_from_key(config_key)
-                if config_key is not None
-                else candidate_gemm_configs_for_device(a.device)[0]
-            ),
+            config=config,
             device_capacity_override=device_capacity_override,
         )
     return out
