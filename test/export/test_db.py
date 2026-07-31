@@ -15,6 +15,7 @@ from torch._export.db.examples import (
 from torch.export import export
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -29,6 +30,8 @@ def _to_device(obj, device):
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class ExampleTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # TODO Maybe we should make this tests actually show up in a file?
     @parametrize(
         "name,case",

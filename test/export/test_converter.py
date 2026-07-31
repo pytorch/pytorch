@@ -11,7 +11,7 @@ from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
+from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS, run_tests, xfailIfS390X
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -26,6 +26,8 @@ requires_prepacked_linear = unittest.skipIf(
 
 
 class TestConverter(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -1488,6 +1490,8 @@ class TestConverter(TestCase):
 
 
 class TestConverterPrimDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_prim_device(self, device):
         class Module(torch.nn.Module):
             def forward(self, x):
