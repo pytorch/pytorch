@@ -175,9 +175,11 @@ else
 fi
 
 # 9. Build Dependencies
-# Using the confirmed path: requirements/requirements.txt
+# torch_tpu locks dependencies per Python version (requirements/requirements_3_12.txt
+# and friends); it used to ship a single requirements/requirements.txt.
+TORCH_TPU_REQUIREMENTS="requirements/requirements_$(python -c 'import sys; print(f"{sys.version_info.major}_{sys.version_info.minor}")').txt"
 # Filter out torch pins to prevent downgrading the CI build
-grep -vE "torch|torchvision|torchaudio" requirements/requirements.txt > requirements_no_torch.txt
+grep -vE "torch|torchvision|torchaudio" "${TORCH_TPU_REQUIREMENTS}" > requirements_no_torch.txt
 # The requirements file is fully hash-locked, so every dependency is already
 # pinned explicitly. Use --no-deps so pip does not try to re-resolve the
 # torch* packages we just stripped out (e.g. torchvision pulled in by timm),
