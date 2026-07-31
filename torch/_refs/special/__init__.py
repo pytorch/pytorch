@@ -65,6 +65,7 @@ def bessel_j1(a: TensorLikeType) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def entr(a: TensorLikeType) -> TensorLikeType:
     return torch.where(
@@ -79,6 +80,7 @@ def entr(a: TensorLikeType) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def erfcx(a: TensorLikeType) -> TensorLikeType:
     return prims.erfcx(a)
@@ -114,6 +116,7 @@ def i1e(a: TensorLikeType) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def log_ndtr(a: TensorLikeType) -> TensorLikeType:
     # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
@@ -131,6 +134,7 @@ def log_ndtr(a: TensorLikeType) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def logit(self: TensorLikeType, eps: float | None = None) -> TensorLikeType:
     if eps is None:
@@ -146,6 +150,7 @@ def logit(self: TensorLikeType, eps: float | None = None) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def xlog1py(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType):
     torch._check(
@@ -175,6 +180,7 @@ def xlog1py(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType):
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     c = 0.25 * p * (p - 1) * math.log(math.pi)
@@ -187,6 +193,7 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def ndtr(a: TensorLikeType) -> TensorLikeType:
     # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
@@ -200,6 +207,7 @@ def ndtr(a: TensorLikeType) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def ndtri(a: TensorLikeType) -> TensorLikeType:
     return prims.ndtri(a)

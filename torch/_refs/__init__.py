@@ -561,6 +561,7 @@ def _make_elementwise_unary_reference(
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a",),
             type_promotion_kind=type_promotion_kind,
+            correct_cuda_tensoriterator_strides=True,
         )
         def _ref(a: TensorLikeType) -> TensorLikeType:
             if extra_meta is not None:
@@ -1017,6 +1018,7 @@ def reciprocal(a):
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def round(a: TensorLikeType, *, decimals: int = 0) -> TensorLikeType:
     if decimals == 0:
@@ -1170,6 +1172,7 @@ def _make_elementwise_binary_reference(
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a", "b"),
             type_promotion_kind=type_promotion_kind,
+            correct_cuda_tensoriterator_strides=True,
         )
         def _ref(
             a: Tensor | NumberType,
@@ -1224,6 +1227,7 @@ def _binary_op_dtype(
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def add(
     a: TensorLikeType | NumberType,
@@ -1867,6 +1871,7 @@ def rsub(
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def sub(
     a: TensorLikeType | NumberType,
@@ -1922,6 +1927,7 @@ def true_divide(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def xlogy(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType):
     torch._check(
@@ -1969,6 +1975,7 @@ def trunc_divide(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "tensor1", "tensor2"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def addcdiv(
     self: TensorLikeType,
@@ -1996,6 +2003,7 @@ def addcdiv(
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "tensor1", "tensor2"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def addcmul(
     self: TensorLikeType,
@@ -2023,6 +2031,7 @@ def addcmul(
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "min", "max"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    correct_cuda_tensoriterator_strides=True,
 )
 def clamp(
     a: TensorLikeType,
@@ -2089,6 +2098,7 @@ def _where_default(pred: Tensor) -> tuple[Tensor, ...]:
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    correct_cuda_tensoriterator_strides=True,
 )
 def where(
     pred: Tensor,
