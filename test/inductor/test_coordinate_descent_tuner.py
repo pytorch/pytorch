@@ -146,6 +146,31 @@ class TestCoordinateDescentTuner(TestCase):
             )
         )
 
+    def test_mix_order_reduction_xblock_must_divide_rsplit(self):
+        tuner = CoordescTuner(is_mix_order_reduction=True)
+
+        self.assertTrue(
+            tuner.is_valid_config(
+                triton.Config(
+                    {"XBLOCK": 4, "RSPLIT_SIZE": 16}, num_warps=8, num_stages=1
+                )
+            )
+        )
+        self.assertFalse(
+            tuner.is_valid_config(
+                triton.Config(
+                    {"XBLOCK": 8, "RSPLIT_SIZE": 18}, num_warps=8, num_stages=1
+                )
+            )
+        )
+        self.assertFalse(
+            tuner.is_valid_config(
+                triton.Config(
+                    {"XBLOCK": 3, "RSPLIT_SIZE": 18}, num_warps=8, num_stages=1
+                )
+            )
+        )
+
     def test_native_matmul_rejects_invalid_neighbours(self):
         tuner = CoordescTuner(
             is_native_matmul=True,

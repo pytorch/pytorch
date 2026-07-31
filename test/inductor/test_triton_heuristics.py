@@ -25,6 +25,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     requires_gpu_with_enough_memory,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -60,6 +61,7 @@ from torch._inductor.runtime.triton_heuristics import (
     check_autotune_cache,
     DEFER,
     make_matmul_triton_config,
+    persistent_reduction,
     template,
     triton_config,
 )
@@ -303,6 +305,81 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(configs, [cfg])
         self.assertIsNone(autotune_cache)
         self.assertEqual(autotune_cache_info["autotune_cache_state"], "only 1 config")
+
+    def test_mix_order_reduction_large_rnumel_caps_default_xblock(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=152,
+            cc=100,
+            major=10,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+
+        for rsplit_size in (16, 64, 128):
+            cfgs = persistent_reduction(
+                {"x": 32768, "r0_": 16384},
+                triton_meta={"device": device, "signature": {}},
+                inductor_meta={"RSPLIT_SIZE": rsplit_size},
+                return_configs=True,
+            )
+            self.assertEqual([cfg.kwargs["XBLOCK"] for cfg in cfgs], [1])
+            self.assertEqual([cfg.kwargs["NUM_STAGES"] for cfg in cfgs], [2])
+
+    def test_mix_order_reduction_max_autotune_adds_xblock_choices(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=152,
+            cc=100,
+            major=10,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+
+        cfgs = persistent_reduction(
+            {"x": 32768, "r0_": 16384},
+            triton_meta={"device": device, "signature": {}},
+            inductor_meta={"RSPLIT_SIZE": 16, "max_autotune": True},
+            return_configs=True,
+        )
+
+        self.assertEqual(
+            OrderedSet(cfg.kwargs["XBLOCK"] for cfg in cfgs), OrderedSet([1, 2, 4])
+        )
+        self.assertEqual(
+            {
+                cfg.kwargs["XBLOCK"]: cfg.kwargs["NUM_STAGES"]
+                for cfg in cfgs
+                if cfg.num_warps == 16
+            },
+            {1: 2, 2: 2, 4: 1},
+        )
+        for cfg in cfgs:
+            self.assertEqual(cfg.kwargs["RSPLIT_SIZE"] % cfg.kwargs["XBLOCK"], 0)
+
+    def test_mix_order_reduction_xblock_candidates_divide_rsplit(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=152,
+            cc=100,
+            major=10,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+
+        cfgs = persistent_reduction(
+            {"x": 32768, "r0_": 16384},
+            triton_meta={"device": device, "signature": {}},
+            inductor_meta={"RSPLIT_SIZE": 18, "max_autotune": True},
+            return_configs=True,
+        )
+
+        self.assertEqual(
+            OrderedSet(cfg.kwargs["XBLOCK"] for cfg in cfgs), OrderedSet([1, 2])
+        )
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
