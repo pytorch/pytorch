@@ -762,6 +762,11 @@ class TestDraftExport(TestCase):
                 package_path=f.name,
             )
 
+
+
+class TestDraftExportCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         not torch.cuda.is_available()
         or torch.cuda.get_device_properties(0).total_memory < 2**28,
@@ -791,7 +796,6 @@ class TestDraftExport(TestCase):
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
-
 
 class TestDraftExportDeviceGuard(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
