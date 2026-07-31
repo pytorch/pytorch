@@ -1240,6 +1240,10 @@ def run_doctests(test_module, test_directory, options):
                 "from torch import nn",
                 "import torch.nn.functional as F",
                 "import torch",
+                # So doctests can suppress a warning from an intentionally
+                # deprecated/prototype example via a `# docs: hide`-marked
+                # `warnings.filterwarnings(...)` line without a visible import.
+                "import warnings",
             ]
         ),
         "analysis": "static",  # set to "auto" to test doctests in compiled modules
@@ -1255,8 +1259,18 @@ def run_doctests(test_module, test_directory, options):
         argv=[],
         exclude=exclude_module_list,
     )
-    result = 1 if run_summary.get("n_failed", 0) else 0
-    return result
+    n_failed = run_summary.get("n_failed", 0)
+    n_warned = run_summary.get("n_warned", 0)
+    if n_warned:
+        print_to_stderr(
+            f"ERROR: {n_warned} doctest(s) emitted run-time warnings. Doctests "
+            "must be warning-free: either fix the example to use the recommended "
+            "API, or if the warning is intrinsic to a deprecated/prototype API "
+            "being documented, suppress it with a `# docs: hide`-marked "
+            '`>>> warnings.filterwarnings("ignore", message=".*<substr>")` line '
+            "(executed by xdoctest, stripped from the rendered docs)."
+        )
+    return 1 if (n_failed or n_warned) else 0
 
 
 def sanitize_file_name(file: str):
