@@ -11482,6 +11482,39 @@ for shape in [(1,), ()]:
         self.assertEqual(len(func_nodes), 1)
         self.assertIs(func_nodes[0], out.grad_fn)
 
+    def test_autograd_context_var_api(self):
+        cv = torch.autograd.graph.AutogradContextVar("cv", default="d")
+        self.assertEqual(cv.name, "cv")
+        self.assertEqual(cv.get(), "d")
+        self.assertEqual(cv.get("arg"), "arg")
+        token = cv.set("v")
+        self.assertEqual(cv.get(), "v")
+        self.assertEqual(cv.get("arg"), "v")
+        cv.reset(token)
+        self.assertEqual(cv.get(), "d")
+
+        cv2 = torch.autograd.graph.AutogradContextVar("cv2")
+        self.assertRaises(LookupError, cv2.get)
+        self.assertEqual(cv2.get("arg"), "arg")
+
+    def test_autograd_context_var_thread_set_takes_precedence(self):
+        cv = torch.autograd.graph.AutogradContextVar("cv", default="d")
+        seen = []
+
+        def hook(g):
+            seen.append(cv.get())
+            cv.set("mutated")
+            seen.append(cv.get())
+            return g
+
+        x = torch.randn(2, requires_grad=True)
+        y = (x * 2).sum()
+        x.register_hook(hook)
+        token = cv.set("caller")
+        y.backward()
+        cv.reset(token)
+        self.assertEqual(seen, ["caller", "mutated"])
+
     def test_node_creation_hook_inplace(self):
         nodes = []
         a = torch.randn(2, requires_grad=True)
@@ -13365,6 +13398,53 @@ class TestAutogradForwardMode(TestCase):
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
+    def test_autograd_context_var_visible_in_hooks(self, device):
+        # On non-CPU devices backward hooks run on autograd worker threads,
+        # where plain ContextVars set by the caller are not visible.
+        cv = torch.autograd.graph.AutogradContextVar("cv", default="default")
+        plain = contextvars.ContextVar("plain", default="default")
+        seen = {}
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, gO):
+                seen["function_backward"] = cv.get()
+                return gO
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        y = Func.apply(x).sum()
+        y.grad_fn.register_prehook(lambda gO: seen.__setitem__("prehook", cv.get()))
+        y.grad_fn.register_hook(lambda gI, gO: seen.__setitem__("posthook", cv.get()))
+        x.register_hook(lambda g: seen.__setitem__("tensor_hook", cv.get()))
+        x.register_post_accumulate_grad_hook(
+            lambda t: seen.__setitem__("post_acc_grad", cv.get())
+        )
+
+        cv_token = cv.set("caller")
+        plain_token = plain.set("caller")
+        try:
+            y.backward()
+        finally:
+            cv.reset(cv_token)
+            plain.reset(plain_token)
+
+        expected = [
+            "function_backward",
+            "post_acc_grad",
+            "posthook",
+            "prehook",
+            "tensor_hook",
+        ]
+        self.assertEqual(sorted(seen.keys()), expected)
+        for site, value in seen.items():
+            self.assertEqual(value, "caller", msg=f"site: {site}")
+        # After backward, no stashed state should leak into get().
+        self.assertEqual(cv.get(), "default")
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
