@@ -1,15 +1,16 @@
 import copy
 import logging
 import operator
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 from functools import cache
+from threading import RLock
 from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
-from torch._guards import detect_fake_mode
 from torch._library.simple_registry import singleton as _simple_registry
-from torch.utils._python_dispatch import _disable_current_modes
+from torch.utils._python_dispatch import _disable_current_modes, TorchDispatchMode
 
 from ._compatibility import compatibility
 from ._symbolic_trace import symbolic_trace
@@ -62,6 +63,7 @@ _SAFE_META_SCALAR_TYPES = (
     torch.memory_format,
 )
 _MISSING = object()
+_META_EXECUTION_LOCK = RLock()
 log = logging.getLogger(__name__)
 
 __all__ = [
@@ -198,6 +200,10 @@ class _MetaValueAnalysis(NamedTuple):
     contains_tensor: bool
 
 
+class _UnsafeMetaPropagation(RuntimeError):
+    pass
+
+
 def _analyze_meta_value(value: Any) -> _MetaValueAnalysis:
     active_container_ids: set[int] = set()
     completed_container_analyses: dict[int, _MetaValueAnalysis] = {}
@@ -306,11 +312,15 @@ def _copy_meta_val(
         return result
     if value_type is FakeTensor:
         if tensor_converter is None:
-            result = snapshot_fake(value)
+            if fake_mode is None or fake_mode is value.fake_mode:
+                result = snapshot_fake(value)
+            else:
+                with _disable_current_modes():
+                    result = snapshot_fake(fake_mode.from_tensor(value))
         else:
             with _disable_current_modes():
                 result = tensor_converter.from_real_tensor(
-                    value.fake_mode, value, shape_env=None
+                    fake_mode or value.fake_mode, value, shape_env=None
                 )
         memo[value_id] = result
         return result
@@ -378,16 +388,22 @@ def _try_copy_meta_val(
     return result
 
 
-def _detect_fake_mode_from_values(values: list[Any]) -> "FakeTensorMode | None":
-    try:
-        fake_mode = detect_fake_mode(values)
-    except AssertionError:
-        # Inputs from multiple fake modes cannot be interpreted together.
-        # Returning None makes propagation copy inputs but skip operator execution.
+def _detect_fake_mode_from_values(
+    values: list[Any], fallback_fake_mode: "FakeTensorMode | None" = None
+) -> "FakeTensorMode | None":
+    FakeTensor, _, FakeTensorMode, _, _ = _fake_tensor_meta_helpers()
+    fake_modes = {
+        value.fake_mode
+        for value in torch.utils._pytree.tree_leaves(values)
+        if type(value) is FakeTensor
+    }
+    if len(fake_modes) > 1:
+        return None
+    fake_mode = next(iter(fake_modes), None)
+    if fake_mode is not None and type(fake_mode) is not FakeTensorMode:
         return None
     if fake_mode is None and any(_contains_tensor(value) for value in values):
-        _, _, FakeTensorMode, _, _ = _fake_tensor_meta_helpers()
-        fake_mode = FakeTensorMode(allow_fallback_kernels=False)
+        fake_mode = fallback_fake_mode or FakeTensorMode(allow_fallback_kernels=False)
     return fake_mode
 
 
@@ -434,10 +450,17 @@ def _is_trusted_torch_builtin(target: Any) -> bool:
 
 
 def _is_trusted_meta_overload(target: Any) -> bool:
-    if target.namespace == "aten":
+    if target.namespace in ("aten", "prim"):
+        registry_entry = _simple_registry.get(target.name())
         return (
             not target._defined_in_python
-            and _simple_registry.find(target.name()).fake_impl.kernel is None
+            and torch.Tag.dynamic_output_shape not in target.tags
+            and torch.Tag.data_dependent_output not in target.tags
+            and (registry_entry is None or registry_entry.fake_impl.kernel is None)
+            and (
+                registry_entry is None or not registry_entry.torch_dispatch_rules._data
+            )
+            and (target.namespace != "aten" or _has_trusted_aten_meta_kernel(target))
         )
     if target.namespace != "prims":
         return False
@@ -446,18 +469,60 @@ def _is_trusted_meta_overload(target: Any) -> bool:
     from torch import _prims
 
     name = target._schema.name.partition("::")[2]
-    return (
-        not _has_registered_aten_fake_impl()
-        and name in _prims.__all__
-        and getattr(_prims, name, None) is target
-    )
+    return name in _prims.__all__ and getattr(_prims, name, None) is target
 
 
-def _has_registered_aten_fake_impl() -> bool:
+def _has_trusted_aten_meta_kernel(target: Any) -> bool:
+    try:
+        kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+            target.name(), "Meta"
+        )
+    except RuntimeError:
+        return False
+    source = str(kernel).replace("\\", "/")
     return any(
-        qualname.startswith("aten::") and entry.fake_impl.kernel is not None
-        for qualname, entry in _simple_registry._data.items()
+        builtin_path in source
+        for builtin_path in ("torch/_meta_registrations.py:", "/aten/src/ATen/")
     )
+
+
+class _TrustedMetaDispatchMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: torch._ops.OpOverload,
+        types: tuple[type[Any], ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        if (
+            type(func) is not torch._ops.OpOverload
+            or func._schema.is_mutable
+            or not _is_trusted_meta_overload(func)
+        ):
+            raise _UnsafeMetaPropagation(f"Unsafe metadata operator: {func}")
+        return func(*args, **(kwargs or {}))
+
+
+@contextmanager
+def _meta_execution_context(
+    fake_mode: "FakeTensorMode",
+) -> Generator[None, None, None]:
+    with _META_EXECUTION_LOCK:
+        old_allow_fallback_kernels = fake_mode.allow_fallback_kernels
+        fake_mode.allow_fallback_kernels = False
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(_disable_current_modes())
+                shape_env = fake_mode.shape_env
+                if shape_env is not None:
+                    # Reject results that need new guards or unbacked symbols.
+                    stack.enter_context(shape_env.error_on_new_guards())
+                    stack.enter_context(shape_env.ignore_fresh_unbacked_symbols())
+                stack.enter_context(fake_mode)
+                stack.enter_context(_TrustedMetaDispatchMode())
+                yield
+        finally:
+            fake_mode.allow_fallback_kernels = old_allow_fallback_kernels
 
 
 def _run_meta_overload(
@@ -465,20 +530,14 @@ def _run_meta_overload(
 ) -> Any:
     if type(target) is torch._ops.OpOverload and target.namespace == "prims":
         return cast(Any, target).prim_meta_impl(*args, **kwargs)
-    if type(target) is torch._ops.OpOverloadPacket:
-        overloads = [getattr(target, name) for name in target.overloads()]
-        if overloads and overloads[0].namespace == "prims":
-            return cast(Any, overloads[0]).prim_meta_impl(*args, **kwargs)
     return target(*args, **kwargs)
 
 
-def _is_safe_meta_propagation_target(
-    target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> bool:
-    has_tensor_input = _contains_tensor((args, kwargs))
+def _is_safe_meta_propagation_target(target: Any, has_tensor_input: bool) -> bool:
     if type(target) is torch._ops.OpOverload:
         return (
             _is_trusted_meta_overload(target)
+            and not target._schema.is_mutable
             and bool(target._schema.returns)
             and has_tensor_input
         )
@@ -486,24 +545,25 @@ def _is_safe_meta_propagation_target(
         overloads = [getattr(target, name) for name in target.overloads()]
         return (
             bool(overloads)
-            and all(_is_trusted_meta_overload(overload) for overload in overloads)
-            and any(overload._schema.returns for overload in overloads)
+            and any(
+                _is_trusted_meta_overload(overload) and overload._schema.returns
+                for overload in overloads
+            )
             and has_tensor_input
         )
-    return not _has_registered_aten_fake_impl() and (
-        any(target is builtin for builtin in _SAFE_META_PROPAGATION_BUILTINS)
-        or (
-            has_tensor_input
-            and _is_trusted_torch_builtin(target)
-            and _has_value_returning_torch_schema(target)
-        )
+    return any(target is builtin for builtin in _SAFE_META_PROPAGATION_BUILTINS) or (
+        has_tensor_input
+        and _is_trusted_torch_builtin(target)
+        and _has_value_returning_torch_schema(target)
     )
 
 
-@cache
 def _is_safe_meta_propagation_method_name(target: str) -> bool:
     tensor_method = getattr(torch.Tensor, target, None)
-    if tensor_method is None or not callable(tensor_method):
+    if (
+        type(tensor_method) is not type(torch.Tensor.add)
+        or tensor_method.__objclass__ is not torch._C.TensorBase
+    ):
         return False
     try:
         packet = getattr(torch.ops.aten, target)
@@ -520,10 +580,13 @@ def _propagate_replacement_meta(
     replacement_module: torch.nn.Module | None,
     val_map: dict[Node, Any],
     replacement_nodes: list[Node],
+    fallback_fake_mode: "FakeTensorMode | None",
 ) -> None:
     # This intentionally does not use whole-graph FakeTensorProp. Only metadata
     # for newly copied replacement nodes is filled, and only through built-in ops
-    # that are safe to interpret during rewriting.
+    # that are safe to interpret during rewriting. Retracing is not an equivalent
+    # alternative: Graph replacements have no callable to retrace, and invoking a
+    # callable replacement again could run arbitrary user code and side effects.
     replacement_node_set = {
         node for node in replacement_nodes if isinstance(node, Node)
     }
@@ -535,7 +598,7 @@ def _propagate_replacement_meta(
                 destination_module, replacement_module, node.target
             )
             resolved_attrs[node] = attr_value
-            if invalidates_preannotation:
+            if node.op == "get_attr" or invalidates_preannotation:
                 invalidated_nodes.add(node)
         if any(input_node in invalidated_nodes for input_node in node.all_input_nodes):
             invalidated_nodes.add(node)
@@ -564,12 +627,10 @@ def _propagate_replacement_meta(
             attr_value = resolved_attrs[node]
             if attr_value is not _MISSING and _is_safe_meta_value(attr_value):
                 source_values.append(attr_value)
-    fake_mode = _detect_fake_mode_from_values(source_values)
+    fake_mode = _detect_fake_mode_from_values(source_values, fallback_fake_mode)
 
     env: dict[Node, Any] = {}
     source_copy_memo: dict[int, Any] = {}
-    _, FakeTensorConverter, _, _, _ = _fake_tensor_meta_helpers()
-    source_copy_converter = FakeTensorConverter()
 
     def load_arg(arg_node: Node) -> Any:
         if arg_node not in env:
@@ -595,13 +656,14 @@ def _propagate_replacement_meta(
                             meta_val,
                             fake_mode,
                             source_copy_memo,
-                            source_copy_converter,
                         )
+                    elif copied_node.meta.get("val") is not None:
+                        continue
             else:
                 meta_val = _meta_val_if_safe(copied_node)
                 if meta_val is not _MISSING:
                     copied_meta_val = _try_copy_meta_val(
-                        meta_val, fake_mode, source_copy_memo, source_copy_converter
+                        meta_val, fake_mode, source_copy_memo
                     )
                     if copied_meta_val is _MISSING:
                         continue
@@ -612,13 +674,14 @@ def _propagate_replacement_meta(
 
         if preannotated_meta_val is not _MISSING:
             env[node] = preannotated_meta_val
+            continue
 
         if node.op == "get_attr":
             attr_value = resolved_attrs[node]
             if attr_value is _MISSING or not _is_safe_meta_value(attr_value):
                 continue
             copied_attr_value = _try_copy_meta_val(
-                attr_value, fake_mode, source_copy_memo, source_copy_converter
+                attr_value, fake_mode, source_copy_memo
             )
             if copied_attr_value is _MISSING:
                 continue
@@ -633,7 +696,7 @@ def _propagate_replacement_meta(
         if node.op == "placeholder":
             if not isinstance(copied_node, Node) and _is_safe_meta_value(copied_node):
                 copied_meta_val = _try_copy_meta_val(
-                    copied_node, fake_mode, source_copy_memo, source_copy_converter
+                    copied_node, fake_mode, source_copy_memo
                 )
                 if copied_meta_val is not _MISSING:
                     env[node] = copied_meta_val
@@ -656,25 +719,27 @@ def _propagate_replacement_meta(
         except KeyError:
             # A predecessor could not be propagated, so its dependents cannot run.
             continue
-        if not _is_safe_meta_value((args, kwargs)):
+        input_analysis = _analyze_meta_value((args, kwargs))
+        if not input_analysis.is_safe:
             continue
 
         try:
             if node.op == "call_function":
-                if not _is_safe_meta_propagation_target(node.target, args, kwargs):
+                if not _is_safe_meta_propagation_target(
+                    node.target, input_analysis.contains_tensor
+                ):
                     continue
-                with _disable_current_modes(), fake_mode:
+                with _meta_execution_context(fake_mode):
                     result = _run_meta_overload(node.target, args, kwargs)
             else:
                 if not (
                     type(node.target) is str
-                    and not _has_registered_aten_fake_impl()
                     and _is_safe_meta_propagation_method_name(node.target)
                     and len(args) > 0
                     and isinstance(args[0], torch.Tensor)
                 ):
                     continue
-                with _disable_current_modes(), fake_mode:
+                with _meta_execution_context(fake_mode):
                     result = getattr(args[0], node.target)(*args[1:], **kwargs)
         except _META_PROPAGATION_OPERATOR_EXCEPTIONS:
             # Invalid metadata inputs and unsupported fake implementations must
@@ -724,6 +789,11 @@ def replace_pattern(
                 anchor: Node
                 # Maps nodes in the pattern subgraph to nodes in the larger graph
                 nodes_map: Dict[Node, Node]
+
+    Newly inserted nodes receive ``meta["val"]`` when it can be inferred by
+    safely interpreting built-in metadata operations. Existing annotations on
+    replacement nodes are preserved, except that ``get_attr`` nodes and their
+    dependents are recomputed from the module attributes resolved in ``gm``.
 
     Examples:
 
@@ -930,6 +1000,8 @@ def _replace_pattern(
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
     match_changed_node: dict[Node, Node] = {}
+    _, _, FakeTensorMode, _, _ = _fake_tensor_meta_helpers()
+    fallback_fake_mode = FakeTensorMode(allow_fallback_kernels=False)
 
     match_and_replacements = []
     for match in _matches:
@@ -1025,6 +1097,7 @@ def _replace_pattern(
             replacement_module,
             val_map,
             replacement_nodes,
+            fallback_fake_mode,
         )
 
         # Hook the output Node of the replacement subgraph in to the

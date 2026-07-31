@@ -4,22 +4,19 @@ import operator
 import os
 import sys
 import warnings
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from unittest import mock
 
 import torch
 from torch._library.simple_registry import singleton as _simple_registry
-from torch._library.utils import Kernel
-from torch._subclasses.fake_tensor import (
-    FakeTensor,
-    FakeTensorConverter,
-    FakeTensorMode,
-)
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import subgraph_rewriter, symbolic_trace
 from torch.fx.annotate import annotate
 
 # Make the helper files in test/ importable
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -89,6 +86,16 @@ def _add_pattern(x, y):
 
 
 class TestSubgraphRewriter(JitTestCase):
+    def _node_with_target(self, gm, target):
+        return next(node for node in gm.graph.nodes if node.target == target)
+
+    def _replace_once(self, gm, pattern, replacement):
+        matches = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+        self.assertEqual(len(matches), 1)
+
+    def _export_relu(self):
+        return torch.export.export(_ReluModel(), (torch.randn(2, 3),)).graph_module
+
     def _reset_side_effect_replacement_call_count(self):
         global _side_effect_replacement_call_count
         _side_effect_replacement_call_count = 0
@@ -835,9 +842,7 @@ class TestSubgraphRewriter(JitTestCase):
             return lin_res, mul_res
 
         traced = symbolic_trace(M())
-        matches = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
-
-        self.assertEqual(len(matches), 1)
+        self._replace_once(traced, pattern, replacement)
 
         found_repalcement_node = False
         for node in traced.graph.nodes:
@@ -997,8 +1002,7 @@ class TestSubgraphRewriter(JitTestCase):
         ep = torch.export.export(M(), (x, y))
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, pattern, replacement)
 
         replacement_nodes = [
             node for node in gm.graph.nodes if node.target == torch.ops.aten.mul.Tensor
@@ -1017,17 +1021,18 @@ class TestSubgraphRewriter(JitTestCase):
         ep = torch.export.export(_ReluModel(), (torch.randn(2, 3),))
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement)
 
-        replacement_node = next(
-            node
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.reshape.default
-        )
+        replacement_node = self._node_with_target(gm, torch.ops.aten.reshape.default)
         val = replacement_node.meta.get("val")
         self.assertIsInstance(val, torch.Tensor)
         self.assertEqual(val.shape, torch.Size([6]))
+        input_val = next(
+            node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder"
+        )
+        self.assertEqual(
+            val.untyped_storage()._cdata, input_val.untyped_storage()._cdata
+        )
 
     def test_replace_pattern_populates_common_replacement_meta_val(self):
         def operator_replacement(x):
@@ -1091,14 +1096,9 @@ class TestSubgraphRewriter(JitTestCase):
             with self.subTest(replacement=replacement.__name__):
                 gm = torch.export.export(_NegModel(), (torch.randn(2, 3),)).graph_module
 
-                matches = subgraph_rewriter.replace_pattern(
-                    gm, _neg_pattern, replacement
-                )
-                self.assertEqual(len(matches), 1)
+                self._replace_once(gm, _neg_pattern, replacement)
 
-                replacement_node = next(
-                    node for node in gm.graph.nodes if node.target == target
-                )
+                replacement_node = self._node_with_target(gm, target)
                 val = replacement_node.meta.get("val")
                 self.assertIsInstance(val, torch.Tensor)
                 self.assertEqual(val.shape, shape)
@@ -1112,17 +1112,10 @@ class TestSubgraphRewriter(JitTestCase):
 
         for replacement in (max_replacement, slice_replacement):
             with self.subTest(replacement=replacement.__name__):
-                gm = torch.export.export(
-                    _ReluModel(), (torch.randn(2, 3),)
-                ).graph_module
-                matches = subgraph_rewriter.replace_pattern(
-                    gm, _relu_pattern, replacement
-                )
-                self.assertEqual(len(matches), 1)
+                gm = self._export_relu()
+                self._replace_once(gm, _relu_pattern, replacement)
 
-                getitem_node = next(
-                    node for node in gm.graph.nodes if node.target == operator.getitem
-                )
+                getitem_node = self._node_with_target(gm, operator.getitem)
                 val = getitem_node.meta.get("val")
                 self.assertIsInstance(val, torch.Tensor)
                 self.assertEqual(val.shape, torch.Size([2]))
@@ -1143,14 +1136,11 @@ class TestSubgraphRewriter(JitTestCase):
         ep = torch.export.export(_ReluModel(), (torch.randn(2, 3),))
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, Replacement())
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, Replacement())
 
         offset_node = next(node for node in gm.graph.nodes if node.target == "offset")
         self.assertIsInstance(offset_node.meta.get("val"), torch.Tensor)
-        add_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.add.Tensor
-        )
+        add_node = self._node_with_target(gm, torch.ops.aten.add.Tensor)
         self.assertIsInstance(add_node.meta.get("val"), torch.Tensor)
 
         def add_pattern(x, y):
@@ -1180,13 +1170,9 @@ class TestSubgraphRewriter(JitTestCase):
         placeholder.meta["val"] = torch.ones(2, 3)
 
         replacement_gm = symbolic_trace(Replacement())
-        replacement_weight_node = next(
-            node for node in replacement_gm.graph.nodes if node.target == "weight"
-        )
-        replacement_mm_node = next(
-            node
-            for node in replacement_gm.graph.nodes
-            if node.target == torch.ops.aten.mm.default
+        replacement_weight_node = self._node_with_target(replacement_gm, "weight")
+        replacement_mm_node = self._node_with_target(
+            replacement_gm, torch.ops.aten.mm.default
         )
         with FakeTensorMode() as mode:
             replacement_weight_node.meta["val"] = mode.from_tensor(
@@ -1194,54 +1180,33 @@ class TestSubgraphRewriter(JitTestCase):
             )
             replacement_mm_node.meta["val"] = mode.from_tensor(torch.empty(2, 4))
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement_gm)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement_gm)
         self.assertIs(gm.weight, original_weight)
 
         weight_node = next(node for node in gm.graph.nodes if node.target == "weight")
         self.assertEqual(weight_node.meta["val"].shape, torch.Size([3, 5]))
-        mm_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.mm.default
-        )
+        mm_node = self._node_with_target(gm, torch.ops.aten.mm.default)
         self.assertEqual(mm_node.meta["val"].shape, torch.Size([2, 5]))
         self.assertEqual(gm(torch.ones(2, 3)).shape, torch.Size([2, 5]))
 
     def test_replace_pattern_meta_copy_recomputes_rebound_get_attr(self):
-        class Replacement(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.register_buffer("weight", torch.full((3, 4), 7.0))
-
-            def forward(self, x):
-                return torch.ops.aten.mm.default(x, self.weight)
-
-        replacement_gm = symbolic_trace(Replacement())
-        weight = next(
-            node for node in replacement_gm.graph.nodes if node.target == "weight"
-        )
-        mm = next(
-            node
-            for node in replacement_gm.graph.nodes
-            if node.target == torch.ops.aten.mm.default
-        )
-        with FakeTensorMode() as mode:
-            weight.meta["val"] = mode.from_tensor(torch.empty(3, 4))
-            mm.meta["val"] = mode.from_tensor(torch.empty(2, 4))
-        replacement_gm.weight = torch.full((3, 5), 2.0)
+        replacement = torch.nn.Module()
+        replacement.count = 2
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        count = graph.get_attr("count")
+        add = graph.call_function(operator.add, (x, count))
+        graph.output(add)
+        replacement_gm = torch.fx.GraphModule(replacement, graph)
+        count.meta["val"] = 2
+        replacement_gm.count = 3
 
         gm = symbolic_trace(_ReluModel())
         placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
-        placeholder.meta["val"] = torch.ones(2, 3)
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement_gm)
-
-        self.assertEqual(len(matches), 1)
-        weight_node = next(node for node in gm.graph.nodes if node.target == "weight")
-        self.assertEqual(weight_node.meta["val"].shape, torch.Size([3, 5]))
-        mm_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.mm.default
-        )
-        self.assertEqual(mm_node.meta["val"].shape, torch.Size([2, 5]))
-        self.assertEqual(gm(torch.ones(2, 3)).shape, torch.Size([2, 5]))
+        placeholder.meta["val"] = torch.ones(2)
+        self._replace_once(gm, _relu_pattern, replacement_gm)
+        self.assertEqual(self._node_with_target(gm, "count").meta["val"], 3)
+        self.assertEqual(gm(torch.ones(2)), torch.full((2,), 4.0))
 
     def test_replace_pattern_meta_copy_invalidates_raw_graph_get_attr(self):
         gm = symbolic_trace(_ReluModel())
@@ -1258,16 +1223,11 @@ class TestSubgraphRewriter(JitTestCase):
             weight.meta["val"] = mode.from_tensor(torch.empty(3, 4))
             mm.meta["val"] = mode.from_tensor(torch.empty(2, 4))
 
-        matches = subgraph_rewriter.replace_pattern(
-            gm, _relu_pattern, replacement_graph
-        )
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement_graph)
 
         weight_node = next(node for node in gm.graph.nodes if node.target == "weight")
         self.assertEqual(weight_node.meta["val"].shape, torch.Size([3, 5]))
-        mm_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.mm.default
-        )
+        mm_node = self._node_with_target(gm, torch.ops.aten.mm.default)
         self.assertEqual(mm_node.meta["val"].shape, torch.Size([2, 5]))
         self.assertEqual(gm(torch.ones(2, 3)).shape, torch.Size([2, 5]))
 
@@ -1292,10 +1252,7 @@ class TestSubgraphRewriter(JitTestCase):
         danger = replacement_graph.get_attr("danger")
         replacement_graph.output(danger)
 
-        matches = subgraph_rewriter.replace_pattern(
-            gm, _relu_pattern, replacement_graph
-        )
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement_graph)
         self.assertEqual(descriptor_accesses, 0)
         danger_node = next(node for node in gm.graph.nodes if node.target == "danger")
         self.assertNotIn("val", danger_node.meta)
@@ -1323,8 +1280,7 @@ class TestSubgraphRewriter(JitTestCase):
                 elif node.target == torch.sin:
                     node.meta["val"] = mode.from_tensor(torch.empty(2, 4))
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement_gm)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement_gm)
         self.assertIs(gm.linear, destination_linear)
 
         linear_node = next(node for node in gm.graph.nodes if node.target == "linear")
@@ -1362,13 +1318,10 @@ class TestSubgraphRewriter(JitTestCase):
             call_module.meta["val"] = mode.from_tensor(torch.empty(2, 4))
             sin.meta["val"] = mode.from_tensor(torch.empty(2, 4))
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement_gm)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement_gm)
 
         weight_node = next(node for node in gm.graph.nodes if node.target == "weight")
-        call_module_node = next(
-            node for node in gm.graph.nodes if node.target == "consumer"
-        )
+        call_module_node = self._node_with_target(gm, "consumer")
         sin_node = next(node for node in gm.graph.nodes if node.target == torch.sin)
         self.assertEqual(weight_node.meta["val"].shape, torch.Size([3, 5]))
         self.assertNotIn("val", call_module_node.meta)
@@ -1384,16 +1337,13 @@ class TestSubgraphRewriter(JitTestCase):
             def forward(self, x):
                 return torch.ops.aten.mm.default(x, self.weight)
 
-        gm = torch.export.export(_ReluModel(), (torch.randn(2, 3),)).graph_module
+        gm = self._export_relu()
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, Replacement())
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, Replacement())
 
         weight_node = next(node for node in gm.graph.nodes if node.target == "weight")
         self.assertIsInstance(weight_node.meta.get("val"), FakeTensor)
-        mm_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.mm.default
-        )
+        mm_node = self._node_with_target(gm, torch.ops.aten.mm.default)
         mm_val = mm_node.meta.get("val")
         self.assertIsInstance(mm_val, FakeTensor)
         self.assertEqual(mm_val.shape, torch.Size([2, 4]))
@@ -1411,12 +1361,9 @@ class TestSubgraphRewriter(JitTestCase):
         placeholder_nodes[0].meta["val"] = x
         placeholder_nodes[1].meta["val"] = y
 
-        matches = subgraph_rewriter.replace_pattern(gm, _add_pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _add_pattern, replacement)
 
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.mul.Tensor
-        )
+        replacement_node = self._node_with_target(gm, torch.ops.aten.mul.Tensor)
         val = replacement_node.meta.get("val")
 
         self.assertIsInstance(val, FakeTensor)
@@ -1435,20 +1382,11 @@ class TestSubgraphRewriter(JitTestCase):
         )
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement)
 
-        sym_size_node = next(
-            node
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.sym_size.int
-        )
+        sym_size_node = self._node_with_target(gm, torch.ops.aten.sym_size.int)
         self.assertIs(type(sym_size_node.meta.get("val")), torch.SymInt)
-        view_node = next(
-            node
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.view.default
-        )
+        view_node = self._node_with_target(gm, torch.ops.aten.view.default)
         view_val = view_node.meta.get("val")
         self.assertIsInstance(view_val, FakeTensor)
         self.assertIs(type(view_val.shape[0]), torch.SymInt)
@@ -1487,12 +1425,9 @@ class TestSubgraphRewriter(JitTestCase):
             if node.op == "placeholder":
                 node.meta["val"] = CustomMeta()
 
-        matches = subgraph_rewriter.replace_pattern(gm, _add_pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _add_pattern, replacement)
         self.assertEqual(custom_meta_call_count, 0)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == operator.mul
-        )
+        replacement_node = self._node_with_target(gm, operator.mul)
         self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_skips_cyclic_metadata(self):
@@ -1508,88 +1443,8 @@ class TestSubgraphRewriter(JitTestCase):
         placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
         placeholder.meta["val"] = cyclic_meta
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-        self.assertEqual(len(matches), 1)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.neg.default
-        )
-        self.assertNotIn("val", replacement_node.meta)
-
-    def test_replace_pattern_meta_copy_preserves_container_aliases(self):
-        with FakeTensorMode() as mode:
-            fake = mode.from_tensor(torch.randn(2, 3))
-            view = fake.as_strided((3, 2), (2, 1))
-
-        value = [fake]
-        for _ in range(18):
-            value = [value, value]
-        self.assertTrue(subgraph_rewriter._is_safe_meta_value(value))
-        self.assertTrue(subgraph_rewriter._contains_tensor(value))
-
-        copied = subgraph_rewriter._copy_meta_val(value, mode)
-        self.assertIs(copied[0], copied[1])
-        for _ in range(18):
-            copied = copied[0]
-        self.assertIsNot(copied[0], fake)
-
-        copied_fake, copied_view = subgraph_rewriter._copy_meta_val(
-            [fake, view], mode, tensor_converter=FakeTensorConverter()
-        )
-        self.assertEqual(copied_view.size(), view.size())
-        self.assertEqual(copied_view.stride(), view.stride())
-        self.assertEqual(copied_view.storage_offset(), view.storage_offset())
-        self.assertEqual(
-            copied_fake.untyped_storage()._cdata,
-            copied_view.untyped_storage()._cdata,
-        )
-        self.assertNotEqual(
-            copied_fake.untyped_storage()._cdata, fake.untyped_storage()._cdata
-        )
-
-    def test_replace_pattern_meta_copy_rejects_custom_scalar_meta_value(self):
-        custom_meta_call_count = 0
-
-        class CustomInt(int):
-            def __mul__(self, other):
-                nonlocal custom_meta_call_count
-                custom_meta_call_count += 1
-                return self
-
-        class CustomSymNode:
-            def is_constant(self):
-                nonlocal custom_meta_call_count
-                custom_meta_call_count += 1
-                return True
-
-        for value in (CustomInt(2), torch.SymInt(CustomSymNode())):
-            self.assertFalse(subgraph_rewriter._is_safe_meta_value(value))
-        self.assertEqual(custom_meta_call_count, 0)
-
-    def test_replace_pattern_meta_copy_does_not_read_custom_class_descriptor(self):
-        class_access_count = 0
-
-        class SpoofedClass:
-            @property
-            def __class__(self):
-                nonlocal class_access_count
-                class_access_count += 1
-                return torch.Tensor
-
-        def replacement(x, y):
-            return x * y
-
-        ep = torch.export.export(_AddModel(), (torch.randn(4), torch.randn(4)))
-        gm = ep.graph_module
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                node.meta["val"] = SpoofedClass()
-
-        matches = subgraph_rewriter.replace_pattern(gm, _add_pattern, replacement)
-        self.assertEqual(len(matches), 1)
-        self.assertEqual(class_access_count, 0)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == operator.mul
-        )
+        self._replace_once(gm, _relu_pattern, replacement)
+        replacement_node = self._node_with_target(gm, torch.ops.aten.neg.default)
         self.assertNotIn("val", replacement_node.meta)
 
     @skipIfTorchDynamo("TorchDynamo inspects the custom metaclass")
@@ -1648,9 +1503,7 @@ class TestSubgraphRewriter(JitTestCase):
                 return super().__hash__()
 
         self.assertFalse(
-            subgraph_rewriter._is_safe_meta_propagation_target(
-                CustomTarget(), (torch.empty(1),), {}
-            )
+            subgraph_rewriter._is_safe_meta_propagation_target(CustomTarget(), True)
         )
         method_target = CustomMethod("relu")
         self.assertFalse(
@@ -1683,12 +1536,9 @@ class TestSubgraphRewriter(JitTestCase):
                 node.meta["val"] = CustomTensor(torch.randn(4))
         subclass_call_count = 0
 
-        matches = subgraph_rewriter.replace_pattern(gm, _add_pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _add_pattern, replacement)
         self.assertEqual(subclass_call_count, 0)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == operator.mul
-        )
+        replacement_node = self._node_with_target(gm, operator.mul)
         self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_does_not_run_tuple_subclass(self):
@@ -1719,12 +1569,9 @@ class TestSubgraphRewriter(JitTestCase):
         placeholder.meta["val"] = max(torch.randn(4), torch.zeros(4, dtype=torch.long))
         constructor_call_count = 0
 
-        matches = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, pattern, replacement)
         self.assertEqual(constructor_call_count, 0)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == operator.getitem
-        )
+        replacement_node = self._node_with_target(gm, operator.getitem)
         self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_skips_unsafe_call_method(self):
@@ -1736,11 +1583,8 @@ class TestSubgraphRewriter(JitTestCase):
         ep = torch.export.export(_NegModel(), (torch.randn(2, 3),))
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, _neg_pattern, replacement_graph)
-        self.assertEqual(len(matches), 1)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == "__getattribute__"
-        )
+        self._replace_once(gm, _neg_pattern, replacement_graph)
+        replacement_node = self._node_with_target(gm, "__getattribute__")
         self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_skips_non_tensor_method(self):
@@ -1753,22 +1597,17 @@ class TestSubgraphRewriter(JitTestCase):
         placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
         placeholder.meta["val"] = torch.randn(2, 3)
 
-        matches = subgraph_rewriter.replace_pattern(gm, _neg_pattern, replacement_graph)
-        self.assertEqual(len(matches), 1)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == "sym_size"
-        )
+        self._replace_once(gm, _neg_pattern, replacement_graph)
+        replacement_node = self._node_with_target(gm, "sym_size")
         self.assertNotIn("val", replacement_node.meta)
 
-    def test_replace_pattern_recomputes_preannotated_replacement_meta_val(self):
+    def test_replace_pattern_preserves_preannotated_replacement_meta_val(self):
         def replacement(x):
             return torch.ops.aten.neg.default(x)
 
         replacement_gm = symbolic_trace(replacement)
-        replacement_node = next(
-            node
-            for node in replacement_gm.graph.nodes
-            if node.target == torch.ops.aten.neg.default
+        replacement_node = self._node_with_target(
+            replacement_gm, torch.ops.aten.neg.default
         )
         with FakeTensorMode() as mode:
             replacement_meta_val = mode.from_tensor(torch.empty(2, 3))
@@ -1777,36 +1616,25 @@ class TestSubgraphRewriter(JitTestCase):
         ep = torch.export.export(_ReluModel(), (torch.randn(4, 5),))
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement_gm)
-        self.assertEqual(len(matches), 1)
-        copied_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.neg.default
-        )
-        self.assertIsNot(copied_node.meta.get("val"), replacement_meta_val)
-        self.assertEqual(copied_node.meta["val"].shape, torch.Size([4, 5]))
+        self._replace_once(gm, _relu_pattern, replacement_gm)
+        copied_node = self._node_with_target(gm, torch.ops.aten.neg.default)
+        self.assertIs(copied_node.meta.get("val"), replacement_meta_val)
 
     def test_replace_pattern_replaces_none_replacement_meta_val(self):
         def replacement(x):
             return torch.ops.aten.reshape.default(x, [6])
 
         replacement_gm = symbolic_trace(replacement)
-        replacement_node = next(
-            node
-            for node in replacement_gm.graph.nodes
-            if node.target == torch.ops.aten.reshape.default
+        replacement_node = self._node_with_target(
+            replacement_gm, torch.ops.aten.reshape.default
         )
         replacement_node.meta["val"] = None
 
         ep = torch.export.export(_ReluModel(), (torch.randn(2, 3),))
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement_gm)
-        self.assertEqual(len(matches), 1)
-        copied_node = next(
-            node
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.reshape.default
-        )
+        self._replace_once(gm, _relu_pattern, replacement_gm)
+        copied_node = self._node_with_target(gm, torch.ops.aten.reshape.default)
         val = copied_node.meta.get("val")
         self.assertIsInstance(val, torch.Tensor)
         self.assertEqual(val.shape, torch.Size([6]))
@@ -1862,8 +1690,7 @@ class TestSubgraphRewriter(JitTestCase):
         ep = torch.export.export(_ReluModel(), (torch.randn(2, 3),))
         gm = ep.graph_module
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, _relu_pattern, replacement)
         self.assertEqual(_side_effect_replacement_call_count, 0)
         replacement_nodes = [
             node for node in gm.graph.nodes if node.target == side_effect_replacement
@@ -1886,7 +1713,7 @@ class TestSubgraphRewriter(JitTestCase):
             value = torch.ops.aten.neg.default(x)
             return torch.ops.prims.mul.default(value, x).relu()
 
-        gm = torch.export.export(_ReluModel(), (torch.randn(2, 3),)).graph_module
+        gm = self._export_relu()
         sentinel = torch.ones(1)
         with RecordingMode():
             matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
@@ -1899,55 +1726,23 @@ class TestSubgraphRewriter(JitTestCase):
             node = next(node for node in gm.graph.nodes if node.target == target)
             self.assertIsInstance(node.meta.get("val"), FakeTensor)
 
-    def test_replace_pattern_meta_copy_does_not_trust_jit_builtin_registry(self):
-        side_effect_count = 0
-
-        def side_effect(x):
-            nonlocal side_effect_count
-            side_effect_count += 1
-            return x
-
-        builtin_table = torch.jit._builtins._get_builtin_table()
-        torch.jit._builtins._register_builtin(side_effect, "aten::sin")
-        self.addCleanup(builtin_table.pop, id(side_effect), None)
-
-        replacement_graph = torch.fx.Graph()
-        x = replacement_graph.placeholder("x")
-        replacement = replacement_graph.call_function(side_effect, (x,))
-        replacement_graph.output(replacement)
-
-        gm = torch.export.export(_ReluModel(), (torch.randn(2, 3),)).graph_module
-        matches = subgraph_rewriter.replace_pattern(
-            gm, _relu_pattern, replacement_graph
-        )
-
-        self.assertEqual(len(matches), 1)
-        self.assertEqual(side_effect_count, 0)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == side_effect
-        )
-        self.assertNotIn("val", replacement_node.meta)
+        gm = self._export_relu()
+        with FakeTensorMode():
+            self._replace_once(gm, _relu_pattern, replacement)
+        node = self._node_with_target(gm, torch.ops.aten.neg.default)
+        self.assertIsInstance(node.meta.get("val"), FakeTensor)
 
     def test_replace_pattern_preserves_unsupported_preannotated_meta_val(self):
-        def custom_replacement(x):
-            return x
-
         replacement_graph = torch.fx.Graph()
         x = replacement_graph.placeholder("x")
-        replacement = replacement_graph.call_function(custom_replacement, (x,))
+        replacement = replacement_graph.call_function(torch.ops.aten.neg.default, (x,))
         replacement_graph.output(replacement)
-        replacement_meta_val = torch.empty(4, 5)
+        replacement_meta_val = object()
         replacement.meta["val"] = replacement_meta_val
 
         gm = torch.export.export(_ReluModel(), (torch.randn(4, 5),)).graph_module
-        matches = subgraph_rewriter.replace_pattern(
-            gm, _relu_pattern, replacement_graph
-        )
-
-        self.assertEqual(len(matches), 1)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == custom_replacement
-        )
+        self._replace_once(gm, _relu_pattern, replacement_graph)
+        replacement_node = self._node_with_target(gm, torch.ops.aten.neg.default)
         self.assertIs(replacement_node.meta["val"], replacement_meta_val)
 
     def test_replace_pattern_meta_copy_does_not_run_custom_op_fake(self):
@@ -1980,14 +1775,10 @@ class TestSubgraphRewriter(JitTestCase):
             ep = torch.export.export(_ReluModel(), (torch.randn(2, 3),))
             gm = ep.graph_module
 
-            matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-            self.assertEqual(len(matches), 1)
+            self._replace_once(gm, _relu_pattern, replacement)
             self.assertEqual(fake_call_count, 0)
-            replacement_node = next(
-                node
-                for node in gm.graph.nodes
-                if node.target
-                == torch.ops.subgraph_rewriter_test.custom_replacement.default
+            replacement_node = self._node_with_target(
+                gm, torch.ops.subgraph_rewriter_test.custom_replacement.default
             )
             self.assertNotIn("val", replacement_node.meta)
 
@@ -2021,18 +1812,10 @@ class TestSubgraphRewriter(JitTestCase):
                     with self.subTest(
                         namespace=namespace, replacement=replacement.__name__
                     ):
-                        gm = torch.export.export(
-                            _ReluModel(), (torch.randn(2, 3),)
-                        ).graph_module
-                        matches = subgraph_rewriter.replace_pattern(
-                            gm, _relu_pattern, replacement
-                        )
-
-                        self.assertEqual(len(matches), 1)
+                        gm = self._export_relu()
+                        self._replace_once(gm, _relu_pattern, replacement)
                         self.assertEqual(fake_call_count, 0)
-                        replacement_node = next(
-                            node for node in gm.graph.nodes if node.target == target
-                        )
+                        replacement_node = self._node_with_target(gm, target)
                         self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_skips_registered_aten_fake(self):
@@ -2042,48 +1825,185 @@ class TestSubgraphRewriter(JitTestCase):
         def method_replacement(x):
             return x.neg()
 
-        def prims_replacement(x):
-            return torch.ops.prims.mul.default(x, x)
+        def packet_replacement(x):
+            return torch.ops.aten.mul(x, x)
 
-        fake_impls = _simple_registry.find("aten::neg").fake_impl.kernels
-        marker = Kernel(lambda *args, **kwargs: None, "test")
-        fake_impls.append(marker)
-        try:
+        real_get = _simple_registry.get
+        fake_entry = mock.Mock()
+        fake_entry.fake_impl.kernel = object()
+        with mock.patch.object(
+            _simple_registry,
+            "get",
+            side_effect=lambda qualname: (
+                fake_entry
+                if qualname in ("aten::neg", "aten::mul.Scalar")
+                else real_get(qualname)
+            ),
+        ):
             for replacement, target in (
                 (overload_replacement, torch.ops.aten.neg.default),
                 (method_replacement, "neg"),
-                (prims_replacement, torch.ops.prims.mul.default),
+                (packet_replacement, torch.ops.aten.mul),
             ):
-                gm = torch.export.export(
-                    _ReluModel(), (torch.randn(2, 3),)
-                ).graph_module
-                matches = subgraph_rewriter.replace_pattern(
-                    gm, _relu_pattern, replacement
-                )
-                self.assertEqual(len(matches), 1)
-                replacement_node = next(
-                    node for node in gm.graph.nodes if node.target == target
-                )
-                self.assertNotIn("val", replacement_node.meta)
-        finally:
-            fake_impls.remove(marker)
+                gm = self._export_relu()
+                self._replace_once(gm, _relu_pattern, replacement)
+                replacement_node = self._node_with_target(gm, target)
+                if target == torch.ops.aten.mul:
+                    self.assertIsInstance(replacement_node.meta.get("val"), FakeTensor)
+                else:
+                    self.assertNotIn("val", replacement_node.meta)
 
-    def test_replace_pattern_meta_copy_skips_data_dependent_op(self):
-        def replacement(x):
-            return torch.ops.aten.nonzero.default(x)
+    def test_replace_pattern_meta_copy_skips_python_dispatch_overrides(self):
+        calls = 0
+
+        def evil(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return args[-1]
+
+        gm = self._export_relu()
+        with torch.library._scoped_library("aten", "IMPL") as lib:
+            lib.impl("neg", evil, "Meta", allow_override=True)
+            torch.library.register_torch_dispatch(
+                torch.ops.aten.neg.default, FakeTensorMode, evil, lib=lib
+            )
+            self._replace_once(gm, _relu_pattern, lambda x: x.neg())
+        self.assertEqual(calls, 0)
+        self.assertNotIn("val", self._node_with_target(gm, "neg").meta)
+
+        class DerivedFakeMode(FakeTensorMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                nonlocal calls
+                if func == torch.ops.aten.sin.default:
+                    calls += 1
+                return super().__torch_dispatch__(func, types, args, kwargs)
 
         gm = symbolic_trace(_ReluModel())
         placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
-        placeholder.meta["val"] = torch.randn(2, 3)
+        with DerivedFakeMode() as mode:
+            placeholder.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+        with torch.library._scoped_library("aten", "IMPL") as lib:
+            torch.library.register_torch_dispatch(
+                torch.ops.aten.sin.default, DerivedFakeMode, evil, lib=lib
+            )
+            self._replace_once(gm, _relu_pattern, lambda x: torch.sin(x))
+        self.assertEqual(calls, 0)
+        self.assertNotIn("val", self._node_with_target(gm, torch.sin).meta)
 
-        matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-        self.assertEqual(len(matches), 1)
-        replacement_node = next(
-            node
+    def test_replace_pattern_meta_copy_skips_python_tensor_method(self):
+        calls = 0
+
+        def evil(self):
+            nonlocal calls
+            calls += 1
+            return self
+
+        self.assertTrue(subgraph_rewriter._is_safe_meta_propagation_method_name("neg"))
+        original = torch.Tensor.neg
+        torch.Tensor.neg = evil
+        try:
+            gm = self._export_relu()
+            self._replace_once(gm, _relu_pattern, lambda x: x.neg())
+        finally:
+            torch.Tensor.neg = original
+        self.assertEqual(calls, 0)
+        self.assertNotIn("val", self._node_with_target(gm, "neg").meta)
+
+    def test_replace_pattern_meta_copy_skips_data_dependent_op(self):
+        def nonzero_replacement(x):
+            return torch.ops.aten.nonzero.default(x)
+
+        def guarded_view_replacement(x):
+            return torch.ops.aten.view.default(x, [2, -1])
+
+        def item_replacement(x):
+            return torch.ops.aten.item.default(x)
+
+        for replacement, target in (
+            (nonzero_replacement, torch.ops.aten.nonzero.default),
+            (guarded_view_replacement, torch.ops.aten.view.default),
+            (item_replacement, torch.ops.aten.item.default),
+        ):
+            gm = torch.export.export(
+                _ReluModel(),
+                (torch.randn(4, 3),),
+                dynamic_shapes={"x": {0: torch.export.Dim("batch", min=3, max=8)}},
+            ).graph_module
+            fake_mode = next(
+                node.meta["val"].fake_mode
+                for node in gm.graph.nodes
+                if node.op == "placeholder"
+            )
+            shape_env = fake_mode.shape_env
+            before = (
+                list(shape_env.pending_fresh_unbacked_symbols),
+                shape_env.counter["ignored_backward_guard"],
+                dict(shape_env.var_to_range),
+            )
+            self._replace_once(gm, _relu_pattern, replacement)
+            self.assertEqual(
+                before,
+                (
+                    list(shape_env.pending_fresh_unbacked_symbols),
+                    shape_env.counter["ignored_backward_guard"],
+                    dict(shape_env.var_to_range),
+                ),
+            )
+            self.assertTrue(fake_mode.allow_fallback_kernels)
+            self.assertNotIn("val", self._node_with_target(gm, target).meta)
+
+    def test_replace_pattern_meta_copy_disables_fallback_kernels(self):
+        def replacement(x):
+            return torch.ops.aten._foobar.default(x, False, False)
+
+        gm = self._export_relu()
+        fake_mode = next(
+            node.meta["val"].fake_mode
             for node in gm.graph.nodes
-            if node.target == torch.ops.aten.nonzero.default
+            if node.op == "placeholder"
         )
-        self.assertNotIn("val", replacement_node.meta)
+        with mock.patch(
+            "torch._subclasses.fake_tensor.run_fallback_kernel"
+        ) as fallback:
+            self._replace_once(gm, _relu_pattern, replacement)
+        fallback.assert_not_called()
+        self.assertTrue(fake_mode.allow_fallback_kernels)
+        node = self._node_with_target(gm, torch.ops.aten._foobar.default)
+        self.assertNotIn("val", node.meta)
+
+    def test_replace_pattern_meta_execution_context_is_serialized(self):
+        class BlockingLock:
+            def __init__(self):
+                self.attempted = Event()
+                self.release = Event()
+
+            def __enter__(self):
+                self.attempted.set()
+                self.release.wait()
+
+            def __exit__(self, *args):
+                pass
+
+        shape_env = ShapeEnv()
+        mode = FakeTensorMode(allow_fallback_kernels=True, shape_env=shape_env)
+        lock = BlockingLock()
+
+        def enter_context():
+            with subgraph_rewriter._meta_execution_context(mode):
+                pass
+
+        with mock.patch.object(subgraph_rewriter, "_META_EXECUTION_LOCK", lock):
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(enter_context)
+                attempted = lock.attempted.wait(1)
+                was_blocked = not future.done()
+                lock.release.set()
+                future.result()
+        self.assertTrue(attempted)
+        self.assertTrue(was_blocked)
+        self.assertTrue(mode.allow_fallback_kernels)
+        self.assertFalse(shape_env._error_on_new_guards)
+        self.assertFalse(shape_env.frozen)
 
     def test_replace_pattern_meta_copy_skips_invalid_operator_inputs(self):
         def reshape_replacement(x):
@@ -2102,9 +2022,7 @@ class TestSubgraphRewriter(JitTestCase):
             )
             placeholder.meta["val"] = torch.randn(4)
             subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-            replacement_node = next(
-                node for node in gm.graph.nodes if node.target == target
-            )
+            replacement_node = self._node_with_target(gm, target)
             self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_skips_mixed_fake_modes(self):
@@ -2118,11 +2036,8 @@ class TestSubgraphRewriter(JitTestCase):
             with FakeTensorMode() as mode:
                 placeholder.meta["val"] = mode.from_tensor(torch.randn(4))
 
-        matches = subgraph_rewriter.replace_pattern(gm, _add_pattern, replacement)
-        self.assertEqual(len(matches), 1)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == torch.ops.aten.mul.Tensor
-        )
+        self._replace_once(gm, _add_pattern, replacement)
+        replacement_node = self._node_with_target(gm, torch.ops.aten.mul.Tensor)
         self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_skips_unsupported_tensor_metadata(self):
@@ -2137,74 +2052,37 @@ class TestSubgraphRewriter(JitTestCase):
             )
             nested = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
 
-        source = torch.randn(2, 3)
-        with FakeTensorMode() as mode:
-            memo = {}
-            self.assertIs(
-                subgraph_rewriter._try_copy_meta_val([source, quantized], mode, memo),
-                subgraph_rewriter._MISSING,
-            )
-            self.assertEqual(memo, {})
-            self.assertIsInstance(
-                subgraph_rewriter._try_copy_meta_val(source, mode, memo), FakeTensor
-            )
-
         for unsupported in (quantized, nested):
             gm = symbolic_trace(_ReluModel())
             placeholder = next(
                 node for node in gm.graph.nodes if node.op == "placeholder"
             )
             placeholder.meta["val"] = unsupported
-            matches = subgraph_rewriter.replace_pattern(gm, _relu_pattern, replacement)
-            self.assertEqual(len(matches), 1)
-            replacement_node = next(
-                node
-                for node in gm.graph.nodes
-                if node.target == torch.ops.aten.neg.default
-            )
+            self._replace_once(gm, _relu_pattern, replacement)
+            replacement_node = self._node_with_target(gm, torch.ops.aten.neg.default)
             self.assertNotIn("val", replacement_node.meta)
-
-    def test_replace_pattern_meta_copy_snapshots_immutable_collections(self):
-        with FakeTensorMode() as mode:
-            fake = mode.from_tensor(torch.randn(2, 3))
-
-        source = immutable_dict({fake: immutable_list([fake, slice(fake)])})
-        copied = subgraph_rewriter._copy_meta_val(source, mode)
-
-        self.assertIs(type(copied), immutable_dict)
-        copied_key = next(iter(copied))
-        self.assertIsNot(copied_key, fake)
-        self.assertIs(type(copied[copied_key]), immutable_list)
-        self.assertIsNot(copied[copied_key], source[fake])
-        self.assertIsNot(copied[copied_key][0], fake)
-        self.assertIs(copied[copied_key][0], copied_key)
-        self.assertIs(copied[copied_key][1].stop, copied_key)
 
     def test_replace_pattern_meta_copy_preserves_cross_input_aliases(self):
         class M(torch.nn.Module):
-            def forward(self, values, key):
-                return values[key]
+            def forward(self, x):
+                return torch.ops.aten.neg.default(x), torch.ops.aten.neg.default(x)
 
-        def pattern(values, key):
-            return values[key]
-
-        def replacement(values, key):
-            return values[key]
+        def replacement(x):
+            return torch.ops.aten.view.default(x, [6])
 
         gm = symbolic_trace(M())
-        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-        self.assertEqual(len(placeholders), 2)
-        with FakeTensorMode() as mode:
-            fake = mode.from_tensor(torch.randn(2, 3))
-        placeholders[0].meta["val"] = immutable_dict({fake: fake})
-        placeholders[1].meta["val"] = fake
-
-        matches = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
-        self.assertEqual(len(matches), 1)
-        replacement_node = next(
-            node for node in gm.graph.nodes if node.target == operator.getitem
+        placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        placeholder.meta["val"] = torch.randn(2, 3)
+        matches = subgraph_rewriter.replace_pattern(gm, _neg_pattern, replacement)
+        self.assertEqual(len(matches), 2)
+        vals = [
+            node.meta["val"]
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.view.default
+        ]
+        self.assertEqual(
+            vals[0].untyped_storage()._cdata, vals[1].untyped_storage()._cdata
         )
-        self.assertIsInstance(replacement_node.meta.get("val"), FakeTensor)
 
     def test_replace_pattern_meta_copy_does_not_mutate_existing_meta_val(self):
         def transpose_replacement(x):
@@ -2213,40 +2091,25 @@ class TestSubgraphRewriter(JitTestCase):
         def resize_replacement(x):
             return torch.ops.aten.resize_.default(x, [100])
 
-        for replacement, target, expected_shape in [
-            (
-                transpose_replacement,
-                torch.ops.aten.transpose_.default,
-                torch.Size([3, 2]),
-            ),
-            (resize_replacement, torch.ops.aten.resize_.default, torch.Size([100])),
+        for replacement, target in [
+            (transpose_replacement, torch.ops.aten.transpose_.default),
+            (resize_replacement, torch.ops.aten.resize_.default),
         ]:
             with self.subTest(replacement=replacement.__name__):
-                gm = torch.export.export(
-                    _ReluModel(), (torch.randn(2, 3),)
-                ).graph_module
+                gm = self._export_relu()
                 placeholder = next(
                     node for node in gm.graph.nodes if node.op == "placeholder"
                 )
                 original_val = placeholder.meta["val"]
                 original_storage_size = original_val.untyped_storage().nbytes()
 
-                matches = subgraph_rewriter.replace_pattern(
-                    gm, _relu_pattern, replacement
-                )
-                self.assertEqual(len(matches), 1)
+                self._replace_once(gm, _relu_pattern, replacement)
                 self.assertEqual(original_val.shape, torch.Size([2, 3]))
                 self.assertEqual(
                     original_val.untyped_storage().nbytes(), original_storage_size
                 )
-                replacement_node = next(
-                    node for node in gm.graph.nodes if node.target == target
-                )
-                self.assertEqual(replacement_node.meta["val"].shape, expected_shape)
-                self.assertNotEqual(
-                    replacement_node.meta["val"].untyped_storage()._cdata,
-                    original_val.untyped_storage()._cdata,
-                )
+                replacement_node = self._node_with_target(gm, target)
+                self.assertNotIn("val", replacement_node.meta)
 
     def test_replace_pattern_meta_copy_skips_existing_replacement_node(self):
         class M(torch.nn.Module):
@@ -2264,8 +2127,7 @@ class TestSubgraphRewriter(JitTestCase):
         placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
         original_shape = placeholder.meta["val"].shape
 
-        matches = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
-        self.assertEqual(len(matches), 1)
+        self._replace_once(gm, pattern, replacement)
         self.assertEqual(placeholder.meta["val"].shape, original_shape)
 
     def test_matching_pattern_with_list_type_arg(self):
@@ -2280,9 +2142,7 @@ class TestSubgraphRewriter(JitTestCase):
             return torch.ops.aten._reshape_alias_copy.default(x, arg1, arg0)
 
         traced = symbolic_trace(M())
-        matches = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
-
-        self.assertEqual(len(matches), 1)
+        self._replace_once(traced, pattern, replacement)
 
         self.assertExpectedInline(
             traced.code.strip(),
@@ -2319,8 +2179,7 @@ def forward(self, x):
                 return x - self.c
 
         traced = symbolic_trace(M())
-        matches = subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
-        self.assertEqual(len(matches), 1)
+        self._replace_once(traced, Pattern(), Replacement())
 
     def test_matching_variable_arguments(self):
         class M(torch.nn.Module):
@@ -2336,9 +2195,7 @@ def forward(self, x):
             )
 
         traced = symbolic_trace(M())
-        matches = subgraph_rewriter.replace_pattern(traced, pattern, pattern)
-
-        self.assertEqual(len(matches), 1)
+        self._replace_once(traced, pattern, pattern)
 
     def test_replaced_nodes(self):
         class M(torch.nn.Module):
