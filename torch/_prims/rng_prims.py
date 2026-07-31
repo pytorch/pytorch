@@ -493,11 +493,13 @@ def register_run_dtensor_rng_op():
     @run_dtensor_rng_op.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(start_offset_incr, end_offset_incr, op, *args, **kwargs):
         device = get_device(args, kwargs)
-        if device not in ("cuda", "xpu"):
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is None or device != accelerator.type:
             raise RuntimeError(
-                f"run_dtensor_rng_op only supports CUDA and XPU devices, got {device}. "
-                f"This operator is designed for distributed random operations on "
-                f"counter-based RNG accelerators."
+                f"run_dtensor_rng_op only supports the current accelerator "
+                f"({accelerator.type if accelerator is not None else 'none'}), "
+                f"got {device}. This operator is designed for distributed random "
+                f"operations on counter-based RNG accelerators."
             )
         return _impl_device(start_offset_incr, end_offset_incr, op, *args, **kwargs)
 
