@@ -1914,6 +1914,14 @@ op_db: list[OpInfo] = [
             # nvmath on CUDA so coverage is meaningful (CPU still runs the SVD
             # kernel, hence the skip is scoped to CUDA only).
             DecorateInfo(skipIfNoNvmath, device_type="cuda"),
+            # The gradient goes through SVD/eigh, whose MPS results differ
+            # slightly between contiguous and non-contiguous inputs.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=3e-4, rtol=2e-3)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
         ],
     ),
     OpInfo(

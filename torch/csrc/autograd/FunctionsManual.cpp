@@ -4535,7 +4535,7 @@ Tensor linalg_polar_backward(
     auto Y = at::linalg_solve(H, grad_U.mH()).mH();
     grad_A_from_U = Y;
     auto extra = -at::matmul(U.mH(), Y);
-    grad_H_eff = grad_H_eff.defined() ? grad_H_eff + extra : extra;
+    grad_H_eff = grad_H_eff.defined() ? grad_H_eff + extra : std::move(extra);
   }
   Tensor grad_A;
   if (grad_H_eff.defined()) {
@@ -4544,7 +4544,8 @@ Tensor linalg_polar_backward(
     grad_A = at::matmul(A, S_bar + S_bar.mH());
   }
   if (grad_A_from_U.defined()) {
-    grad_A = grad_A.defined() ? grad_A + grad_A_from_U : grad_A_from_U;
+    grad_A =
+        grad_A.defined() ? grad_A + grad_A_from_U : std::move(grad_A_from_U);
   }
   return grad_A;
 }
