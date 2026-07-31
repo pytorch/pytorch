@@ -10,9 +10,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._logging import LazyString, trace_structured
-
-from .epilogue_nodes import (
+from torch._inductor.kernel.gemm_epilogue import (
     NormalizedGetItem,
     NormalizedNVFP4Pack,
     NormalizedPrepareSoftmax,
@@ -23,6 +21,7 @@ from .epilogue_nodes import (
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
+from torch._logging import LazyString, trace_structured
 
 
 if TYPE_CHECKING:
