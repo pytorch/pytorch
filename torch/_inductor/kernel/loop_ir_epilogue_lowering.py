@@ -12,6 +12,7 @@ import torch
 from torch._inductor.ir import ComputedBuffer
 from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
 from torch._inductor.ops_handler import DefaultHandler
+from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 
@@ -28,6 +29,34 @@ class GemmEpilogueIRExpression:
     op: str
     args: tuple[Any, ...]
     kwargs: tuple[tuple[str, Any], ...] = ()
+    loads: frozenset[str] = frozenset()
+    reductions: tuple["GemmEpilogueIRReduction", ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmEpilogueIRReduction:
+    reduction_type: str
+    source: GemmEpilogueIRExpression
+    result: int | None = None
+    source_type: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmEpilogueIRRegion:
+    output_name: str
+    reductions: tuple[GemmEpilogueIRReduction, ...]
+    expression: GemmEpilogueIRExpression
+
+    @property
+    def algorithm(self) -> str:
+        reduction_types = OrderedSet(
+            reduction.reduction_type for reduction in self.reductions
+        )
+        if "online_softmax_reduce" in reduction_types:
+            return "online_softmax"
+        if "welford_reduce" in reduction_types:
+            return "welford"
+        return "generic"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -65,6 +94,27 @@ class GemmEpilogueIRFinalizer:
     kind: str
 
 
+def _expression_values(value: Any):
+    if isinstance(value, GemmEpilogueIRExpression):
+        yield value
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            yield from _expression_values(item)
+
+
+def _unique_reductions(
+    values: Sequence[GemmEpilogueIRExpression],
+) -> tuple[GemmEpilogueIRReduction, ...]:
+    reductions = []
+    seen: OrderedSet[int] = OrderedSet()
+    for value in values:
+        for reduction in value.reductions:
+            if id(reduction) not in seen:
+                seen.add(id(reduction))
+                reductions.append(reduction)
+    return tuple(reductions)
+
+
 class _GemmEpilogueIRHandler(DefaultHandler):
     def __init__(self) -> None:
         self.stores: dict[str, GemmEpilogueIRStore] = {}
@@ -72,15 +122,29 @@ class _GemmEpilogueIRHandler(DefaultHandler):
     def _default(
         self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> GemmEpilogueIRExpression:
-        return GemmEpilogueIRExpression(name, args, tuple(sorted(kwargs.items())))
+        values = tuple(_expression_values((*args, *tuple(kwargs.values()))))
+        return GemmEpilogueIRExpression(
+            name,
+            args,
+            tuple(sorted(kwargs.items())),
+            frozenset().union(*(value.loads for value in values)),
+            _unique_reductions(values),
+        )
 
     def indirect_indexing(self, x, size, check=True, wrap_neg=True):
         return sympy.Symbol(f"indirect_{len(self.stores)}", integer=True)
 
     def load(self, name: str, index: sympy.Expr) -> GemmEpilogueIRExpression:
         stored = self.stores.get(name)
+        if stored is None:
+            return GemmEpilogueIRExpression(
+                "load", (name, index, None), loads=frozenset((name,))
+            )
         return GemmEpilogueIRExpression(
-            "load", (name, index, stored.value if stored is not None else None)
+            "load",
+            (name, index, stored.value),
+            loads=frozenset((name,)) | stored.value.loads,
+            reductions=stored.value.reductions,
         )
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -88,10 +152,26 @@ class _GemmEpilogueIRHandler(DefaultHandler):
         if reduction_type in ("online_softmax_reduce", "welford_reduce"):
             count = 2 if reduction_type == "online_softmax_reduce" else 3
             return tuple(
-                GemmEpilogueIRExpression("reduction", (*args, index))
+                GemmEpilogueIRExpression(
+                    "reduction",
+                    (*args, index),
+                    loads=value.loads,
+                    reductions=(
+                        *value.reductions,
+                        GemmEpilogueIRReduction(reduction_type, value, index),
+                    ),
+                )
                 for index in range(count)
             )
-        return GemmEpilogueIRExpression("reduction", args)
+        return GemmEpilogueIRExpression(
+            "reduction",
+            args,
+            loads=value.loads,
+            reductions=(
+                *value.reductions,
+                GemmEpilogueIRReduction(reduction_type, value),
+            ),
+        )
 
     def store(
         self,
@@ -144,7 +224,7 @@ class GemmEpilogueIRAnalysis:
         store = self.store(name)
         if store is None:
             return None
-        transitive_inputs = _loaded_names(store.value)
+        transitive_inputs = store.value.loads or _loaded_names(store.value)
         return GemmEpilogueIROutputRole(
             transitive_inputs,
             transitive_inputs & self.reduction_stores,
@@ -171,6 +251,29 @@ class GemmEpilogueIRAnalysis:
             output_name, group, axis, reduction_type, source_type
         )
 
+    def reduction_region(
+        self,
+        output_name: str,
+        source_name: str,
+        group: int,
+        source_dtype: torch.dtype,
+    ) -> GemmEpilogueIRRegion | None:
+        store = self.store(output_name)
+        if store is None:
+            return None
+        reductions = store.value.reductions or _synthetic_reductions_ir(
+            store.value, store.index, source_name, group, source_dtype
+        )
+        if not reductions:
+            return None
+        if any(
+            (reduction.source.loads or _loaded_names(reduction.source))
+            != frozenset((source_name,))
+            for reduction in reductions
+        ):
+            return None
+        return GemmEpilogueIRRegion(output_name, reductions, store.value)
+
     def reduction_finalizer(
         self,
         output_name: str,
@@ -191,6 +294,11 @@ class GemmEpilogueIRAnalysis:
             kind = "mean"
         elif is_absmax_scale_finalizer_ir(store, source_name):
             kind = "absmax_scale"
+        elif (
+            store.value.loads == frozenset((source_name,))
+            and not store.value.reductions
+        ):
+            kind = "generic"
         else:
             return None
         return GemmEpilogueIRFinalizer(output_name, source_name, kind)
@@ -200,7 +308,7 @@ class GemmEpilogueIRAnalysis:
         return frozenset(
             name
             for name, store in self.stores.items()
-            if _contains_reduction(store.value)
+            if store.value.reductions or _contains_reduction(store.value)
         )
 
 
@@ -230,6 +338,38 @@ def _walk(expr: Any):
     yield expr
     for arg in expr.args:
         yield from _walk(arg)
+
+
+def grouped_reduction_axis_ir(
+    reduction: GemmEpilogueIRReduction, group: int, n: int
+) -> int | None:
+    """Infer grouped M/N geometry from the reduction source load strides."""
+    indices = [
+        expr.args[1]
+        for expr in _walk(reduction.source)
+        if expr.op == "load" and len(expr.args) > 1
+    ]
+    unique_indices = []
+    for index in indices:
+        if not any(sympy.simplify(index - other) == 0 for other in unique_indices):
+            unique_indices.append(index)
+    if len(unique_indices) != group:
+        return None
+
+    def is_progression(step: int) -> bool:
+        return any(
+            all(
+                any(
+                    sympy.simplify(index - (base + offset * step)) == 0
+                    for index in unique_indices
+                )
+                for offset in range(group)
+            )
+            for base in unique_indices
+        )
+
+    axes = [axis for axis, step in ((1, 1), (0, n)) if is_progression(step)]
+    return axes[0] if len(axes) == 1 else None
 
 
 def operation_names_ir(store: GemmEpilogueIRStore) -> frozenset[str]:
@@ -346,6 +486,34 @@ def grouped_reduction_ir(
         if len(terms) == group and len(frozenset(transforms)) == 1 and transforms[0]:
             return reduction_type, transforms[0]
     return None
+
+
+def _synthetic_reductions_ir(
+    expr: Any,
+    index: sympy.Expr,
+    source_name: str,
+    group: int,
+    source_dtype: torch.dtype,
+) -> tuple[GemmEpilogueIRReduction, ...]:
+    if not isinstance(expr, GemmEpilogueIRExpression):
+        return ()
+    classified = grouped_reduction_ir(
+        GemmEpilogueIRStore(index, expr), source_name, group, source_dtype
+    )
+    if classified is not None:
+        reduction_type, source_type = classified
+        return (GemmEpilogueIRReduction(reduction_type, expr, source_type=source_type),)
+    reductions = []
+    seen: OrderedSet[int] = OrderedSet()
+    for arg in expr.args:
+        for value in _expression_values(arg):
+            for reduction in _synthetic_reductions_ir(
+                value, index, source_name, group, source_dtype
+            ):
+                if id(reduction.source) not in seen:
+                    seen.add(id(reduction.source))
+                    reductions.append(reduction)
+    return tuple(reductions)
 
 
 def is_direct_bool_gt_zero_ir(store: GemmEpilogueIRStore, source_name: str) -> bool:
