@@ -421,14 +421,14 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
-    if (is_meta_) {
+    TORCH_INTERNAL_ASSERT(op.device.has_value());
+    if (is_meta_ && op.device->is_meta()) {
       if (auto device = device_from_tensor_backend(op.tensor_base())) {
         op.device = *device;
       }
     }
 
     // Acquires the first non-CPU device (if any) as the common device
-    TORCH_INTERNAL_ASSERT(op.device.has_value());
     if (common_device == kCPU && !op.device->is_cpu()) {
       common_device = *op.device;
     }
@@ -1525,13 +1525,14 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
-  auto has_storage = true;
-  for (auto& op : operands_) {
-    has_storage &= op.tensor_base().has_storage();
+  bool privateuse1_without_storage = false;
+  if (common_device_.type() == DeviceType::PrivateUse1) {
+    bool has_storage = true;
+    for (auto& op : operands_) {
+      has_storage &= op.tensor_base().has_storage();
+    }
+    privateuse1_without_storage = !has_storage;
   }
-  auto privateuse1_without_storage =
-     common_device_.type() == DeviceType::PrivateUse1 &&
-     !has_storage;
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
@@ -1558,7 +1559,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // So index translations in reduction can access
   // a valid value for the offset
   int64_t ndim_offsets = (ndim() ? ndim() : 1);
-  view_offsets_ = DimVector(ndim_offsets, 0);
+  view_offsets_.assign(ndim_offsets, 0);
 }
 
 // This is the structured kernels' implementation of set_output.  It is

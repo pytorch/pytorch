@@ -34,6 +34,16 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyCPU,
     OpDTypes,
+    skipOps,
+    xfail,
+    skip,
+)
+from torch.testing._internal.common_dtype import (
+    complex_types,
+    integral_types_and,
+    complex_types_and,
+    all_types_and_complex_and,
+    integral_types,
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs, op_db, foreach_unary_op_db, foreach_binary_op_db,
@@ -665,7 +675,6 @@ meta_function_expected_failures = {
     torch.Tensor.to_sparse : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, f16, i8, f32},
     torch.cov : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32, f16},
     torch.functional.istft : {f64, c64, c128, f32},
@@ -1014,8 +1023,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             return (None, None, None)
 
         candidate_ols = []
-        for candidate_ol_name in olp.overloads():
-            candidate_ol = getattr(olp, candidate_ol_name)
+        for candidate_ol in olp.op_overloads():
             if any(arg.is_out for arg in candidate_ol._schema.arguments):
                 candidate_ols.append(candidate_ol)
 
@@ -1161,6 +1169,33 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps((
+        skip('sparse.sampled_addmm'),
+        skip('sparse.mm', variant_name='reduce'),
+        skip('to'),
+        xfail('_foreach_neg', dtypes=(b8,)),
+        xfail('_foreach_ceil', dtypes=complex_types_and(b8)),
+        xfail('_foreach_erf', dtypes=complex_types()),
+        xfail('_foreach_erfc', dtypes=complex_types()),
+        xfail('_foreach_floor', dtypes=complex_types_and(b8)),
+        xfail('_foreach_round', dtypes=complex_types_and(b8)),
+        xfail('_foreach_frac', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_trunc', dtypes=complex_types_and(b8)),
+        xfail('_foreach_sign', dtypes=complex_types()),
+        xfail('_foreach_lgamma', dtypes=complex_types()),
+        xfail('_foreach_add'),
+        xfail('_foreach_sub'),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_pow', dtypes=(b8,)),
+        xfail('_foreach_addcmul', dtypes=(b8,)),
+        xfail('_foreach_addcdiv', dtypes=integral_types_and(b8)),
+        xfail('_foreach_max', dtypes=(c128, c64)),
+        xfail('_foreach_norm', dtypes=integral_types_and(b8)),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_outplace(self, device, dtype, op):
         if "_scaled_mm" in op.name:
@@ -1208,6 +1243,56 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps((
+        xfail('abs', dtypes=(c128, c64, c32)),
+        xfail('as_strided', variant_name='partial_views'),
+        xfail('float_power', dtypes=[bf16, f16, f32]),
+        xfail('square', dtypes=(b8,)),
+        xfail('_foreach_exp', dtypes=integral_types_and(b8)),
+        xfail('_foreach_acos', dtypes=integral_types_and(b8)),
+        xfail('_foreach_asin', dtypes=integral_types_and(b8)),
+        xfail('_foreach_atan', dtypes=integral_types_and(b8)),
+        xfail('_foreach_cos', dtypes=integral_types_and(b8)),
+        xfail('_foreach_cosh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log10', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log2', dtypes=integral_types_and(b8)),
+        xfail('_foreach_tan', dtypes=integral_types_and(b8)),
+        xfail('_foreach_tanh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sin', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sinh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_neg', dtypes=(b8,)),
+        xfail('_foreach_sqrt', dtypes=integral_types_and(b8)),
+        xfail('_foreach_rsqrt', dtypes=integral_types_and(b8)),
+        xfail('_foreach_ceil', dtypes=complex_types_and(b8)),
+        xfail('_foreach_erf', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_erfc', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_expm1', dtypes=integral_types_and(b8)),
+        xfail('_foreach_floor', dtypes=complex_types_and(b8)),
+        xfail('_foreach_log1p', dtypes=integral_types_and(b8)),
+        xfail('_foreach_round', dtypes=complex_types_and(b8)),
+        xfail('_foreach_frac', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_reciprocal', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sigmoid', dtypes=integral_types_and(b8)),
+        xfail('_foreach_trunc', dtypes=complex_types_and(b8)),
+        xfail('_foreach_abs', dtypes=complex_types()),
+        xfail('_foreach_sign', dtypes=complex_types()),
+        skip('_foreach_lgamma', dtypes=integral_types_and(b8)),
+        xfail('_foreach_lgamma', dtypes=complex_types() + integral_types_and(b8)),
+        xfail('_foreach_add', dtypes=all_types_and_complex_and(b8, bf16, f16)),
+        xfail('_foreach_sub'),
+        xfail('_foreach_mul', dtypes=(b8,)),
+        xfail('_foreach_div', dtypes=integral_types_and(b8)),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_pow', dtypes=(b8,)),
+        xfail('_foreach_addcmul', dtypes=(b8,)),
+        xfail('_foreach_addcdiv', dtypes=integral_types_and(b8)),
+        xfail('_foreach_norm'),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_inplace(self, device, dtype, op):
         func = op.get_inplace()
@@ -1272,18 +1357,120 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps((
+        skip('sparse.sampled_addmm'),
+        skip('sparse.mm', variant_name='reduce'),
+        xfail('nn.functional.binary_cross_entropy'),
+        xfail('empty_strided'),
+        xfail('_foreach_neg', dtypes=(b8,)),
+        xfail('_foreach_ceil', dtypes=complex_types_and(b8)),
+        xfail('_foreach_erf', dtypes=complex_types()),
+        xfail('_foreach_erfc', dtypes=complex_types()),
+        xfail('_foreach_floor', dtypes=complex_types_and(b8)),
+        xfail('_foreach_round', dtypes=complex_types_and(b8)),
+        xfail('_foreach_frac', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_trunc', dtypes=complex_types_and(b8)),
+        xfail('_foreach_sign', dtypes=complex_types()),
+        xfail('_foreach_lgamma', dtypes=complex_types()),
+        xfail('_foreach_sub'),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_pow', dtypes=(b8,)),
+        xfail('_foreach_addcmul', dtypes=(b8,)),
+        xfail('_foreach_addcdiv', dtypes=integral_types_and(b8)),
+        xfail('_foreach_max', dtypes=(c128, c64)),
+        xfail('_foreach_norm', dtypes=integral_types_and(b8)),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=False)
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps((
+        xfail('abs', dtypes=(c128, c64, c32)),
+        xfail('as_strided', variant_name='partial_views'),
+        xfail('square', dtypes=(b8,)),
+        xfail('_foreach_exp', dtypes=integral_types_and(b8)),
+        xfail('_foreach_acos', dtypes=integral_types_and(b8)),
+        xfail('_foreach_asin', dtypes=integral_types_and(b8)),
+        xfail('_foreach_atan', dtypes=integral_types_and(b8)),
+        xfail('_foreach_cos', dtypes=integral_types_and(b8)),
+        xfail('_foreach_cosh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log10', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log2', dtypes=integral_types_and(b8)),
+        xfail('_foreach_tan', dtypes=integral_types_and(b8)),
+        xfail('_foreach_tanh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sin', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sinh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_neg', dtypes=(b8,)),
+        xfail('_foreach_sqrt', dtypes=integral_types_and(b8)),
+        xfail('_foreach_rsqrt', dtypes=integral_types_and(b8)),
+        xfail('_foreach_ceil', dtypes=complex_types_and(b8)),
+        xfail('_foreach_erf', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_erfc', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_expm1', dtypes=integral_types_and(b8)),
+        xfail('_foreach_floor', dtypes=complex_types_and(b8)),
+        xfail('_foreach_log1p', dtypes=integral_types_and(b8)),
+        xfail('_foreach_round', dtypes=complex_types_and(b8)),
+        xfail('_foreach_frac', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_reciprocal', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sigmoid', dtypes=integral_types_and(b8)),
+        xfail('_foreach_trunc', dtypes=complex_types_and(b8)),
+        xfail('_foreach_abs', dtypes=complex_types()),
+        xfail('_foreach_sign', dtypes=complex_types()),
+        xfail('_foreach_lgamma', dtypes=complex_types() + integral_types_and(b8)),
+        xfail('_foreach_add', dtypes=(b8,)),
+        xfail('_foreach_sub'),
+        xfail('_foreach_mul', dtypes=(b8,)),
+        xfail('_foreach_div', dtypes=integral_types_and(b8)),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_pow', dtypes=(b8,)),
+        xfail('_foreach_addcmul', dtypes=(b8,)),
+        xfail('_foreach_addcdiv', dtypes=integral_types_and(b8)),
+        xfail('_foreach_norm'),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=True)
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps((
+        skip('sparse.sampled_addmm'),
+        skip('sparse.mm', variant_name='reduce'),
+        xfail('nn.functional.binary_cross_entropy'),
+        xfail('empty_strided'),
+        xfail('_foreach_neg', dtypes=(b8,)),
+        xfail('_foreach_ceil', dtypes=complex_types_and(b8)),
+        xfail('_foreach_erf', dtypes=complex_types()),
+        xfail('_foreach_erfc', dtypes=complex_types()),
+        xfail('_foreach_floor', dtypes=complex_types_and(b8)),
+        xfail('_foreach_round', dtypes=complex_types_and(b8)),
+        xfail('_foreach_frac', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_trunc', dtypes=complex_types_and(b8)),
+        xfail('_foreach_sign', dtypes=complex_types()),
+        xfail('_foreach_lgamma', dtypes=complex_types()),
+        xfail('_foreach_sub'),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_pow', dtypes=(b8,)),
+        xfail('_foreach_addcmul', dtypes=(b8,)),
+        xfail('_foreach_addcdiv', dtypes=integral_types_and(b8)),
+        xfail('_foreach_max', dtypes=(c128, c64)),
+        xfail('_foreach_norm', dtypes=integral_types_and(b8)),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_symbolic_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
@@ -1291,6 +1478,55 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps((
+        xfail('abs', dtypes=(c128, c64, c32)),
+        xfail('as_strided', variant_name='partial_views'),
+        xfail('square', dtypes=(b8,)),
+        xfail('_foreach_exp', dtypes=integral_types_and(b8)),
+        xfail('_foreach_acos', dtypes=integral_types_and(b8)),
+        xfail('_foreach_asin', dtypes=integral_types_and(b8)),
+        xfail('_foreach_atan', dtypes=integral_types_and(b8)),
+        xfail('_foreach_cos', dtypes=integral_types_and(b8)),
+        xfail('_foreach_cosh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log10', dtypes=integral_types_and(b8)),
+        xfail('_foreach_log2', dtypes=integral_types_and(b8)),
+        xfail('_foreach_tan', dtypes=integral_types_and(b8)),
+        xfail('_foreach_tanh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sin', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sinh', dtypes=integral_types_and(b8)),
+        xfail('_foreach_neg', dtypes=(b8,)),
+        xfail('_foreach_sqrt', dtypes=integral_types_and(b8)),
+        xfail('_foreach_rsqrt', dtypes=integral_types_and(b8)),
+        xfail('_foreach_ceil', dtypes=complex_types_and(b8)),
+        xfail('_foreach_erf', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_erfc', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_expm1', dtypes=integral_types_and(b8)),
+        xfail('_foreach_floor', dtypes=complex_types_and(b8)),
+        xfail('_foreach_log1p', dtypes=integral_types_and(b8)),
+        xfail('_foreach_round', dtypes=complex_types_and(b8)),
+        xfail('_foreach_frac', dtypes=integral_types_and(b8) + complex_types()),
+        xfail('_foreach_reciprocal', dtypes=integral_types_and(b8)),
+        xfail('_foreach_sigmoid', dtypes=integral_types_and(b8)),
+        xfail('_foreach_trunc', dtypes=complex_types_and(b8)),
+        xfail('_foreach_abs', dtypes=complex_types()),
+        xfail('_foreach_sign', dtypes=complex_types()),
+        skip('_foreach_lgamma', dtypes=integral_types_and(b8)),
+        xfail('_foreach_lgamma', dtypes=complex_types() + integral_types_and(b8)),
+        xfail('_foreach_add', dtypes=(b8,)),
+        xfail('_foreach_sub'),
+        xfail('_foreach_mul', dtypes=(b8,)),
+        xfail('_foreach_div', dtypes=integral_types_and(b8)),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_pow', dtypes=(b8,)),
+        xfail('_foreach_addcmul', dtypes=(b8,)),
+        xfail('_foreach_addcdiv', dtypes=integral_types_and(b8)),
+        xfail('_foreach_norm'),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
@@ -1298,6 +1534,28 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
+    @skipOps((
+        xfail('view_as_complex'),
+        skip('sparse.sampled_addmm'),
+        xfail('nn.functional.binary_cross_entropy'),
+        xfail('narrow_copy'),
+        xfail('view_copy'),
+        xfail('view'),
+        xfail('view_as'),
+        xfail('empty_strided'),
+        skip('normal'),
+        xfail('take_along_dim'),
+        xfail('kron'),
+        xfail('nn.functional.channel_shuffle'),
+        xfail('_foreach_sub'),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_addcmul', dtypes=(b8,)),
+        xfail('_foreach_addcdiv', dtypes=integral_types() + complex_types_and(b8)),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
     @onlyCUDA
@@ -1307,6 +1565,22 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
+    @skipOps((
+        xfail('abs', dtypes=(c128, c64, c32)),
+        xfail('as_strided', variant_name='partial_views'),
+        xfail('_foreach_add', dtypes=integral_types() + complex_types_and(b8, bf16, f16, f64)),
+        xfail('_foreach_sub'),
+        xfail('_foreach_mul', dtypes=(b8,)),
+        xfail('_foreach_div', dtypes=integral_types_and(b8)),
+        xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
+        xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
+        xfail('_foreach_minimum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_maximum', dtypes=complex_types_and(b8)),
+        xfail('_foreach_addcmul', dtypes=integral_types() + complex_types_and(b8)),
+        xfail('_foreach_addcdiv', dtypes=integral_types() + complex_types_and(b8)),
+        xfail('_foreach_norm'),
+        xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
+    ))
     @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
     @onlyCUDA
@@ -1316,6 +1590,17 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
+    @skipOps((
+        xfail('complex'),
+        xfail('heaviside'),
+        xfail('isclose'),
+        xfail('polar'),
+        xfail('_refs.copysign'),
+        xfail('_refs.floor_divide'),
+        xfail('_refs.isclose'),
+        xfail('_refs._conversions.complex'),
+        xfail('_refs._conversions.polar'),
+    ))
     @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
     # Only test on CUDA, as CUDA kernel's stride is the reference
     @onlyCUDA
@@ -1742,6 +2027,7 @@ class TestMeta(TestCase):
     @onlyCUDA
     def test_cuda_mixed_dtype_binary_pointwise_fake_stride(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         complex_input = torch.randn(
             1, 9, 17, device=device, dtype=torch.complex64
@@ -1890,8 +2176,129 @@ class TestMeta(TestCase):
                 fake_out = torch._refs.add(fake_scalar, fake_input, alpha=None)
 
             self.assertTrue(fake_out.requires_grad)
+            self.assertFalse(fake_out.is_leaf)
+            self.assertIsNotNone(fake_out.grad_fn)
             self.assertEqual(ref_out.size(), fake_out.size())
             self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(distinct_noncontiguous_layouts=True):
+            shape = (2, 3, 4)
+            a = torch.empty_strided(
+                shape, (12, 1, 3), device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, (1, 8, 2), device=device, dtype=torch.float64
+            ).fill_(2)
+            for lhs, rhs, expected_stride in (
+                (a, b, (12, 1, 3)),
+                (b, a, (1, 8, 2)),
+            ):
+                with self.subTest(expected_stride=expected_stride):
+                    ref_out = torch.add(lhs, rhs)
+
+                    with FakeTensorMode(
+                        shape_env=ShapeEnv(), static_shapes=False
+                    ) as mode:
+                        fake_out = torch.add(
+                            mode.from_tensor(lhs), mode.from_tensor(rhs)
+                        )
+
+                    fake_stride = tuple(int(s) for s in fake_out.stride())
+                    self.assertEqual(ref_out.size(), fake_out.size())
+                    self.assertEqual(ref_out.stride(), expected_stride)
+                    self.assertEqual(ref_out.stride(), fake_stride)
+
+        with self.subTest(shared_noncontiguous_layout=True):
+            shape = (2, 1, 3)
+            strides = (1, 99, 2)
+            a = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float64
+            ).fill_(2)
+            ref_out = torch.add(a, b)
+
+            with FakeTensorMode(shape_env=ShapeEnv(), static_shapes=False) as mode:
+                fake_out = torch.add(mode.from_tensor(a), mode.from_tensor(b))
+
+            fake_stride = tuple(int(s) for s in fake_out.stride())
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), strides)
+            self.assertEqual(ref_out.stride(), fake_stride)
+
+        with self.subTest(ambiguous_contiguous_layout=True):
+            shape = (2, 1, 3, 4)
+            strides = (12, 99, 4, 1)
+            a = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float64
+            ).fill_(2)
+            ref_out = torch.add(a, b)
+
+            with FakeTensorMode() as mode:
+                fake_out = torch._refs.add(
+                    mode.from_tensor(a), mode.from_tensor(b)
+                )
+                fake_round_out = torch._refs.round(mode.from_tensor(a))
+
+            self.assertEqual(ref_out.stride(), (12, 12, 4, 1))
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+            self.assertEqual(torch.round(a).stride(), fake_round_out.stride())
+
+        with self.subTest(scalar_operand_layout=True):
+            for shape, strides, expected_stride in (
+                ((2, 1, 3, 4), (12, 99, 4, 1), (12, 24, 4, 1)),
+                ((2, 1, 3), (3, 1, 1), (3, 1, 1)),
+            ):
+                a = torch.empty_strided(
+                    shape, strides, device=device, dtype=torch.float32
+                ).fill_(1)
+                for lhs_scalar in (False, True):
+                    with self.subTest(
+                        strides=strides,
+                        lhs_scalar=lhs_scalar,
+                    ):
+                        args = (2.0, a) if lhs_scalar else (a, 2.0)
+                        ref_out = torch.add(*args)
+
+                        with FakeTensorMode() as mode:
+                            fake_a = mode.from_tensor(a)
+                            fake_args = (
+                                (2.0, fake_a) if lhs_scalar else (fake_a, 2.0)
+                            )
+                            fake_out = torch._refs.add(*fake_args)
+
+                        with FakeTensorMode(
+                            shape_env=ShapeEnv(), static_shapes=False
+                        ) as mode:
+                            fake_a = mode.from_tensor(a)
+                            fake_args = (
+                                (2.0, fake_a) if lhs_scalar else (fake_a, 2.0)
+                            )
+                            dynamic_fake_out = torch.add(*fake_args)
+
+                        dynamic_fake_stride = tuple(
+                            int(s) for s in dynamic_fake_out.stride()
+                        )
+                        self.assertEqual(ref_out.stride(), expected_stride)
+                        self.assertEqual(ref_out.stride(), fake_out.stride())
+                        self.assertEqual(ref_out.stride(), dynamic_fake_stride)
+
+        with self.subTest(common_device_under_kernel_invocation=True):
+            from torch._subclasses.fake_tensor import in_kernel_invocation_manager
+
+            with FakeTensorMode() as mode:
+                fake_cpu_scalar = mode.from_tensor(torch.ones(()))
+                fake_cuda_input = mode.from_tensor(torch.ones(2, device=device))
+                with in_kernel_invocation_manager(mode):
+                    common_device = torch._prims_common.get_tensoriterator_common_device(
+                        fake_cpu_scalar, fake_cuda_input
+                    )
+
+            self.assertEqual(common_device.type, "cuda")
 
         with self.subTest(ref_where_pred_stride=True):
             pred = complex_input.real > 0
@@ -1910,13 +2317,23 @@ class TestMeta(TestCase):
 
         with self.subTest(ref_non_elementwise_outputs=True):
             real_input = complex_input.real.detach()
+            prelu_input = torch.empty_strided(
+                (2, 1, 3, 4),
+                (12, 99, 4, 1),
+                device=device,
+                dtype=torch.float64,
+            ).normal_()
+            prelu_weight = torch.ones(1, device=device, dtype=torch.float64)
+            ref_prelu_out = torch._refs.nn.functional.prelu(
+                prelu_input, prelu_weight
+            )
             with FakeTensorMode() as mode:
                 fake_input = mode.from_tensor(real_input)
                 logsumexp_out = torch._refs.logsumexp(fake_input, 1)
                 dot_out = torch._refs.dot(fake_input.flatten(), fake_input.flatten())
                 prelu_out = torch._refs.nn.functional.prelu(
-                    mode.from_tensor(torch.randn(2, 3, 5, 7, device=device)),
-                    mode.from_tensor(torch.randn(3, device=device)),
+                    mode.from_tensor(prelu_input),
+                    mode.from_tensor(prelu_weight),
                 )
                 addr_out = torch._refs.addr(
                     mode.from_tensor(torch.randn(2, 3, device=device)),
@@ -1926,7 +2343,8 @@ class TestMeta(TestCase):
 
             self.assertEqual(logsumexp_out.size(), (17,))
             self.assertEqual(dot_out.size(), ())
-            self.assertEqual(prelu_out.size(), (2, 3, 5, 7))
+            self.assertEqual(ref_prelu_out.stride(), (12, 12, 4, 1))
+            self.assertEqual(prelu_out.stride(), ref_prelu_out.stride())
             self.assertEqual(addr_out.size(), (2, 3))
 
 
@@ -2161,6 +2579,17 @@ class TestMetaKernelConv(TestCase):
 
 
 class TestMetaKernelRegistrations(TestCase):
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_aminmax_out_dtype_mismatch(self):
+        inp = torch.rand(10, 10, device="meta")
+        out_min = torch.empty(10, dtype=torch.float64, device="meta")
+        out_max = torch.empty(10, dtype=torch.float64, device="meta")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.ops.aten.aminmax.out(
+                inp, dim=-1, keepdim=False, min=out_min, max=out_max
+            )
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):
         cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
@@ -2557,6 +2986,10 @@ class TestMetaKernelRegistrations(TestCase):
             self.assertEqual(cpu_t.dtype, meta_t.dtype)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190240"
+    )
     def test_mkldnn_rnn_backward_gru_bias_shape(self):
         # GRU backward is not supported on CPU via oneDNN, so we verify
         # the meta kernel's bias shape against the expected value from

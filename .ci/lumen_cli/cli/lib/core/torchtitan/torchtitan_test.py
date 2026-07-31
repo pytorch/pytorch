@@ -50,6 +50,7 @@ class TorchtitanTestRunner(BaseRunner):
                 _nightly_index_url(),
             ],
         )
+        pip_install_packages(packages=["helion"])
         with working_directory(self.work_directory):
             pip_install_packages(packages=["-e", "."])
             pip_install_packages(packages=["pytest", "pytest-cov"])

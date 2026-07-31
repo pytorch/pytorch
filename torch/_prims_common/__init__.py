@@ -468,6 +468,32 @@ def is_channels_last_contiguous_or_false(a: Tensor) -> bool:
     ) or is_channels_last_contiguous_or_false_3d(a)
 
 
+# Defined at module scope so the class is built once, not rebuilt on every call.
+class K(NamedTuple):
+    size: int
+    stride: int
+
+    def __lt__(self, other):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+        # for backed symbols, this is practically a < operation
+        # for unbacked, we return True if < is statically known,
+        # then try to answer this symbolically, with stride ordering semantics
+        # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
+        return (
+            guard_or_false(
+                self.stride < other.stride
+            )  # checks statically known inequality
+            or (
+                (
+                    guard_or_false(self.stride == 0)
+                    or guard_or_false(other.stride % self.stride == 0)
+                )
+                and guard_or_true(self.stride != other.stride)
+            )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
+        )
+
+
 def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     """
     Helper function for is_non_overlapping_and_dense.
@@ -478,7 +504,7 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     this may be non-overlapping & dense at runtime, for values {u0: 4, u1: 4, u2: 4, u3: 1},
     but isn't true for all values.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
     from torch.utils._sympy.functions import Max
 
     # Short-circuits for 0/1-element tensors
@@ -496,28 +522,6 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     # This sort is done in a size-oblivious way, which helps if we do a
     # comparison like 2048*u0 > u0; we just want this to return True
     # (and not worry about what if u0 is zero).
-    class K(NamedTuple):
-        size: int
-        stride: int
-
-        def __lt__(self, other):
-            # for backed symbols, this is practically a < operation
-            # for unbacked, we return True if < is statically known,
-            # then try to answer this symbolically, with stride ordering semantics
-            # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
-            return (
-                guard_or_false(
-                    self.stride < other.stride
-                )  # checks statically known inequality
-                or (
-                    (
-                        guard_or_false(self.stride == 0)
-                        or guard_or_false(other.stride % self.stride == 0)
-                    )
-                    and guard_or_true(self.stride != other.stride)
-                )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
-            )
-
     lengths_and_strides = sorted(map(K, sizes, strides))
 
     # verify actual strides match the expected (composed sizes)
@@ -550,7 +554,7 @@ def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
 def compute_elementwise_output_logical_to_physical_perm(
-    *tensors, _skip_checks=False, ambiguity_check=False
+    *tensors, _skip_checks=False, _skip_fast_path=False, ambiguity_check=False
 ) -> tuple[list[int], bool]:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -596,11 +600,12 @@ def compute_elementwise_output_logical_to_physical_perm(
             )
         )
 
-    if is_contiguous and not is_channels_last:
-        return list(range(ndim)), False
+    if not _skip_fast_path:
+        if is_contiguous and not is_channels_last:
+            return list(range(ndim)), False
 
-    if is_channels_last and not is_contiguous:
-        return [0, *list(range(2, ndim)), 1], False
+        if is_channels_last and not is_contiguous:
+            return [0, *list(range(2, ndim)), 1], False
 
     shape = tensors[0].shape
 
@@ -668,6 +673,20 @@ def compute_elementwise_output_logical_to_physical_perm(
 
 
 def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
+    return _compute_elementwise_output_strides(
+        *tensors, preserve_single_tensor_strides=True
+    )
+
+
+def compute_tensoriterator_output_strides(*tensors) -> tuple[int, ...]:
+    return _compute_elementwise_output_strides(
+        *tensors, preserve_single_tensor_strides=False
+    )
+
+
+def _compute_elementwise_output_strides(
+    *tensors, preserve_single_tensor_strides: bool
+) -> tuple[int, ...]:
     """
     Computes the output strides for elementwise operations.
     """
@@ -678,6 +697,7 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
     # Filters the tensors to actual tensors
+    num_args = len(tensors)
     tensors = tuple(
         a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
     )
@@ -689,20 +709,60 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     ndim = tensors[0].ndim
     shape = tensors[0].shape
 
+    if not preserve_single_tensor_strides and any(
+        isinstance(dim, IntWithoutSymInt) and dim == 0 for dim in shape
+    ):
+        raise ValueError("TensorIterator zero-size stride inference is unsupported")
+
     if ndim == 0:
         return ()
     if ndim == 1:
         return (1,)
 
-    if len(tensors) == 1:
+    if preserve_single_tensor_strides and len(tensors) == 1 and num_args == 1:
         if torch._prims_common.is_non_overlapping_and_dense_or_false(tensors[0]):
             return tensors[0].stride()
         else:
             empty_like_tensor = torch.empty_like(tensors[0])
             return empty_like_tensor.stride()
 
+    if num_args == len(tensors) and all(
+        is_contiguous_for_memory_format_or_false(
+            tensor, memory_format=torch.contiguous_format
+        )
+        for tensor in tensors
+    ):
+        return make_contiguous_strides_for(shape)
+
+    # TensorIterator preserves a shared non-overlapping dense layout after its
+    # contiguous and channels-last fast paths. This also preserves arbitrary
+    # strides on singleton dimensions.
+    first = tensors[0]
+    shared_dense_layout = num_args == len(tensors) and all(
+        tensor.stride() == first.stride()
+        and is_non_overlapping_and_dense_or_false(tensor)
+        for tensor in tensors
+    )
+    if shared_dense_layout:
+        all_contiguous = all(
+            is_contiguous_for_memory_format_or_false(
+                tensor, memory_format=torch.contiguous_format
+            )
+            for tensor in tensors
+        )
+        all_channels_last = all(
+            is_contiguous_for_memory_format_or_false(
+                tensor, memory_format=torch.channels_last
+            )
+            for tensor in tensors
+        )
+        if not all_contiguous and not all_channels_last:
+            return first.stride()
+
     logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
-        *tensors, _skip_checks=True
+        *tensors,
+        _skip_checks=True,
+        _skip_fast_path=num_args != len(tensors),
     )
     permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
 
@@ -889,6 +949,24 @@ def is_same_shape(a: Sequence, b: Sequence) -> BoolLikeType:
 
 def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
     return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
+
+
+def get_tensoriterator_common_device(*args: object) -> torch.device | None:
+    # Keep this import local because fake_tensor imports torch._prims_common.
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    device = None
+    for arg in args:
+        if not isinstance(arg, TensorLike):
+            continue
+
+        arg_device = maybe_get_fake_device(arg) or arg.device
+        if arg.ndim == 0 and arg_device.type == "cpu":
+            if device is None:
+                device = arg_device
+            continue
+        return arg_device
+    return device
 
 
 def check_same_device(*args, allow_cpu_scalar_tensors):
@@ -1133,8 +1211,13 @@ _integer_dtypes = (
     torch.int32,
     torch.int64,
 )
-_low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
-_complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
+_low_precision_dtypes = (
+    torch.float16,
+    torch.bfloat16,
+    torch.complex32,
+    torch.bcomplex32,
+)
+_complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
@@ -1178,11 +1261,12 @@ _complex_to_real_dtype_map = {
     torch.complex128: torch.float64,
     torch.complex64: torch.float32,
     torch.complex32: torch.float16,
+    torch.bcomplex32: torch.bfloat16,
 }
 
 _real_to_complex_dtype_map = {
     torch.float16: torch.complex32,
-    torch.bfloat16: torch.complex64,
+    torch.bfloat16: torch.bcomplex32,
     torch.float32: torch.complex64,
     torch.float64: torch.complex128,
 }
@@ -1229,6 +1313,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     if dtype in _integer_dtypes:
         return sym_int
     if dtype.is_floating_point:
+        # pyrefly: ignore [bad-return]
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
@@ -1273,7 +1358,7 @@ def check_fp_or_complex(
 ):
     """
     Checks whether the input is floating point or complex.
-    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
+    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and [b]complex32
     """
     torch._check(
         is_float_dtype(dtype) or is_complex_dtype(dtype),
@@ -1371,7 +1456,7 @@ def get_higher_dtype(
         (torch.float16, torch.bfloat16),
         (torch.float32,),
         (torch.float64,),
-        (torch.complex32,),
+        (torch.complex32, torch.bcomplex32),
         (torch.complex64,),
         (torch.complex128,),
     )
@@ -1501,6 +1586,7 @@ _computation_dtype_map = {
     torch.bfloat16: torch.float32,
     torch.float16: torch.float32,
     torch.complex32: torch.complex64,
+    torch.bcomplex32: torch.complex64,
 }
 
 
@@ -1608,7 +1694,7 @@ def elementwise_dtypes(
     partially ordered as follows:
 
     bool -> uint8, int8 -> int16 -> int32 -> int64 ->
-      float16, bfloat16 -> float32 -> float64 -> complex32 -> complex64 -> complex128
+      float16, bfloat16 -> float32 -> float64 -> complex32, bcomplex32 -> complex64 -> complex128
 
     The result dtype is selected by:
       - if no tensor's dtype has the same corresponding type as the one selected,
@@ -1628,7 +1714,7 @@ def elementwise_dtypes(
 
     The "corresponding complex dtypes" are:
       float16    -> complex32
-      bfloat16   -> complex64
+      bfloat16   -> bcomplex32
       float32    -> complex64
       float64    -> complex128
       complex32  -> complex32
@@ -1639,7 +1725,7 @@ def elementwise_dtypes(
     dtype by mapping low precision floating point and complex dtypes as follows:
 
       float16   -> float32
-      bfloat16  -> float32
+      bfloat16  -> bcomplex32
       complex32 -> complex64
 
     This is referred to as "op math", and the NO_OPMATH type promotion kind disables this mapping, making the
@@ -1824,7 +1910,7 @@ def make_contiguous_strides_for(
         if len(shape) < 2:
             return result
         # Use sym_max to handle unbacked symbolic dimensions
-        return result[:-2] + (1, sym_max(shape[-2], 1))
+        return result[:-2] + (1, sym_max(shape[-2], 1))  # type: ignore[return-value]
 
 
 def make_channels_last_1d_strides_for(
@@ -1838,7 +1924,7 @@ def make_channels_last_1d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 3
     for idx in (1, -1, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1858,7 +1944,7 @@ def make_channels_last_2d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 4
     for idx in (1, -1, -2, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1877,7 +1963,7 @@ def make_channels_last_3d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1943,6 +2029,7 @@ def set_correction(
     # NB: we don't actually support symint here, but it's harmless to accept
     if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
+    # pyrefly: ignore [bad-return]
     return sym_float(correction)
 
 
