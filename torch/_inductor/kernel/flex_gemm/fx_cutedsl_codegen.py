@@ -19,7 +19,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     upcast_compute_type,
     use_cutedsl_fast_math,
 )
-from torch._inductor.kernel import gemm_epilogue_analysis as _epilogue_analysis
+from torch._inductor.kernel import fx_epilogue_lowering as _epilogue_analysis
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
@@ -50,7 +50,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     reduction_from_node,
     unsupported_reduction_from_node,
 )
-from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan, iter_fx_node_inputs
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
@@ -171,6 +171,11 @@ class FlexGemmEpilogueAnalysis:
         if self.outputs.local_reduce is not None:
             geometries.add(self.outputs.local_reduce.match.geometry)
         return tuple(geometries)
+
+    @property
+    def reduction_plan(self) -> GemmReductionPlan | None:
+        """Return the backend-neutral reduction plan produced by FX analysis."""
+        return self.outputs.reduction_plan
 
 
 def analyze_flex_gemm_epilogue(
