@@ -1,10 +1,13 @@
-# mypy: allow-untyped-defs
 import pickle
-from collections.abc import Iterator, Sequence
-from typing import Any
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Generic, TypeVar
 
 import torch
 
+
+T = TypeVar("T")
+K = TypeVar("K")
+V = TypeVar("V")
 
 _ONE_MB = 1 << 20
 
@@ -16,7 +19,7 @@ def _tensor_to_bytes(t: torch.Tensor) -> bytes:
         return bytes(t.tolist())
 
 
-class SharedList(Sequence):
+class SharedList(Sequence, Generic[T]):
     r"""A list-like container whose data is stored in a single :class:`torch.Tensor`.
 
     When used inside a :class:`~torch.utils.data.Dataset` with
@@ -115,7 +118,7 @@ class SharedList(Sequence):
         )
 
 
-class SharedDict:
+class SharedDict(Mapping, Generic[K, V]):
     r"""A dict-like container whose keys and values are stored in shared-memory
     tensors.
 
@@ -200,13 +203,13 @@ class SharedDict:
         end = int(self._v_index[idx + 1].item())
         return pickle.loads(_tensor_to_bytes(self._v_storage[start:end]))
 
-    def keys(self) -> list[Any]:
+    def keys(self) -> list[Any]:  # type: ignore[override]
         return [self._deserialize_key(i) for i in range(self._length)]
 
-    def values(self) -> list[Any]:
+    def values(self) -> list[Any]:  # type: ignore[override]
         return [self._deserialize_value(i) for i in range(self._length)]
 
-    def items(self) -> list[tuple]:
+    def items(self) -> list[tuple[Any, Any]]:  # type: ignore[override]
         return [
             (self._deserialize_key(i), self._deserialize_value(i))
             for i in range(self._length)
