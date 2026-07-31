@@ -223,7 +223,7 @@ class InPlaceCompilationTests(TestCase):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
         scripted = torch.jit.script(model)
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             frozen = torch.jit.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
@@ -234,7 +234,7 @@ class InPlaceCompilationTests(TestCase):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
         scripted = torch.jit.script(model)
-        with self.assertWarns(DeprecationWarning):
+        with self.assertWarns(FutureWarning):
             frozen = torch.jit.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
@@ -305,7 +305,7 @@ class PublicTorchCompilerTests(TestCase):
         self.assertEqual(
             matching,
             True,
-            f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
+            lambda msg: f"{msg}\nSignatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
 
     def test_dynamo_signatures(self):
