@@ -1642,6 +1642,7 @@ def is_storage(obj: object, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
         True
         >>>
         >>> # TypedStorage (legacy)
+        >>> warnings.filterwarnings("ignore", message=".*TypedStorage is deprecated")  # docs: hide
         >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
         >>> torch.is_storage(typed_storage)
         True
@@ -1872,6 +1873,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
         * :func:`torch.Tensor.index_put` with ``accumulate=False``
@@ -1924,7 +1926,6 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
