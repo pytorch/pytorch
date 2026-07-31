@@ -2267,7 +2267,6 @@ class TestMetaKernelRegistrations(TestCase):
                 inp, dim=-1, keepdim=False, min=out_min, max=out_max
             )
 
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_grid_sampler_2d_cpu_fallback_meta(self):
         # The meta kernels' whole contract is output metadata, so compare
         # shape/stride/dtype against eager for the forward and both backward
