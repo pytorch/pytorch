@@ -2155,7 +2155,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         torch.compile(model, backend=backend)(inp)
         return [n.name for n in backend.graphs[0].graph.nodes]
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2185,7 +2184,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         names2 = self._get_graph_node_names(model, d2)
         self.assertEqual(names1, names2)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_correctness(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2209,7 +2207,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_result, compiled_result1)
         self.assertEqual(eager_result, compiled_result2)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_aot_eager(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2250,7 +2247,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         bw_names2 = [n.name for n in backend2.bw_graphs[0].graph.nodes]
         self.assertEqual(bw_names1, bw_names2)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_idempotent(self):
         from torch._dynamo.output_graph import _canonicalize_graph
 
@@ -2269,11 +2265,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         graph = backend.graphs[0].graph
 
         names_once = [n.name for n in graph.nodes]
-        graph2 = _canonicalize_graph(graph)
-        names_twice = [n.name for n in graph2.nodes]
+        _canonicalize_graph(graph)
+        names_twice = [n.name for n in graph.nodes]
         self.assertEqual(names_once, names_twice)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_overlapping_unsqueeze_with_mutation(self):
         def f(x, y):
             x.add_(1)
@@ -2291,7 +2286,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_barrier_preserves_order(self):
         from torch._dynamo.output_graph import _canonicalize_graph
 
@@ -2313,7 +2307,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         # neg must come after the barrier even though it only depends on x
         self.assertGreater(neg_idx, barrier_idx)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_in_place_ops_are_barriers(self):
         def f(x, y):
             a = y * 2
@@ -2383,11 +2376,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             names4 = self._get_graph_node_names(model, d2)
         self.assertEqual(names3, names4)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_is_safe_to_reorder(self):
         import operator
 
-        from torch._dynamo.output_graph import _is_safe_to_reorder
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
 
         graph = fx.Graph()
         x = graph.placeholder("x")
@@ -2428,6 +2420,41 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
+
+        # Nodes binding unbacked symbols are barriers: reordering them changes
+        # the order the ShapeEnv resolves replacements (compile-time blowup).
+        # Checked before the call_method branch, since Dynamo emits item() as a
+        # call_method that would otherwise be reported safe.
+        unbacked_method = graph.call_method("item", (x,))
+        self.assertTrue(_is_safe_to_reorder(unbacked_method))
+        unbacked_method.meta["unbacked_bindings"] = {"u0": ()}
+        self.assertFalse(_is_safe_to_reorder(unbacked_method))
+
+        # Functional collectives are barriers (comm/compute overlap + Inductor's
+        # in-place collective reuse). Dynamo graphs hold OpOverloadPackets,
+        # aten graphs hold OpOverloads, so both dispatch forms must be covered.
+        collective_overload = graph.call_function(
+            torch.ops._c10d_functional.all_reduce.default, (x, "sum", "0")
+        )
+        self.assertFalse(_is_safe_to_reorder(collective_overload))
+        collective_packet = graph.call_function(
+            torch.ops._c10d_functional.all_reduce, (x, "sum", "0")
+        )
+        self.assertFalse(_is_safe_to_reorder(collective_packet))
+        self.assertTrue(
+            _is_safe_to_reorder(graph.call_function(torch.ops.aten.add.Tensor, (x, x)))
+        )
+
+        # increment_version bumps a version counter in place; matched by
+        # identity, so the torch._C alias (different __name__) is covered too.
+        self.assertFalse(
+            _is_safe_to_reorder(
+                graph.call_function(torch.autograd.graph.increment_version, (x,))
+            )
+        )
+        self.assertFalse(
+            _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
+        )
 
 
 instantiate_parametrized_tests(DictTests)
