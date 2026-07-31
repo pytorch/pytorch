@@ -20,7 +20,9 @@ from torch._decomp import (
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
+    _unsqueeze_to_dim,
     embedding_dense_backward as decomp_embedding_dense_backward,
+    native_batch_norm_helper,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
 )
@@ -146,6 +148,8 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    # Overridden below to match eval-mode batch norm CUDA numerics.
+    aten._native_batch_norm_legit_no_training,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -224,6 +228,54 @@ if torch.distributed.is_available():
         out = aten.clone.default(out, memory_format=torch.contiguous_format)
         counters["inductor"]["decompose_shard_dim_alltoall"] += 1
         return aten.view.default(out, post_view_shape)
+
+
+@register_decomposition([aten._native_batch_norm_legit_no_training])
+def _native_batch_norm_legit_no_training(
+    input: torch.Tensor,
+    weight: torch.Tensor | None,
+    bias: torch.Tensor | None,
+    running_mean: torch.Tensor,
+    running_var: torch.Tensor,
+    momentum: float,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if input.device.type != "cuda" or torch.version.hip is not None:
+        output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            False,
+            momentum,
+            eps,
+            False,
+        )
+        return output, save_mean, save_rstd
+
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+    running_var = running_var.to(dtype=computation_dtype, copy=True)
+
+    invstd = torch.rsqrt(running_var + eps)
+    save_mean = running_mean
+    save_rstd = invstd
+
+    mean = _unsqueeze_to_dim(running_mean, input.dim() - 1)
+    invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
+    xmu = input - mean
+
+    if weight is not None:
+        weight = _unsqueeze_to_dim(weight.flatten(), input.dim() - 1)
+        xmu = xmu * weight
+    if bias is not None:
+        bias = _unsqueeze_to_dim(bias.flatten(), input.dim() - 1)
+        output = torch.addcmul(bias, xmu, invstd)
+    else:
+        output = xmu * invstd
+
+    return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
 @register_decomposition([aten.lerp.Scalar])
