@@ -52,7 +52,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_SINGLE_PHYSICAL_FINALIZE_ERROR,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
     local_reduce_unsupported_tensorssa_error,
-    statically_known_equal,
     statically_known_shape_equal,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
@@ -80,6 +79,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmPhysicalReduction,
     FlexGemmStructuralInt,
     grouped_tensor_layout,
+    GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
     iter_fx_node_inputs,
     lower_full_scalar,
@@ -92,6 +92,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_view_or_reshape,
     tensor_meta_shape,
 )
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -1328,10 +1329,15 @@ class FlexGemmEpilogueEmitter:
             )
         }
         self.grouped_tensors = {
-            node: grouped.layout
+            node: GroupedTensorSSALayout(
+                group=grouped.layout.group, axis=grouped.layout.axis
+            )
             for node, grouped in analysis.local_reduce.grouped_layouts.items()
         }
-        self.active_grouped_layouts = OrderedSet(analysis.required_geometries)
+        self.active_grouped_layouts = OrderedSet(
+            GroupedTensorSSALayout(group=geometry.group, axis=geometry.axis)
+            for geometry in analysis.required_geometries
+        )
         self.store_sources: dict[torch.fx.Node, Any] = {}
         self.physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction] = {}
         self.local_reduce = self.outputs.local_reduce

@@ -913,6 +913,35 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             rtol=1e-2,
         )
 
+    def _test_sdpa_rewriter_13_non_transpose_permute(self, dtype):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            attn_weight = torch.bmm(query, key.permute(1, 2, 0)).softmax(dim=-1)
+            attn_weight = torch.nn.functional.dropout(
+                attn_weight, p=0.5, training=training
+            )
+            return torch.bmm(attn_weight, value)
+
+        args = [
+            torch.randn((8, 3, 4), device=self.device, dtype=dtype),
+            torch.randn((3, 8, 4), device=self.device, dtype=dtype),
+            torch.randn((8, 3, 4), device=self.device, dtype=dtype),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=True,
+            check_train=False,
+            override_check_equal=True,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_sdpa_rewriter_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -2012,6 +2041,13 @@ if HAS_CPU:
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
         use_static_shapes = False
+
+    class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
+        device = "cpu"
+        test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,
+            dtype=torch.float32,
+        )
 
 
 if __name__ == "__main__":

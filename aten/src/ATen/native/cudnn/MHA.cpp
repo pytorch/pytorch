@@ -227,9 +227,32 @@ int roundup_power2(int dim) {
   return dim;
 }
 
+// scaled_dot_product_attention accepts an attn_mask whose dtype differs from
+// query (validate_sdpa_input allows float or query.dtype; bool masks are
+// converted to query.dtype before we get here), so the bias cannot inherit the
+// graph-wide io data type.
+static fe::DataType_t bias_data_type(const Tensor& attn_bias) {
+  switch (attn_bias.scalar_type()) {
+    case kHalf:
+      return fe::DataType_t::HALF;
+    case kBFloat16:
+      return fe::DataType_t::BFLOAT16;
+    case kFloat:
+      return fe::DataType_t::FLOAT;
+    default:
+      TORCH_CHECK(
+          false,
+          "cuDNN SDPA got attn_bias of unsupported dtype ",
+          attn_bias.scalar_type(),
+          ", expected one of float, half, bfloat16.");
+  }
+}
+
 struct MHAParams {
   c10::DeviceIndex device_id;
   fe::DataType_t dataType;
+  // the mask dtype is not implied by dataType, and it selects a different graph
+  fe::DataType_t biasDataType;
   std::array<int, MAX_MHA_DIM> q_dim;
   std::array<int, MAX_MHA_DIM> k_dim;
   std::array<int, MAX_MHA_DIM> v_dim;
@@ -326,6 +349,7 @@ void setMHAParams(
   }
   // uninit is OK as the struct is memset 0'd
   if (params.has_attn_bias) {
+    params.biasDataType = bias_data_type(attn_bias.value());
     std::copy(
         attn_bias.value().sizes().begin(),
         attn_bias.value().sizes().end(),
@@ -577,12 +601,13 @@ std::unique_ptr<fe::graph::Graph> build_graph(
   auto V_ = mha_graph->tensor(
       fe::graph::Tensor_attributes().set_uid(V).set_name("V"));
   if (attn_bias.has_value()) {
-    scaled_dot_product_flash_attention_options.set_bias(
-        mha_graph->tensor(fe::graph::Tensor_attributes()
-                              .set_uid(BIAS)
-                              .set_name("bias")
-                              .set_dim(attn_bias.value().sizes().vec())
-                              .set_stride(attn_bias.value().strides().vec())));
+    scaled_dot_product_flash_attention_options.set_bias(mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_uid(BIAS)
+            .set_name("bias")
+            .set_dim(attn_bias.value().sizes().vec())
+            .set_stride(attn_bias.value().strides().vec())
+            .set_data_type(bias_data_type(attn_bias.value()))));
   }
 
   auto [O_, Stats] =
@@ -963,12 +988,13 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward(
   auto V_ = mha_graph->tensor(
       fe::graph::Tensor_attributes().set_uid(V).set_name("V"));
   if (attn_bias.has_value()) {
-    sdpa_backward_options.set_bias(
-        mha_graph->tensor(fe::graph::Tensor_attributes()
-                              .set_uid(BIAS)
-                              .set_name("bias")
-                              .set_dim(attn_bias.value().sizes().vec())
-                              .set_stride(attn_bias.value().strides().vec())));
+    sdpa_backward_options.set_bias(mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_uid(BIAS)
+            .set_name("bias")
+            .set_dim(attn_bias.value().sizes().vec())
+            .set_stride(attn_bias.value().strides().vec())
+            .set_data_type(bias_data_type(attn_bias.value()))));
   }
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
