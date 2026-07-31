@@ -3378,19 +3378,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if self._object_has_getattribute:
-            getattribute_fn = inspect.getattr_static(
-                type(self.value), "__getattribute__"
-            )
-            new_source: AttrSource | None = (
-                AttrSource(self.source, "__getattribute__") if self.source else None
-            )
-
+            # CPython's _Py_slot_tp_getattr_hook: a user __getattribute__ runs
+            # first and only chains to __getattr__ on AttributeError.  Delegate
+            # to call_getattribute so that dispatch lives in exactly one place.
             try:
-                return variables.UserMethodVariable(
-                    getattribute_fn,
-                    self,
-                    source=new_source,
-                ).call_function(tx, [VariableTracker.build(tx, name)], {})
+                return self.call_getattribute(tx, name)
             except ObservedAttributeError:
                 # Pass through to __getattr__ if __getattribute__ fails
                 handle_observed_exception(tx)
