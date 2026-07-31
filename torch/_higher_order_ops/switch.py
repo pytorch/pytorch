@@ -380,7 +380,10 @@ def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMod
     # Shortcut if a branch produces None outputs; then all branches need to produce None
     if any(x is None for x in xs):
         if not all(x is None for x in xs):
-            raise AssertionError(f"expected all leaves to be None, got {xs}")
+            raise RuntimeError(
+                "torch.switch branches must return the same type for corresponding "
+                f"output leaves, but got {[type(x).__name__ for x in xs]}"
+            )
         return None
 
     # In case all branches return an int, use an unbacked symbol as the merge result

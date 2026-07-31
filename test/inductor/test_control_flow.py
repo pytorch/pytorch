@@ -12,6 +12,7 @@ from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.switch import switch
 from torch._inductor.custom_graph_pass import CustomGraphPass
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -377,6 +378,145 @@ class CondTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    def _check_cond_no_outputs_input_mutation(self, device, dynamic):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                x = x.clone()
+
+                def true_fn(x):
+                    x.add_(1)
+
+                def false_fn(x):
+                    x.sub_(1)
+
+                torch.cond(p, true_fn, false_fn, (x,))
+                return x * 2
+
+        with torch.no_grad():
+            self._run_test(
+                model=Model(),
+                inputs=(torch.ones(4),),
+                device=device,
+                dynamic=dynamic,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_cond_no_outputs_input_mutation(self, device, dynamic):
+        self._check_cond_no_outputs_input_mutation(device, dynamic)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cond_no_outputs_input_mutation_cpp_wrapper(self, device, dynamic):
+        self._check_cond_no_outputs_input_mutation(device, dynamic)
+
+    def _check_cond_equal_constant_output(self, device, dynamic):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(
+                    p,
+                    lambda y: (y + 1, 1),
+                    lambda y: (y - 1, 1),
+                    (x,),
+                )
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.ones(4),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_cond_equal_constant_output(self, device, dynamic):
+        self._check_cond_equal_constant_output(device, dynamic)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cond_equal_constant_output_cpp_wrapper(self, device, dynamic):
+        self._check_cond_equal_constant_output(device, dynamic)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_cond_mixed_tensor_none_output(self, device, dynamic):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(
+                    p,
+                    lambda y: (y + 1, None),
+                    lambda y: (y - 1, None),
+                    (x,),
+                )
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.ones(4),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_cond_bool_constant_outputs_rejected(self, device, dynamic):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(p, lambda y: True, lambda y: True, (x,))
+
+        x = torch.ones(4, device=device)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"must be int \(but not bool\) or None",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(True, device=device), x
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_differing_constant_outputs_rejected(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(p, lambda y: 1, lambda y: 2, (x,))
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "NotImplementedError:.*differing constant outputs",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(True, device=device), torch.ones(4, device=device)
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_differing_constant_output_types_rejected(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(
+                    p,
+                    lambda y: (y + 1, None),
+                    lambda y: (y - 1, 1),
+                    (x,),
+                )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            "branches must return the same type for corresponding output leaves",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(True, device=device), torch.ones(4, device=device)
+            )
 
     @requires_gpu
     def test_cond_subgraph_output_stride_padding(self):
@@ -2506,6 +2646,18 @@ class SwitchModels:
                 (x, y),
             )
 
+    class ConstantOutputs(torch.nn.Module):
+        def forward(self, idx, x):
+            return switch(
+                idx,
+                [
+                    lambda a: (1, a + 1.0, None, a * 2.0),
+                    lambda a: (1, a - 1.0, None, a * 3.0),
+                    lambda a: (1, -a, None, a * 4.0),
+                ],
+                (x,),
+            )
+
     class OuterCode(torch.nn.Module):
         def forward(self, idx, x):
             c = x * 2.0
@@ -2618,6 +2770,50 @@ class SwitchTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    def _check_switch_constant_outputs(self, device, dynamic):
+        self._run_test(
+            model=SwitchModels.ConstantOutputs(),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_constant_outputs(self, device, dynamic):
+        self._check_switch_constant_outputs(device, dynamic)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_switch_constant_outputs_cpp_wrapper(self, device, dynamic):
+        self._check_switch_constant_outputs(device, dynamic)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_bool_constant_outputs_rejected(self, device, dynamic):
+        class Model(torch.nn.Module):
+            def forward(self, idx, x):
+                return switch(
+                    idx,
+                    [lambda y: True, lambda y: True],
+                    (x,),
+                )
+
+        x = torch.ones(4, device=device)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"must be int \(but not bool\) or None",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(0, device=device), x
+            )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])

@@ -461,7 +461,10 @@ def _merge_output(
 
     if a is None or b is None:
         if not (a is None and b is None):
-            raise AssertionError(f"expected both a and b to be None, got a={a}, b={b}")
+            raise RuntimeError(
+                "torch.cond branches must return the same type for corresponding "
+                f"output leaves, but got {type(a).__name__} and {type(b).__name__}"
+            )
         return None
 
     def min_max(s0, s1):
