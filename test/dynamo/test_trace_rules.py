@@ -72,7 +72,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
-    "torch._C._is_cow_tensor",
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
@@ -207,7 +206,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._lobpcg",
             "torch._logging",
             "torch._meta_registrations",
-            "torch._namedtensor_internals",
             "torch._numpy",
             "torch._sources",
             "torch._subclasses",
@@ -336,9 +334,21 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             else:
                 self.assertTrue(
                     isinstance(mod, types.ModuleType),
-                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    lambda msg: f"{msg}\n{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
                     "is not a python module, please check and correct it.",
                 )
+
+    def test_cuda_manual_seed_functions_graph_break(self):
+        for name in (
+            "torch.cuda.manual_seed",
+            "torch.cuda.manual_seed_all",
+            "torch.cuda.random.manual_seed",
+            "torch.cuda.random.manual_seed_all",
+        ):
+            self.assertIs(
+                torch._dynamo.trace_rules.lookup(load_object(name)),
+                SkipFunctionVariable,
+            )
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
@@ -488,7 +498,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(
                 fn_name in torch_non_c_binding_in_graph_functions,
                 (
-                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    lambda msg: f"{msg}\ntorch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
                     "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
                     "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
                     "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"
