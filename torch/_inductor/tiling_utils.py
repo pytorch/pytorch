@@ -134,21 +134,16 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
     ) -> sympy.Expr:
         return x / y
 
-    # For the purposes of tiling/coalesced access, approximate ModularIndexing
-    # and FloorDiv, then check later. sympy `replace` only peels one layer of
-    # nested self-referential functions per pass, so iterate to a fixpoint.
+    # For the purposes of tiling/coalesced access, approximate ModularIndexing and FloorDiv
+    # then check later. simultaneous=False rebuilds bottom up, collapsing nested
+    # occurrences in one pass; the second sweep catches nodes that FloorDiv eval
+    # reintroduces while rebuilding. Leftovers make _solve_simple_expr bail out.
     eq_1_expr_simplified = eq_1_expr
-    # pyrefly: ignore [missing-attribute]
-    while eq_1_expr_simplified.has(ModularIndexing) or eq_1_expr_simplified.has(
-        FloorDiv
-    ):
+    for _ in range(2):
         # pyrefly: ignore [missing-attribute]
-        new_expr = eq_1_expr_simplified.replace(
-            ModularIndexing, indexing_div_rep
-        ).replace(FloorDiv, indexing_div_rep)
-        if new_expr == eq_1_expr_simplified:
-            break
-        eq_1_expr_simplified = new_expr
+        eq_1_expr_simplified = eq_1_expr_simplified.replace(
+            ModularIndexing, indexing_div_rep, simultaneous=False
+        ).replace(FloorDiv, indexing_div_rep, simultaneous=False)
 
     out = _solve_simple_expr(eq_1_expr_simplified)
 

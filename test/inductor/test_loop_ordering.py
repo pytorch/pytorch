@@ -1687,6 +1687,12 @@ class MemoryCoalescingTest(MockSchedulerTest):
             # must not raise, and nested forms solve identically to the flat form
             self.assertEqual(tiling_utils.solve_for_tiling(expr), sympy.Integer(252253))
 
+        # mixed nesting has no tiling solution, but must not raise either
+        mixed = FloorDiv(
+            ModularIndexing(5 * FloorDiv(ModularIndexing(n0 + 8, 1, 6), 5), 1, 36), 8
+        )
+        self.assertEqual(tiling_utils.solve_for_tiling(mixed), None)
+
     @parametrize("dynamic", (False, True))
     def test_induced_fused_tiling(self, dynamic):
         def fn(nodes):
