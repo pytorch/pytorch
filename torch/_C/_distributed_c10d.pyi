@@ -160,7 +160,7 @@ class BroadcastOptions:
     asyncOp: bool
 
 class AllreduceOptions:
-    reduceOp: ReduceOp
+    reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
@@ -168,7 +168,7 @@ class AllreduceOptions:
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
 class ReduceOptions:
-    reduceOp: ReduceOp
+    reduceOp: ReduceOp | ReduceOp.RedOpType
     rootRank: int
     rootTensor: int
     timeout: timedelta
@@ -189,7 +189,7 @@ class ScatterOptions:
     asyncOp: bool
 
 class ReduceScatterOptions:
-    reduceOp: ReduceOp
+    reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
 
@@ -307,6 +307,7 @@ class Store:
     def queue_push(self, key: str, value: bytes | str) -> None: ...
     def queue_len(self, key: str) -> int: ...
     def list_keys(self) -> list[str]: ...
+    def clone(self) -> Store: ...
 
 class FileStore(Store):
     def __init__(self, path: str, numWorkers: int = ...) -> None: ...
@@ -381,6 +382,8 @@ class Work:
     def _source_rank(self) -> int: ...
     def result(self) -> list[Tensor]: ...
     def synchronize(self) -> None: ...
+    def _get_duration(self) -> float: ...
+    def _get_sequence_number(self) -> int: ...
     def boxed(self) -> ScriptObject: ...
     @staticmethod
     def unbox(obj: ScriptObject) -> Work: ...
@@ -629,6 +632,18 @@ class ProcessGroup:
         root: int,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def gather_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
+    def gather_into_tensor(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     @overload
     def scatter(
         self,
@@ -818,7 +833,7 @@ class ProcessGroupGloo(Backend):
         store: Store,
         rank: int,
         size: int,
-        timeout: timedelta,
+        timeout: timedelta = ...,
         enable_reconfigure: bool = ...,
     ) -> None: ...
     @staticmethod
@@ -929,6 +944,7 @@ def _register_process_group(
     process_group: ProcessGroup,
 ) -> None: ...
 def _resolve_process_group(group_name: GroupName) -> ProcessGroup: ...
+def _create_work_from_future(future: Future) -> Work: ...
 def _register_work(tensor: torch.Tensor, work: Work) -> ProcessGroup: ...
 def _get_work_registry_size() -> int: ...
 def _set_allow_inflight_collective_as_graph_input(
@@ -1111,19 +1127,39 @@ class ProcessGroupXCCL(Backend):
     def _reset_fr_recording_xccl(self) -> None: ...
 
 class ProcessGroupNCCL2(Backend):
-    class Options(Backend.Options):
-        is_high_priority_stream: bool
-        abort_process_on_timeout_or_error: bool
-
-        def __init__(self, is_high_priority_stream: bool = False): ...
+    Options = ProcessGroupNCCL.Options
 
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-        options: Options,
+        options: ProcessGroupNCCL.Options,
     ) -> None: ...
+    def get_error(self) -> ErrorType: ...
+    @property
+    def options(self) -> ProcessGroupNCCL.Options: ...
+
+class ProcessGroupNCCLLazy(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupNCCL.Options,
+    ) -> None: ...
+    def get_error(self) -> ErrorType: ...
+    def _num_active_channels(self) -> int: ...
+
+class FlightRecorderHook:
+    @staticmethod
+    def attach(pg: ProcessGroup) -> FlightRecorderHook: ...
+    def remove(self) -> None: ...
+
+class NanCheckHook:
+    @staticmethod
+    def attach(pg: ProcessGroup) -> NanCheckHook: ...
+    def remove(self) -> None: ...
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...
