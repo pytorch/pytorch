@@ -486,6 +486,9 @@ jobs:
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      # [AIPYTORCH-894 A/B] Capture in-log CPU-affinity/compile-worker evidence on the
+      # un-isolated control runner to confirm the oversubscription that kills the shard.
+      repro-probe: true
     secrets: inherit
 
   inductor-build:

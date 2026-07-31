@@ -39,6 +39,13 @@ on:
         default: ""
         description: |
           List of tests to include (empty string implies default list)
+      repro-probe:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          [AIPYTORCH-894 A/B only] When true, emit greppable REPRO_PROBE lines into the job log
+          (one-shot CPU-affinity/parallel_info probe + background compile-worker sampler). Inert by default.
       dashboard-tag:
         required: false
         type: string
@@ -204,6 +211,7 @@ jobs:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          REPRO_PROBE: ${{ inputs.repro-probe && '1' || '0' }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
@@ -282,7 +290,16 @@ jobs:
           if [[ "${TEST_CONFIG}" == *distributed* ]]; then
             PREFLIGHT="timeout 180 python .ci/pytorch/rocm_preflight.py && "
           fi
-          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${PREFLIGHT}${TEST_COMMAND}"
+          # [AIPYTORCH-894 A/B] In-log reproduction evidence (gated on repro-probe). Non-fatal.
+          if [[ "${REPRO_PROBE}" == "1" ]]; then
+            docker exec -t "${container_name}" bash -lc 'echo "REPRO_PROBE affinity=$(python -c "import os;print(len(os.sched_getaffinity(0)))") nproc=$(nproc) parallel_info:"; python -c "import torch;print(torch.__config__.parallel_info())"' || true
+          fi
+          # [AIPYTORCH-894 A/B] Background compile-worker sampler (gated). Non-fatal; dies with container.
+          SAMPLER=""
+          if [[ "${REPRO_PROBE}" == "1" ]]; then
+            SAMPLER='{ ( for i in $(seq 1 60); do echo "REPRO_PROBE workers=$(pgrep -fc "compile_worker|async_compile|torch/_inductor/compile_worker" 2>/dev/null || echo 0) ts=$(date +%s)"; sleep 30; done ) & } && '
+          fi
+          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${PREFLIGHT}${SAMPLER}${TEST_COMMAND}"
 
       - name: Restore workspace owner
         if: always()
