@@ -189,7 +189,7 @@ def reset() -> None:
 
         FakeTensorMode.cache_clear()
 
-        if torch.cuda.is_initialized():
+        if torch.cuda.is_available():
             from torch._inductor.cudagraph_trees import reset_cudagraph_trees
 
             reset_cudagraph_trees()
