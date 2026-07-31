@@ -1242,7 +1242,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
-        if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
+        if func.__name__ in ("__getitem__", "__setitem__") and isinstance(
+            args[0], torch.Tensor
+        ):
+            is_getitem = func.__name__ == "__getitem__"
 
             def is_scalar_tensor_index(item: object) -> TypeGuard[torch.Tensor]:
                 if not isinstance(item, torch.Tensor) or item.ndim != 0:
@@ -1257,15 +1260,29 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     return item.item()
                 return item
 
+            def has_traceable_index(item: object) -> bool:
+                if isinstance(item, torch.SymInt):
+                    return True
+                if isinstance(item, slice):
+                    return any(
+                        isinstance(s, torch.SymInt) or is_scalar_tensor_index(s)
+                        for s in (item.start, item.stop, item.step)
+                    )
+                return is_getitem and is_scalar_tensor_index(item)
+
             def rewrite(
                 dim: int, item: Any
             ) -> tuple[int, tuple[Callable[..., object], list[Any]]] | None:
                 # Redirect to torch.select for indexing.
                 if item is None:
                     return dim + 1, (torch.unsqueeze, [dim])
+                if not is_getitem and isinstance(item, bool):
+                    return None
                 if isinstance(item, (int, torch.SymInt)):
                     return dim, (torch.select, [dim, item])
                 if is_scalar_tensor_index(item):
+                    if not is_getitem:
+                        return None
                     return dim, (
                         lambda t, dim, item: torch.select(
                             t, dim, maybe_tensor_index_item(item)
@@ -1297,30 +1314,20 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
             items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
 
-            has_symint = False
+            has_traceable_index_value = False
             index_ellipsis = None
             t = args[0]
             n_none_slices = t.ndim + 1
             for i, item in enumerate(items):
-                if (
-                    isinstance(item, torch.SymInt)
-                    or (
-                        isinstance(item, slice)
-                        and any(
-                            isinstance(s, torch.SymInt) or is_scalar_tensor_index(s)
-                            for s in (item.start, item.stop, item.step)
-                        )
-                    )
-                    or is_scalar_tensor_index(item)
-                ):
-                    has_symint = True
+                if has_traceable_index(item):
+                    has_traceable_index_value = True
                 if item is Ellipsis:
                     index_ellipsis = i
                 if item is not None:
                     n_none_slices -= 1
 
-            # only rewrite when there are symints
-            if has_symint:
+            # only rewrite when there are traceable dynamic index values
+            if has_traceable_index_value:
                 if index_ellipsis is not None:
                     none_slices = [slice(None)] * n_none_slices
                     items[index_ellipsis : index_ellipsis + 1] = none_slices
@@ -1340,6 +1347,9 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)
+                    if not is_getitem:
+                        cast(torch.Tensor, t).copy_(args[2])
+                        return None
                     return t
 
                 return run, [], {}
