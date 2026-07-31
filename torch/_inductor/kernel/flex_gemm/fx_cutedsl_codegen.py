@@ -47,10 +47,17 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_squeeze,
     lower_tensorssa_reduce,
     lower_view_or_reshape,
-    reduction_from_node,
-    unsupported_reduction_from_node,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan, iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionPlan,
+    iter_fx_node_inputs,
+    NormalizedGetItem,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSqueeze,
+    NormalizedUnsupportedReduction,
+    NormalizedView,
+)
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
@@ -147,20 +154,22 @@ class FlexGemmEpilogueAnalysis:
     """Bundle the immutable analysis consumed by FlexGEMM lowering and emission.
 
     Attributes:
+        gemm: The validated GEMM node shared by lowering and emission.
         outputs: Classification of main, auxiliary, and local-reduction outputs.
         local_reduce: Grouped layouts and local-reduction matches from the FX graph.
     """
 
+    gemm: torch.fx.Node
     outputs: FlexGemmOutputPlan
     local_reduce: FlexGemmLocalReduceAnalysis
 
     @classmethod
     def from_graph_module(
-        cls, graph_module: torch.fx.GraphModule
+        cls, graph_module: torch.fx.GraphModule, gemm: torch.fx.Node
     ) -> "FlexGemmEpilogueAnalysis":
         """Run the one-pass local-reduction analysis and classify graph outputs."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
-        return cls(output_plan(graph_module, local_reduce), local_reduce)
+        return cls(gemm, output_plan(graph_module, local_reduce), local_reduce)
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
@@ -180,6 +189,7 @@ class FlexGemmEpilogueAnalysis:
 
 def analyze_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
+    gemm: torch.fx.Node,
 ) -> FlexGemmEpilogueAnalysis:
     """Analyze FlexGEMM body for output planning and epilogue code generation.
 
@@ -194,7 +204,7 @@ def analyze_flex_gemm_epilogue(
     Returns:
         Output and local-reduction analysis shared by later lowering phases.
     """
-    return FlexGemmEpilogueAnalysis.from_graph_module(graph_module)
+    return FlexGemmEpilogueAnalysis.from_graph_module(graph_module, gemm)
 
 
 def gemm_node(
@@ -249,7 +259,6 @@ class FlexGemmEpilogueEmitter:
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
-        gemm_op: torch._ops.OpOverload,
         analysis: FlexGemmEpilogueAnalysis,
         epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
         *,
@@ -258,7 +267,8 @@ class FlexGemmEpilogueEmitter:
         self.graph_module = graph_module
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.fast_math = fast_math
-        self.gemm = gemm_node(graph_module, gemm_op)
+        self.gemm = analysis.gemm
+        self.graph = analysis.local_reduce.graph
         self.outputs = analysis.outputs
         self.kernel = FlexGemmCuteDSLKernel()
         self.env: dict[torch.fx.Node, Any] = {
@@ -282,10 +292,12 @@ class FlexGemmEpilogueEmitter:
                 match=local_reduce_match, store=store, feeds_main=True
             ):
                 self.feed_main = local_reduce_match.value_node
-                reduction = reduction_from_node(local_reduce_match.value_node)
-                if reduction is None or not isinstance(reduction[0], torch.fx.Node):
+                reduction = self.graph.normalized_nodes.get(
+                    local_reduce_match.value_node
+                )
+                if not isinstance(reduction, NormalizedReduction):
                     raise AssertionError("feed-main plans require a matched reduction")
-                self.feed_main_input = reduction[0]
+                self.feed_main_input = reduction.source
                 self.aux = None if store is None else store.node
             case FlexGemmOutputLocalReducePlan(
                 store=FlexGemmLocalReduceStore(node=store_node)
@@ -398,55 +410,63 @@ class FlexGemmEpilogueEmitter:
         if lowered is not None:
             self.env[node] = lowered
             return
-        lowered = lower_squeeze(node, self.env, self.store_sources)
-        if lowered is not None:
-            self.env[node] = lowered
-            self.propagate_physical_reduction(node, node.args[0])
-            return
-        lowered = lower_getitem(node, self.env, self.store_sources)
-        if lowered is not None:
-            self.env[node] = lowered
-            self.propagate_physical_reduction(node, node.args[0])
-            return
-        lowered = lower_prepare_softmax_online(
-            node,
-            self.env,
-            self.kernel,
-            self.grouped_tensors,
-            self.store_sources,
-        )
-        if lowered is not None:
-            self.env[node] = lowered
-            return
-        lowered = lower_view_or_reshape(
-            node,
-            self.env,
-            self.kernel,
-            self.grouped_tensors,
-            self.active_grouped_layouts,
-            self.store_sources,
-            node is self.feed_main_input,
-        )
-        if lowered is not None:
-            self.env[node] = lowered
-            self.propagate_physical_reduction(node, node.args[0])
-            return
-        lowered = lower_tensorssa_reduce(
-            node,
-            self.env,
-            self.kernel,
-            self.grouped_tensors,
-            self.store_sources,
-            self.physical_reductions,
-        )
-        if lowered is not None:
-            self.bind_reduction(node, lowered)
-            return
-        unsupported_reduction = unsupported_reduction_from_node(node)
-        if unsupported_reduction is not None:
-            raise local_reduce_unsupported_tensorssa_error(
-                unsupported_reduction, value_only=True
-            )
+        normalized = self.graph.normalized_nodes.get(node)
+        match normalized:
+            case NormalizedSqueeze():
+                lowered = lower_squeeze(node, normalized, self.env, self.store_sources)
+                if lowered is not None:
+                    self.env[node] = lowered
+                    self.propagate_physical_reduction(node, normalized.source)
+                    return
+            case NormalizedGetItem():
+                lowered = lower_getitem(node, normalized, self.env, self.store_sources)
+                if lowered is not None:
+                    self.env[node] = lowered
+                    self.propagate_physical_reduction(node, normalized.source)
+                    return
+            case NormalizedPrepareSoftmax():
+                self.env[node] = lower_prepare_softmax_online(
+                    node,
+                    normalized,
+                    self.env,
+                    self.kernel,
+                    self.grouped_tensors,
+                    self.store_sources,
+                )
+                return
+            case NormalizedView():
+                lowered = lower_view_or_reshape(
+                    node,
+                    normalized,
+                    self.env,
+                    self.kernel,
+                    self.grouped_tensors,
+                    self.active_grouped_layouts,
+                    self.store_sources,
+                    node is self.feed_main_input,
+                )
+                if lowered is not None:
+                    self.env[node] = lowered
+                    self.propagate_physical_reduction(node, normalized.source)
+                    return
+            case NormalizedReduction():
+                self.bind_reduction(
+                    node,
+                    lower_tensorssa_reduce(
+                        node,
+                        normalized,
+                        self.env,
+                        self.kernel,
+                        self.grouped_tensors,
+                        self.store_sources,
+                        self.physical_reductions,
+                    ),
+                )
+                return
+            case NormalizedUnsupportedReduction():
+                raise local_reduce_unsupported_tensorssa_error(
+                    normalized.target, value_only=True
+                )
         is_shape_preserving = is_shape_preserving_pointwise_node(node)
         if is_shape_preserving and self.feed_main is None:
             if self.aux is None and any(
@@ -571,7 +591,6 @@ class FlexGemmEpilogueEmitter:
 
 def materialize_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
-    gemm_op: torch._ops.OpOverload,
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
     *,
@@ -598,7 +617,6 @@ def materialize_flex_gemm_epilogue(
     """
     return FlexGemmEpilogueEmitter(
         graph_module,
-        gemm_op,
         analysis,
         epilogue_arg_placeholders,
         fast_math=fast_math,
