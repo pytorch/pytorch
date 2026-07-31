@@ -732,8 +732,8 @@ inline uint chunk_quads(
 }
 
 // Shared body of the *_inner_chunk kernels: each row of length row_len is
-// split across lanes_per_row lanes (32 / lanes_per_row rows share one
-// simdgroup, a shuffle tree folds the per-lane partials) and, for split-K,
+// split across lanes_per_row lanes (simdgroup_size / lanes_per_row rows share
+// one simdgroup, a shuffle tree folds the per-lane partials) and, for split-K,
 // into segs_per_row segments per row producing [num_rows, segs_per_row]
 // partials the host combines with a second dispatch. Lanes read their rows
 // interleaved, as vec4 quads when chunk_quads allows and as chained scalar
@@ -752,8 +752,9 @@ inline void chunk_reduce_impl(
   const uint row_len = sizes.y;
   const uint lanes_per_row = sizes.z;
   const uint segs_per_row = sizes.w;
-  const uint rows_per_simd = 32 / lanes_per_row;
-  const uint simd_idx = tgid * (tptg / 32) + simdgroup_id;
+  const uint rows_per_simd = c10::metal::simdgroup_size / lanes_per_row;
+  const uint simd_idx =
+      tgid * (tptg / c10::metal::simdgroup_size) + simdgroup_id;
   const uint out_idx = simd_idx * rows_per_simd + simd_lane_id / lanes_per_row;
   if (out_idx >= num_rows * segs_per_row) {
     return;
@@ -774,8 +775,8 @@ inline void chunk_reduce_impl(
   // loads measure equal or ahead. A single segment per row with an
   // element-4 aligned row length makes every row start aligned, so the
   // decision is simdgroup-uniform.
-  const bool quads_ok =
-      lanes_per_row < 32 && segs_per_row == 1 && (row_len & 3u) == 0;
+  const bool quads_ok = lanes_per_row < c10::metal::simdgroup_size &&
+      segs_per_row == 1 && (row_len & 3u) == 0;
   uint k = chunk_quads<OPS>(
       input,
       row_base,
