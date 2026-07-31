@@ -10,6 +10,7 @@ import torch
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     MACOS_VERSION,
     parametrize,
@@ -40,6 +41,8 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 @instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
     device = "mps"
@@ -357,6 +360,8 @@ class MPSBasicTests(TestCase):
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 class MPSBasicTestsAOTI(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)
         ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
