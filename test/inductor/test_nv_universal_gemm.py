@@ -2521,6 +2521,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             fn, a, b, scale_a, scale_b, *biases
         )
         self.assertEqual(epilogue_fused, expected_fused)
+        # Random packed FP4 operands can produce NaNs in the reference GEMM.
         torch.testing.assert_close(
             result, fn(a, b, scale_a, scale_b, *biases), equal_nan=True
         )
