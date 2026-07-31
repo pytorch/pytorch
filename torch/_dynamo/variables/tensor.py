@@ -1392,7 +1392,7 @@ class TensorVariable(VariableTracker):
 
     def _collect_backward_inputs(
         self, vars_iter: Iterable[VariableTracker], error_on_non_leaf: bool = False
-    ) -> list[VariableTracker] | None:
+    ) -> list["TensorVariable"]:
         """
         Collect unique leaf tensors from vars_iter for backward.
 
@@ -1448,7 +1448,6 @@ class TensorVariable(VariableTracker):
                     if node not in seen_nodes:
                         seen_nodes.add(node)
                         result.append(var)
-        # pyrefly: ignore [bad-return]
         return result
 
     def method_backward(
@@ -1478,12 +1477,13 @@ class TensorVariable(VariableTracker):
 
         TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
         """
-        if not config.trace_autograd_ops:
+        if self.layout != torch.strided or self.is_nested:
             unimplemented(
-                gb_type="Unsupported Tensor.backward() call",
-                context=f"call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
-                explanation="Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
-                hints=["Set torch._dynamo.trace_autograd_ops=True"],
+                gb_type="Tensor.backward() with non-strided tensor",
+                context=f"call_method {self} backward",
+                explanation="Dynamo's Tensor.backward() lowering does not support "
+                "non-strided tensors.",
+                hints=["Run backward() on this tensor outside the compiled region."],
             )
 
         if not self.requires_grad and not self.has_grad_fn:
@@ -1507,10 +1507,16 @@ class TensorVariable(VariableTracker):
             )
             input_vars = self._collect_backward_inputs(all_vars)
             if not input_vars:
-                # No leaf tensors found - nothing to accumulate gradients into.
-                # This matches eager behavior where backward() is a no-op if there
-                # are no leaves requiring grad.
-                return ConstantVariable.create(None)
+                unimplemented(
+                    gb_type="backward() with untracked leaf tensors",
+                    context=f"call_method {self} backward",
+                    explanation="Tensor.backward() cannot be captured because Dynamo "
+                    "cannot see the leaf tensors that receive gradients. This can "
+                    "happen when the autograd graph crosses a graph-break boundary.",
+                    hints=[
+                        "Call backward() in the same compiled region as the forward computation.",
+                    ],
+                )
         else:
             if isinstance(inputs, variables.BaseListVariable):
                 provided_vars = inputs.items
@@ -1533,6 +1539,36 @@ class TensorVariable(VariableTracker):
                     ],
                 )
 
+        has_post_accumulate_grad_hook = any(
+            name == "register_post_accumulate_grad_hook"
+            and hooked_tensor.as_proxy().node is input_var.as_proxy().node
+            for hooked_tensor, _, _, name in tx.output.side_effects.tensor_hooks.values()
+            for input_var in input_vars
+        ) or any(
+            input_var.as_proxy().node.meta.get("has_post_accumulate_grad_hook", False)
+            for input_var in input_vars
+        )
+        for input_var in input_vars:
+            if input_var.source and input_var.source.subguards_allowed():
+                hooks = input_var.get_real_value()._post_accumulate_grad_hooks
+                hooks_source = AttrSource(
+                    input_var.source, "_post_accumulate_grad_hooks"
+                )
+                if hooks is None:
+                    install_guard(hooks_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+                else:
+                    install_guard(hooks_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                    has_post_accumulate_grad_hook |= bool(hooks)
+
+        if has_post_accumulate_grad_hook:
+            unimplemented(
+                gb_type="Tensor.backward() with post-accumulate-grad hooks",
+                context=f"call_method {self} backward",
+                explanation="Dynamo's Tensor.backward() lowering cannot preserve "
+                "post-accumulate-grad hooks.",
+                hints=["Run backward() outside the compiled region."],
+            )
+
         # Build autograd.grad call
         grad_kwargs = {"allow_unused": VariableTracker.build(tx, auto_detect)}
         if retain_graph is not None:
@@ -1546,7 +1582,9 @@ class TensorVariable(VariableTracker):
             grad_args.append(gradient)
 
         autograd_grad_fn = VariableTracker.build(tx, torch.autograd.grad)
-        grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
+        # Direct user calls to autograd.grad still honor trace_autograd_ops.
+        with config.patch(trace_autograd_ops=True):
+            grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
 
         # Accumulate gradients for unique leaf tensors under no_grad context
         # to replicate eager autograd engine.
@@ -1564,6 +1602,16 @@ class TensorVariable(VariableTracker):
             grad_i = grads_var.call_method(
                 tx, "__getitem__", [VariableTracker.build(tx, idx)], {}
             )
+            if isinstance(grad_i, TensorVariable) and (
+                grad_i.layout != torch.strided or grad_i.is_nested
+            ):
+                unimplemented(
+                    gb_type="Tensor.backward() with non-strided gradients",
+                    context=f"gradient for backward input {idx}",
+                    explanation="Dynamo's Tensor.backward() lowering cannot "
+                    "accumulate non-strided gradients.",
+                    hints=["Run backward() outside the compiled region."],
+                )
             accumulate_grad_fn.call_function(tx, [input_var, grad_i], {})
 
         grad_mode_var.exit(tx)
@@ -2078,6 +2126,9 @@ class TensorVariable(VariableTracker):
         # see [On tensor.register_hook]
 
         if not self.source:
+            if name == "register_post_accumulate_grad_hook":
+                self.as_proxy().node.meta["has_post_accumulate_grad_hook"] = True
+
             # For intermediate tensors (those without a source), we have two approaches:
             # 1. When compiled autograd is enabled: use BackwardState to defer hook execution
             # 2. When compiled autograd is NOT enabled: use a custom autograd function
@@ -2173,6 +2224,8 @@ class TensorVariable(VariableTracker):
             hooked_proxy.node.meta["example_value"] = tensor_proxy.node.meta[
                 "example_value"
             ]
+            if name == "register_post_accumulate_grad_hook":
+                hooked_proxy.node.meta["has_post_accumulate_grad_hook"] = True
             self.proxy = hooked_proxy
             self.synchronize_attributes(tx)
             return variables.RemovableHandleVariable(
