@@ -2252,26 +2252,6 @@ graph():
         y = torch.tensor([5, 10])
         self.assertTrue(torch.allclose(ep.module()(y), m(y)))
 
-    @requires_cuda_and_triton
-    def test_export_raw_triton_kernel_non_strict_error(self):
-        from torch.testing._internal.triton_utils import add_kernel
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                out = torch.empty_like(x)
-                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
-                return out
-
-        args = (
-            torch.randn(3, device="cuda"),
-            torch.randn(3, device="cuda"),
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Raw Triton kernel calls are not supported by non-strict torch.export",
-        ):
-            export(M(), args, strict=False)
-
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -10325,99 +10305,6 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_cuda_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_dim(self):
-        device = torch.device("cuda")
-        combine_mode = "pointwise"
-
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
-
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 2, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_cuda_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_scandim(self):
-        device = torch.device("cuda")
-        combine_mode = "pointwise"
-
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
-
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_cuda_and_triton
-    def test_export_associative_scan_lifted_buffers(self):
-        if "cpp_runtime_nonstrict" in self.id():
-            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
-
-        device = torch.device("cuda")
-        combine_mode = "pointwise"
-
-        class A(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
-
-            def forward(self):
-                return self.buffer.cos()
-
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.a = A()
-
-            def combine_fn(self, x, y):
-                return (x + y) * self.a()
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        inp = torch.ones(3, 10, 2, device=device)
-        ep = export(M(), (inp,))
-        epm = ep.module()
-
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
-
-        for gm in epm.named_modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            self.assertEqual(
-                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
-                1,
-            )
-
     # associative_scan is not supported by the cpp (NativeRT) runtime yet
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_pointwise_cpu(self):
@@ -17217,79 +17104,6 @@ class GraphModule(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_module_to_with_shared_weights(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-
-            def forward(self, x):
-                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
-                embedded = self.embedding(token_ids).sum()
-                return x.sum() + embedded.sum()
-
-        class Container(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if "cuda" in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        with (
-            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
-            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
-        ):
-            torch.manual_seed(0)
-            container = Container()
-            container_eager = copy.deepcopy(container)
-            gm = torch.export.export(
-                container,
-                (torch.randn(4, 4, 4, device="cuda"),),
-                strict=True,
-            ).module()
-
-            self.assertExpectedInline(
-                str(gm.code).strip(),
-                """\
-def forward(self, x):
-    args_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    mod_embedding_weight = self.mod.embedding.weight
-    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
-    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
-    submod_1 = self.submod_1
-    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
-    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
-    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
-    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
-    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
-    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
-    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
-    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
-    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
-    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
-    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",
-            )
-
-            inp = torch.randn(4, 4, 4, device="cuda")
-
-            # Call container first to move shared weights to CUDA
-            export_out = gm(inp)
-            eager_out = container_eager(inp)
-            self.assertEqual(export_out, eager_out)
-
-            # This should not fail even though weights are now on CUDA
-            # and .to(cuda) returns the same parameter with requires_grad=True
-            export_out_v2 = gm(inp)
-            eager_out_v2 = container_eager(inp)
-            self.assertEqual(export_out_v2, eager_out_v2)
-
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureStrictV2  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureRetraceability  # test_hop doesn't have a dynamo implementation
@@ -18944,6 +18758,196 @@ def forward(self, x, y):
         result = decomposed.module()(torch.randn(1, 16, 64))
         self.assertEqual(result.shape, (1, 256, 64))
 
+
+
+class TestExportCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_cuda_and_triton
+    def test_export_raw_triton_kernel_non_strict_error(self):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
+                return out
+
+        args = (
+            torch.randn(3, device="cuda"),
+            torch.randn(3, device="cuda"),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Raw Triton kernel calls are not supported by non-strict torch.export",
+        ):
+            export(M(), args, strict=False)
+
+    @requires_cuda_and_triton
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_dim(self):
+        device = torch.device("cuda")
+        combine_mode = "pointwise"
+
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 2, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    @requires_cuda_and_triton
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_scandim(self):
+        device = torch.device("cuda")
+        combine_mode = "pointwise"
+
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    @requires_cuda_and_triton
+    def test_export_associative_scan_lifted_buffers(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
+        device = torch.device("cuda")
+        combine_mode = "pointwise"
+
+        class A(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
+
+            def forward(self):
+                return self.buffer.cos()
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = A()
+
+            def combine_fn(self, x, y):
+                return (x + y) * self.a()
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        inp = torch.ones(3, 10, 2, device=device)
+        ep = export(M(), (inp,))
+        epm = ep.module()
+
+        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+
+        for gm in epm.named_modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            self.assertEqual(
+                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
+                1,
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_module_to_with_shared_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        with (
+            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
+            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
+        ):
+            torch.manual_seed(0)
+            container = Container()
+            container_eager = copy.deepcopy(container)
+            gm = torch.export.export(
+                container,
+                (torch.randn(4, 4, 4, device="cuda"),),
+                strict=True,
+            ).module()
+
+            self.assertExpectedInline(
+                str(gm.code).strip(),
+                """\
+def forward(self, x):
+    args_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    mod_embedding_weight = self.mod.embedding.weight
+    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
+    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
+    submod_1 = self.submod_1
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
+    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
+    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
+    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
+    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
+    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
+    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
+    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
+    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
+    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
+    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",
+            )
+
+            inp = torch.randn(4, 4, 4, device="cuda")
+
+            # Call container first to move shared weights to CUDA
+            export_out = gm(inp)
+            eager_out = container_eager(inp)
+            self.assertEqual(export_out, eager_out)
+
+            # This should not fail even though weights are now on CUDA
+            # and .to(cuda) returns the same parameter with requires_grad=True
+            export_out_v2 = gm(inp)
+            eager_out_v2 = container_eager(inp)
+            self.assertEqual(export_out_v2, eager_out_v2)
 
 class TestExportAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
