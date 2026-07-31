@@ -219,49 +219,6 @@ __device__ __forceinline__ void sync_remote_blocks(
   }
 };
 
-// NOTE [one-shot low-latency]
-// The one-shot all-reduce family (one_shot_*, multimem_one_shot_*) brackets its
-// peer read with two cross-rank barriers: an *entry* barrier (make every peer's
-// input visible before we read it) and an *exit* barrier (make the symm buffers
-// safe to be overwritten by a later kernel, i.e. every peer has finished reading
-// this iteration's data). Each barrier is one NVLink round-trip gated by the
-// slowest peer, so at small (latency-bound) sizes the two barriers dominate the
-// kernel time.
-//
-// These helpers factor the barrier out of the reduction core so a "low-latency"
-// variant can drop the exit round-trip (kLowLatency=true), leaving a single
-// entry barrier -- the same 1-round-trip shape NCCL's LL symmetric kernels reach
-// by folding the flag into the data. Dropping the exit barrier is only safe when
-// the symmetric input buffer is not overwritten (by any rank) before this op's
-// stream work completes -- e.g. reducing a persistent buffer, or back-to-back
-// captured replays. If the input is recomputed in-place every step without an
-// external sync, keep the default (kLowLatency=false).
-
-// Entry barrier: make every peer's input visible before this kernel reads it.
-// `hasPrevMemAccess` is true when this kernel wrote the symm buffer first (the
-// copy path); false when the input was already resident (multicast / no-copy).
-template <bool hasPrevMemAccess>
-__device__ __forceinline__ void one_shot_entry_barrier(
-    uint32_t** signal_pads,
-    size_t rank,
-    size_t world_size) {
-  sync_remote_blocks<hasPrevMemAccess, true>(signal_pads, rank, world_size);
-  __syncthreads();
-}
-
-// Exit barrier: guarantee this kernel's peer reads have completed before a later
-// kernel may overwrite the symm buffers. Elided when kLowLatency is set.
-template <bool kLowLatency>
-__device__ __forceinline__ void one_shot_exit_barrier(
-    uint32_t** signal_pads,
-    size_t rank,
-    size_t world_size) {
-  if constexpr (!kLowLatency) {
-    __syncthreads();
-    sync_remote_blocks<true, false>(signal_pads, rank, world_size);
-  }
-}
-
 template <typename T>
 struct MultimemLdReduce {
   template <int Alignment>
@@ -461,6 +418,115 @@ load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
     acc = add_vec<alignment, T>(acc, vec);
   }
   return acc;
+}
+
+// NOTE [LL one-shot]
+// Low-latency one-shot all-reduce, modeled on NCCL's LL symmetric kernels.
+// Whereas the base one-shot ops bracket their peer read with two cross-rank
+// signal-pad barriers (an entry barrier so peers' inputs are visible, an exit
+// barrier so buffers are safe to overwrite), the LL variant instead has each
+// rank *push* its input into a symmetric scratch
+// "inbox" as 16-byte lines of the form {payload_lo, epoch, payload_hi, epoch}
+// -- 8 bytes of data plus a 32-bit epoch flag written twice. A reader spins on
+// its own inbox until BOTH flag words equal the current epoch (the doubled flag
+// guards against a torn 16-byte write, so no 16-byte atomicity is assumed) and
+// then reduces. The flag write *is* the synchronization, so a single cross-rank
+// round-trip suffices -- no separate entry or exit barrier.
+//
+// Reuse safety (dropping BOTH barriers) comes from double-buffering plus a
+// monotonically increasing epoch. The inbox has two slots; call E uses
+// slot = E & 1, so a slot is only overwritten every other call. The flag
+// protocol enforces the ordering that makes that safe: rank A's write of epoch
+// E+2 into a slot happens only after A has read every peer's epoch-(E+1) line,
+// which each peer wrote only after finishing its own epoch-E read -- hence
+// every reader of epoch E in that slot has finished before A overwrites it at
+// E+2. The epoch lives in device memory and is bumped by a tiny follow-up
+// kernel, so CUDA-graph replays advance it (a host-side counter would be
+// captured as a constant and break the protocol on replay). Epochs stay in
+// lockstep across ranks because the collective is called the same number of
+// times on each rank.
+
+// Unicast: write one LL line to a peer's inbox slot. Relaxed system scope --
+// the flag lives in the same line as the data, so per-line consistency
+// (guaranteed by the doubled-flag read) is all that is needed; no separate
+// fence.
+__device__ __forceinline__ void ll_st(
+    void* dst,
+    uint32_t d0,
+    uint32_t d1,
+    uint32_t epoch) {
+#if !defined(USE_ROCM)
+  asm volatile("st.relaxed.sys.global.v4.u32 [%0], {%1,%2,%3,%4};" ::"l"(dst),
+               "r"(d0),
+               "r"(epoch),
+               "r"(d1),
+               "r"(epoch)
+               : "memory");
+#else
+  volatile uint32_t* p = reinterpret_cast<volatile uint32_t*>(dst);
+  p[0] = d0;
+  p[1] = epoch;
+  p[2] = d1;
+  p[3] = epoch;
+  __threadfence_system();
+#endif
+}
+
+// Multicast: write one LL line to every peer's inbox slot in a single
+// instruction (NVSwitch fan-out), used by the multimem LL variant.
+__device__ __forceinline__ void ll_multimem_st(
+    void* mc_dst,
+    uint32_t d0,
+    uint32_t d1,
+    uint32_t epoch) {
+#if !defined(USE_ROCM) && defined(NVCC_SUPPORTS_MULTICAST)
+  asm volatile(
+      "multimem.st.relaxed.sys.global.v4.f32 [%0], {%1,%2,%3,%4};" ::"l"(
+          mc_dst),
+      "r"(d0),
+      "r"(epoch),
+      "r"(d1),
+      "r"(epoch)
+      : "memory");
+#else
+  CUDA_KERNEL_ASSERT(false);
+#endif
+}
+
+// Spin-read one LL line from the local inbox until both flags == epoch; returns
+// the 8-byte payload as {d0, d1}.
+__device__ __forceinline__ uint2 ll_ld(const void* src, uint32_t epoch) {
+  uint32_t d0, f0, d1, f1;
+  do {
+#if !defined(USE_ROCM)
+    asm volatile("ld.relaxed.sys.global.v4.u32 {%0,%1,%2,%3}, [%4];"
+                 : "=r"(d0), "=r"(f0), "=r"(d1), "=r"(f1)
+                 : "l"(src)
+                 : "memory");
+#else
+    const volatile uint32_t* p =
+        reinterpret_cast<const volatile uint32_t*>(src);
+    d0 = p[0];
+    f0 = p[1];
+    d1 = p[2];
+    f1 = p[3];
+#endif
+  } while (f0 != epoch || f1 != epoch);
+  return make_uint2(d0, d1);
+}
+
+// Add two 8-byte LL payloads element-wise, per dtype.
+template <typename T>
+__device__ __forceinline__ uint2 ll_add(uint2 a, uint2 b) {
+  if constexpr (std::is_same_v<T, float>) {
+    return make_uint2(
+        __float_as_uint(__uint_as_float(a.x) + __uint_as_float(b.x)),
+        __float_as_uint(__uint_as_float(a.y) + __uint_as_float(b.y)));
+  } else if constexpr (std::is_same_v<T, at::BFloat16>) {
+    return make_uint2(add_bf16x2(a.x, b.x), add_bf16x2(a.y, b.y));
+  } else {
+    static_assert(dependent_false<T>);
+  }
 }
 
 } // namespace c10d::symmetric_memory

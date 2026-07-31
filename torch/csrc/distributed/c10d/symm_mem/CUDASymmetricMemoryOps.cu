@@ -15,11 +15,17 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+
+#include <algorithm>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -59,16 +65,6 @@
     default: {                                                        \
       TORCH_CHECK(false, "Not implemented for alignment=", alignment); \
     }                                                                 \
-  }
-
-// Turn a runtime bool into a compile-time constexpr `name` for both branches.
-#define DISPATCH_BOOL(value, name, ...) \
-  if (value) {                          \
-    constexpr bool name = true;         \
-    __VA_ARGS__();                      \
-  } else {                              \
-    constexpr bool name = false;        \
-    __VA_ARGS__();                      \
   }
 
 #define AT_DISPATCH_FLOAT_AND_BFLOAT16(scalar_type, name, ...)         \
@@ -138,7 +134,152 @@ void init_elementwise_launch_config(
   }
 }
 
+// ---- Low-latency (LL) one-shot all-reduce. See NOTE [LL one-shot]. ----
+constexpr size_t ll_all_reduce_max_num_blocks = 24;
+constexpr size_t ll_all_reduce_max_num_threads = 512;
+
+// Per-group cached symmetric scratch "inbox" plus a device-resident epoch
+// counter, backing the LL one-shot ops. Grows collectively on demand.
+struct LLScratch {
+  at::Tensor buffer; // symmetric scratch storage (kept alive here)
+  c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> symm;
+  uint32_t* epoch = nullptr; // device counter, starts at 1
+  size_t capacity_lines = 0; // allocated 16-byte lines per (slot, src)
+  std::vector<at::Tensor> graveyard; // prior buffers, kept alive across grows
+};
+
+std::mutex ll_scratch_mutex;
+
+// Return a cached LL scratch with room for `needed_lines` lines per (slot,
+// src), growing it if needed. The grow path calls rendezvous(), which has
+// collective semantics, so this must be reached in lockstep by every rank in
+// the group -- which holds for a collective op called with matching sizes on
+// all ranks.
+LLScratch& get_ll_scratch(
+    const std::string& group_name,
+    c10::Device device,
+    int world_size,
+    size_t needed_lines) {
+  // Intentionally leaked: LLScratch holds symmetric-memory tensors whose
+  // destructors call into the CUDA driver, which is unsafe during static
+  // destruction at process exit (cudaErrorCudartUnloading). Torn down with the
+  // process instead.
+  static auto* ll_scratch_cache =
+      new std::unordered_map<std::string, LLScratch>();
+  std::lock_guard<std::mutex> lk(ll_scratch_mutex);
+  auto& s = (*ll_scratch_cache)[group_name];
+  if (s.epoch == nullptr) {
+    C10_CUDA_CHECK(cudaMalloc(&s.epoch, sizeof(uint32_t)));
+    uint32_t one = 1u;
+    C10_CUDA_CHECK(
+        cudaMemcpy(s.epoch, &one, sizeof(uint32_t), cudaMemcpyHostToDevice));
+  }
+  if (needed_lines > s.capacity_lines) {
+    if (s.buffer.defined()) {
+      // A peer may still reference this base from an in-flight op; keep the old
+      // allocation alive rather than freeing it under them.
+      s.graveyard.push_back(s.buffer);
+    }
+    // 2 slots * world_size sources * needed_lines lines * 16 bytes/line.
+    const int64_t bytes = static_cast<int64_t>(2) * world_size *
+        static_cast<int64_t>(needed_lines) * 16;
+    // Allocate group-agnostically -- the NCCL backend's allocator rejects a
+    // group_name at alloc time; rendezvous() below binds the buffer to the
+    // group.
+    s.buffer = c10d::symmetric_memory::empty_strided_p2p(
+        {bytes}, {1}, at::kByte, device, std::nullopt, std::nullopt);
+    s.buffer.zero_(); // flags start at 0, which never equals a live epoch (>=1)
+    s.symm = c10d::symmetric_memory::rendezvous(s.buffer, group_name);
+    s.capacity_lines = needed_lines;
+  }
+  return s;
+}
+
+// Bump the device epoch once per LL op (stream-ordered after the LL kernel), so
+// CUDA-graph replays advance it. Single-threaded -> plain increment.
+static __global__ void ll_epoch_inc_kernel(uint32_t* epoch_ptr) {
+  *epoch_ptr += 1u;
+}
+
+// LL one-shot all-reduce (unicast writes). Each rank pushes its input into
+// every peer's inbox as {payload, epoch} lines, then spin-reads its own inbox
+// and reduces. `stride` is the fixed per-(slot,src) line stride (= scratch
+// capacity); `lines` is the number of live lines this call.
+template <typename T>
+static __global__ void one_shot_all_reduce_ll_kernel(
+    uint4** inbox_ptrs,
+    const T* input,
+    T* output,
+    size_t lines,
+    size_t stride,
+    const uint32_t* epoch_ptr,
+    size_t rank,
+    size_t world_size) {
+  const uint32_t epoch = *epoch_ptr;
+  const size_t slot_base =
+      static_cast<size_t>(epoch & 1u) * world_size * stride;
+  const uint2* in2 = reinterpret_cast<const uint2*>(input);
+  uint2* out2 = reinterpret_cast<uint2*>(output);
+  const size_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+  const size_t nthreads = blockDim.x * gridDim.x;
+
+  for (size_t i = tid; i < lines; i += nthreads) {
+    const uint2 v = in2[i];
+    for (size_t step = 0; step < world_size; ++step) {
+      const size_t p = (rank + step) % world_size;
+      ll_st(inbox_ptrs[p] + slot_base + rank * stride + i, v.x, v.y, epoch);
+    }
+  }
+
+  uint4* my_inbox = inbox_ptrs[rank];
+  for (size_t i = tid; i < lines; i += nthreads) {
+    uint2 acc = ll_ld(my_inbox + slot_base + i, epoch); // src 0
+    for (size_t s = 1; s < world_size; ++s) {
+      acc = ll_add<T>(acc, ll_ld(my_inbox + slot_base + s * stride + i, epoch));
+    }
+    out2[i] = acc;
+  }
+}
+
 #if !defined(USE_ROCM) //No multi-cast support on ROCm yet
+// LL one-shot all-reduce (multicast writes). Identical to the unicast variant
+// except the push is a single multimem.st per line that fans out to every
+// peer's inbox via the NVSwitch; the reduce is still local. See NOTE [LL
+// one-shot].
+template <typename T>
+static __global__ void multimem_one_shot_all_reduce_ll_kernel(
+    uint4* inbox_mc,
+    uint4* inbox_local,
+    const T* input,
+    T* output,
+    size_t lines,
+    size_t stride,
+    const uint32_t* epoch_ptr,
+    size_t rank,
+    size_t world_size) {
+  const uint32_t epoch = *epoch_ptr;
+  const size_t slot_base =
+      static_cast<size_t>(epoch & 1u) * world_size * stride;
+  const uint2* in2 = reinterpret_cast<const uint2*>(input);
+  uint2* out2 = reinterpret_cast<uint2*>(output);
+  const size_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+  const size_t nthreads = blockDim.x * gridDim.x;
+
+  for (size_t i = tid; i < lines; i += nthreads) {
+    const uint2 v = in2[i];
+    ll_multimem_st(inbox_mc + slot_base + rank * stride + i, v.x, v.y, epoch);
+  }
+
+  for (size_t i = tid; i < lines; i += nthreads) {
+    uint2 acc = ll_ld(inbox_local + slot_base + i, epoch); // src 0
+    for (size_t s = 1; s < world_size; ++s) {
+      acc = ll_add<T>(
+          acc, ll_ld(inbox_local + slot_base + s * stride + i, epoch));
+    }
+    out2[i] = acc;
+  }
+}
+
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -238,7 +379,7 @@ at::Tensor multimem_all_reduce_(
   return input;
 }
 
-template <typename T, int alignment, bool kLowLatency = false>
+template <typename T, int alignment>
 static __global__ void multimem_one_shot_reduce_kernel(
     T* input_mc_ptr,
     T* output_ptr,
@@ -250,10 +391,8 @@ static __global__ void multimem_one_shot_reduce_kernel(
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  // No prior symm-buffer write on this path (input already resident), so the
-  // entry barrier only needs acquire. See NOTE [one-shot low-latency].
-  one_shot_entry_barrier</*hasPrevMemAccess=*/false>(
-      signal_pads, rank, world_size);
+  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
+  __syncthreads();
 
   if (rank == root) {
     auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
@@ -264,16 +403,16 @@ static __global__ void multimem_one_shot_reduce_kernel(
     }
   }
 
-  one_shot_exit_barrier<kLowLatency>(signal_pads, rank, world_size);
+  __syncthreads();
+  sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
-at::Tensor multimem_one_shot_reduce_out_impl(
+at::Tensor multimem_one_shot_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
     int64_t root,
     std::string group_name,
-    at::Tensor out,
-    bool low_latency) {
+    at::Tensor out) {
   auto pg = c10d::resolve_process_group(group_name);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -336,36 +475,24 @@ at::Tensor multimem_one_shot_reduce_out_impl(
   AT_DISPATCH_FLOAT_AND_BFLOAT16(
       input.scalar_type(), "multimem_one_shot_all_reduce", [&]() {
         DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
-          DISPATCH_BOOL(low_latency, k_low_latency, [&]() {
-            multimem_one_shot_reduce_kernel<scalar_t, k_alignment, k_low_latency>
-                <<<num_blocks,
-                   num_threads,
-                   0,
-                   at::cuda::getCurrentCUDAStream()>>>(
-                    reinterpret_cast<scalar_t*>(symm_mem->get_multicast_ptr()) +
-                        input.storage_offset(),
-                    out.data_ptr<scalar_t>(),
-                    input.numel(),
-                    reinterpret_cast<uint32_t**>(
-                        symm_mem->get_signal_pad_ptrs_dev()),
-                    rank,
-                    world_size,
-                    root);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-          });
+          multimem_one_shot_reduce_kernel<scalar_t, k_alignment>
+              <<<num_blocks,
+                 num_threads,
+                 0,
+                 at::cuda::getCurrentCUDAStream()>>>(
+                  reinterpret_cast<scalar_t*>(symm_mem->get_multicast_ptr()) +
+                      input.storage_offset(),
+                  out.data_ptr<scalar_t>(),
+                  input.numel(),
+                  reinterpret_cast<uint32_t**>(
+                      symm_mem->get_signal_pad_ptrs_dev()),
+                  rank,
+                  world_size,
+                  root);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
   return out;
-}
-
-at::Tensor multimem_one_shot_reduce_out(
-    const at::Tensor& input,
-    std::string reduce_op,
-    int64_t root,
-    std::string group_name,
-    at::Tensor out) {
-  return multimem_one_shot_reduce_out_impl(
-      input, reduce_op, root, group_name, out, /*low_latency=*/false);
 }
 
 at::Tensor multimem_one_shot_all_reduce_out(
@@ -386,17 +513,61 @@ at::Tensor multimem_one_shot_all_reduce(
   return multimem_one_shot_all_reduce_out(input, reduce_op, group_name, out);
 }
 
-// Low-latency variant: single entry barrier, exit barrier elided (1 cross-rank
-// round-trip). See NOTE [one-shot low-latency] for the correctness contract.
+// Low-latency variant: the LL protocol (see NOTE [LL one-shot]) -- a single
+// cross-rank round-trip, reuse-safe via double-buffering + a device epoch.
+// Multicast push (one multimem.st per line), local reduce.
 at::Tensor multimem_one_shot_all_reduce_low_latency(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  auto group = c10d::resolve_process_group(group_name);
-  int root = group->getRank();  // each rank reduces to itself
+  TORCH_CHECK(
+      input.is_contiguous(),
+      "multimem_one_shot_all_reduce_low_latency: input must be contiguous.");
+  TORCH_CHECK(
+      reduce_op == "sum",
+      "multimem_one_shot_all_reduce_low_latency: only sum is supported.");
   auto out = at::empty_like(input);
-  return multimem_one_shot_reduce_out_impl(
-      input, reduce_op, root, group_name, out, /*low_latency=*/true);
+  if (input.numel() == 0) {
+    return out;
+  }
+  auto pg = c10d::resolve_process_group(group_name);
+  const int rank = pg->getRank();
+  const int world_size = pg->getSize();
+  const size_t elt = input.element_size();
+  // LL packs whole 8-byte lines; fall back to the barrier-based op otherwise.
+  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0) {
+    return multimem_one_shot_all_reduce(input, reduce_op, group_name);
+  }
+  const size_t lines = input.numel() / (8 / elt);
+  auto& scratch = get_ll_scratch(group_name, input.device(), world_size, lines);
+  if (!scratch.symm->has_multicast_support()) {
+    return multimem_one_shot_all_reduce(input, reduce_op, group_name);
+  }
+
+  const int num_threads = static_cast<int>(ll_all_reduce_max_num_threads);
+  int num_blocks = static_cast<int>(std::min<size_t>(
+      ll_all_reduce_max_num_blocks, (lines + num_threads - 1) / num_threads));
+  num_blocks = std::max(num_blocks, 1);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOAT_AND_BFLOAT16(
+      input.scalar_type(), "multimem_one_shot_all_reduce_low_latency", [&]() {
+        multimem_one_shot_all_reduce_ll_kernel<scalar_t>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                reinterpret_cast<uint4*>(scratch.symm->get_multicast_ptr()),
+                reinterpret_cast<uint4*>(scratch.buffer.data_ptr()),
+                input.data_ptr<scalar_t>(),
+                out.data_ptr<scalar_t>(),
+                lines,
+                scratch.capacity_lines,
+                scratch.epoch,
+                rank,
+                world_size);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(scratch.epoch);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return out;
 }
 
 template <int alignment>
@@ -573,7 +744,7 @@ at::Tensor memcpy_to_multicast_(
 // count to 512 to prevent/alleviate register spill.
 constexpr size_t one_shot_all_reduce_max_num_blocks = 24;
 constexpr size_t one_shot_all_reduce_max_num_threads = 512;
-template <typename T, int alignment, int k_world_size, bool kLowLatency = false>
+template <typename T, int alignment, int k_world_size>
 static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     void one_shot_all_reduce_kernel(
         T** input_ptrs,
@@ -596,10 +767,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     }
   }
   // TODO make it sync with one block for no-copy case
-  // Entry barrier: publish the copied input (release) and make every peer's
-  // input visible (acquire) before the reduce. See NOTE [one-shot low-latency].
-  one_shot_entry_barrier</*hasPrevMemAccess=*/true>(
-      signal_pads, rank, world_size);
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
+  __syncthreads();
 
   for (size_t i = offset; i < numel; i += stride) {
     auto vec = load_and_reduce<T, alignment, k_world_size>(
@@ -607,7 +776,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     at::native::memory::st_vec<alignment>(output_ptr + i, vec);
   }
 
-  one_shot_exit_barrier<kLowLatency>(signal_pads, rank, world_size);
+  __syncthreads();
+  sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
 at::Tensor one_shot_all_reduce_out_impl(
@@ -615,8 +785,7 @@ at::Tensor one_shot_all_reduce_out_impl(
     const std::optional<at::Tensor>& local_input,
     std::string reduce_op,
     std::string group_name,
-    at::Tensor out,
-    bool low_latency = false) {
+    at::Tensor out) {
   auto pg = c10d::resolve_process_group(group_name);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -687,30 +856,23 @@ at::Tensor one_shot_all_reduce_out_impl(
       input.scalar_type(), "one_shot_all_reduce", [&]() {
         DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
           DISPATCH_WORLD_SIZES(symm_mem->get_world_size(), [&]() {
-            DISPATCH_BOOL(low_latency, k_low_latency, [&]() {
-              one_shot_all_reduce_kernel<
-                  scalar_t,
-                  k_alignment,
-                  k_world_size,
-                  k_low_latency>
-                  <<<num_blocks,
-                     num_threads,
-                     0,
-                     at::cuda::getCurrentCUDAStream()>>>(
-                      reinterpret_cast<scalar_t**>(
-                          symm_mem->get_buffer_ptrs_dev()),
-                      out.data_ptr<scalar_t>(),
-                      local_input.has_value()
-                          ? local_input->data_ptr<scalar_t>()
-                          : nullptr,
-                      input.storage_offset(),
-                      input.numel(),
-                      reinterpret_cast<uint32_t**>(
-                          symm_mem->get_signal_pad_ptrs_dev()),
-                      symm_mem->get_rank(),
-                      symm_mem->get_world_size());
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
-            });
+            one_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size>
+                <<<num_blocks,
+                   num_threads,
+                   0,
+                   at::cuda::getCurrentCUDAStream()>>>(
+                    reinterpret_cast<scalar_t**>(
+                        symm_mem->get_buffer_ptrs_dev()),
+                    out.data_ptr<scalar_t>(),
+                    local_input.has_value() ? local_input->data_ptr<scalar_t>()
+                                            : nullptr,
+                    input.storage_offset(),
+                    input.numel(),
+                    reinterpret_cast<uint32_t**>(
+                        symm_mem->get_signal_pad_ptrs_dev()),
+                    symm_mem->get_rank(),
+                    symm_mem->get_world_size());
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
           });
         });
       });
@@ -745,15 +907,58 @@ at::Tensor one_shot_all_reduce(
       input, std::nullopt, reduce_op, group_name, out);
 }
 
-// Low-latency variant: single entry barrier, exit barrier elided (1 cross-rank
-// round-trip). See NOTE [one-shot low-latency] for the correctness contract.
+// Low-latency variant: the LL protocol (see NOTE [LL one-shot]) -- a single
+// cross-rank round-trip, reuse-safe via double-buffering + a device epoch.
+// Unicast push (one st per peer per line), local reduce.
 at::Tensor one_shot_all_reduce_low_latency(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
+  TORCH_CHECK(
+      input.is_contiguous(),
+      "one_shot_all_reduce_low_latency: input must be contiguous.");
+  TORCH_CHECK(
+      reduce_op == "sum",
+      "one_shot_all_reduce_low_latency: only sum is supported.");
   auto out = at::empty_like(input);
-  return one_shot_all_reduce_out_impl(
-      input, std::nullopt, reduce_op, group_name, out, /*low_latency=*/true);
+  if (input.numel() == 0) {
+    return out;
+  }
+  auto pg = c10d::resolve_process_group(group_name);
+  const int rank = pg->getRank();
+  const int world_size = pg->getSize();
+  const size_t elt = input.element_size();
+  // LL packs whole 8-byte lines; fall back to the barrier-based op otherwise.
+  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0) {
+    return one_shot_all_reduce_out_impl(
+        input, std::nullopt, reduce_op, group_name, out);
+  }
+  const size_t lines = input.numel() / (8 / elt);
+  auto& scratch = get_ll_scratch(group_name, input.device(), world_size, lines);
+
+  const int num_threads = static_cast<int>(ll_all_reduce_max_num_threads);
+  int num_blocks = static_cast<int>(std::min<size_t>(
+      ll_all_reduce_max_num_blocks, (lines + num_threads - 1) / num_threads));
+  num_blocks = std::max(num_blocks, 1);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOAT_AND_BFLOAT16(
+      input.scalar_type(), "one_shot_all_reduce_low_latency", [&]() {
+        one_shot_all_reduce_ll_kernel<scalar_t>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                reinterpret_cast<uint4**>(scratch.symm->get_buffer_ptrs_dev()),
+                input.data_ptr<scalar_t>(),
+                out.data_ptr<scalar_t>(),
+                lines,
+                scratch.capacity_lines,
+                scratch.epoch,
+                rank,
+                world_size);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(scratch.epoch);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return out;
 }
 
 at::Tensor one_shot_all_reduce_copy(
@@ -1271,6 +1476,14 @@ at::Tensor one_shot_all_reduce(
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(false, "one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor one_shot_all_reduce_low_latency(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce_low_latency: requires CUDA 12.3+.");
   return input;
 }
 
