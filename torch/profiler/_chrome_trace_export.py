@@ -21,6 +21,8 @@ _TRIMONTH_SECONDS = 7889238
 
 _FLOW_NAMES = {1: "fwdbwd", 2: "ac2g"}
 
+_PARAM_COMMS_CALL_NAME = "record_param_comms"
+
 _EXCLUDED_EXTERNAL_ID_TYPES = {
     "gpu_memcpy",
     "gpu_memset",
@@ -189,6 +191,13 @@ def export_chrome_trace(
             md = act.metadata_json()
             if md:
                 args_parts.append(md)
+
+            if cat == "kernel":
+                linked = act.linked_activity()
+                if linked is not None and linked.name() == _PARAM_COMMS_CALL_NAME:
+                    linked_md = linked.metadata_json()
+                    if linked_md:
+                        args_parts.append(linked_md)
 
             f.write(
                 f'{{"ph":"X","cat":{_json_escape(cat)},'
