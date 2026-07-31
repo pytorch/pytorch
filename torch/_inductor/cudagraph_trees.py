@@ -701,14 +701,14 @@ def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
 # A path index of (depth, offset) indices into a graph that is `depth`` number of nodes from the root
 # at graph output offset
 PathOutputIndex = tuple[int, int]
-# Cached per-node lists and output index to check for user-visible output cloning.
-PathUserVisibleOutputEntry = tuple[
+# Cached per-node lists and output index used when cloning a path output storage.
+PathOutputEntry = tuple[
     list[StorageWeakRefWrapper | None],
     list[TensorWeakRef | None],
     list[Tensor | None] | None,
     int,
 ]
-PathUserVisibleStorageGroup = tuple[PathUserVisibleOutputEntry, ...]
+PathStorageGroup = tuple[PathOutputEntry, ...]
 
 # For each node in the path, for each output, is the output alive
 PathLiveness = list[list[bool]]
@@ -764,7 +764,7 @@ class CUDAWarmupNode:
     @functools.cached_property
     def path_user_visible_storage_groups(
         self,
-    ) -> tuple[PathUserVisibleStorageGroup, ...]:
+    ) -> tuple[PathStorageGroup, ...]:
         return collect_path_user_visible_storage_groups(tuple(self._path_from_root))
 
     def run(self, new_inputs: Any) -> OutputType:
@@ -1200,7 +1200,7 @@ class CUDAGraphNode:
     @functools.cached_property
     def path_user_visible_storage_groups(
         self,
-    ) -> tuple[PathUserVisibleStorageGroup, ...]:
+    ) -> tuple[PathStorageGroup, ...]:
         return collect_path_user_visible_storage_groups(tuple(self._path_from_root))
 
     def _copy_inputs_and_remove_from_src(
@@ -2044,7 +2044,7 @@ def canonical_path_output_index(
 
 def collect_path_user_visible_storage_groups(
     path: tuple[CUDAGraphNode | CUDAWarmupNode, ...],
-) -> tuple[PathUserVisibleStorageGroup, ...]:
+) -> tuple[PathStorageGroup, ...]:
     """Return path storage-alias groups for user-visible output cloning.
 
     Starts from user-visible outputs, then includes outputs on the same path
@@ -2085,7 +2085,7 @@ def collect_path_user_visible_storage_groups(
             ):
                 selected_outputs.add(output_index)
 
-    entries_by_data_ptr: dict[int, list[PathUserVisibleOutputEntry]] = {}
+    entries_by_data_ptr: dict[int, list[PathOutputEntry]] = {}
     for depth, idx in selected_outputs:
         node = path[depth]
         output_weakrefs = node.outputs_weakrefs
@@ -2106,6 +2106,29 @@ def collect_path_user_visible_storage_groups(
             )
         )
 
+    return tuple(tuple(entries) for entries in entries_by_data_ptr.values())
+
+
+def collect_path_storage_groups_by_data_ptr(
+    path: tuple[CUDAGraphNode | CUDAWarmupNode, ...],
+    selected_data_ptrs: OrderedSet[int],
+) -> tuple[PathStorageGroup, ...]:
+    entries_by_data_ptr: dict[int, list[PathOutputEntry]] = {}
+    for node in path:
+        cached_tensor_outputs = (
+            node.cached_tensor_outputs if isinstance(node, CUDAGraphNode) else None
+        )
+        for idx, storage_ref in enumerate(node.outputs_weakrefs):
+            if storage_ref is None or storage_ref.data_ptr() not in selected_data_ptrs:
+                continue
+            entries_by_data_ptr.setdefault(storage_ref.data_ptr(), []).append(
+                (
+                    node.outputs_weakrefs,
+                    node.tensor_weakrefs,
+                    cached_tensor_outputs,
+                    idx,
+                )
+            )
     return tuple(tuple(entries) for entries in entries_by_data_ptr.values())
 
 
@@ -2303,6 +2326,7 @@ class CUDAGraphTreeManager:
 
         # warn only once if a function mutates inputs
         self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
+        self.warned_live_backward_outputs: OrderedSet[FunctionID] = OrderedSet()
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
@@ -2372,6 +2396,7 @@ class CUDAGraphTreeManager:
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
         self.has_live_user_visible_output_cloning = False
+        self.has_backward_function = False
 
         # Note: [Backward Generation Handling]
         # We generally perform a sequence of forward executions followed by backward executions.
@@ -2416,6 +2441,55 @@ class CUDAGraphTreeManager:
     def set_to_running_backward(self) -> None:
         self.running_forwards_with_pending_backwards = False
         self.mode = CompilationMode.BACKWARD
+
+    def _get_live_backward_output_storage_groups(
+        self,
+    ) -> tuple[PathStorageGroup, ...]:
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
+
+        live_backward_data_ptrs: OrderedSet[int] = OrderedSet()
+        for node in self.current_node._path_from_root:
+            if self.id_to_mode[node.wrapped_function.id] != CompilationMode.BACKWARD:
+                continue
+            for storage_ref in node.outputs_weakrefs:
+                if storage_ref is not None and is_live(storage_ref):
+                    live_backward_data_ptrs.add(storage_ref.data_ptr())
+
+        if not live_backward_data_ptrs:
+            return ()
+
+        return collect_path_storage_groups_by_data_ptr(
+            tuple(self.current_node._path_from_root), live_backward_data_ptrs
+        )
+
+    def _handle_live_backward_outputs(self) -> bool:
+        storage_groups = self._get_live_backward_output_storage_groups()
+        if not storage_groups:
+            return True
+
+        if not config.triton.cudagraph_clone_graph_owned_backward_outputs:
+            return False
+
+        self._clone_live_output_storage_groups(storage_groups)
+        return True
+
+    def _run_eager_due_to_live_backward_outputs(
+        self, new_inputs: list[InputType], function_id: FunctionID
+    ) -> OutputType:
+        if (
+            function_id not in self.warned_live_backward_outputs
+            or config.triton.cudagraph_or_error
+        ):
+            self.warned_live_backward_outputs.add(function_id)
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs due to live CUDAGraph backward outputs. "
+                "Clear .grad and any other references to backward outputs, or set "
+                "torch._inductor.config.triton."
+                "cudagraph_clone_graph_owned_backward_outputs=True "
+                "to clone their storages before CUDAGraph generation cleanup."
+            )
+        return self.ids_to_funcs[function_id].model(new_inputs)
 
     def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
@@ -2467,24 +2541,31 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording(function_id)
+            if not self.try_end_curr_recording(function_id):
+                return self._run_eager_due_to_live_backward_outputs(
+                    new_inputs, function_id
+                )
 
         if self.in_warmup:
-            self.try_end_curr_warmup(function_id)
+            if not self.try_end_curr_warmup(function_id):
+                return self._run_eager_due_to_live_backward_outputs(
+                    new_inputs, function_id
+                )
 
         if (
-            self.has_live_user_visible_output_cloning
-            and self.path_state == ExecutionState.EXECUTION
-        ):
+            self.has_live_user_visible_output_cloning or self.has_backward_function
+        ) and self.path_state == ExecutionState.EXECUTION:
             curr_generation = self.get_curr_generation()
             # current_node is cleared lazily, so the first invocation in a new
             # generation may still see children from the previous generation.
             # Enforce the existing generation boundary before matching children.
             if self.in_new_torch_compile_invocation(curr_generation):
-                self.try_end_curr_execution(
-                    curr_generation,
-                    skip_dead_output_cleanup=True,
-                )
+                if not self.try_end_curr_execution(
+                    curr_generation, skip_dead_output_cleanup=True
+                ):
+                    return self._run_eager_due_to_live_backward_outputs(
+                        new_inputs, function_id
+                    )
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2566,7 +2647,10 @@ class CUDAGraphTreeManager:
             # as noted above, we want to do this lazily to avoid having to
             # check all existing outputs
             if self.current_node is not None and function_id in self.roots:
-                self.try_end_curr_execution()
+                if not self.try_end_curr_execution():
+                    return self._run_eager_due_to_live_backward_outputs(
+                        new_inputs, function_id
+                    )
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
@@ -2609,7 +2693,10 @@ class CUDAGraphTreeManager:
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
-            self.try_end_curr_execution()
+            if not self.try_end_curr_execution():
+                return self._run_eager_due_to_live_backward_outputs(
+                    new_inputs, function_id
+                )
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
@@ -2758,6 +2845,7 @@ class CUDAGraphTreeManager:
     ]:
         id = self.new_func_id()
         if mode == CompilationMode.BACKWARD:
+            self.has_backward_function = True
             user_visible_output_idxs = ()
         user_visible_output_idxs_set = frozenset(user_visible_output_idxs)
         if user_visible_output_idxs_set:
@@ -2842,11 +2930,14 @@ class CUDAGraphTreeManager:
         if not path_user_visible_storage_groups:
             return
 
-        storages_to_clone: list[
-            tuple[StorageWeakRefPointer, PathUserVisibleStorageGroup]
-        ] = []
+        self._clone_live_output_storage_groups(path_user_visible_storage_groups)
 
-        for output_entries in path_user_visible_storage_groups:
+    def _clone_live_output_storage_groups(
+        self, storage_groups: Iterable[PathStorageGroup]
+    ) -> None:
+        storages_to_clone: list[tuple[StorageWeakRefPointer, PathStorageGroup]] = []
+
+        for output_entries in storage_groups:
             for (
                 output_weakrefs,
                 _tensor_weakrefs,
@@ -2860,14 +2951,14 @@ class CUDAGraphTreeManager:
                     break
 
         if storages_to_clone:
-            self._clone_live_user_visible_storages(storages_to_clone)
+            self._clone_live_output_storages(storages_to_clone)
 
-    def _clone_live_user_visible_storages(
+    def _clone_live_output_storages(
         self,
         storages_to_clone: Iterable[
             tuple[
                 StorageWeakRefPointer,
-                PathUserVisibleStorageGroup,
+                PathStorageGroup,
             ]
         ],
     ) -> None:
@@ -2875,7 +2966,7 @@ class CUDAGraphTreeManager:
             tuple[
                 UntypedStorage,
                 UntypedStorage,
-                PathUserVisibleStorageGroup,
+                PathStorageGroup,
             ]
         ] = []
 
@@ -2937,7 +3028,7 @@ class CUDAGraphTreeManager:
                         torch._C._remove_cached_tensor(cached_t)
                         cached_tensor_outputs[idx] = None
 
-    def try_end_curr_recording(self, function_id: FunctionID) -> None:
+    def try_end_curr_recording(self, function_id: FunctionID) -> bool:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -2950,24 +3041,27 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
+            if not self._handle_live_backward_outputs():
+                return False
             self.clear_current_path_state_and_set_to_none(
                 clone_live_user_visible_outputs=True,
                 dealloc_current_path_weakrefs=True,
             )
-            return
+            return True
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
-            return
+            return True
 
         self.check_warn_on_unable_to_start_executing(function_id)
+        return True
 
     def try_end_curr_execution(
         self,
         curr_generation: int | None = None,
         *,
         skip_dead_output_cleanup: bool = False,
-    ) -> None:
+    ) -> bool:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
@@ -2977,34 +3071,41 @@ class CUDAGraphTreeManager:
         if self.in_recording:
             raise AssertionError("expected in_recording to be False")
         if self.current_node is None:
-            return
+            return True
 
         if self.can_start_new_generation(curr_generation):
+            if not self._handle_live_backward_outputs():
+                return False
             self.clear_current_path_state_and_set_to_none(
                 clone_live_user_visible_outputs=True
             )
-            return
+            return True
 
         if skip_dead_output_cleanup:
-            return
+            return True
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self, function_id: FunctionID) -> None:
+        return True
+
+    def try_end_curr_warmup(self, function_id: FunctionID) -> bool:
         if self.current_node is None:
             raise AssertionError("expected current_node to not be None")
         if self.can_start_new_generation():
+            if not self._handle_live_backward_outputs():
+                return False
             self._clone_current_path_live_user_visible_outputs()
             self.dealloc_current_path_weakrefs()
             self.current_node = None
-            return
+            return True
 
         if self.current_node.all_outputs_are_dead():
             self.current_node = None
-            return
+            return True
 
         self.check_warn_on_unable_to_start_executing(function_id)
+        return True
 
     def check_warn_on_unable_to_start_executing(self, function_id: FunctionID) -> None:
         "Warn if we in a potential loop where we are unable to hit fast path"

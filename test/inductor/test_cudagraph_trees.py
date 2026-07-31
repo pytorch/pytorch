@@ -2025,6 +2025,117 @@ if HAS_CUDA_AND_TRITON:
                 x_grad, x_grad_clone = compute_grad(grad_output, create_graph=True)
                 self.assertEqual(x_grad, x_grad_clone)
 
+        def test_backward_outputs_do_not_poison_grad_accumulation(self):
+            counters.clear()
+
+            class MLP(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.lin = nn.Linear(4, 8)
+
+                def forward(self, x):
+                    return self.lin(x)
+
+            torch.manual_seed(0)
+            model = MLP().cuda().train()
+            ref_model = MLP().cuda().train()
+            ref_model.load_state_dict(model.state_dict())
+
+            compiled = torch.compile(
+                model, fullgraph=True, backend="inductor", mode="reduce-overhead"
+            )
+            inputs = [torch.rand((1, 4), device="cuda") for _ in range(4)]
+
+            compiled(inputs[0]).sum().backward()
+            ref_model(inputs[0]).sum().backward()
+
+            weight_grad = model.lin.weight.grad
+            if weight_grad is None:
+                self.fail("expected weight grad after first backward")
+            old_data_ptr = weight_grad.data_ptr()
+
+            for iteration, x in enumerate(inputs[1:], start=1):
+                output = compiled(x)
+                self.assertIs(model.lin.weight.grad, weight_grad)
+                if iteration == 1:
+                    self.assertNotEqual(weight_grad.data_ptr(), old_data_ptr)
+                    old_data_ptr = weight_grad.data_ptr()
+                else:
+                    self.assertEqual(weight_grad.data_ptr(), old_data_ptr)
+                    self.assertEqual(
+                        self.get_manager().path_state, ExecutionState.EXECUTION
+                    )
+                output.sum().backward()
+                ref_model(x).sum().backward()
+
+            self.assertEqual(model.lin.weight.grad, ref_model.lin.weight.grad)
+            self.assertEqual(model.lin.bias.grad, ref_model.lin.bias.grad)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+            model.zero_grad(set_to_none=True)
+            ref_model.zero_grad(set_to_none=True)
+
+        def test_backward_output_alias_survives_grad_clear(self):
+            model = nn.Linear(4, 8).cuda().train()
+            compiled = torch.compile(
+                model, fullgraph=True, backend="inductor", mode="reduce-overhead"
+            )
+
+            compiled(torch.rand((1, 4), device="cuda")).sum().backward()
+            saved_grad = model.weight.grad
+            if saved_grad is None:
+                self.fail("expected weight grad after first backward")
+            expected = saved_grad.clone()
+            old_data_ptr = saved_grad.data_ptr()
+            model.zero_grad(set_to_none=True)
+
+            compiled(torch.rand((1, 4), device="cuda"))
+
+            self.assertEqual(saved_grad, expected)
+            self.assertNotEqual(saved_grad.data_ptr(), old_data_ptr)
+
+        @config.patch("triton.cudagraph_clone_graph_owned_backward_outputs", False)
+        def test_backward_outputs_skip_cudagraph_without_grad_clone(self):
+            counters.clear()
+
+            model = nn.Linear(4, 8).cuda().train()
+            ref_model = nn.Linear(4, 8).cuda().train()
+            ref_model.load_state_dict(model.state_dict())
+            compiled = torch.compile(
+                model, fullgraph=True, backend="inductor", mode="reduce-overhead"
+            )
+
+            x1 = torch.rand((1, 4), device="cuda")
+            compiled(x1).sum().backward()
+            ref_model(x1).sum().backward()
+            old_grad = model.weight.grad
+            if old_grad is None:
+                self.fail("expected weight grad after first backward")
+            old_data_ptr = old_grad.data_ptr()
+
+            x2 = torch.rand((1, 4), device="cuda")
+            y2 = compiled(x2)
+            current_grad = model.weight.grad
+            if current_grad is None:
+                self.fail("expected weight grad after second forward")
+            self.assertIs(current_grad, old_grad)
+            self.assertEqual(current_grad.data_ptr(), old_data_ptr)
+
+            y2.sum().backward()
+            ref_model(x2).sum().backward()
+
+            self.assertEqual(model.weight.grad, ref_model.weight.grad)
+            self.assertEqual(model.bias.grad, ref_model.bias.grad)
+            self.assertGreaterEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+            model.zero_grad(set_to_none=True)
+            ref_model.zero_grad(set_to_none=True)
+            del old_grad, current_grad, y2
+
+            cudagraph_skips = counters["inductor"]["cudagraph_skips"]
+            compiled(torch.rand((1, 4), device="cuda")).sum().backward()
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], cudagraph_skips)
+
         def test_frozen_fn(self):
             @torch.compile()
             def foo(x):
@@ -2985,33 +3096,43 @@ if HAS_CUDA_AND_TRITON:
             self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
 
         @parametrize("generation_cloning", (None, "user_visible"))
-        def test_grad_accumulation_dealloc_error_message(self, generation_cloning):
+        def test_grad_accumulation_with_mark_step(self, generation_cloning):
             model = torch.nn.Linear(10, 1, device="cuda")
+            ref_model = torch.nn.Linear(10, 1, device="cuda")
+            ref_model.load_state_dict(model.state_dict())
             compiled_model = torch.compile(
                 model, fullgraph=True, mode="reduce-overhead"
             )
-
-            def run_iter():
-                torch.compiler.cudagraph_mark_step_begin()
-                x = torch.randn(
+            inputs = [
+                torch.randn(
                     (10,), dtype=torch.float32, requires_grad=True, device="cuda"
                 )
-                loss = compiled_model(x).clone().sum().clone()
-                loss.backward()
+                for _ in range(2)
+            ]
 
             with config.patch(
                 {
                     "triton.cudagraph_trees_generation_cloning": generation_cloning,
                 }
             ):
-                run_iter()
+                torch.compiler.cudagraph_mark_step_begin()
+                compiled_model(inputs[0]).clone().sum().clone().backward()
+                ref_model(inputs[0]).sum().backward()
 
-                with self.assertRaises(RuntimeError) as exc:
-                    run_iter()
+                weight_grad = model.weight.grad
+                if weight_grad is None:
+                    self.fail("expected weight grad after first backward")
+                old_data_ptr = weight_grad.data_ptr()
 
-            FileCheck().check("gradient tensor output of CUDAGraphs").check(
-                "gradient accumulation"
-            ).check(".grad tensor").run(str(exc.exception))
+                torch.compiler.cudagraph_mark_step_begin()
+                second_loss = compiled_model(inputs[1]).clone().sum().clone()
+                self.assertIs(model.weight.grad, weight_grad)
+                self.assertNotEqual(weight_grad.data_ptr(), old_data_ptr)
+                second_loss.backward()
+                ref_model(inputs[1]).sum().backward()
+
+            self.assertEqual(model.weight.grad, ref_model.weight.grad)
+            self.assertEqual(model.bias.grad, ref_model.bias.grad)
 
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
