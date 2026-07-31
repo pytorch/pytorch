@@ -275,6 +275,19 @@ def build_fingerprint_with_pytree(
     return InputFingerprint(flat_vts, arg_sources, has_unknown, treespec)
 
 
+def sym_num_key(sym_num: Any) -> Any:
+    """Key for matching a symbolic input against a cached one.
+
+    Compares the symbolic expression rather than the SymInt object. Each tensor
+    holds its own SymInt objects, so two arguments carrying the same symbol
+    (e.g. the atom count threaded through successive layers) are distinct
+    objects. Equal expressions mean the same value, which is what reuse needs;
+    distinct symbols still have distinct expressions.
+    """
+    node = getattr(sym_num, "node", None)
+    return node.expr if node is not None else sym_num
+
+
 def get_flat_proxies(fingerprint: InputFingerprint) -> list[Proxy]:
     """Collect deduplicated proxies from tensor/symnode leaves."""
     seen: set[torch.fx.Node] = set()
@@ -498,11 +511,7 @@ def build_reuse_condition(
                 raise AssertionError(
                     f"expected SymNodeVariable for SYMNODE tag, got {type(vt).__name__}"
                 )
-            # Store the SymInt/SymFloat/SymBool object itself. Two accesses to
-            # the same symbolic dimension (e.g. x.shape[0] twice) produce the
-            # same Python object, so identity comparison in is_reusable is
-            # correct and avoids false matches between distinct symbols.
-            input_checks.append((InputTag.SYMNODE, vt.sym_num))
+            input_checks.append((InputTag.SYMNODE, sym_num_key(vt.sym_num)))
         elif tag == InputTag.CONSTANT:
             if not isinstance(vt, ConstantVariable):
                 raise AssertionError(
@@ -650,7 +659,13 @@ def is_reusable(
                 raise AssertionError(
                     f"expected SymNodeVariable for SYMNODE tag, got {type(cur_vt).__name__}"
                 )
-            if cur_vt.sym_num is not cached_val:
+            if sym_num_key(cur_vt.sym_num) != cached_val:
+                hc_log.debug(
+                    "subgraph_reuse: reuse failed -- input %d symnode mismatch: cached '%s' vs current '%s'",
+                    i,
+                    cached_val,
+                    cur_vt.sym_num,
+                )
                 return False
         elif cached_tag == InputTag.CONSTANT:
             if not isinstance(cur_vt, ConstantVariable):
@@ -671,6 +686,13 @@ def is_reusable(
                     else None
                 )
                 if cached_src is None or new_src is None:
+                    hc_log.debug(
+                        "subgraph_reuse: reuse failed -- input %d constant mismatch "
+                        "with no source to replace: cached '%s' vs current '%s'",
+                        i,
+                        cached_val,
+                        cur_vt.value,
+                    )
                     return False
 
     source_replacement = build_source_replacement(

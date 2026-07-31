@@ -3792,6 +3792,35 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_subgraph_reuse_symint_arg(self):
+        """A symint arg must match on its expression, not on object identity.
+
+        Each tensor holds its own SymInt objects, so the same symbol threaded
+        through successive regions arrives as a different object every call.
+        """
+
+        @nested_compile_region
+        def gn(x, n):
+            return x * n
+
+        def fn(x):
+            a = gn(x, x.shape[0])
+            b = gn(a, a.shape[0])
+            return b
+
+        x = torch.randn(8, 4)
+        ref = fn(x)
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
+        with self._count_speculate_calls() as count:
+            res = compiled(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+        x2 = torch.randn(5, 4)
+        self.assertEqual(fn(x2), compiled(x2))
+
     def test_subgraph_reuse_transposed_buffer_dynamic(self):
         """Reuse must work when a region reads a transposed view of a buffer.
 
