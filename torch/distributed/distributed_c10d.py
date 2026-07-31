@@ -999,23 +999,43 @@ def _parse_backend_string(
 
 def _get_default_backend_type_for_backend_config(
     backend_config: BackendConfig,
+    device_id: torch.device | None = None,
 ) -> ProcessGroup.BackendType:
-    if Backend.NCCL in backend_config.device_backend_map.values():
-        return ProcessGroup.BackendType.NCCL
+    def _resolve_backend_type(backend: str) -> ProcessGroup.BackendType:
+        # Must mirror _new_process_group_helper's per-device
+        # `backend_type_map.get(backend_str, CUSTOM)`, or the default type
+        # names a backend that never gets registered.
+        known_type = Backend.backend_type_map.get(backend)
+        if known_type is not None:
+            return known_type
+        if _is_torchcomms_backend(backend):
+            return ProcessGroup.BackendType.CUSTOM
+        # Unreachable for a group that actually gets built
+        return ProcessGroup.BackendType.GLOO
 
-    custom_backend = next(
-        (
-            backend
-            for backend in backend_config.device_backend_map.values()
-            if Backend.backend_type_map.get(str(backend))
-            == ProcessGroup.BackendType.CUSTOM
-            or _is_torchcomms_backend(str(backend))
-        ),
-        None,
-    )
-    if custom_backend is not None:
-        return ProcessGroup.BackendType.CUSTOM
-    return ProcessGroup.BackendType.GLOO
+    device_backend_map = backend_config.device_backend_map
+    if not device_backend_map:
+        return ProcessGroup.BackendType.GLOO
+
+    accelerator = torch.accelerator.current_accelerator()
+
+    def _device_priority(device: str) -> int:
+        # Prefer this group's accelerator backend over the host one, because
+        # ``ProcessGroup::barrier()`` derives its tensor device from the default
+        # backend type -- a host default silently downgrades barrier() on a
+        # mixed "cpu:<host>,<acc>:<acc backend>" group to a CPU barrier.
+        if device_id is not None and device == device_id.type:
+            return 0
+        if accelerator is not None and device == accelerator.type:
+            return 1
+        if device != "cpu":
+            return 2
+        return 3
+
+    # `min` keeps the first device of the winning priority, so ties resolve in
+    # the order the devices were named in the backend string.
+    device = min(device_backend_map, key=_device_priority)
+    return _resolve_backend_type(str(device_backend_map[device]))
 
 
 class _reduce_op:
@@ -2691,7 +2711,7 @@ def _new_process_group_helper(
     # when multi backend is passed in
     if not pg_backend_set:
         pg._set_default_backend(
-            _get_default_backend_type_for_backend_config(backend_config)
+            _get_default_backend_type_for_backend_config(backend_config, device_id)
         )
 
     if device_id:
