@@ -26,7 +26,7 @@ from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, make_fake_mode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -615,7 +615,7 @@ def make_fake_inputs(
             "co_firstlineno": code.co_firstlineno,
         }
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = FakeTensorMode(
+            fake_mode = make_fake_mode(
                 shape_env=ShapeEnv(
                     tracked_fakes=[],
                     co_fields=co_fields,

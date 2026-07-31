@@ -47,7 +47,7 @@ from torch._functorch._aot_autograd.runtime_wrappers import (
 from torch._guards import compile_context, CompileContext, CompileId, Source
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import make_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
@@ -336,7 +336,7 @@ class AutogradCompilerInstance:
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
-        self.fake_tensor_mode = FakeTensorMode(
+        self.fake_tensor_mode = make_fake_mode(
             allow_fallback_kernels=True,
             allow_non_fake_inputs=True,
             shape_env=self.shape_env,
