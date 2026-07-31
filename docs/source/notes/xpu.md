@@ -61,7 +61,7 @@ Use {func}`torch.xpu.get_stream_from_external` to create a {class}`torch.xpu.Str
 
 ### Event
 
-{class}`torch.xpu.Event` is a synchronization primitive that can be used to monitor XPU execution progress, measure execution time, and orchestrate dependencies betwween between different {class}`torch.xpu.Stream`. For backend-independent stream management, PyTorch provides the device-agnostic {class}`torch.Event` interface, enabling portable synchronization code across different accelerator backends.
+{class}`torch.xpu.Event` is a synchronization primitive that can be used to monitor XPU execution progress, measure execution time, and orchestrate dependencies between different {class}`torch.xpu.Stream`. For backend-independent stream management, PyTorch provides the device-agnostic {class}`torch.Event` interface, enabling portable synchronization code across different accelerator backends.
 Currently, {class}`torch.xpu.Event` does not support inter-process communication (IPC). Support for IPC will be added in a future release.
 
 ## XPU vs CUDA: key differences
