@@ -454,7 +454,8 @@ def dispatch_gemm_act(
     ``out``/``C``/``aux_outs`` views, and swaps the row/col broadcast roles of
     captured epilogue tensors so each still aligns with the transposed accumulator.
     Tuple epilogues route the main result through QuACK ``D`` and aux outputs through
-    ``PostAct``/``mAuxOut``.
+    ``PostAct``/``mAuxOut``. Grouped-main epilogues instead leave ``D`` unused and
+    use ``PostAct``/``mAuxOut`` as the contracted logical main store.
     """
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
