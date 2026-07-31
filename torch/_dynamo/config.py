@@ -161,9 +161,6 @@ specialize_int = False
 # support codegen on float (this is to be fixed).
 specialize_float = False
 
-# Max ops per ComputedLazyConstantVariable chain before realizing under guards; 0 disables
-computed_lazy_constant_max_nodes = 64
-
 # legacy config, does nothing now!
 dynamic_shapes = True
 

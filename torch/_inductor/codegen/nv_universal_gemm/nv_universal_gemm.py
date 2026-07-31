@@ -529,7 +529,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
             epilogue_reads=None,
             epilogue_writes=None,
             epilogue_var_renames=None,
-            local_reduce=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
 
@@ -567,7 +566,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 epilogue_reads=epilogue_reads,
                 epilogue_writes=epilogue_writes,
                 epilogue_var_renames=epilogue_var_renames,
-                local_reduce=local_reduce,
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
                 bias_node=bias_node,
