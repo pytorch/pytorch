@@ -29,7 +29,7 @@ import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, make_fake_mode
+from torch._subclasses.fake_tensor import FakeTensor, make_fake_mode
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource

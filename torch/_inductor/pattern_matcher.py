@@ -78,7 +78,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensor, FakeTensorMode, make_fake_mode
+from .._subclasses import FakeTensor, make_fake_mode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table

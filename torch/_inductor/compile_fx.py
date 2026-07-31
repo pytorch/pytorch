@@ -102,8 +102,8 @@ from torch._inductor.utils import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import make_fake_mode
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import make_fake_mode
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -3113,9 +3113,9 @@ def _compile_fx_main(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
-        fake_mode = detect_fake_mode(
-            example_inputs_
-        ) or make_fake_mode(allow_non_fake_inputs=True)
+        fake_mode = detect_fake_mode(example_inputs_) or make_fake_mode(
+            allow_non_fake_inputs=True
+        )
         tracing_context = (
             torch._guards.TracingContext.try_get()
             or torch._guards.TracingContext(fake_mode)

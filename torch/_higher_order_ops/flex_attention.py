@@ -654,11 +654,7 @@ def create_fw_bw_graph(
     from torch._dispatch.python import suspend_functionalization
     from torch._dynamo._trace_wrapped_higher_order_op import mod_index
     from torch._functorch.aot_autograd import AOTConfig, create_joint
-    from torch._subclasses.fake_tensor import (
-        FakeTensorMode,
-        is_fake_tensor,
-        make_fake_mode,
-    )
+    from torch._subclasses.fake_tensor import is_fake_tensor, make_fake_mode
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
