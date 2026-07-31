@@ -582,7 +582,7 @@ def find_coalesced_group(
     rank: int,
 ) -> list[tuple[int, dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
-    build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
+    build and return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     """
     found = []
     collective_seq_id = None
@@ -616,7 +616,7 @@ def find_coalesced_group_with_non_p2p(
     rank: int,
 ) -> list[tuple[int, dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
-    build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
+    build and return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     """
     found = []
     collective_seq_id = None

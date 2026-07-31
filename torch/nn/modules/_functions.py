@@ -71,7 +71,7 @@ class SyncBatchNorm(Function):
                 dtype=combined.dtype,
                 device=combined.device,
             )
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 combined_flat, combined, process_group, async_op=False
             )
             combined = torch.reshape(combined_flat, (world_size, combined_size))
