@@ -6151,6 +6151,55 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=shape,
         )
 
+    def _emit_recursive_split(
+        self,
+        expr: str,
+        names: Sequence[str],
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> None:
+        factor = len(names)
+        assert factor > 1 and factor & (factor - 1) == 0  # noqa: S101
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
+        if factor == 2:
+            if not is_float8:
+                self.compute.writeline(f"{', '.join(names)} = tl.split({expr})")
+                return
+            raw_parts = tuple(
+                self.cse.newvar(dtype=torch.uint8, shape=shape[:-1]) for _ in names
+            )
+            self.compute.writeline(
+                f"{', '.join(map(str, raw_parts))} = tl.split({expr})"
+            )
+            for raw_part, name in zip(raw_parts, names):
+                self.compute.writeline(
+                    f"{name} = {raw_part}.to({triton_type(dtype)}, bitcast=True)"
+                )
+            return
+        half = len(names) // 2
+        split_shape = (*shape[:-1], half, 2)
+        part_shape = (*shape[:-1], half)
+        split_dtype = torch.uint8 if is_float8 else dtype
+        even = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        odd = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        self.compute.writeline(
+            f"{even}, {odd} = tl.split("
+            f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
+        )
+        self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
+        self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
+
+    def _bitcast_reshape_expr(
+        self,
+        value: CSEVariable,
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> str:
+        value_expr = str(value)
+        if dtype in TRITON_FLOAT8_DTYPES:
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        return self._reshape_expr(value, shape, value_expr=value_expr)
+
     def emit_split_via_reshape(
         self,
         value: CSEVariable,
@@ -6188,16 +6237,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Used for nested-reduction broadcasts that lift a reduced-resolution
         value (one element per group) to full or half resolution.
         """
-        value_expr = str(value)
-        is_float8 = dtype in TRITON_FLOAT8_DTYPES
-        if is_float8:
-            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
-        reshaped = self._reshape_expr(value, pre_broadcast_shape, value_expr=value_expr)
+        reshaped = self._bitcast_reshape_expr(value, pre_broadcast_shape, dtype)
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
         line = triton_reshape(broadcasted, list(broadcast_shape), list(final_shape))
-        if is_float8:
+        if dtype in TRITON_FLOAT8_DTYPES:
             line = f"{line}.to({triton_type(dtype)}, bitcast=True)"
         return self.cse.generate(
             self.compute,
