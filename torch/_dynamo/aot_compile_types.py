@@ -113,13 +113,13 @@ class GraphModuleSerializableCallable(SerializableCallable):
 
     @classmethod
     def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        from torch._subclasses import FakeTensorMode
+        from torch._subclasses import make_fake_mode
         from torch.fx._graph_pickler import GraphPickler
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         state = pickle.loads(data)
 
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_mode = make_fake_mode(shape_env=ShapeEnv())
         state["graph_module"] = GraphPickler.loads(state["graph_module"], fake_mode)
         if not isinstance(state["graph_module"], torch.fx.GraphModule):
             raise AssertionError(

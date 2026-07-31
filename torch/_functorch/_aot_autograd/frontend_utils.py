@@ -10,7 +10,11 @@ from torch._custom_class_base import CustomClassBase
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    is_fake_tensor,
+    make_fake_mode,
+    maybe_get_fake_mode,
+)
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -229,7 +233,7 @@ def construct_fake_mode(
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
-        fake_mode = FakeTensorMode(shape_env=shape_env)
+        fake_mode = make_fake_mode(shape_env=shape_env)
     else:
         shape_env = fake_mode.shape_env
     return (fake_mode, shape_env)
