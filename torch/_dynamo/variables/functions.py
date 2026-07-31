@@ -88,6 +88,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    raise_args_mismatch,
     unpack_iterable,
 )
 from .base import (
@@ -127,6 +128,133 @@ if TYPE_CHECKING:
 _F = TypeVar("_F", bound=Callable[..., Any])
 CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
+
+
+def _is_nn_module_variable(obj: VariableTracker) -> bool:
+    return isinstance(
+        obj,
+        (
+            variables.NNModuleVariable,
+            variables.UnspecializedNNModuleVariable,
+        ),
+    ) or (
+        isinstance(obj, variables.UserDefinedObjectVariable)
+        and isinstance(obj.value, torch.nn.Module)
+    )
+
+
+def _maybe_register_module_forward_hook(
+    tx: "InstructionTranslatorBase",
+    module: VariableTracker,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker | None:
+    module = variables.LazyVariableTracker.realize_all(module)
+    if not _is_nn_module_variable(module):
+        return None
+
+    if isinstance(module, variables.NNModuleVariable):
+        module_value = tx.output.get_submodule(module.module_key)
+    elif isinstance(module, variables.UserDefinedObjectVariable):
+        module_value = module.value
+    else:
+        raise AssertionError(f"Expected nn.Module variable, got {module}")
+
+    module_forward = inspect.getattr_static(type(module_value), "forward", None)
+    first_arg_name = tx.f_code.co_varnames[0] if tx.f_code.co_varnames else None
+    is_compiled_module_forward = (
+        tx.f_code.co_name == "forward"
+        and isinstance(module_forward, types.FunctionType)
+        and module_forward.__code__ is tx.f_code
+        and module.source is not None
+        and module.source.name == f"L[{first_arg_name!r}]"
+    )
+    if not is_compiled_module_forward:
+        return None
+
+    hook_state_names = (
+        "_forward_hooks",
+        "_forward_hooks_with_kwargs",
+        "_forward_hooks_always_called",
+    )
+    hook_state_objects = tuple(getattr(module_value, name) for name in hook_state_names)
+    has_pending_hook_state_mutation = any(
+        tx.output.side_effects.has_pending_mutation_of_attr(module, name)
+        for name in hook_state_names
+    ) or any(
+        hook_dict in tx.output.side_effects
+        and tx.output.side_effects.is_modified(tx.output.side_effects[hook_dict])
+        for hook_dict in hook_state_objects
+    )
+    if has_pending_hook_state_mutation:
+        unimplemented(
+            gb_type="module hook registration after hook state mutation",
+            context=f"module={module}",
+            explanation=(
+                "Dynamo cannot defer module hook registration after mutating hook "
+                "state in the same forward."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    if any(
+        id(hook_state_object) in tx.output.side_effects.accessed_module_hook_state_ids
+        for hook_state_object in hook_state_objects
+    ) or any(
+        hook_state_object in tx.output.side_effects
+        for hook_state_object in hook_state_objects
+    ):
+        unimplemented(
+            gb_type="module hook registration after hook state access",
+            context=f"module={module}",
+            explanation=(
+                "Dynamo cannot defer module hook registration after reading hook "
+                "state in the same forward."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    if tx.output.side_effects.removable_handle_state_accessed:
+        unimplemented(
+            gb_type="module hook registration after handle state access",
+            context="RemovableHandle state accessed before registration",
+            explanation=(
+                "Dynamo cannot defer module hook registration after RemovableHandle "
+                "state was accessed in the same forward."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    options = dict(kwargs)
+    if len(args) == 1 and "hook" not in options:
+        hook = args[0]
+    elif not args and "hook" in options:
+        hook = options.pop("hook")
+    else:
+        raise_args_mismatch(
+            tx,
+            torch.nn.Module.register_forward_hook.__name__,
+            "one hook argument and keyword-only prepend, with_kwargs, or always_call",
+            f"{len(args)} args and {len(kwargs)} kwargs",
+        )
+    if any(key not in ("prepend", "with_kwargs", "always_call") for key in options):
+        raise_args_mismatch(
+            tx,
+            torch.nn.Module.register_forward_hook.__name__,
+            "one hook argument and keyword-only prepend, with_kwargs, or always_call",
+            f"{len(args)} args and {len(kwargs)} kwargs",
+        )
+
+    handle = variables.RemovableHandleVariable(mutation_type=ValueMutationNew())
+    tx.output.side_effects.register_module_hook(
+        module,
+        hook,
+        handle,
+        torch.nn.Module.register_forward_hook.__name__,
+        options,
+        hook_state_objects,
+    )
+    return handle
+
+
 _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 
@@ -758,6 +886,23 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.fn is torch.nn.Module.register_forward_hook:
+            module: VariableTracker | None = None
+            hook_args: list[VariableTracker] = []
+            hook_kwargs = kwargs
+            if args:
+                module = args[0]
+                hook_args = args[1:]
+            elif "self" in kwargs:
+                hook_kwargs = dict(kwargs)
+                module = hook_kwargs.pop("self")
+            if module is not None:
+                result = _maybe_register_module_forward_hook(
+                    tx, module, hook_args, hook_kwargs
+                )
+                if result is not None:
+                    return result
+
         # Handle patch_dynamo_config call
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
@@ -1684,6 +1829,18 @@ class UserMethodVariable(UserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if _is_nn_module_variable(self.obj):
+            # OptimizedModule dispatches its own hooks outside Dynamo. Replaying
+            # registration at the forward suffix keeps it before that dispatch.
+            if self.fn is torch.nn.Module.register_forward_hook:
+                result = _maybe_register_module_forward_hook(tx, self.obj, args, kwargs)
+                if result is not None:
+                    return result
+
+            from .nn_module import _raise_if_unsupported_hook_registration
+
+            _raise_if_unsupported_hook_registration(tx, self.obj, self.fn)
+
         # NOTE this is to handle methods annotated by `nonstrict_trace`.
         # a `nonstrict_trace`-ed function will be wrapped by
         # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,

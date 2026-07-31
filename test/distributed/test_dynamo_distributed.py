@@ -345,6 +345,7 @@ class FakeDDP(nn.Module):
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
     @contextmanager
+    @torch._disable_dynamo(recursive=False)
     def _inside_ddp_forward(self):
         old = DDP._active_ddp_module
         DDP._active_ddp_module = self

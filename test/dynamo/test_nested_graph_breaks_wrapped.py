@@ -99,6 +99,28 @@ for test in tests:
 del test
 
 xfails = [
+    # Deferred module hook registration is only replayed from the top-level frame.
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_counter_observation_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_counter_post_observation_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_dict_observation_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_dunder_dict_observation_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_handle_state_alias_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_immediate_remove_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_independent_handle_state_snapshot_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_live_mapping_alias_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_dunder_getattribute_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_getattr_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_handle_state_alias_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_live_mapping_alias_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_state_alias_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_state_mutation_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_state_read_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_prior_vars_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_state_alias_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_deferred_forward_hook_state_alias_mutation_graph_breaks_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_register_forward_hook_after_child_with_existing_hook_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_register_forward_hook_call_forms_fullgraph_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksHooksTests.test_register_forward_hook_inside_forward_fullgraph_nested_graph_breaks,  # noqa: F821
     # variable naming issues (debug_force_nested_calls changes L['x'] to L['args'][0])
     NestedGraphBreaksMiscTests.test_flat_name_to_original_fqn_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_compare_shapes_with_constant_nested_graph_breaks,  # noqa: F821

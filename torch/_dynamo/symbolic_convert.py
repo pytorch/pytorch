@@ -3310,7 +3310,9 @@ class InstructionTranslatorBase(
         obj = self.pop().realize()
         try:
             result = generic_getattr(self, obj, attr)
-        except Unsupported:
+        except Unsupported as exc:
+            if exc.skip_frame:
+                raise
             if not obj.is_python_constant():
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None

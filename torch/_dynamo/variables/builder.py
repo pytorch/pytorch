@@ -25,6 +25,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import gc
 import importlib.machinery
 import inspect
 import itertools
@@ -38,7 +39,7 @@ import time
 import types
 import typing
 import weakref
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, ItemsView, KeysView, MutableMapping, ValuesView
 from types import ModuleType
 from typing import Any, cast, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
 
@@ -348,6 +349,22 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+_LIVE_MAPPING_ALIAS_TYPES = (types.MappingProxyType, KeysView, ValuesView, ItemsView)
+
+
+def _get_live_mapping_alias_target(value: object) -> object | None:
+    seen: set[int] = set()
+    while isinstance(value, _LIVE_MAPPING_ALIAS_TYPES):
+        if id(value) in seen:
+            return None
+        seen.add(id(value))
+        referents = gc.get_referents(value)
+        if len(referents) != 1:
+            return None
+        value = referents[0]
+    return value
 
 
 log = logging.getLogger(__name__)
@@ -823,6 +840,24 @@ class VariableBuilder:
 
     def _call_impl(self, value: object) -> VariableTracker:
         self.tx.output.current_tracer.traced_sources.add(self.source)
+        if isinstance(value, _LIVE_MAPPING_ALIAS_TYPES):
+            mapping = _get_live_mapping_alias_target(value)
+            if mapping is not None:
+                if self.tx.output.side_effects.is_pending_module_hook_state_object(
+                    mapping
+                ):
+                    unimplemented(
+                        gb_type="pending module hook state alias read",
+                        context=f"source={self.source}",
+                        explanation=(
+                            "Dynamo cannot access an alias of nn.Module hook state "
+                            "after deferring a hook registration in the same forward."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                self.tx.output.side_effects.accessed_module_hook_state_ids.add(
+                    id(mapping)
+                )
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -998,6 +1033,14 @@ class VariableBuilder:
         )
 
     def wrap_mapping_proxy(self, value: Any) -> VariableTracker:
+        mapping = _get_live_mapping_alias_target(value)
+        handle_dict = _get_live_mapping_alias_target(
+            torch.utils.hooks.RemovableHandle.__dict__
+        )
+        if mapping is not None and mapping is handle_dict:
+            self.tx.output.side_effects.observe_removable_handle_state(
+                f"mappingproxy source={self.source}"
+            )
         self.install_guards(GuardBuilder.TYPE_MATCH)
         # This might be suboptimal compared to dict guards. But mappingproxy is
         # not very common, so its ok to guard on all keys.
@@ -1169,6 +1212,16 @@ class VariableBuilder:
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+            if self.tx.output.side_effects.is_pending_module_hook_state_object(value):
+                unimplemented(
+                    gb_type="pending module hook state alias read",
+                    context=f"source={self.source}",
+                    explanation=(
+                        "Dynamo cannot access an alias of nn.Module hook state after "
+                        "deferring a hook registration in the same forward."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value)
 

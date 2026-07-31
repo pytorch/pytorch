@@ -204,7 +204,7 @@ class SideEffects:
     - Tracks mutations to Python objects, lists, and dictionaries that need to be
     applied after an FX graph is run.
     - Manages attribute modifications and deletions
-    - Handles tensor hooks and backward pass state
+    - Handles tensor/module hooks and backward pass state
     - Tracks cell variable mutations and global variable changes
     - Ensures correct ordering and application of side effects after graph execution
 
@@ -244,6 +244,20 @@ class SideEffects:
             ],
         ]
         | None = None,
+        module_hooks: dict[
+            int,
+            tuple[
+                VariableTracker,
+                VariableTracker,
+                "variables.RemovableHandleVariable",
+                str,
+                dict[str, VariableTracker],
+            ],
+        ]
+        | None = None,
+        removable_handle_state_accessed: bool = False,
+        accessed_module_hook_state_ids: set[int] | None = None,
+        pending_module_hook_state_ids: set[int] | None = None,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
@@ -254,6 +268,11 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        self.module_hooks = module_hooks or {}
+        self.removable_handle_state_accessed = removable_handle_state_accessed
+        self.accessed_module_hook_state_ids = accessed_module_hook_state_ids or set()
+        self.pending_module_hook_state_ids = pending_module_hook_state_ids or set()
+        self._suppress_module_hook_state_access = 0
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -287,6 +306,34 @@ class SideEffects:
         """Remove a variable from the skip mutation set, restoring normal mutation tracking."""
         if var in self.ignore_mutation_on_these_variables:
             self.ignore_mutation_on_these_variables.remove(var)
+
+    @contextlib.contextmanager
+    def suppress_module_hook_state_access(self) -> Generator[None, None, None]:
+        self._suppress_module_hook_state_access += 1
+        try:
+            yield
+        finally:
+            self._suppress_module_hook_state_access -= 1
+
+    def is_module_hook_state_access_suppressed(self) -> bool:
+        return self._suppress_module_hook_state_access > 0
+
+    def observe_removable_handle_state(self, context: str) -> None:
+        if self.module_hooks:
+            unimplemented(
+                gb_type="RemovableHandle state read after module hook registration",
+                context=context,
+                explanation=(
+                    "Dynamo cannot read RemovableHandle state after deferring a "
+                    "module hook registration in the same forward."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
+        self.removable_handle_state_accessed = True
+
+    def is_pending_module_hook_state_object(self, value: object) -> bool:
+        return id(value) in self.pending_module_hook_state_ids
 
     @contextlib.contextmanager
     def defer_side_effect_checks(self) -> Generator[None, None, None]:
@@ -379,6 +426,13 @@ class SideEffects:
             and self.attr_mutation_kinds == other.attr_mutation_kinds
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
+            and self.module_hooks == other.module_hooks
+            and self.removable_handle_state_accessed
+            == other.removable_handle_state_accessed
+            and self.accessed_module_hook_state_ids
+            == other.accessed_module_hook_state_ids
+            and self.pending_module_hook_state_ids
+            == other.pending_module_hook_state_ids
         )
 
     def diff(self, other: "SideEffects") -> str | None:
@@ -402,6 +456,19 @@ class SideEffects:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
             return "tensor_hooks"
+        elif self.module_hooks != other.module_hooks:
+            return "module_hooks"
+        elif (
+            self.removable_handle_state_accessed
+            != other.removable_handle_state_accessed
+        ):
+            return "removable_handle_state_accessed"
+        elif (
+            self.accessed_module_hook_state_ids != other.accessed_module_hook_state_ids
+        ):
+            return "accessed_module_hook_state_ids"
+        elif self.pending_module_hook_state_ids != other.pending_module_hook_state_ids:
+            return "pending_module_hook_state_ids"
         else:
             return None
 
@@ -423,6 +490,10 @@ class SideEffects:
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
+            module_hooks=self.module_hooks,
+            removable_handle_state_accessed=self.removable_handle_state_accessed,
+            accessed_module_hook_state_ids=set(self.accessed_module_hook_state_ids),
+            pending_module_hook_state_ids=set(self.pending_module_hook_state_ids),
         )
 
     def __contains__(self, item: Any) -> bool:
@@ -1066,6 +1137,7 @@ class SideEffects:
                 pre_existing_vars,
                 tx.output.backward_state,
                 self.tensor_hooks,
+                self.module_hooks,
             ],
         )
         # Manually release the self-referential function, which indirectly
@@ -1305,25 +1377,84 @@ class SideEffects:
             raise AssertionError("handle must be mutable in register_hook")
         if not hasattr(torch.Tensor, name):
             raise AssertionError(f"torch.Tensor has no attribute '{name}'")
-        idx = len(self.tensor_hooks.keys())
+        idx = len(self.tensor_hooks) + len(self.module_hooks)
         # duplicate index possible because of self.remove_hook()
-        while idx in self.tensor_hooks:
+        while idx in self.tensor_hooks or idx in self.module_hooks:
             idx += 1
         self.tensor_hooks[idx] = (tensor, hook, handle, name)
         if handle.idx:
             raise AssertionError(f"handle.idx should be falsy, got {handle.idx}")
         handle.idx = idx
 
+    def register_module_hook(
+        self,
+        module: VariableTracker,
+        hook: VariableTracker,
+        handle: "variables.RemovableHandleVariable",
+        name: str,
+        kwargs: dict[str, VariableTracker],
+        hook_state_objects: tuple[object, ...],
+    ) -> None:
+        if module.source is None:
+            raise AssertionError("module hook registration requires a source")
+        self.check_allowed_side_effect(module)
+        if not isinstance(handle, variables.RemovableHandleVariable):
+            raise AssertionError(
+                f"Expected RemovableHandleVariable, got {type(handle)}"
+            )
+        if not handle.is_mutable():
+            raise AssertionError("handle must be mutable in register_module_hook")
+        if not hasattr(torch.nn.Module, name):
+            raise AssertionError(f"torch.nn.Module has no attribute '{name}'")
+
+        idx = len(self.tensor_hooks) + len(self.module_hooks)
+        while idx in self.tensor_hooks or idx in self.module_hooks:
+            idx += 1
+        self.module_hooks[idx] = (module, hook, handle, name, kwargs)
+        self.pending_module_hook_state_ids.update(map(id, hook_state_objects))
+        if handle.idx is not None:
+            raise AssertionError(f"handle.idx must be None, got {handle.idx}")
+        handle.idx = idx
+
+    def has_pending_module_hook(self, module: VariableTracker) -> bool:
+        return any(
+            registered_module.source == module.source
+            for registered_module, _, _, _, _ in self.module_hooks.values()
+        )
+
+    def is_pending_module_hook_handle(self, idx: int) -> bool:
+        return idx in self.module_hooks
+
     def remove_hook(self, idx: int) -> None:
-        del self.tensor_hooks[idx]
+        if idx in self.tensor_hooks:
+            del self.tensor_hooks[idx]
+        else:
+            del self.module_hooks[idx]
 
     def codegen_hooks(self, cg: PyCodegen) -> None:
-        for (
-            tensor,
-            hook,
-            handle,
-            name,
-        ) in self.tensor_hooks.values():
+        for idx in sorted(self.tensor_hooks.keys() | self.module_hooks.keys()):
+            if idx in self.module_hooks:
+                module, hook, handle, name, kwargs = self.module_hooks[idx]
+
+                def gen_module_fn() -> None:
+                    cg(module)
+                    cg.extend_output([cg.create_load_attr(name)])
+
+                cg.add_push_null(gen_module_fn)
+                cg(hook)
+                if kwargs:
+                    cg.foreach(kwargs.values())
+                    cg.extend_output(
+                        cg.create_call_function_kw(
+                            1 + len(kwargs), tuple(kwargs.keys()), False
+                        )
+                    )
+                else:
+                    cg.extend_output(create_call_function(1, False))
+                cg.add_cache(handle)
+                continue
+
+            tensor, hook, handle, name = self.tensor_hooks[idx]
             # Note: [On tensor.register_hook]
             #
             # register_hook on a tensor, AKA backward hooks, have slightly nuanced differences in how they are implemented
@@ -1514,7 +1645,7 @@ class SideEffects:
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.tensor_hooks
             or self.save_for_backward
-            or self.tensor_hooks
+            or self.module_hooks
         )
 
     def clear(self) -> None:
