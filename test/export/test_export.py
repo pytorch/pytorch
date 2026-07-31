@@ -79,6 +79,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
@@ -323,6 +324,8 @@ def cleanup_dispatch_trace_metadata(mod: torch.export.ExportedProgram) -> None:
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_export_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -585,6 +588,8 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
@@ -17929,6 +17934,8 @@ def forward(self, q, k, v):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_scaled_dot_product_attention_cpu(self):
         """
         This test makes sure we are always getting the same decomposition result for SDPA.
@@ -18602,6 +18609,8 @@ def forward(self, x):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()
@@ -18937,6 +18946,8 @@ def forward(self, x, y):
 
 
 class TestExportAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_device_to_accelerator(self, device):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -18986,6 +18997,8 @@ class TestExportAccelerator(TestCase):
 
 
 class TestExportRNN(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_export_lstm(self, device):
         class M(torch.nn.Module):
             def __init__(self):
@@ -19054,6 +19067,8 @@ class TestExportRNN(TestCase):
 
 
 class TestExportTriton(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_export_custom_triton_kernel(self, device):
         if not has_triton_package() or not has_triton():
             self.skipTest("requires triton")
@@ -19209,6 +19224,8 @@ class TestExportTriton(TestCase):
 
 
 class TestExportMoveToDeviceIndex(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_assert_tensor_metadata_device_index(self, device):
         class N(torch.nn.Module):
             def forward(self, x, y):
@@ -19227,6 +19244,8 @@ class TestExportMoveToDeviceIndex(TestCase):
 
 
 class TestExportAutocastException(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_exception(self, device):
         device_type = torch.device(device).type
 
@@ -19275,6 +19294,8 @@ class TestExportAutocastException(TestCase):
 
 
 class TestExportFlexAttention(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_flex_attention_export(self, device):
         device_type = torch.device(device).type
         if device_type not in ("cpu", "cuda", "xpu", "hpu", "mps"):
