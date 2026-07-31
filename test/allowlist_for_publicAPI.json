@@ -2672,5 +2672,7 @@
   ],
   "torch.utils.hipify.hipify_python": [
     "TrieNode"
-  ]
+  ],
+  "SharedTensor": {},
+  "to_shared_dataset": {}
 }

@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.data import SharedDict, SharedList
+from torch.utils.data._shared_container import SharedTensor, to_shared_dataset
 
 
 class TestSharedList(TestCase):
@@ -210,6 +212,147 @@ class TestSharedDict(TestCase):
         self.assertEqual(len(sd), N)
         self.assertEqual(sd["key_0"], "value_0")
         self.assertEqual(sd[f"key_{N - 1}"], f"value_{N - 1}")
+
+
+class TestSharedTensor(TestCase):
+    def test_basic(self) -> None:
+        tensors = [torch.ones(5), torch.zeros(3), torch.randn(4)]
+        st = SharedTensor(tensors)
+        self.assertEqual(len(st), 3)
+        self.assertTrue(torch.equal(st[0], torch.ones(5)))
+        self.assertTrue(torch.equal(st[1], torch.zeros(3)))
+        self.assertEqual(st[2].numel(), 4)
+
+    def test_single_element(self) -> None:
+        t = torch.tensor([1.0, 2.0, 3.0])
+        st = SharedTensor([t])
+        self.assertEqual(len(st), 1)
+        self.assertTrue(torch.equal(st[0], t))
+
+    def test_empty(self) -> None:
+        st = SharedTensor([])
+        self.assertEqual(len(st), 0)
+
+    def test_different_dtypes(self) -> None:
+        st = SharedTensor(
+            [torch.ones(2, dtype=torch.float32), torch.ones(3, dtype=torch.float32)]
+        )
+        self.assertEqual(len(st), 2)
+
+    def test_negative_index(self) -> None:
+        tensors = [torch.tensor([1.0]), torch.tensor([2.0]), torch.tensor([3.0])]
+        st = SharedTensor(tensors)
+        self.assertTrue(torch.equal(st[-1], torch.tensor([3.0])))
+
+    def test_out_of_bounds(self) -> None:
+        st = SharedTensor([torch.ones(2)])
+        with self.assertRaises(IndexError):
+            st[10]
+
+    def test_iteration(self) -> None:
+        tensors = [torch.ones(2), torch.zeros(2)]
+        st = SharedTensor(tensors)
+        result = list(st)
+        self.assertEqual(len(result), 2)
+        self.assertTrue(torch.equal(result[0], torch.ones(2)))
+
+
+class TestToSharedDataset(TestCase):
+    def test_converts_large_list(self) -> None:
+        class DS:
+            def __init__(self):
+                self.data = list(range(10000))
+                self.small = [1, 2, 3]
+
+        ds = DS()
+        to_shared_dataset(ds, threshold_bytes=100)
+        self.assertIsInstance(ds.data, SharedList)
+        self.assertIsInstance(ds.small, list)
+
+    def test_converts_large_dict(self) -> None:
+        class DS:
+            def __init__(self):
+                self.labels = {i: f"v{i}" for i in range(5000)}
+
+        ds = DS()
+        to_shared_dataset(ds, threshold_bytes=100)
+        self.assertIsInstance(ds.labels, SharedDict)
+
+    def test_preserves_non_data_attrs(self) -> None:
+        class DS:
+            def __init__(self):
+                self.transform = lambda x: x
+                self.data = list(range(10000))
+
+        ds = DS()
+        to_shared_dataset(ds, threshold_bytes=100)
+        self.assertIsInstance(ds.data, SharedList)
+        self.assertIsInstance(ds.transform, type(lambda: None))
+
+    def test_skips_already_shared(self) -> None:
+        orig = SharedList([1, 2, 3])
+
+        class DS:
+            def __init__(self):
+                self.data = orig
+
+        ds = DS()
+        to_shared_dataset(ds, threshold_bytes=1)
+        self.assertIs(ds.data, orig)
+
+    def test_subclass_dataset(self) -> None:
+        from torch.utils.data import Dataset
+
+        class MyDS(Dataset):
+            def __init__(self):
+                self.paths = list(range(5000))
+
+            def __len__(self):
+                return len(self.paths)
+
+            def __getitem__(self, idx):
+                return self.paths[idx]
+
+        ds = MyDS()
+        to_shared_dataset(ds, threshold_bytes=100)
+        self.assertIsInstance(ds.paths, SharedList)
+        self.assertEqual(len(ds), 5000)
+
+
+class TestDataLoaderSharedMemory(TestCase):
+    def test_use_shared_memory_flag(self) -> None:
+        from torch.utils.data import DataLoader, Dataset
+
+        class DS(Dataset):
+            def __init__(self):
+                self.data = [f"item_{i}_" * 100 for i in range(5000)]
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        dl = DataLoader(DS(), batch_size=4, use_shared_memory=True)
+        self.assertIsInstance(dl.dataset.data, SharedList)
+
+    def test_use_shared_memory_small(self) -> None:
+        from torch.utils.data import DataLoader, Dataset
+
+        class DS(Dataset):
+            def __init__(self):
+                self.data = [1]
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        dl = DataLoader(DS(), batch_size=1, use_shared_memory=True)
+        self.assertIsInstance(dl.dataset.data, list)
+        items = [batch.item() for batch in dl]
+        self.assertEqual(items, [1])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,9 @@ from typing import Any
 import torch
 
 
+_ONE_MB = 1 << 20
+
+
 def _tensor_to_bytes(t: torch.Tensor) -> bytes:
     try:
         return t.numpy().tobytes()
@@ -237,4 +240,129 @@ class SharedDict:
         )
 
 
-__all__ = ["SharedList", "SharedDict"]
+def to_shared_dataset(dataset, threshold_bytes: int = _ONE_MB):
+    """Convert list/dict attributes of a :class:`~torch.utils.data.Dataset`
+    to :class:`SharedList` / :class:`SharedDict` automatically.
+
+    Walks ``dataset.__dict__``, replacing any ``list`` or ``dict`` attribute
+    whose serialized size exceeds *threshold_bytes* with the corresponding
+    shared-memory container.  Smaller attributes and non-list/dict attributes
+    are left unchanged.
+
+    When used inside a :class:`~torch.utils.data.DataLoader` with
+    ``num_workers > 0``, the converted attributes are stored in shared memory
+    and shared across worker processes via :mod:`torch.multiprocessing`'s
+    ``ForkingPickler`` — eliminating copy-on-write memory replication.
+
+    Args:
+        dataset: A :class:`~torch.utils.data.Dataset` instance to inspect.
+        threshold_bytes (int): Minimum serialized size (in bytes) required
+            before a list/dict is converted.  Default: 1 MiB.
+
+    Returns:
+        The same *dataset* instance (modified in-place).
+
+    Example::
+
+        class ImageDataset(Dataset):
+            def __init__(self, paths, labels):
+                self.paths = paths  # large list
+                self.labels = labels  # large dict
+                self.transform = ...  # non-data, skipped
+
+
+        ds = ImageDataset(paths, labels)
+        ds = to_shared_dataset(ds)
+        # ds.paths is now a SharedList, ds.labels is now a SharedDict
+    """
+
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    for attr, value in list(dataset.__dict__.items()):
+        if isinstance(value, (SharedList, SharedDict)):
+            continue
+        if isinstance(value, list):
+            try:
+                raw = pickle.dumps(value)
+            except Exception:
+                continue
+            if len(raw) >= threshold_bytes:
+                dataset.__dict__[attr] = SharedList(value)
+                logger.info(
+                    "to_shared_dataset: converted %s (list, %d bytes -> SharedList)",
+                    attr,
+                    len(raw),
+                )
+        elif isinstance(value, dict):
+            try:
+                raw = pickle.dumps(value)
+            except Exception:
+                continue
+            if len(raw) >= threshold_bytes:
+                dataset.__dict__[attr] = SharedDict(value)
+                logger.info(
+                    "to_shared_dataset: converted %s (dict, %d bytes -> SharedDict)",
+                    attr,
+                    len(raw),
+                )
+    return dataset
+
+
+class SharedTensor:
+    """A list-of-tensors backed by a single flat shared-memory buffer.
+
+    Every element is a :class:`torch.Tensor` view into shared storage.
+    Unlike :class:`SharedList`, this avoids pickle serialization — data is
+    stored directly in a flat ``torch.Tensor`` and indexed by pre-computed
+    offsets.  This is intended for datasets that are already tensor-based
+    (e.g., preloaded image tensors).
+
+    Args:
+        tensors (Iterable[torch.Tensor]): Tensors to store. All must have the
+            same ``dtype``.
+    """
+
+    def __init__(self, tensors: list[torch.Tensor]) -> None:
+        tensors = list(tensors)
+        if not tensors:
+            self._length = 0
+            self._storage = torch.empty(0, dtype=torch.uint8)
+            self._index = torch.zeros(1, dtype=torch.int64)
+            return
+        dtype = tensors[0].dtype
+        offsets = [0]
+        for t in tensors:
+            offsets.append(offsets[-1] + t.numel())
+        total = offsets[-1]
+        self._storage = torch.empty(total, dtype=dtype)
+        for i, t in enumerate(tensors):
+            self._storage[offsets[i] : offsets[i + 1]] = t.reshape(-1)
+        self._index = torch.tensor(offsets, dtype=torch.int64)
+        self._length = len(tensors)
+        self._dtype = dtype
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        if idx < 0:
+            idx += self._length
+        if idx < 0 or idx >= self._length:
+            raise IndexError(
+                f"index {idx} out of range for SharedTensor of len {self._length}"
+            )
+        start = int(self._index[idx].item())
+        end = int(self._index[idx + 1].item())
+        return self._storage[start:end]
+
+    def __iter__(self) -> Iterator[torch.Tensor]:
+        for i in range(self._length):
+            yield self[i]
+
+    def __repr__(self) -> str:
+        return f"SharedTensor(len={self._length}, dtype={self._dtype})"
+
+
+__all__ = ["SharedList", "SharedDict", "SharedTensor", "to_shared_dataset"]

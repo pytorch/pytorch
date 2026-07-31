@@ -1,4 +1,5 @@
 from torch.utils.data._shared_container import SharedDict, SharedList
+from torch.utils.data._shared_container import SharedTensor, to_shared_dataset
 from torch.utils.data.dataloader import (
     _DatasetKind,
     DataLoader,
@@ -58,6 +59,8 @@ __all__ = [
     "SequentialSampler",
     "SharedDict",
     "SharedList",
+    "SharedTensor",
+    "to_shared_dataset",
     "StackDataset",
     "Subset",
     "SubsetRandomSampler",
