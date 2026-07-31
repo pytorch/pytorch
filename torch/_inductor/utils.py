@@ -2248,6 +2248,7 @@ def use_triton_tdm_scaled_template(
     """Return whether scaled FP8 MM operands may use gfx1250 TDM descriptors."""
     if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
         return False
+    # See use_triton_tdm_template for why bounds are checked first.
     if not all(
         _descriptor_shape_fits_in_int32(mat.get_size(), add_guards=add_guards)
         for mat in matrices
