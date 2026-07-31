@@ -131,9 +131,9 @@ struct AttentionKernel {
 
   struct Params {
     // Input tensors
-    const scalar_t* query_ptr = nullptr; // [num_queries, num_heads, head_dim]
-    const scalar_t* key_ptr = nullptr; // [num_keys, num_heads, head_dim]
-    const scalar_t* value_ptr = nullptr; // [num_keys, num_heads, head_dim_value]
+    const scalar_t* query_ptr = nullptr; // [num_queries, num_query_heads, head_dim]
+    const scalar_t* key_ptr = nullptr; // [num_keys, num_kv_heads, head_dim]
+    const scalar_t* value_ptr = nullptr; // [num_keys, num_kv_heads, head_dim_value]
     const scalar_t* attn_bias_ptr = nullptr; // [num_heads, num_queries, num_keys]
     const int32_t* seqstart_q_ptr = nullptr;
     const int32_t* seqstart_k_ptr = nullptr;
@@ -184,6 +184,7 @@ struct AttentionKernel {
 
     int32_t num_batches = 0;
     int32_t num_heads = 0;
+    int32_t q_heads_per_kv = 1;
 
     // dropout
     bool use_dropout = false;
@@ -198,6 +199,7 @@ struct AttentionKernel {
     CUTLASS_DEVICE bool advance_to_block() {
       auto batch_id = blockIdx.z;
       auto head_id = blockIdx.y;
+      auto kv_head_id = head_id / q_heads_per_kv;
       auto query_start = blockIdx.x * kQueriesPerBlock;
 
       auto lse_dim = ceil_div((int32_t)num_queries, kAlignLSE) * kAlignLSE;
@@ -248,9 +250,9 @@ struct AttentionKernel {
 
       // Advance to the current batch / head / query_start
       query_ptr += (q_start + query_start) * q_strideM + head_id * q_strideH;
-      key_ptr += k_start * k_strideM + head_id * k_strideH;
+      key_ptr += k_start * k_strideM + kv_head_id * k_strideH;
 
-      value_ptr += k_start * v_strideM + head_id * v_strideH;
+      value_ptr += k_start * v_strideM + kv_head_id * v_strideH;
       output_ptr +=
           int64_t(q_start + query_start) * o_strideM + head_id * head_dim_value;
 
@@ -609,6 +611,7 @@ struct AttentionKernel {
     TORCH_CHECK(
         p.num_heads <= 1 || p.v_strideH % kAlignmentV == 0,
         "value is not correctly aligned (strideH)");
+    TORCH_CHECK(p.q_heads_per_kv > 0, "invalid GQA group size");
     TORCH_CHECK(
         p.custom_mask_type < NumCustomMaskTypes,
         "invalid value for `custom_mask_type`");
