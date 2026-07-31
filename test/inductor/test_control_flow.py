@@ -2307,6 +2307,90 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @torch._dynamo.config.patch(
+        {"capture_dynamic_output_shape_ops": True, "capture_scalar_outputs": True}
+    )
+    def test_scan_unroll_dynamic_cpu(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def step(carry, x):
+            next_carry = carry + x
+            return next_carry, next_carry.cos()
+
+        def f_unroll_1(init, xs):
+            return scan(step, init, xs, unroll=1)
+
+        def f(init, xs):
+            return scan(step, init, xs, unroll=2)
+
+        def f_full(init, xs):
+            return scan(step, init, xs, unroll=True)
+
+        def f_large_unroll(init, xs):
+            return scan(step, init, xs, unroll=10)
+
+        def f_empty_ys(init, xs, unroll):
+            def empty_ys_step(carry, x):
+                return carry + x, []
+
+            return scan(empty_ys_step, init, xs, unroll=unroll)
+
+        def f_unbacked(init, xs):
+            indices = torch.nonzero(xs[:, 0] > 0).flatten()
+            dynamic_xs = xs.index_select(0, indices)
+            torch._check(dynamic_xs.shape[0] > 0)
+            return f_empty_ys(init, dynamic_xs, 3)
+
+        compiled_f = torch.compile(f, fullgraph=True, dynamic=True)
+        for scan_length in (0, 1, 5, 7):
+            init = torch.randn(3, 4)
+            xs = torch.randn(scan_length, 3, 4)
+            self.assertEqual(f(init, xs), compiled_f(init, xs))
+
+        init = torch.randn(3, 4)
+        xs = torch.randn(5, 3, 4)
+        compiled_f_full = torch.compile(f_full, fullgraph=True, dynamic=True)
+        self.assertEqual(f_full(init, xs), compiled_f_full(init, xs))
+
+        init = torch.randn(3, 4)
+        xs = torch.randn(3, 3, 4)
+        compiled_f_large_unroll = torch.compile(
+            f_large_unroll, fullgraph=True, dynamic=True
+        )
+        self.assertEqual(f_large_unroll(init, xs), compiled_f_large_unroll(init, xs))
+
+        for unroll in (1, 2, True):
+            for scan_length in (0, 5):
+                init = torch.randn(3, 4)
+                xs = torch.randn(scan_length, 3, 4)
+                compiled_f_empty_ys = torch.compile(
+                    lambda init, xs: f_empty_ys(init, xs, unroll),
+                    fullgraph=True,
+                    dynamic=True,
+                )
+                self.assertEqual(
+                    f_empty_ys(init, xs, unroll), compiled_f_empty_ys(init, xs)
+                )
+
+        init = torch.randn(3, 4)
+        xs = torch.randn(8, 3, 4)
+        xs[:, 0, 0] = torch.tensor([-1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0])
+        compiled_f_unbacked = torch.compile(f_unbacked, fullgraph=True)
+        self.assertEqual(f_unbacked(init, xs), compiled_f_unbacked(init, xs))
+
+        def assert_while_loop_body_count(fn, expected_count):
+            init = torch.randn(3, 4)
+            xs = torch.randn(5, 3, 4)
+            compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+            result, (code,) = run_and_get_code(compiled_fn, init, xs)
+            self.assertEqual(fn(init, xs), result)
+            self.assertEqual(code.count("def while_loop_body_graph_"), expected_count)
+
+        assert_while_loop_body_count(f_unroll_1, 1)
+        assert_while_loop_body_count(f, 2)
+        assert_while_loop_body_count(f_full, 0)
+
 
 class MapModels:
     class Simple(torch.nn.Module):
