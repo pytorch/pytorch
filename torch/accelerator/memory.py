@@ -275,3 +275,61 @@ def _snapshot(device=None, augment_with_fx_traces: bool = False):
     return torch.cuda.memory._snapshot(
         device, augment_with_fx_traces=augment_with_fx_traces
     )
+
+
+def _save_segment_usage(filename: str = "output.svg", snapshot: Any = None) -> None:
+    r"""Render a memory snapshot as a flamegraph SVG grouped by allocator segment.
+
+    Every allocation appears beneath the segment that backs it, so the output
+    shows how each reserved segment is subdivided and where it is fragmented.
+
+    Args:
+        filename (str, optional): path to write the SVG to. Default: ``"output.svg"``.
+        snapshot (optional): the snapshot to render. If not given, one is taken
+            via :func:`_snapshot`.
+
+    .. note:: This function is a no-op if the current :ref:`accelerator <accelerators>`
+        does not implement flamegraph formatting.
+
+    .. note:: Rendering downloads ``flamegraph.pl`` into ``~/.cache`` on first use
+        and runs ``perl``, so it needs network access and a perl interpreter.
+    """
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        return
+    mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+    if mem_mod is None or not hasattr(mem_mod, "_segments"):
+        return
+    if snapshot is None:
+        snapshot = _snapshot()
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(mem_mod._segments(snapshot))
+
+
+def _save_memory_usage(filename: str = "output.svg", snapshot: Any = None) -> None:
+    r"""Render a memory snapshot as a flamegraph SVG grouped by stream.
+
+    Allocations are aggregated per stream rather than per segment, so the output
+    shows which call sites own the memory rather than how it is laid out.
+
+    Args:
+        filename (str, optional): path to write the SVG to. Default: ``"output.svg"``.
+        snapshot (optional): the snapshot to render. If not given, one is taken
+            via :func:`_snapshot`.
+
+    .. note:: This function is a no-op if the current :ref:`accelerator <accelerators>`
+        does not implement flamegraph formatting.
+
+    .. note:: Rendering downloads ``flamegraph.pl`` into ``~/.cache`` on first use
+        and runs ``perl``, so it needs network access and a perl interpreter.
+    """
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        return
+    mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+    if mem_mod is None or not hasattr(mem_mod, "_memory"):
+        return
+    if snapshot is None:
+        snapshot = _snapshot()
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(mem_mod._memory(snapshot))
