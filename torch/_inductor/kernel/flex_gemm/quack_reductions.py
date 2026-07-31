@@ -34,7 +34,9 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
-from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionGeometry,
+    iter_fx_node_inputs,
     NormalizedGetItem,
     NormalizedPrepareSoftmax,
     NormalizedReduction,
@@ -42,10 +44,6 @@ from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
     NormalizedSplit,
     NormalizedSqueeze,
     NormalizedView,
-)
-from torch._inductor.kernel.gemm_epilogue import (
-    GemmReductionGeometry,
-    iter_fx_node_inputs,
 )
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.ops_handler import ReductionType
