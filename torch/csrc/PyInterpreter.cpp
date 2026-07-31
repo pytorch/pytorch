@@ -1126,11 +1126,9 @@ struct ActiveFakeMode {
 ActiveFakeMode get_active_fake_mode() {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
+  py::object py_fake_mode = getFakeModePyObj(mode.get());
   TORCH_CHECK(
-      mode->fake_mode_pyobj_ != nullptr,
-      "CppFakeTensorMode must be set on mode");
-  py::object py_fake_mode = py::reinterpret_borrow<py::object>(
-      mode->fake_mode_pyobj_->ptr(getPyInterpreter()));
+      !py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
   return {std::move(mode), std::move(py_fake_mode)};
 }
 
@@ -1336,4 +1334,19 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
+}
+
+py::object getFakeModePyObj(const c10::FakeTensorMode* mode) {
+  if (mode == nullptr || mode->fake_mode_pyobj_ == nullptr) {
+    return py::none();
+  }
+  // fake_mode_pyobj_ is a *weak* reference to the Python CppFakeTensorMode (the
+  // Python object owns this C++ mode through a capsule, so a strong
+  // back-reference would form an uncollectable cycle). A dead referent -> None.
+  PyObject* obj = nullptr;
+  if (PyWeakref_GetRef(mode->fake_mode_pyobj_->ptr(getPyInterpreter()), &obj) <=
+      0) {
+    return py::none();
+  }
+  return py::reinterpret_steal<py::object>(obj);
 }

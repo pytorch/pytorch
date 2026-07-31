@@ -30,7 +30,7 @@ prims = torch.ops.prims
 quantized_decomposed = torch.ops.quantized_decomposed
 quantized = torch.ops.quantized
 
-# Only for per tensor quant since permute may changes the channel idx
+# Only for per tensor quant since permute may change the channel idx
 _PER_TENSOR_QUANTIZE_OPS = [
     quantized_decomposed.quantize_per_tensor.default,
     quantized_decomposed.quantize_per_tensor.tensor,
