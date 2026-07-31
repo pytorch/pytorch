@@ -329,7 +329,7 @@ Examples::
     tensor(0, dtype=torch.int32)
 
 .. _LAPACK's getrf:
-    https://www.netlib.org/lapack/explore-html-3.6.1/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
+    https://www.netlib.org/lapack/explore-html/
 """,
 )
 
@@ -967,7 +967,7 @@ Examples::
     tensor([1, 2, 3], dtype=torch.int32)
 
 .. _LAPACK's sytrf:
-    https://www.netlib.org/lapack/explore-html-3.6.1/d3/db6/group__double_s_ycomputational_gad91bde1212277b3e909eb6af7f64858a.html
+    https://www.netlib.org/lapack/explore-html/
 """,
 )
 
@@ -1025,7 +1025,7 @@ Examples::
     tensor(0, dtype=torch.int32)
 
 .. _LAPACK's sytrf:
-    https://www.netlib.org/lapack/explore-html-3.6.1/d3/db6/group__double_s_ycomputational_gad91bde1212277b3e909eb6af7f64858a.html
+    https://www.netlib.org/lapack/explore-html/
 """,
 )
 
@@ -1409,9 +1409,8 @@ Args:
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
-        :attr:`dtype` before performing the operation, and the returned tensor's type
-        will be :attr:`dtype`. Default: `None`
+    dtype (:class:`torch.dtype`, optional): If specified :attr:`x` is cast to
+        :attr:`dtype` prior to doing the accumulation. Default: `None`
 
 Returns:
     A real-valued tensor, even when :attr:`input` is complex.
@@ -1535,7 +1534,7 @@ Args:
     x (Tensor): tensor, flattened by default, but this behavior can be
         controlled using :attr:`dim`.  (Note: the keyword argument
         `input` can also be used as an alias for `x`.)
-    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
+    ord (int, float, inf, -inf, optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
         Default: `None`
@@ -1544,11 +1543,8 @@ Args:
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
-        If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
-        and the returned tensor's type will be :attr:`dtype` if real and of its real counterpart if complex.
-        :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
-        :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
+    dtype (:class:`torch.dtype`, optional): If specified :attr:`x` is cast to
+        :attr:`dtype` prior to doing the accumulation. Default: `None`
 
 Returns:
     A real-valued tensor, even when :attr:`x` is complex.
@@ -1613,9 +1609,8 @@ Args:
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
-        :attr:`dtype` before performing the operation, and the returned tensor's type
-        will be :attr:`dtype`. Default: `None`
+    dtype (:class:`torch.dtype`, optional): If specified :attr:`x` is cast to
+        :attr:`dtype` prior to doing the accumulation. Default: `None`
 
 Returns:
     A real-valued tensor, even when :attr:`A` is complex.
@@ -2215,6 +2210,53 @@ Example::
 )
 
 
+matrix_sqrth = _add_docstr(
+    _linalg.linalg_matrix_sqrth,
+    r"""
+linalg.matrix_sqrth(A) -> Tensor
+
+Computes the principal square root of a symmetric (resp. Hermitian) positive-definite matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+for a symmetric (resp. Hermitian) positive-definite matrix :math:`A \in \mathbb{K}^{n \times n}`,
+this function returns the unique symmetric (resp. Hermitian) positive-definite matrix
+:math:`X \in \mathbb{K}^{n \times n}` such that
+
+.. math::
+    XX = A.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+.. note:: Only the lower triangular part of :attr:`A` is used in the computation, and
+          :attr:`A` is assumed to be symmetric (resp. Hermitian). See :func:`torch.linalg.eigh`.
+
+.. seealso::
+
+        :func:`torch.linalg.cholesky` computes a different factorization of a symmetric
+        (resp. Hermitian) positive-definite matrix.
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric (resp. Hermitian) positive-definite matrices.
+
+Examples::
+
+    >>> A = torch.tensor([[2., 0.], [0., 9.]])
+    >>> torch.linalg.matrix_sqrth(A)
+    tensor([[1.4142, 0.0000],
+            [0.0000, 3.0000]])
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A = A @ A.mT + 3 * torch.eye(3)  # batch of symmetric positive-definite matrices
+    >>> X = torch.linalg.matrix_sqrth(A)
+    >>> torch.allclose(X @ X, A, atol=1e-5)
+    True
+""",
+)
+
+
 solve = _add_docstr(
     _linalg.linalg_solve,
     r"""
@@ -2516,7 +2558,7 @@ Returns:
     A named tuple `(LU, pivots, info)`.
 
 .. _LAPACK's getrf:
-    https://www.netlib.org/lapack/explore-html-3.6.1/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
+    https://www.netlib.org/lapack/explore-html/
 """,
 )
 

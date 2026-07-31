@@ -223,7 +223,7 @@ def _fa4_run_forward(
         "num_splits": num_splits or 1,
         "out": out,
     }
-    out, lse = module._flash_attn_fwd(query, key, value, **kwargs)
+    out, lse, *_ = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
 
 
