@@ -6413,23 +6413,28 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             # after prologue starts
             self.assertLess(prologue_event.time_range.end, last_start_time)
 
-    def test_record_runtime_overhead_default_off(self):
-        # record_runtime_overhead defaults False, so the "Pregraph bytecode"
-        # profiler marker Dynamo emits into each compiled call is absent by
-        # default (the marker adds per-call overhead). Enabling the flag brings
-        # it back. Pins the default so an accidental re-flip is caught.
+    def test_record_runtime_overhead_gated_on_profiler(self):
+        # record_runtime_overhead defaults True, but the "Pregraph bytecode"
+        # marker Dynamo emits into each compiled call is gated at RUNTIME on the
+        # active profiler: it fires only when a profiler is attached, so a
+        # non-profiled call pays nothing. Setting the flag False drops the marker
+        # emission entirely.
         def has_pregraph_marker():
             torch._dynamo.reset()
             f = torch.compile(lambda x: x + 1, backend="eager")
             x = torch.randn(4)
-            f(x)  # compile + warm the cache
+            f(x)  # compile + warm the cache WITHOUT a profiler active
             with profile(activities=[ProfilerActivity.CPU]) as prof:
                 f(x)
             return any("Pregraph bytecode" in e.name for e in prof.events())
 
-        self.assertFalse(has_pregraph_marker())
-        with torch._dynamo.config.patch(record_runtime_overhead=True):
-            self.assertTrue(has_pregraph_marker())
+        # Default (on): the runtime gate lets the marker fire under a profiler
+        # even though the function was compiled without one (no recompile needed).
+        self.assertTrue(has_pregraph_marker())
+        # Flag off: the marker is never emitted, so it is absent even under a
+        # profiler.
+        with torch._dynamo.config.patch(record_runtime_overhead=False):
+            self.assertFalse(has_pregraph_marker())
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
