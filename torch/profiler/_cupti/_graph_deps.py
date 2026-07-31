@@ -33,6 +33,11 @@ class _GraphDependencyRecorder:
 
     def __init__(self) -> None:
         self.deps: dict[int, list[int]] = {}
+        # graph_node_id -> cudaEvent_t handle for event-record nodes. The CUPTI record for the
+        # node (a CUDA_EVENT activity) carries no event handle, so this is the only way to tag
+        # the rendered EventRecord span with the event it records -- which, together with the
+        # node->node dependency arrows, shows what downstream nodes wait on (see get_graph_data).
+        self.event_record_events: dict[int, int] = {}
         self._handle: Any = None
 
     def arm(self) -> None:
@@ -56,12 +61,19 @@ class _GraphDependencyRecorder:
             for n in nodes
             if n["dependencies"]
         }
-        if not recorded:
+        events = {
+            n["tools_id"]: n["event_ptr"]
+            for n in nodes
+            if n["node_type"] == "event_record" and n["event_ptr"]
+        }
+        if not recorded and not events:
             return
         self.deps.update(recorded)
+        self.event_record_events.update(events)
         # Track the exec graph id (tools_id >> 32, shared by all the graph's nodes) so the
-        # observer's graph-destroy hook can purge these edges from the map on destruction.
-        torch_cuda_graph._recorded_exec_ids.add(next(iter(recorded)) >> 32)
+        # observer's graph-destroy hook can purge this graph's entries on destruction.
+        any_id = next(iter(recorded)) if recorded else next(iter(events))
+        torch_cuda_graph._recorded_exec_ids.add(any_id >> 32)
 
 
 _recorder = _GraphDependencyRecorder()
@@ -75,3 +87,8 @@ def arm_graph_dependency_recording() -> None:
 def graph_dependencies() -> dict[int, list[int]]:
     """The persistent, shared graph_node_id -> predecessor graph_node_ids map."""
     return _recorder.deps
+
+
+def graph_event_record_events() -> dict[int, int]:
+    """The persistent, shared event-record node graph_node_id -> cudaEvent_t handle map."""
+    return _recorder.event_record_events
