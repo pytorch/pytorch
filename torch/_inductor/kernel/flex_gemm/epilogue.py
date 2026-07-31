@@ -59,20 +59,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
-from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-    normalize_flex_gemm_epilogue_fx_node,
-    NormalizedGetItem,
-    NormalizedNode,
-    NormalizedNVFP4Pack,
-    NormalizedPrepareSoftmax,
-    NormalizedReduction,
-    NormalizedSelect,
-    NormalizedSplit,
-    NormalizedSqueeze,
-    NormalizedToBlocked,
-    NormalizedUnsupportedReduction,
-    NormalizedView,
-)
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
@@ -86,7 +72,6 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     grouped_tensor_layout,
     GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
-    iter_fx_node_inputs,
     lower_full_scalar,
     lower_getitem,
     lower_grouped_n_select,
@@ -96,6 +81,20 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_tensorssa_reduce,
     lower_view_or_reshape,
     tensor_meta_shape,
+)
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmEpilogueGraph,
+    iter_fx_node_inputs,
+    NormalizedGetItem,
+    NormalizedNVFP4Pack,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSelect,
+    NormalizedSplit,
+    NormalizedSqueeze,
+    NormalizedToBlocked,
+    NormalizedUnsupportedReduction,
+    NormalizedView,
 )
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.virtualized import V
@@ -357,45 +356,6 @@ class FlexGemmOutputPlan:
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
 
 
-@dataclasses.dataclass(frozen=True)
-class FlexGemmEpilogueGraph:
-    """Index dependencies and normalized nodes alongside the original FX graph.
-
-    Attributes:
-        dependencies: Every FX node mapped to all of its direct and transitive
-            input nodes.
-        normalized_nodes: Selected FX nodes mapped to canonical arguments shared
-            by semantic analysis and emission.
-    """
-
-    dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]]
-    normalized_nodes: dict[torch.fx.Node, NormalizedNode]
-
-    @classmethod
-    def from_graph_module(
-        cls, graph_module: torch.fx.GraphModule
-    ) -> "FlexGemmEpilogueGraph":
-        """Build transitive dependencies in the graph's topological order."""
-        dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]] = {}
-        normalized_nodes: dict[torch.fx.Node, NormalizedNode] = {}
-        for node in graph_module.graph.nodes:
-            node_dependencies: OrderedSet[torch.fx.Node] = OrderedSet()
-            for input_node in iter_fx_node_inputs((node.args, node.kwargs)):
-                node_dependencies.add(input_node)
-                node_dependencies.update(dependencies.get(input_node, ()))
-            dependencies[node] = frozenset(node_dependencies)
-            if (normalized := normalize_flex_gemm_epilogue_fx_node(node)) is not None:
-                normalized_nodes[node] = normalized
-        return cls(dependencies, normalized_nodes)
-
-    def depends_on(self, value: Any, target: torch.fx.Node) -> bool:
-        """Return whether a value is or transitively depends on the target node."""
-        return any(
-            node is target or target in self.dependencies.get(node, ())
-            for node in iter_fx_node_inputs(value)
-        )
-
-
 @dataclasses.dataclass
 class FlexGemmLocalReduceAnalysis:
     """Collect grouped TensorSSA layouts and supported local-reduction matches.
@@ -411,7 +371,7 @@ class FlexGemmLocalReduceAnalysis:
         matches: FX values matched to a supported grouped local reduction.
     """
 
-    graph: FlexGemmEpilogueGraph
+    graph: GemmEpilogueGraph
     grouped_layouts: dict[torch.fx.Node, FlexGemmGroupedLayoutMatch] = (
         dataclasses.field(default_factory=dict)
     )
@@ -424,8 +384,9 @@ class FlexGemmLocalReduceAnalysis:
         cls, graph_module: torch.fx.GraphModule
     ) -> "FlexGemmLocalReduceAnalysis":
         """Build shared dependency and reduction state in one topological pass."""
-        analysis = cls(FlexGemmEpilogueGraph.from_graph_module(graph_module))
-        for node in graph_module.graph.nodes:
+        nodes = tuple(graph_module.graph.nodes)
+        analysis = cls(GemmEpilogueGraph.from_nodes(nodes))
+        for node in nodes:
             if node.op == "output":
                 break
             analysis.visit_node(node)
@@ -909,7 +870,7 @@ def tuple_output_plan(
 
 
 def validate_output_layout_transforms(
-    graph: FlexGemmEpilogueGraph,
+    graph: GemmEpilogueGraph,
     plan: FlexGemmOutputPlan,
 ) -> None:
     """Require every layout transform to be the output validated by the plan."""
@@ -1352,7 +1313,7 @@ class FlexGemmEpilogueEmitter:
 
     ::
 
-        FlexGemmEpilogueGraph
+        GemmEpilogueGraph
           `--> FlexGemmLocalReduceAnalysis
                  +--> grouped_layouts
                  `--> matches
