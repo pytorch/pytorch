@@ -116,7 +116,7 @@ def build_groups_memberships(
             _pg_guids[(pg_uid, global_rank)] = pg_guid
             if isinstance(ranks, str):
                 # TODO Bug in FR data format? ranks is '[0, 1,...]'
-                ranks = eval(ranks)
+                ranks = ast.literal_eval(ranks)
 
             if pg_guid not in _groups:
                 groups.append(Group(id=pg_guid, desc=desc, size=len(ranks)))
@@ -398,7 +398,7 @@ def transform_ft(
         rank = dump["rank"]
         for key, pg_config in dump["pg_config"].items():
             if pg_config["desc"] == "default_pg":
-                ranks = eval(pg_config["ranks"])
+                ranks = ast.literal_eval(pg_config["ranks"])
                 replica_id = rank // group_world_size
                 first_rank = replica_id * group_world_size
                 new_ranks = [r + first_rank for r in ranks]
