@@ -1100,7 +1100,9 @@ class _NestedReductionBase:
         self.assertEqual(act[2], ref[2], atol=1e-2, rtol=1e-2)
         self.check_non_leaf_epilogue_fallback()
 
-    @parametrize("B,D,G", [(32, 1024, 16), (1, 16, 16)])
+    # B=3 keeps the x range off a power of two, which the XBLOCK floor must
+    # round up rather than adopt verbatim.
+    @parametrize("B,D,G", [(32, 1024, 16), (1, 16, 16), (3, 16, 16)])
     def test_standalone_sub_parent_epilogue(self, B, D, G):
         def f(x):
             xg = x.view(B, D // G, G)
