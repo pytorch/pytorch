@@ -130,7 +130,9 @@
 #endif
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
-#define C10_LIBCUDA_DRIVER_API_12_9(_) _(cuLogsRegisterCallback, 12090)
+#define C10_LIBCUDA_DRIVER_API_12_9(_) \
+  _(cuLogsRegisterCallback, 12090)     \
+  _(cuLogsUnregisterCallback, 12090)
 #else
 #define C10_LIBCUDA_DRIVER_API_12_9(_)
 #endif

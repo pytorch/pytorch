@@ -48,21 +48,36 @@ void CUDA_CB cuda_error_log_callback(
   }
 }
 
-bool register_cuda_error_log_callback() noexcept {
-  DriverAPI* api = nullptr;
-  try {
-    api = DriverAPI::get();
-  } catch (...) {
-    // This can happen if no suitable CUDA driver is found. In that case,
-    // silently disable CUDA error log reporting.
-    return false;
+class CUDAErrorLogCallbackRegistration {
+ public:
+  CUDAErrorLogCallbackRegistration() noexcept {
+    DriverAPI* api = nullptr;
+    try {
+      api = DriverAPI::get();
+    } catch (...) {
+      // This can happen if no suitable CUDA driver is found. In that case,
+      // silently disable CUDA error log reporting.
+      return;
+    }
+    if (api->cuLogsRegisterCallback_ && api->cuLogsUnregisterCallback_ &&
+        api->cuLogsRegisterCallback_(
+            cuda_error_log_callback,
+            /*userData=*/nullptr,
+            &callback_handle_) == CUDA_SUCCESS) {
+      unregister_callback_ = api->cuLogsUnregisterCallback_;
+    }
   }
-  return api->cuLogsRegisterCallback_ &&
-      api->cuLogsRegisterCallback_(
-          cuda_error_log_callback,
-          /*userData=*/nullptr,
-          /*callback_out=*/nullptr) == CUDA_SUCCESS;
-}
+
+  ~CUDAErrorLogCallbackRegistration() noexcept {
+    if (unregister_callback_) {
+      (void)unregister_callback_(callback_handle_);
+    }
+  }
+
+ private:
+  decltype(&cuLogsUnregisterCallback) unregister_callback_{nullptr};
+  CUlogsCallbackHandle callback_handle_{nullptr};
+};
 #endif
 
 } // namespace
@@ -70,8 +85,8 @@ bool register_cuda_error_log_callback() noexcept {
 CUDAErrorLogCapture::CUDAErrorLogCapture() noexcept {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
     defined(CUDA_VERSION) && (CUDA_VERSION >= 12090)
-  static const bool callback_registered [[maybe_unused]] =
-      register_cuda_error_log_callback();
+  static const CUDAErrorLogCallbackRegistration callback_registration
+      [[maybe_unused]];
   cuda_error_log_buffer.length = 0;
 #endif
 }
