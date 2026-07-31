@@ -113,6 +113,7 @@ ignore-missing-imports = [
     "onnxscript.*",
     "redis.*",
     "tabulate.*",
+    "shtab.*",
 ]
 # By default, mypy does not check untyped definitions.
 # However, mypy has a configuration called check_untyped_defs which is used
