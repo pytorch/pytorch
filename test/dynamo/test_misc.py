@@ -6148,6 +6148,183 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    def _check_torch_size_reshape_graph(self, graph):
+        call_nodes = [node for node in graph.graph.nodes if node.op == "call_function"]
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertEqual([node.target for node in call_nodes], [torch.reshape])
+            self.assertEqual(call_nodes[0].args[1], (4, 64))
+        else:
+            self.assertEqual(
+                [node.target for node in call_nodes], [torch.Size, torch.reshape]
+            )
+            size_args = call_nodes[0].args[0]
+            self.assertEqual(len(size_args), 2)
+            self.assertTrue(all(isinstance(arg, torch.fx.Node) for arg in size_args))
+            self.assertIs(call_nodes[1].args[1], call_nodes[0])
+
+    def test_torch_size_from_tensor_buffer(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("shape", torch.tensor([4, 64], dtype=torch.int64))
+
+            def forward(self, x):
+                return torch.reshape(x, torch.Size(self.shape))
+
+        mod = Mod()
+        x = torch.randn(4, 64)
+        ref = mod(x)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_mod = torch.compile(mod, backend=backend)
+        res = opt_mod(x)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(len(backend.graphs), 1)
+        self._check_torch_size_reshape_graph(backend.graphs[0])
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_size_from_scalar_tensor_list(self):
+        def fn(x):
+            shape = torch.Size([torch.tensor(2), torch.tensor(3)])
+            return torch.reshape(x, shape)
+
+        x = torch.randn(2, 3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_torch_size_from_tensor_buffer_negative_dim_preemptive_graph_break(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("shape", torch.tensor([-1, 64], dtype=torch.int64))
+
+            def forward(self, x):
+                return torch.reshape(x, torch.Size(self.shape))
+
+        # The earlier non-constant tensor break preempts reshape's -1 handling.
+        with self.assertRaisesRegex(Unsupported, "non-constant tensor argument"):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(4, 64))
+
+    def test_torch_size_from_tensor_buffer_fullgraph_graph_break(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("shape", torch.tensor([4, 64], dtype=torch.int64))
+
+            def forward(self, x):
+                return torch.reshape(x, torch.Size(self.shape))
+
+        with self.assertRaisesRegex(Unsupported, "non-constant tensor argument"):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(4, 64))
+
+    def test_torch_size_from_onnx2torch_style_tensor_shape_guard(self):
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("shape", torch.tensor([4, 64], dtype=torch.int64))
+
+        graph = torch.fx.Graph()
+        x_node = graph.placeholder("x")
+        shape_node = graph.get_attr("shape")
+        eq_node = graph.call_function(operator.eq, (shape_node, 0))
+        any_node = graph.call_function(torch.any, (eq_node,))
+        no_zero_node = graph.call_function(operator.not_, (any_node,))
+        graph.call_function(torch._assert, (no_zero_node, "zero shape unsupported"))
+        size_node = graph.call_function(torch.Size, (shape_node,))
+        reshape_node = graph.call_function(torch.reshape, (x_node, size_node))
+        graph.output(reshape_node)
+
+        mod = torch.fx.GraphModule(Root(), graph)
+        x = torch.randn(4, 64)
+        ref = mod(x)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_mod = torch.compile(mod, backend=backend)
+        res = opt_mod(x)
+
+        self.assertTrue(same(ref, res))
+        call_targets = [
+            [node.target for node in graph.graph.nodes if node.op == "call_function"]
+            for graph in backend.graphs
+        ]
+        self.assertEqual(len(backend.graphs), 2)
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertEqual(call_targets, [[operator.eq, torch.any], [torch.reshape]])
+        else:
+            self.assertEqual(
+                call_targets, [[operator.eq, torch.any], [torch.Size, torch.reshape]]
+            )
+        self._check_torch_size_reshape_graph(backend.graphs[1])
+
+    def test_torch_size_item_example_from_constant_tensor(self):
+        from torch._dynamo.variables.lists import SizeVariable
+
+        graph = torch.fx.Graph()
+        node = graph.placeholder("item")
+        example_value = torch.empty(())
+        example_value.constant = torch.tensor(4)
+        node.meta["example_value"] = example_value
+
+        self.assertEqual(SizeVariable._size_item_example(torch.fx.Proxy(node)), 4)
+
+    def test_torch_size_item_example_from_symint(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._dynamo.variables.lists import SizeVariable
+        from torch.fx.experimental._constant_symnode import ConstantIntNode
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(5, ConstantSource("item"))
+        symint = torch.SymInt(SymNode(symbol, shape_env, int, hint=5))
+
+        graph = torch.fx.Graph()
+        node = graph.placeholder("item")
+        node.meta["example_value"] = symint
+
+        self.assertIs(SizeVariable._size_item_example(torch.fx.Proxy(node)), symint)
+
+        constant_node = graph.placeholder("constant_item")
+        constant_symint = torch.SymInt(ConstantIntNode(5))
+        constant_node.meta["example_value"] = constant_symint
+
+        self.assertIs(
+            SizeVariable._size_item_example(torch.fx.Proxy(constant_node)),
+            constant_symint,
+        )
+
+    def test_torch_size_item_example_graph_breaks(self):
+        from torch._dynamo.variables.lists import SizeVariable
+
+        graph = torch.fx.Graph()
+
+        non_constant_node = graph.placeholder("non_constant_item")
+        non_constant_value = torch.empty(())
+        non_constant_value.constant = None
+        non_constant_node.meta["example_value"] = non_constant_value
+        with self.assertRaisesRegex(Unsupported, "non-constant tensor data"):
+            SizeVariable._size_item_example(torch.fx.Proxy(non_constant_node))
+
+        non_scalar_node = graph.placeholder("non_scalar_item")
+        non_scalar_value = torch.empty(2)
+        non_scalar_value.constant = torch.tensor([4, 64])
+        non_scalar_node.meta["example_value"] = non_scalar_value
+        with self.assertRaisesRegex(Unsupported, "non-scalar tensor item"):
+            SizeVariable._size_item_example(torch.fx.Proxy(non_scalar_node))
+
+    def test_torch_size_from_tensor_item_graph_breaks(self):
+        def fn(x):
+            return torch.empty(torch.Size([x.item()]))
+
+        with self.assertRaisesRegex(Unsupported, "non-constant tensor data"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.tensor(3, dtype=torch.int64)
+            )
+
     def test_torch_size_numel(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
