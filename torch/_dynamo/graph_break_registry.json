@@ -998,6 +998,60 @@
       ]
     }
   ],
+  "GB4316": [
+    {
+      "Gb_type": "Dictionary mutation when a dict view is live",
+      "Context": "A live dict view aliases the mutated dictionary",
+      "Explanation": "Dynamo cannot safely trace a dictionary mutation while a live dict view that aliases the same dictionary may be observed later.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Dictionary mutation when a dict view is live",
+      "Context": "Backing dict id: {backing_id}",
+      "Explanation": "Dynamo cannot safely trace a dictionary mutation while a live dict view that aliases the same dictionary may be observed later.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2587": [
+    {
+      "Gb_type": "Dict view loaded after dictionary mutation",
+      "Context": "View source: {source.name}",
+      "Explanation": "Dynamo cannot safely trace use of a dict view after the dictionary it aliases was mutated.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Dict view loaded after dictionary mutation",
+      "Context": "Backing dict id: {backing_dict_id}",
+      "Explanation": "Dynamo cannot safely trace use of a dict view after the dictionary it aliases was mutated.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3002": [
+    {
+      "Gb_type": "Dict view used after dictionary mutation",
+      "Context": "View type: {self.python_type_name()}",
+      "Explanation": "Dynamo cannot safely trace use of a dict view after the dictionary it aliases was mutated.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Dict view used after dictionary mutation",
+      "Context": "Backing dict id: {self.backing_dict_id}",
+      "Explanation": "Dynamo cannot safely trace use of a dict view after the dictionary it aliases was mutated.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0067": [
     {
       "Gb_type": "HOP: Unsafe side effect",

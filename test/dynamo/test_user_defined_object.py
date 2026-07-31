@@ -833,6 +833,60 @@ class TestUserDefinedClassDict(TestCase):
         # Should have recompiled
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_class_dict_keys_view_sees_later_class_mutation(self):
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            keys = MyClass.__dict__.keys()
+            MyClass.foo = 1
+            return t + (1 if "foo" in keys else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertTrue(hasattr(MyClass, "foo"))
+        finally:
+            if hasattr(MyClass, "foo"):
+                del MyClass.foo
+
+    def test_class_dict_keys_view_resume_sees_later_class_mutation(self):
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            keys = MyClass.__dict__.keys()
+            torch._dynamo.graph_break()
+            MyClass.foo = 1
+            return t + (1 if "foo" in keys else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertTrue(hasattr(MyClass, "foo"))
+        finally:
+            if hasattr(MyClass, "foo"):
+                del MyClass.foo
+
+    def test_easydict_style_class_dict_keys_fullgraph(self):
+        class EasyDictLike(dict):
+            def __init__(self):
+                for key in self.__class__.__dict__.keys():  # noqa: SIM118
+                    if key == "missing":
+                        self[key] = None
+
+            def __setattr__(self, name, value):
+                self[name] = value
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            d = EasyDictLike()
+            d.foo = "foo"
+            d.bar = 1
+            return t + len(d)
+
+        self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([2.0]))
+
 
 class TestClassSetattr(TestCase):
     def test_setattr_class_attribute(self):

@@ -928,20 +928,23 @@ class CommonListMethodsVariable(BaseListVariable):
             from .sets import SetVariable
             from .user_defined import UserDefinedObjectVariable
 
+            arg = args[0].realize()
             sz = len(self.items)
-            if isinstance(args[0], (ListVariable, TupleVariable)):
-                self.items.extend(args[0].items)
-            elif isinstance(args[0], UserDefinedObjectVariable):
-                self.items.extend(unpack_iterable(tx, args[0]))
-            elif isinstance(args[0], (ConstDictVariable, SetVariable)):
-                items = [item.vt for item in args[0].items]
+            if isinstance(arg, (ListVariable, TupleVariable)):
+                self.items.extend(arg.items)
+            elif isinstance(arg, UserDefinedObjectVariable):
+                self.items.extend(unpack_iterable(tx, arg))
+            elif isinstance(arg, (ConstDictVariable, SetVariable)):
+                if isinstance(arg, SetVariable):
+                    arg._check_read_guard(tx)
+                items = [item.vt for item in arg.items]
                 self.items.extend(items)
-            elif isinstance(args[0], ConstantVariable):
-                items = unpack_iterable(tx, args[0])
+            elif isinstance(arg, ConstantVariable):
+                items = unpack_iterable(tx, arg)
                 self.items.extend(items)
             else:
                 unpack_and_apply_fn(
-                    tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
+                    tx, arg, lambda item: self.call_method(tx, "append", [item], {})
                 )
 
             if len(self.items) > sz:

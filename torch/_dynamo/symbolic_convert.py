@@ -2407,7 +2407,7 @@ class InstructionTranslatorBase(
                 explanation="This is not supported.",
                 hints=[],
             )
-        self.output.side_effects.store_global(variable, name, value)
+        self.output.side_effects.store_global(variable, name, value, self.f_globals)
 
     # Cache note: This cache only exists for the duration of this
     # InstructionTranslator - so it should be safe to do.

@@ -827,6 +827,9 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
+        # livevars_analysis is pure for an instruction list and start
+        # instruction. Loops can revisit the same mutation bytecode many times.
+        self.livevars_analysis_cache: dict[tuple[int, Instruction], set[Any]] = {}
         # Cache for sources resolved via MRO walk, keyed by id(obj).
         # When the same descriptor (e.g. property) is reached from multiple
         # subclasses, we reuse the first source to avoid redundant guards.
