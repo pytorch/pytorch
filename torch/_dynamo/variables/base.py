@@ -1949,6 +1949,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return None
 
+    def lookup_dunder_shortcut(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Step 0 of GenericGetAttr: dunders needing VT-specific resolution.
+
+        Base declines (None) so lookup proceeds normally.  UDOV overrides for
+        __dict__/__class__, whose generic getset-descriptor resolution would
+        otherwise yield an untracked dict and drop traced mutations.
+        """
+        return None
+
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
