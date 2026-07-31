@@ -24,7 +24,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, make_fake_mode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -72,7 +72,7 @@ class SwitchOp(HigherOrderOperator):
 
         fake_mode = detect_fake_mode(operands)
         if fake_mode is None or fake_mode.shape_env is None:
-            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+            fake_mode = make_fake_mode(shape_env=ShapeEnv())
         # pyrefly: ignore [missing-attribute]
         with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
             merged_outputs = [

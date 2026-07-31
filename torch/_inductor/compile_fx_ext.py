@@ -24,7 +24,7 @@ from torch._inductor.output_code import (
     CompiledFxGraphConstantsWithGm,
     OutputCode,
 )
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import FakeTensorMode, make_fake_mode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -241,7 +241,7 @@ def _current_fake_mode() -> FakeTensorMode:
         return fake_mode
 
     shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
-    return FakeTensorMode(shape_env=shape_env)
+    return make_fake_mode(shape_env=shape_env)
 
 
 @dataclass

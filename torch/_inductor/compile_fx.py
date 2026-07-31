@@ -102,6 +102,7 @@ from torch._inductor.utils import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
+from torch._subclasses.fake_tensor import make_fake_mode
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
@@ -3114,7 +3115,7 @@ def _compile_fx_main(
 
         fake_mode = detect_fake_mode(
             example_inputs_
-        ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        ) or make_fake_mode(allow_non_fake_inputs=True)
         tracing_context = (
             torch._guards.TracingContext.try_get()
             or torch._guards.TracingContext(fake_mode)
@@ -3447,7 +3448,7 @@ def autograd_cache_key(
     #       torch._guards.tracing, compiled_autograd._disable,
     #       functorch_config.patch
 
-    fake_mode = detect_fake_mode(example_inputs) or torch._subclasses.FakeTensorMode(
+    fake_mode = detect_fake_mode(example_inputs) or make_fake_mode(
         allow_non_fake_inputs=True
     )
     tracing_context = (
