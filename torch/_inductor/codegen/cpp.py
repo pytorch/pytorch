@@ -6388,8 +6388,11 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            # Use CeilDiv to prevent zeroing the whole product and making the
-            # heuristic below think there is no outer work.
+            # Trip count of `for (var = 0; var < size; var += steps)`. The bound
+            # is `size` and the increment is `steps`, so a loop with size < steps
+            # (a vectorized loop narrower than the vector width) still runs one
+            # iteration. Use CeilDiv, not FloorDiv, which would count 0 and zero
+            # out the whole product.
             num_steps = num_steps * CeilDiv(loop.size, loop.steps)
             max_depth += 1
 
@@ -6419,7 +6422,7 @@ class LoopNest:
             and isinstance(num_steps, sympy.Integer)
             and isinstance(self.loops[max_depth].size, sympy.Integer)
             and num_steps * 300
-            < CeilDiv(self.loops[max_depth].size, self.loops[max_depth].steps)
+            < FloorDiv(self.loops[max_depth].size, self.loops[max_depth].steps)
             and not (
                 # Disable parallel reduction under the vec loop
                 simd_vec_depth is not None
