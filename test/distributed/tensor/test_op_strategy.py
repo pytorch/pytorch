@@ -228,50 +228,25 @@ class TestCostModel(DTensorOpTestBase):
         self.assertEqual(redistribute_cost(replica_spec, strided_shard_spec), 0.0)
 
     def test_redistribute_cost_latency(self):
-        # test cost model on addmm op
-        from torch.distributed.tensor._ops._matrix_ops import addmm_strategy
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        torch.manual_seed(0)
+        bias = torch.randn(8)
+        mat1 = torch.randn(50, 6)
+        mat2 = torch.randn(6, 8)
 
-        mesh = self.build_device_mesh()
-        shard0_placement = (Shard(0),)
-        partial_placement = (Partial(),)
-        shard1_placement = (Shard(1),)
-
-        shard0_tensor_meta = extract_tensor_meta(torch.randn(8))
-        partial_tensor_meta = extract_tensor_meta(torch.randn(50, 6))
-        shard1_tensor_meta = extract_tensor_meta(torch.randn(6, 8))
-
-        # shard spec
-        shard0_spec = DTensorSpec(mesh, shard0_placement, shard0_tensor_meta)
-        # replica spec
-        partial_spec = DTensorSpec(mesh, partial_placement, partial_tensor_meta)
-        # partial spec
-        shard1_spec = DTensorSpec(mesh, shard1_placement, shard1_tensor_meta)
-
-        op_schema = OpSchema(
-            torch.ops.aten.addmm.default,
-            (
-                OpStrategy([OpSpec(shard0_spec)]),
-                OpStrategy([OpSpec(partial_spec)]),
-                OpStrategy([OpSpec(shard1_spec)]),
-            ),
-            {},
+        dist_bias = distribute_tensor(bias, mesh, [Shard(0)])
+        dist_mat1 = DTensor.from_local(
+            mat1 / self.world_size,
+            mesh,
+            [Partial()],
+            run_check=False,
         )
+        dist_mat2 = distribute_tensor(mat2, mesh, [Shard(1)])
 
-        output_strategy = addmm_strategy(op_schema)
-        strategy_costs = {}
-        for strategy in output_strategy.strategies:
-            redistribute_cost = sum(chain.from_iterable(strategy.redistribute_cost))
-            strategy_costs[str(strategy)] = redistribute_cost
+        dist_out = torch.addmm(dist_bias, dist_mat1, dist_mat2)
 
-        # assert that cost model counts for collective latency (i.e. multiple comm is penalized)
-        self.assertTrue(
-            strategy_costs["(S(0), R, S(1)) -> S(1)"]
-            < strategy_costs["(R, S(0), R) -> S(0)"]
-        )
-        # assert a single allreduce is the best one
-        self.assertEqual(
-            strategy_costs["(S(0), R, S(1)) -> S(1)"], min(strategy_costs.values())
-        )
+        self.assertEqual(dist_out.placements, (Shard(1),))
+        self.assertEqual(dist_out.full_tensor(), torch.addmm(bias, mat1, mat2))
 
     def test_redistribute_cost_mesh_2d(self):
         mesh_2d = DeviceMesh(
@@ -306,8 +281,6 @@ class TestCostModel(DTensorOpTestBase):
         self.assertTrue(allreduce_cost > reduce_scatter_cost)
 
     def test_mm_strategies(self):
-        from torch.distributed.tensor._ops._matrix_ops import mm_strategy
-
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(6, 8)
         rhs_tensor = torch.randn(8, 12)
@@ -326,22 +299,6 @@ class TestCostModel(DTensorOpTestBase):
 
             op_schema = OpSchema(
                 torch.ops.aten.mm.default,
-                (
-                    OpStrategy([OpSpec(lhs_spec)]),
-                    OpStrategy([OpSpec(rhs_spec)]),
-                ),
-                {},
-            )
-            # test the strategy
-            res_strategies = mm_strategy(op_schema)
-
-            for strtgy in res_strategies.strategies:
-                if strtgy.input_specs == (lhs_spec, rhs_spec):
-                    self.assertEqual(strtgy.redistribute_cost, [[0.0], [0.0]])
-                    break
-
-            op_schema = OpSchema(
-                torch.ops.aten.mm.default,
                 (lhs_spec, rhs_spec),
                 {},
             )
@@ -351,9 +308,59 @@ class TestCostModel(DTensorOpTestBase):
             )
             self.assertFalse(output_sharding.needs_redistribute)
 
-    def test_bmm_strategies(self):
-        from torch.distributed.tensor._ops._matrix_ops import bmm_strategy
+    def test_t_prunes_unproven_unbacked_strided_shard_candidates(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.distributed.tensor._ops.utils import is_tensor_shardable
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
+        mesh = DeviceMesh("cpu", torch.arange(2), _init_backend=False, _rank=0)
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
+        strategy_info = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs[
+                torch.ops.aten.t.default
+            ]
+        )
+        self.assertFalse(strategy_info.allow_unbacked_sharding)
+
+        with fake_mode:
+            split_factor = fake_mode.shape_env.create_unbacked_symint()
+            torch._dynamo.override_optimization_hint(split_factor, 8)
+            input_meta = TensorMeta(
+                torch.Size([2048 * split_factor, 8]),
+                (8, 1),
+                torch.float32,
+            )
+
+            unproven_input_spec = DTensorSpec(
+                mesh,
+                (_StridedShard(1, split_factor=split_factor),),
+                input_meta,
+            )
+            self.assertFalse(
+                is_tensor_shardable(
+                    input_meta.shape,
+                    unproven_input_spec,
+                    allow_unbacked_sharding=strategy_info.allow_unbacked_sharding,
+                )
+            )
+
+            input_spec = DTensorSpec(
+                mesh,
+                (_StridedShard(0, split_factor=split_factor),),
+                input_meta,
+            )
+            op_schema = OpSchema(torch.ops.aten.t.default, (input_spec,), {})
+            output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
+                op_schema
+            )
+
+        self.assertFalse(output_sharding.needs_redistribute)
+        self.assertEqual(
+            output_sharding.output_spec.placements,
+            (_StridedShard(1, split_factor=split_factor),),
+        )
+
+    def test_bmm_strategies(self):
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(8, 6, 8)
         rhs_tensor = torch.randn(8, 8, 12)
@@ -370,22 +377,6 @@ class TestCostModel(DTensorOpTestBase):
         for lhs, rhs in bmm_combs:
             lhs_spec = DTensorSpec(mesh, (lhs,), lhs_tensor_meta)
             rhs_spec = DTensorSpec(mesh, (rhs,), rhs_tensor_meta)
-
-            op_schema = OpSchema(
-                torch.ops.aten.bmm.default,
-                (
-                    OpStrategy([OpSpec(lhs_spec)]),
-                    OpStrategy([OpSpec(rhs_spec)]),
-                ),
-                {},
-            )
-            # test the strategy
-            res_strategies = bmm_strategy(op_schema)
-
-            for strtgy in res_strategies.strategies:
-                if strtgy.input_specs == (lhs_spec, rhs_spec):
-                    self.assertEqual(strtgy.redistribute_cost, [[0.0], [0.0]])
-                    break
 
             op_schema = OpSchema(
                 torch.ops.aten.bmm.default,
@@ -913,6 +904,212 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(indices_plc.dim, 0)
         self.assertEqual(input_plc.dim, 1)
 
+    def test_foreach_max_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import (
+            linear_reduction_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+
+        strategies = linear_reduction_single_dim_strategy(
+            torch.ops.aten._foreach_max.default, (input_meta,), {}
+        )
+
+        self.assertEqual(len(strategies), 3)
+        self.assertEqual(strategies[0][0], Partial("max"))
+        self.assertEqual(strategies[0][1].dim, 0)
+        self.assertEqual(strategies[1][0], Partial("max"))
+        self.assertEqual(strategies[1][1].dim, 1)
+        self.assertEqual(strategies[2], [Partial("max"), Partial("max")])
+
+    def test_var_mean_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import std_var_single_dim_strategy
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        output_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+
+        strategies = std_var_single_dim_strategy(
+            torch.ops.aten.var_mean.correction,
+            (input_meta, [1]),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        self.assertEqual(len(strategies[0]), 3)
+        var_out, mean_out, inp = strategies[0]
+        self.assertEqual(var_out.dim, 0)
+        self.assertEqual(mean_out.dim, 0)
+        self.assertEqual(inp.dim, 0)
+
+        strategies = std_var_single_dim_strategy(
+            torch.ops.aten.var_mean.correction_out,
+            (input_meta, [1]),
+            {"out0": output_meta, "out1": output_meta},
+        )
+        self.assertEqual(len(strategies), 1)
+        self.assertEqual(len(strategies[0]), 5)
+        var_out, mean_out, inp, out0, out1 = strategies[0]
+        self.assertEqual(var_out.dim, 0)
+        self.assertEqual(mean_out.dim, 0)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(out0.dim, 0)
+        self.assertEqual(out1.dim, 0)
+
+    def test_nll_loss_forward_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import (
+            nll_loss_forward_single_dim_strategy,
+            Reduction,
+        )
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 16, 12]), stride=(192, 12, 1), dtype=torch.float32
+        )
+        target_meta = TensorMeta(
+            shape=torch.Size([8, 12]), stride=(12, 1), dtype=torch.int64
+        )
+        weight_meta = TensorMeta(
+            shape=torch.Size([16]), stride=(1,), dtype=torch.float32
+        )
+
+        strategies = nll_loss_forward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_forward.default,
+            (input_meta, target_meta, weight_meta, Reduction.NONE.value, -100),
+            {},
+        )
+        self.assertEqual(len(strategies), 2)
+        self.assertEqual(len(strategies[0]), 5)
+        out, total_weight, inp, target, weight = strategies[0]
+        self.assertIsInstance(out, _ShardingPlaceholder)
+        self.assertEqual(out.dim, 0)
+        self.assertIsInstance(total_weight, Replicate)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertIsInstance(weight, Replicate)
+
+        out, total_weight, inp, target, weight = strategies[1]
+        self.assertEqual(out.dim, 1)
+        self.assertIsInstance(total_weight, Replicate)
+        self.assertEqual(inp.dim, 2)
+        self.assertEqual(target.dim, 1)
+        self.assertIsInstance(weight, Replicate)
+
+        strategies = nll_loss_forward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_forward.default,
+            (input_meta, target_meta, None, Reduction.SUM.value, -100),
+            {},
+        )
+        self.assertEqual(len(strategies), 2)
+        self.assertEqual(len(strategies[0]), 4)
+        out, total_weight, inp, target = strategies[0]
+        self.assertEqual(out, Partial("sum"))
+        self.assertEqual(total_weight, Partial("sum"))
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+
+        strategies = nll_loss_forward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_forward.default,
+            (input_meta, target_meta, None, Reduction.MEAN.value, -100),
+            {},
+        )
+        self.assertEqual(strategies, [])
+
+    def test_nll_loss_backward_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import (
+            nll_loss_backward_single_dim_strategy,
+            Reduction,
+        )
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+
+        grad_out_none_meta = TensorMeta(
+            shape=torch.Size([8, 12]), stride=(12, 1), dtype=torch.float32
+        )
+        grad_out_scalar_meta = TensorMeta(
+            shape=torch.Size([]), stride=(), dtype=torch.float32
+        )
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 16, 12]), stride=(192, 12, 1), dtype=torch.float32
+        )
+        target_meta = TensorMeta(
+            shape=torch.Size([8, 12]), stride=(12, 1), dtype=torch.int64
+        )
+        weight_meta = TensorMeta(
+            shape=torch.Size([16]), stride=(1,), dtype=torch.float32
+        )
+        total_weight_meta = TensorMeta(
+            shape=torch.Size([]), stride=(), dtype=torch.float32
+        )
+
+        strategies = nll_loss_backward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_backward.default,
+            (
+                grad_out_none_meta,
+                input_meta,
+                target_meta,
+                weight_meta,
+                Reduction.NONE.value,
+                -100,
+                total_weight_meta,
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 3)
+        self.assertEqual(len(strategies[0]), 6)
+        out, grad_out, inp, target, weight, total_weight = strategies[0]
+        self.assertIsInstance(out, _ShardingPlaceholder)
+        self.assertEqual(out.dim, 0)
+        self.assertEqual(grad_out.dim, 0)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertIsInstance(weight, Replicate)
+        self.assertIsInstance(total_weight, Replicate)
+
+        out, grad_out, inp, target, weight, total_weight = strategies[1]
+        self.assertEqual(out.dim, 2)
+        self.assertEqual(grad_out.dim, 1)
+        self.assertEqual(inp.dim, 2)
+        self.assertEqual(target.dim, 1)
+        self.assertIsInstance(weight, Replicate)
+        self.assertIsInstance(total_weight, Replicate)
+
+        strategies = nll_loss_backward_single_dim_strategy(
+            torch.ops.aten.nll_loss2d_backward.default,
+            (
+                grad_out_scalar_meta,
+                input_meta,
+                target_meta,
+                None,
+                Reduction.SUM.value,
+                -100,
+                total_weight_meta,
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 5)
+        self.assertEqual(len(strategies[0]), 5)
+        out, grad_out, inp, target, total_weight = strategies[0]
+        self.assertEqual(out.dim, 0)
+        self.assertIsInstance(grad_out, Replicate)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertIsInstance(total_weight, Replicate)
+
+        out, grad_out, inp, target, total_weight = strategies[1]
+        self.assertEqual(out.dim, 0)
+        self.assertIsInstance(grad_out, Replicate)
+        self.assertEqual(inp.dim, 0)
+        self.assertEqual(target.dim, 0)
+        self.assertEqual(total_weight, Partial("sum"))
+
     def test_layer_norm_fwd_single_dim_strategy(self):
         """layer_norm produces sharding rules for each outer dim."""
         from torch.distributed.tensor._ops._math_ops import (
@@ -1051,6 +1248,50 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertIsNone(rule[1])  # d_weight
         self.assertIsNone(rule[2])  # d_bias
 
+        # With weight/bias inputs but masked-off weight/bias outputs
+        strategies = layer_norm_bwd_single_dim_strategy(
+            torch.ops.aten.native_layer_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                stat_meta,
+                weight_meta,
+                weight_meta,
+                [True, False, False],
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 9)
+        self.assertEqual(rule[0].dim, 0)  # d_input sharded
+        self.assertIsNone(rule[1])  # d_weight masked off
+        self.assertIsNone(rule[2])  # d_bias masked off
+        self.assertIsInstance(rule[7], Replicate)  # weight input still present
+        self.assertIsInstance(rule[8], Replicate)  # bias input still present
+
+        # d_input can also be masked independently of d_weight/d_bias
+        strategies = layer_norm_bwd_single_dim_strategy(
+            torch.ops.aten.native_layer_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                stat_meta,
+                weight_meta,
+                weight_meta,
+                [False, True, False],
+            ),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # d_input masked off
+        self.assertIsInstance(rule[1], Partial)  # d_weight reduced
+        self.assertIsNone(rule[2])  # d_bias masked off
+
     def test_rms_norm_bwd_single_dim_strategy(self):
         """rms_norm backward produces correct output/input placements."""
         from torch.distributed.tensor._ops._math_ops import (
@@ -1074,6 +1315,7 @@ class TestOpSchemaMetaProperties(TestCase):
                 [8],  # normalized_shape
                 stat_meta,  # rstd
                 weight_meta,  # weight
+                [True, True],  # output_mask
             ),
             {},
         )
@@ -1088,7 +1330,7 @@ class TestOpSchemaMetaProperties(TestCase):
         # Without weight: d_weight=None
         strategies = rms_norm_bwd_single_dim_strategy(
             torch.ops.aten._fused_rms_norm_backward.default,
-            (input_meta, input_meta, [8], stat_meta, None),
+            (input_meta, input_meta, [8], stat_meta, None, [True, False]),
             {},
         )
         self.assertEqual(len(strategies), 1)
@@ -1096,6 +1338,150 @@ class TestOpSchemaMetaProperties(TestCase):
         # outputs: [d_input, None] + inputs: [grad_out, input, rstd]
         self.assertEqual(len(rule), 5)
         self.assertIsNone(rule[1])  # d_weight
+
+        # With weight input but masked-off d_weight output
+        strategies = rms_norm_bwd_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm_backward.default,
+            (
+                input_meta,  # grad_out
+                input_meta,  # input
+                [8],  # normalized_shape
+                stat_meta,  # rstd
+                weight_meta,  # weight
+                [True, False],  # output_mask
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 6)
+        self.assertEqual(rule[0].dim, 0)  # d_input sharded
+        self.assertIsNone(rule[1])  # d_weight masked off
+        self.assertIsInstance(rule[5], Replicate)  # weight input still present
+
+        # d_input can be masked independently of d_weight
+        strategies = rms_norm_bwd_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                weight_meta,
+                [False, True],
+            ),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # d_input masked off
+        self.assertIsInstance(rule[1], Partial)  # d_weight reduced
+
+    def test_grid_sampler_bwd_single_dim_strategy(self):
+        """grid_sampler backward respects the native output_mask contract."""
+        from torch.distributed.tensor._ops._math_ops import (
+            grid_sampler_backward_strategy,
+        )
+
+        grad_output_meta = TensorMeta(
+            shape=torch.Size([2, 3, 4, 4]), stride=(48, 16, 4, 1), dtype=torch.float32
+        )
+        input_meta = TensorMeta(
+            shape=torch.Size([2, 3, 8, 8]), stride=(192, 64, 8, 1), dtype=torch.float32
+        )
+        grid_meta = TensorMeta(
+            shape=torch.Size([2, 4, 4, 2]), stride=(32, 8, 2, 1), dtype=torch.float32
+        )
+
+        strategies = grid_sampler_backward_strategy(
+            torch.ops.aten.grid_sampler_2d_backward.default,
+            (grad_output_meta, input_meta, grid_meta, 0, 0, False, [True, False]),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 5)
+        self.assertEqual(rule[0].dim, 0)  # grad_input sharded
+        self.assertEqual(rule[1].dim, 0)  # grad_grid is always computed
+        self.assertEqual(rule[2].dim, 0)  # grad_output sharded
+        self.assertEqual(rule[3].dim, 0)  # input sharded
+        self.assertEqual(rule[4].dim, 0)  # grid sharded
+
+        strategies = grid_sampler_backward_strategy(
+            torch.ops.aten.grid_sampler_2d_backward.default,
+            (grad_output_meta, input_meta, grid_meta, 0, 0, False, [False, True]),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # grad_input masked off
+        self.assertEqual(rule[1].dim, 0)  # grad_grid sharded
+
+        strategies = grid_sampler_backward_strategy(
+            torch.ops.aten.grid_sampler_2d_backward.default,
+            (grad_output_meta, input_meta, grid_meta, 0, 0, False, [False, False]),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # grad_input masked off
+        self.assertEqual(rule[1].dim, 0)  # grad_grid ignores output_mask[1]
+
+    def test_batch_norm_bwd_single_dim_strategy(self):
+        """batch_norm backward respects output_mask."""
+        from torch.distributed.tensor._ops._math_ops import batch_norm_backward_strategy
+
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8, 16, 16]),
+            stride=(2048, 256, 16, 1),
+            dtype=torch.float32,
+        )
+        channel_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+
+        strategies = batch_norm_backward_strategy(
+            torch.ops.aten.native_batch_norm_backward.default,
+            (
+                input_meta,  # grad_out
+                input_meta,  # input
+                channel_meta,  # weight
+                channel_meta,  # running_mean
+                channel_meta,  # running_var
+                channel_meta,  # save_mean
+                channel_meta,  # save_invstd
+                True,  # train
+                1e-5,  # eps
+                [True, False, True],  # output_mask
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 10)
+        self.assertEqual(rule[0].dim, 1)  # grad_input sharded on channel
+        self.assertIsNone(rule[1])  # grad_weight masked off
+        self.assertEqual(rule[2].dim, 0)  # grad_bias sharded
+        self.assertEqual(rule[3].dim, 1)  # grad_out sharded on channel
+        self.assertEqual(rule[4].dim, 1)  # input sharded on channel
+
+        strategies = batch_norm_backward_strategy(
+            torch.ops.aten.native_batch_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                channel_meta,
+                channel_meta,
+                channel_meta,
+                channel_meta,
+                channel_meta,
+                True,
+                1e-5,
+                [False, True, False],
+            ),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # grad_input masked off
+        self.assertEqual(rule[1].dim, 0)  # grad_weight sharded
+        self.assertIsNone(rule[2])  # grad_bias masked off
 
     def test_constant_pad_nd_allows_shard_on_non_padded_dim(self):
         """constant_pad_nd should allow sharding on non-padded dims."""
