@@ -545,33 +545,48 @@ class ExportMetaData:
     ] = dc_field(default_factory=dict)
 
 
-def _canonical_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
-    """Canonical heap key for Dynamo output graph nodes.
-
-    Placeholders are sorted by grapharg source name; all other ops delegate
-    to the shared ``_canonical_node_key``.
-    """
-    if node.op == "placeholder":
-        grapharg = node.meta.get("grapharg")
-        if grapharg is not None and grapharg.source is not None:
-            source_name = grapharg.source.name
-        else:
-            source_name = ""
-        return (0, source_name)
-    from torch.fx.passes.canonicalize import _canonical_node_key
-
-    return _canonical_node_key(node, canonical_idx)
-
-
 def _canonicalize_graph(graph: fx.Graph) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
     Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
     Dynamo-specific key generation and barrier detection.
-    """
-    from torch.fx.passes.canonicalize import _is_safe_to_reorder, canonicalize_graph
 
-    canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
+    Placeholders keep their original insertion order and names: the placeholder
+    layout is the graph's positional calling convention, relied on by codegen,
+    AOTAutograd, and graph-break resume functions. Reordering them corrupts
+    those callers (e.g. a runtime-assert on a symint input receiving a tensor,
+    or a version-counter bump landing on the wrong local). Only interior
+    computation nodes are reordered/renamed. This mirrors the export path in
+    ``torch.export._trace._canonicalize_export_graph``.
+
+    Consequence - placeholder layout is deliberately OUT OF SCOPE of the
+    determinism guarantee. Two ranks that trace the same model but discover
+    inputs in different orders (rank-dependent dict/set iteration, differing
+    graph-break points) still get identical interior nodes but different
+    placeholder layouts, so callers must not assume whole-graph identity across
+    ranks (e.g. hashing the printed graph). Canonicalizing within the
+    symint/tensor placeholder partitions would tighten this, at the cost of
+    reordering ``graphargs``/``example_inputs`` coherently.
+    """
+    from torch.fx.passes.canonicalize import (
+        _canonical_node_key,
+        _is_safe_to_reorder,
+        canonicalize_graph,
+    )
+
+    placeholder_ord = itertools.count()
+
+    def _key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
+        if node.op == "placeholder":
+            return (0, next(placeholder_ord))
+        return _canonical_node_key(node, canonical_idx)
+
+    canonicalize_graph(
+        graph,
+        _key,
+        _is_safe_to_reorder,
+        skip_rename_ops=frozenset({"placeholder"}),
+    )
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
