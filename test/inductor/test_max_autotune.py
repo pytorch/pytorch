@@ -5723,6 +5723,8 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         run_and_get_code(compiled_f, a, b)
 
 
+# TDM host-side test does NOT require TDM-capable device.
+@unittest.skipUnless(TEST_WITH_ROCM, "requires ROCm")
 @instantiate_parametrized_tests
 class TestTDMConfigDenseAndGeneric(TestCase):
     def test_tdm_arch_gate_accepts_only_gfx1250(self):

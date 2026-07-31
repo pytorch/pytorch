@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
+    TEST_WITH_ROCM,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
@@ -2208,6 +2209,8 @@ class TestE8M0Log2PatternBitManip(TestCase):
         )
 
 
+# TDM host-side test does NOT require TDM-capable device.
+@unittest.skipUnless(TEST_WITH_ROCM, "requires ROCm")
 class TestTDMScaled(TestCase):
     def test_tdm_scaled_gate_admits_ocp_fp8_and_rejects_fnuz(self):
         from torch._inductor.utils import use_triton_tdm_scaled_template
