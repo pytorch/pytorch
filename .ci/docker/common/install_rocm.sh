@@ -268,9 +268,9 @@ install_almalinux() {
     # under <site-packages>/_rocm_sdk_* and its real install root is discovered via
     # `rocm-sdk path` and exported through /etc/rocm_env.sh (no /opt/rocm symlink);
     # build_env_setup.py / repair_wheel.py discover ROCM_HOME from there. Mirrors #188429.
-    local THEROCK_INDEX_URL="${THEROCK_INDEX_URL:-https://repo.amd.com/rocm/whl-multi-arch/}"
-    # ROCM_VERSION is the ROCm minor line (e.g. "7.14"); resolve to newest 7.14.x.
-    local ROCM_VERSION="${ROCM_VERSION:-7.14}"
+    : "${THEROCK_INDEX_URL:?THEROCK_INDEX_URL must be set}"
+    : "${ROCM_VERSION:?ROCM_VERSION must be set}"
+    # ROCM_VERSION is the minor line (e.g. "7.14"); pip resolves to newest 7.14.x.
     local ROCM_PIP_SPEC="rocm[libraries,devel,device-all]==${ROCM_VERSION}.*"
 
     echo "=============================================="
