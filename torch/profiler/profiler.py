@@ -369,6 +369,10 @@ class _KinetoProfile:
                 enable_graph_dependencies=bool(
                     self._custom_profiler_config.get("enable_graph_dependencies")
                 ),
+                # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+                pftrace_compression_level=int(
+                    self._custom_profiler_config.get("pftrace_compression_level", 1)
+                ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )
