@@ -88,9 +88,11 @@ class Transformer(Module):
             bias. Default: ``True``.
 
     Examples:
-        >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
-        >>> src = torch.rand((10, 32, 512))
-        >>> tgt = torch.rand((20, 32, 512))
+        >>> transformer_model = nn.Transformer(
+        ...     nhead=16, num_encoder_layers=12, batch_first=True
+        ... )
+        >>> src = torch.rand((32, 10, 512))
+        >>> tgt = torch.rand((32, 20, 512))
         >>> out = transformer_model(src, tgt)
 
     Note: A full example to apply nn.Transformer module for the word language model is available in
@@ -340,9 +342,11 @@ class TransformerEncoder(Module):
             TransformerEncoder when padding rate is high. Default: ``True`` (enabled).
 
     Examples:
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
+        >>> encoder_layer = nn.TransformerEncoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        >>> src = torch.rand(10, 32, 512)
+        >>> src = torch.rand(32, 10, 512)
         >>> out = transformer_encoder(src)
     """
 
