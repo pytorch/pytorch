@@ -46,6 +46,7 @@ install_ubuntu() {
       fi
 
       # Auto-detect latest nightly version if not pinned
+      THEROCK_VERSION=7.14.0
       VERSION="${THEROCK_VERSION:-}"
       if [[ -z "${VERSION}" ]]; then
         VERSION=$(curl -fsSL "https://rocm.nightlies.amd.com/tarball/" \
@@ -62,7 +63,7 @@ install_ubuntu() {
       # URL-encode '+' as '%2B' in VERSION (required for devreleases)
       VERSION_ENCODED="${VERSION//+/%2B}"
 
-      TARBALL_URL="https://rocm.nightlies.amd.com/tarball/therock-dist-linux-${AMDGPU_FAMILY}-${VERSION_ENCODED}.tar.gz"
+      TARBALL_URL="https://repo.amd.com/rocm/tarball-multi-arch/therock-dist-linux-multiarch-${VERSION_ENCODED}.tar.gz"
 
       echo "=============================================="
       echo "ROCm Tarball Installation"
@@ -105,7 +106,7 @@ install_ubuntu() {
 
       # Verify bin and lib folder exists after extraction
       echo "Verifying installation..."
-      for dir in bin clients include lib libexec share; do
+      for dir in bin include lib libexec share; do
         if [ ! -d "$ROCM_INSTALL_DIR/$dir" ]; then
           echo "Error: ROCm $dir directory not found"
           exit 1
