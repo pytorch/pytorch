@@ -11488,9 +11488,11 @@ for shape in [(1,), ()]:
         self.assertEqual(cv.get(), "d")
         self.assertEqual(cv.get("arg"), "arg")
         token = cv.set("v")
-        self.assertEqual(cv.get(), "v")
-        self.assertEqual(cv.get("arg"), "v")
-        cv.reset(token)
+        try:
+            self.assertEqual(cv.get(), "v")
+            self.assertEqual(cv.get("arg"), "v")
+        finally:
+            cv.reset(token)
         self.assertEqual(cv.get(), "d")
 
         cv2 = torch.autograd.graph.AutogradContextVar("cv2")
@@ -11511,8 +11513,10 @@ for shape in [(1,), ()]:
         y = (x * 2).sum()
         x.register_hook(hook)
         token = cv.set("caller")
-        y.backward()
-        cv.reset(token)
+        try:
+            y.backward()
+        finally:
+            cv.reset(token)
         self.assertEqual(seen, ["caller", "mutated"])
 
     def test_node_creation_hook_inplace(self):
