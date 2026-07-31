@@ -31,6 +31,7 @@ project-excludes = [
   "torch/include/**",
   "torch/csrc/**",
   "torch/distributed/elastic/agent/server/api.py",
+  "torch/distributed/nccl4py_backend.py",
   "torch/testing/_internal/**",
   "torch/distributed/fsdp/fully_sharded_data_parallel.py",
   "torch/ao/quantization/pt2e/_affine_quantization.py",

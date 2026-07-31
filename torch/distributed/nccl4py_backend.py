@@ -11,11 +11,17 @@ Or use
     dist.init_process_group("nccl4py", ...)
 """
 
-import nccl.core as nccl  # pyrefly: ignore [missing-import]
+# pyre-unsafe
 
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp
+
+
+try:
+    import nccl.core as nccl
+except ModuleNotFoundError:
+    nccl = None  # type: ignore[assignment]
 
 
 class _NcclWork(dist._Work):
@@ -45,6 +51,11 @@ class NCCL4PyBackend(C10DBackend):
     _UID_STORE_KEY = "nccl4py_uid"
 
     def __init__(self, store, rank, size, timeout):
+        if nccl is None:
+            raise RuntimeError(
+                "nccl4py backend requires the 'nccl4py' package. "
+                "Install it with: pip install nccl4py"
+            )
         super().__init__(rank, size)
         self._store = store
         self._options = C10DBackend.Options("nccl4py", timeout=timeout)
@@ -96,17 +107,16 @@ class NCCL4PyBackend(C10DBackend):
         The caller must close custom_op after the NCCL call is enqueued.
         """
         op_type = reduce_op.op
-        if op_type == ReduceOp.RedOpType.SUM:  # pyrefly: ignore [missing-attribute]
+        if op_type == ReduceOp.RedOpType.SUM:
             return nccl.SUM, None
-        if op_type == ReduceOp.RedOpType.PRODUCT:  # pyrefly: ignore [missing-attribute]
+        if op_type == ReduceOp.RedOpType.PRODUCT:
             return nccl.PROD, None
-        if op_type == ReduceOp.RedOpType.MIN:  # pyrefly: ignore [missing-attribute]
+        if op_type == ReduceOp.RedOpType.MIN:
             return nccl.MIN, None
-        if op_type == ReduceOp.RedOpType.MAX:  # pyrefly: ignore [missing-attribute]
+        if op_type == ReduceOp.RedOpType.MAX:
             return nccl.MAX, None
-        if op_type == ReduceOp.RedOpType.AVG:  # pyrefly: ignore [missing-attribute]
+        if op_type == ReduceOp.RedOpType.AVG:
             return nccl.AVG, None
-        # pyrefly: ignore [missing-attribute]
         if op_type == ReduceOp.RedOpType.PREMUL_SUM:
             factor = reduce_op.factor
             if isinstance(factor, torch.Tensor):
