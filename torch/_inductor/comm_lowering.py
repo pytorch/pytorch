@@ -549,6 +549,34 @@ def register_symm_mem_lowerings():
                 group_name,  # type: ignore[arg-type]
             )
 
+    def _create_low_contention_ag_out(
+        kernel: torch._ops.OpOverload,
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ) -> ir.TensorBox:
+        from torch.distributed import distributed_c10d as c10d
+
+        inp.realize()
+        group_size = c10d._get_group_size_by_name(group_name)
+        out_size = [inp.get_size()[0] * group_size, *inp.get_size()[1:]]
+        layout = ir.CommBufferLayout(
+            ir.FixedLayout(
+                device=inp.get_device_or_error(),
+                dtype=inp.get_dtype(),
+                size=out_size,
+            ),
+            ir.CommBufferType.SYMM_MEM,
+            group_name,
+        )
+        return ir.TensorBox.create(
+            ir.ExternKernelOut(
+                layout=layout,
+                inputs=[inp],
+                constant_args=(group_name,),
+                op_overload=kernel,
+            )
+        )
+
     @register_lowering(symm_mem.one_shot_all_reduce)
     def _symm_mem_one_shot_all_reduce(
         inp: ir.TensorBox,
@@ -883,6 +911,42 @@ def register_symm_mem_lowerings():
             symm_mem._low_contention_all_gather.default,
             inp,
             group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_ce_multicast)
+    def _symm_mem_low_contention_all_gather_ce_multicast(
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ):
+        return _create_low_contention_ag_out(
+            symm_mem._low_contention_all_gather_ce_multicast_out.default,
+            inp,
+            group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_ce_multicast_out)
+    def _symm_mem_low_contention_all_gather_ce_multicast_out(
+        inp: ir.TensorBox,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+        out: ir.TensorBox,
+    ):
+        inp.realize()
+        if can_realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM):
+            realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM, group_name)
+        else:
+            raise RuntimeError(
+                "_low_contention_all_gather_ce_multicast_out requires an "
+                "Inductor-owned output buffer that can be realized as symmetric "
+                "memory; this indicates an invalid lowering."
+            )
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_ce_multicast_out.default,
+                inp,
+                group_name,
+                out,
+            ),
         )
 
     @register_lowering(symm_mem._low_contention_reduce_scatter)

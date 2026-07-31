@@ -72,6 +72,11 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
+    # This fails on periodic CPU shards but passes on other CPU configurations,
+    # so skip it instead of producing unexpected successes.
+    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
@@ -1470,6 +1475,18 @@ class TestInductorDynamic(DynamicShapesTestCase):
         out_compiled = compiled_fn(arg0, arg2, arg3)
         # Test backward pass as well - this is where the bug manifested
         out_compiled.sum().backward()
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_combinations_dynamic(self):
+        def f(x):
+            return torch.combinations(x, r=2)
+
+        compiled_f = torch.compile(f, fullgraph=True, dynamic=True)
+        for n in [3, 5, 7]:
+            x = torch.randn(n)
+            expected = f(x)
+            actual = compiled_f(x)
+            self.assertEqual(actual, expected)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)

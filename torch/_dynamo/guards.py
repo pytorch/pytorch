@@ -99,7 +99,6 @@ from torch._guards import (
     Source,
     StorageOverlap,
 )
-from torch._inductor.utils import IndentedBuffer
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
@@ -112,6 +111,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -164,6 +164,7 @@ from .source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
     WeakRefCallSource,
 )
 from .types import (  # noqa: F401
@@ -238,6 +239,24 @@ def _sequence_length(value: Any) -> int:
     if isinstance(value, frozenset):
         return frozenset.__len__(value)
     return len(value)
+
+
+_COW_TENSOR_UNSUPPORTED = object()
+
+
+def _try_is_cow_tensor(value: Any) -> bool | object:
+    if not isinstance(value, torch.Tensor):
+        return _COW_TENSOR_UNSUPPORTED
+    if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
+        return _COW_TENSOR_UNSUPPORTED
+    return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
+
+
+def _cow_tensor_matches(value: Any, expected: Any) -> bool:
+    if not isinstance(expected, bool):
+        return False
+    actual = _try_is_cow_tensor(value)
+    return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
 
 
 dunder_attrs_assumed_constants = (
@@ -760,6 +779,29 @@ def from_numpy(a: Any) -> torch.Tensor:
         return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
+_async_collective_tensor_type: type | None = None
+
+
+def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
+    # Backing callable for UnwrapCollectiveTensorSource: yield an
+    # AsyncCollectiveTensor's inner tensor and leave everything else unchanged,
+    # so a graph traced on an ACT input is guarded against the unwrapped tensor.
+    # Runs on the guard-eval hot path, so memoize the ACT type once resolved.
+    global _async_collective_tensor_type
+    if _async_collective_tensor_type is None:
+        from torch._functorch._aot_autograd.utils import (
+            get_loaded_async_collective_tensor_type,
+        )
+
+        _async_collective_tensor_type = get_loaded_async_collective_tensor_type()
+    if (
+        _async_collective_tensor_type is not None
+        and type(x) is _async_collective_tensor_type
+    ):
+        return x.elem  # type: ignore[attr-defined]
+    return x
+
+
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -798,6 +840,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
+            "___cow_tensor_matches": _cow_tensor_matches,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -805,6 +848,7 @@ def _get_closure_vars() -> dict[str, object]:
             "utils_device": torch.utils._device,
             "device": torch.device,
             "___from_numpy": from_numpy,
+            "___unwrap_async_collective_tensor": unwrap_async_collective_tensor,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -1930,6 +1974,15 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, UnwrapCollectiveTensorSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=unwrap_async_collective_tensor,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, FlattenScriptObjectSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2287,7 +2340,12 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
-        if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
+        if (
+            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                value, torch._subclasses.FakeTensor
+            )
+            and value.pytype
+        ):
             t = value.pytype
         else:
             t = type(value)
@@ -2469,6 +2527,26 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_false_match_guard(
                 get_verbose_code_parts(code, guard), guard.user_stack
             )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _try_is_cow_tensor(value),
+        eval_fn=lambda value, metadata: _cow_tensor_matches(value, metadata),
+    )
+    def COW_TENSOR_MATCH(self, guard: Guard) -> None:
+        expected = _try_is_cow_tensor(self.get(guard))
+        if not isinstance(expected, bool):
+            raise AssertionError("COW_TENSOR_MATCH requires a plain Tensor")
+
+        def guard_fn(x: Any) -> bool:
+            return _cow_tensor_matches(x, expected)
+
+        code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
@@ -3566,7 +3644,9 @@ class GuardBuilder(GuardBuilderBase):
 
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
-            if isinstance(value, torch._subclasses.FakeTensor):
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                value, torch._subclasses.FakeTensor
+            ):
                 if value.pytype is not None:
                     pytype = value.pytype
                 if value.dispatch_keys is not None:
@@ -4055,7 +4135,12 @@ class GuardsStatePickler(pickle.Pickler):
         inner_tensors = dict(inner_data)
 
         outer_size, outer_stride = meta_tensor.shape, meta_tensor.stride()
-        out = type(meta_tensor).__tensor_unflatten__(  # type: ignore[attr-defined]
+        # Use the recorded pytype, not type(meta_tensor): a transparent wrapper
+        # subclass (e.g. AsyncCollectiveTensor) whose __torch_dispatch__ desugars
+        # ops to its inner tensor makes torch.empty_like() return a plain Tensor,
+        # so meta_tensor loses the subclass type and Tensor.__tensor_unflatten__
+        # does not exist.
+        out = pytype.__tensor_unflatten__(  # type: ignore[attr-defined]
             inner_tensors, ctx, outer_size, outer_stride
         )
         out.pytype = pytype
@@ -4207,7 +4292,9 @@ class GuardsStatePickler(pickle.Pickler):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            if isinstance(obj, torch._subclasses.FakeTensor):
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                obj, torch._subclasses.FakeTensor
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
 
             return type(self)._unpickle_tensor, (
@@ -5129,7 +5216,7 @@ class CheckFunctionManager:
 
 
 def build_guard_function(code_parts: list[str], closure_args: str) -> tuple[str, str]:
-    from torch._inductor.utils import IndentedBuffer
+    from torch.utils._indented_buffer import IndentedBuffer
 
     csepass = PyExprCSEPass()
     try:

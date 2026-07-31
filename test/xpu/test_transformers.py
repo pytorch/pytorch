@@ -115,6 +115,79 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_onednn_attention_broadcast_mask_gqa(self, device, dtype):
+        """Verify SDPA with GQA (grouped query attention) and a broadcast
+        attn_mask works correctly.
+
+        The attn_mask is broadcast across batch and head dimensions via
+        as_strided, which is a common pattern in real models. Combined with
+        GQA (query_heads > key_value_heads), this exercises the broadcast +
+        GQA code path in the OneDNN backend.
+        """
+        tol = Tolerances(1e-2, 1e-2)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+
+        batch_size = 1
+        query_heads = 2
+        key_value_heads = 1
+        seq_len = 128
+        head_dim = 128
+
+        torch.manual_seed(0)
+        query = torch.randn(
+            batch_size, query_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        key = torch.randn(
+            batch_size, key_value_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        value = torch.randn(
+            batch_size, key_value_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        # Broadcast mask: base shape (seq_len,) expanded to (B, H, S, S) via stride (0,0,0,1)
+        attn_mask_base = torch.linspace(
+            0.1766357421875, 0.73828125, seq_len, device=device, dtype=dtype
+        )
+        attn_mask = torch.as_strided(
+            attn_mask_base,
+            (batch_size, query_heads, seq_len, seq_len),
+            (0, 0, 0, 1),
+        )
+        scale = head_dim**-0.5
+
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            actual = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=scale,
+                enable_gqa=True,
+            )
+
+        # Math reference: expand K/V to match query heads for manual computation
+        key_expanded = key.expand(batch_size, query_heads, seq_len, head_dim)
+        value_expanded = value.expand(batch_size, query_heads, seq_len, head_dim)
+        attn_mask_contig = attn_mask.expand(
+            batch_size, query_heads, seq_len, seq_len
+        ).contiguous()
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(
+                query.contiguous(),
+                key_expanded.contiguous(),
+                value_expanded.contiguous(),
+                attn_mask=attn_mask_contig,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=scale,
+            )
+
+        self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
+
 
 instantiate_device_type_tests(
     TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True
