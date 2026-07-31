@@ -2487,9 +2487,7 @@ Tensor max_pool_double_backward(
     auto size = indices.sym_sizes().slice(0, indices.dim() - dim).vec();
     size.emplace_back(-1);
     auto indices_view = indices.view_symint(size);
-    const auto memory_format = indices.suggest_memory_format();
-    return grad.contiguous(memory_format)
-        .view_symint(size)
+    return grad.reshape_symint(size)
         .gather(-1, indices_view)
         .view_symint(indices.sym_sizes());
   }
