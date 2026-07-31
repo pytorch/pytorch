@@ -129,7 +129,7 @@ def force_lazy_device(model: fx.GraphModule):
         # What we are doing here is, for the list of covered tensor factory methods
         # we add a lazy device argument explicitly.
         #
-        # TODO: This solution is no ideal since we may miss some factory methods. In future
+        # TODO: This solution is not ideal since we may miss some factory methods. In future
         # when we support lazy mode, this method can be replaced by that.
         if nd.target in tensor_factory_functions and not hasDeviceArg(
             nd.args, nd.kwargs

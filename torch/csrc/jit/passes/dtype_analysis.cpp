@@ -76,7 +76,7 @@ bool MTensorNodeArgValid(Value* value) {
 
 static bool canBeInferredWithMetaTensor(Node* n) {
   // Not a guarantee that the metatensor will not error out
-  // Do not have a allowlist for now and let things error out in execution.
+  // Do not have an allowlist for now and let things error out in execution.
   // Has Tensor output is checked in another place
   bool args_valid =
       std::all_of(n->inputs().begin(), n->inputs().end(), MTensorNodeArgValid);

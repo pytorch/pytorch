@@ -235,7 +235,7 @@ def split_by_tags(
                 f"order={comp.order} and max={mx}"
             )
 
-        # Map a input of `node` to nodes in the component's graph.
+        # Map an input of `node` to nodes in the component's graph.
         def remap_func(x: torch.fx.Node) -> torch.fx.Node:
             # If input is a get_attr node, copy it to current component's graph.
             # Returns the get_attr node in current component's graph.
@@ -519,7 +519,7 @@ def move_non_tensor_nodes_on_boundary(subgraphs: list["Subgraph"]) -> None:
                     # Update mapping
                     node_to_subgraph[node_to_move] = target_subgraph
                     print(
-                        f"In order move the non-tensor node {current_node.name} on boundary, "
+                        f"In order to move the non-tensor node {current_node.name} on boundary, "
                         f"moved node {node_to_move.name} from {'acc' if subgraph.is_acc else 'gpu'}_{subgraph_idx} "
                         f"to {'acc' if subgraphs[target_subgraph].is_acc else 'gpu'}_{target_subgraph}"
                     )

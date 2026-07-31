@@ -77,7 +77,12 @@ which version of PyTorch you are using, refer to this example below::
 TensorFloat-32(TF32) on ROCm
 ----------------------------
 
-TF32 is not supported on ROCm.
+TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) via hipBLASLt. The
+same ``torch.backends.cuda.matmul.fp32_precision`` and
+``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware
+also apply on ROCm. The TF32 path on MI300 has hardware-level numerical
+differences from the NVIDIA implementation; see :ref:`tf32_on_mi300` for
+details.
 
 .. _rocm-memory-management:
 
@@ -87,7 +92,7 @@ Memory management
 PyTorch uses a caching memory allocator to speed up memory allocations. This
 allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
-``rocm-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
+``amd-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_reserved` and
 :meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory
@@ -114,7 +119,7 @@ hipBLAS workspaces
 For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
 handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to
 avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
-``torch._C._cuda_clearCublasWorkspaces()`` is called; note that it's the same function for CUDA or
+``torch.cuda._clear_cublas_workspaces()`` is called; note that it's the same function for CUDA or
 HIP. The workspace size per allocation can be specified via the environment variable
 ``HIPBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.  As an example, the environment
 variable ``HIPBLAS_WORKSPACE_CONFIG=:4096:2:16:8`` specifies a total size of ``2 * 4096 + 8 * 16
