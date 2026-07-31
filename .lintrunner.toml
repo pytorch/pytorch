@@ -291,12 +291,19 @@ include_patterns = [
     'aten/src/ATen/native/native_functions.yaml',
     'aten/src/ATen/native/tags.yaml',
 ]
-command = [
+init_command = [
     'python3',
-    'tools/linter/adapters/torchgen_register_unused_parameter_linter.py',
-    '--build-dir=./build',
-    '--',
-    '@{{PATHSFILE}}'
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=clang-tidy',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=clang-tidy'
+]
+command = [
+    'bash',
+    '-lc',
+    'shopt -s failglob; python3 tools/linter/adapters/clangtidy_linter.py --binary=.lintbin/clangtidy --build_dir=./build --check-unused-parameter -- build/aten/src/ATen/Register*.cpp'
 ]
 
 [[linter]]
