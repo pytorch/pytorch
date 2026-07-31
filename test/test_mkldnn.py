@@ -164,24 +164,6 @@ class TestMkldnn(TestCase):
                                "Found self type = Mkldnntorch.FloatTensor and src type = torch.FloatTensor",
                                lambda: mkldnn_x.copy_(x))
 
-    def test_unsupported(self):
-        # unsupported types and unsupported types with gpu
-        for dtype in [torch.double, torch.uint8, torch.int8,
-                      torch.short, torch.int, torch.long]:
-            with self.assertRaises(RuntimeError):
-                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
-            if torch.cuda.is_available():
-                with self.assertRaises(RuntimeError):
-                    torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cuda')).to_mkldnn()
-        # supported type with gpu
-        if torch.cuda.is_available():
-            with self.assertRaises(RuntimeError):
-                torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
-        # some factory functions
-        for creator in [torch.ones, torch.randn, torch.rand]:
-            with self.assertRaises(RuntimeError):
-                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
-
     def test_mkldnn_conv_shapecheck(self):
         input = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
         w1 = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
@@ -1770,7 +1752,30 @@ class TestMkldnn(TestCase):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
 
 
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+class TestMkldnnDevice(TestCase):
+    def test_unsupported(self):
+        # unsupported types and unsupported types with gpu
+        for dtype in [torch.double, torch.uint8, torch.int8,
+                      torch.short, torch.int, torch.long]:
+            with self.assertRaises(RuntimeError):
+                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
+            if torch.cuda.is_available():
+                with self.assertRaises(RuntimeError):
+                    torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cuda')).to_mkldnn()
+        # supported type with gpu
+        if torch.cuda.is_available():
+            with self.assertRaises(RuntimeError):
+                torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
+        # some factory functions
+        for creator in [torch.ones, torch.randn, torch.rand]:
+            with self.assertRaises(RuntimeError):
+                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
+
+
 instantiate_parametrized_tests(TestMkldnn)
+instantiate_device_type_tests(TestMkldnnDevice, globals(), only_for=('cpu',))
+
 
 if __name__ == '__main__':
     run_tests()
