@@ -12,9 +12,11 @@
 #include <string>
 #include <unordered_set>
 
+#include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -118,6 +120,21 @@ void ProcessGroupNCCL::init(at::Device device) {
 
   if (!nccl_api_) {
     nccl_api_ = std::make_unique<DefaultNcclApi>();
+  }
+
+  // If deterministic mode is enabled, disable the NVLS algorithm in NCCL
+  // (which can lead to non-deterministic reductions). Mirrors the stock
+  // ProcessGroupNCCL. NCCL reads NCCL_ALGO when the communicator is created,
+  // so this must run before createNcclComm below. If the user already set
+  // NCCL_ALGO, leave it untouched.
+  // TODO: remove this once NVLS supports deterministic mode.
+  if (at::globalContext().deterministicAlgorithms()) {
+    if (!c10::utils::get_env("NCCL_ALGO").has_value()) {
+      LOG(INFO)
+          << "torch deterministic mode is enabled, "
+          << "disabling NVLS algorithm in NCCL which can lead to non-deterministic reduction.";
+      c10::utils::set_env("NCCL_ALGO", "^NVLS");
+    }
   }
 
   if (device_.index() == -1 || nccl_comm_ == nullptr) {
