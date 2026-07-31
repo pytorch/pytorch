@@ -855,6 +855,7 @@ inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
     auto op_sig = bgemm_op.Signature();
     auto concrete_sig = params.Signature();
     auto result = mgr.Lookup(op_sig, concrete_sig);
+    bool via_wildcard = false;
     if (result == at::cuda::tunable::ResultEntry::Null()
         && !tuning_ctx->IsTuningEnabled()) {
       // Concrete miss + tuning disabled. Scan persisted wildcard entries via
@@ -865,14 +866,19 @@ inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
       // DynamicSignature()) is empty here even when wildcard entries were
       // persisted at compile-time tuning.
       result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
+      via_wildcard = result != at::cuda::tunable::ResultEntry::Null();
       if (result == at::cuda::tunable::ResultEntry::Null()) {
+        at::cuda::tunable::RecordServingDispatch(false, false, op_sig, concrete_sig);
         return false;
       }
     }
-    if (!tuning_ctx->IsTuningEnabled() &&
-        (result == at::cuda::tunable::ResultEntry::Default() ||
-         !bgemm_op.CanDispatchResult(result, &params))) {
-      return false;
+    if (!tuning_ctx->IsTuningEnabled()) {
+      if (result == at::cuda::tunable::ResultEntry::Default() ||
+          !bgemm_op.CanDispatchResult(result, &params)) {
+        at::cuda::tunable::RecordServingDispatch(false, false, op_sig, concrete_sig);
+        return false;
+      }
+      at::cuda::tunable::RecordServingDispatch(true, via_wildcard);
     }
     bgemm_op(&params);
     return true;
@@ -1431,6 +1437,7 @@ inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
     auto op_sig = gemm_op.Signature();
     auto concrete_sig = params.Signature();
     auto result = mgr.Lookup(op_sig, concrete_sig);
+    bool via_wildcard = false;
     if (result == at::cuda::tunable::ResultEntry::Null()
         && !tuning_ctx->IsTuningEnabled()) {
       // Concrete miss + tuning disabled. Scan persisted wildcard entries via
@@ -1441,14 +1448,19 @@ inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
       // DynamicSignature()) is empty here even when wildcard entries were
       // persisted at compile-time tuning.
       result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
+      via_wildcard = result != at::cuda::tunable::ResultEntry::Null();
       if (result == at::cuda::tunable::ResultEntry::Null()) {
+        at::cuda::tunable::RecordServingDispatch(false, false, op_sig, concrete_sig);
         return false;
       }
     }
-    if (!tuning_ctx->IsTuningEnabled() &&
-        (result == at::cuda::tunable::ResultEntry::Default() ||
-         !gemm_op.CanDispatchResult(result, &params))) {
-      return false;
+    if (!tuning_ctx->IsTuningEnabled()) {
+      if (result == at::cuda::tunable::ResultEntry::Default() ||
+          !gemm_op.CanDispatchResult(result, &params)) {
+        at::cuda::tunable::RecordServingDispatch(false, false, op_sig, concrete_sig);
+        return false;
+      }
+      at::cuda::tunable::RecordServingDispatch(true, via_wildcard);
     }
     gemm_op(&params);
     return true;

@@ -239,6 +239,9 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableTunableOp(bool value);
     bool IsTunableOpEnabled() const;
 
+    void EnableServingDispatchCounter(bool value);
+    bool IsServingDispatchCounterEnabled() const;
+
     void EnableTuning(bool value);
     bool IsTuningEnabled() const;
 
@@ -299,6 +302,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     std::ostream& GetLog() const;
 
     bool enable_;
+    bool serving_dispatch_counter_enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
     bool manager_initialized_;
@@ -323,6 +327,11 @@ class TORCH_CUDA_CPP_API TuningContext {
 
 TORCH_CUDA_CPP_API TuningContext* getTuningContext();
 
+// Records low-volume serving-time cache hit accounting. This is intentionally
+// separate from TUNABLE_LOG* because per-dispatch verbose logs are too noisy for
+// ICE; summaries are emitted periodically and at shutdown.
+TORCH_CUDA_CPP_API void RecordServingDispatch(bool tuned_hit, bool via_wildcard, const std::string& op_signature = "", const std::string& params_signature = "");
+TORCH_CUDA_CPP_API void LogServingDispatchSummary(bool force = false);
 // Returns the current top-of-stack DynamicDimsMask for this thread, or an
 // all-zero mask when no TunableDynamicDimsGuard is active. Producers in
 // Blas.cpp / CUDABlas.cpp / ScaledBlas.cpp call this once per Gemm*Params

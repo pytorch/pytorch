@@ -24,6 +24,9 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <mutex>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -84,11 +87,91 @@ bool matches_wildcard_pattern(
   return p_i >= pattern.size() && c_i >= concrete.size();
 }
 
+constexpr int64_t kServingDispatchLogEvery = 100000;
+constexpr size_t kServingDispatchMaxMissSigs = 2000;
+
+std::atomic<int64_t> serving_dispatch_total{0};
+std::atomic<int64_t> serving_dispatch_concrete_hits{0};
+std::atomic<int64_t> serving_dispatch_wildcard_hits{0};
+std::atomic<int64_t> serving_dispatch_misses{0};
+std::atomic<int64_t> serving_dispatch_last_logged_total{0};
+
 } // namespace
 
 TuningContext* getTuningContext() {
   static TuningContext tuning_context;
   return &tuning_context;
+}
+
+void LogServingDispatchSummary(bool force) {
+  if (!getTuningContext()->IsServingDispatchCounterEnabled()) {
+    return;
+  }
+  const auto total = serving_dispatch_total.load(std::memory_order_relaxed);
+  if (total == 0) {
+    return;
+  }
+
+  auto last_logged =
+      serving_dispatch_last_logged_total.load(std::memory_order_relaxed);
+  if (!force && total - last_logged < kServingDispatchLogEvery) {
+    return;
+  }
+  if (!serving_dispatch_last_logged_total.compare_exchange_strong(
+          last_logged,
+          total,
+          std::memory_order_relaxed,
+          std::memory_order_relaxed)) {
+    return;
+  }
+
+  const auto concrete_hits =
+      serving_dispatch_concrete_hits.load(std::memory_order_relaxed);
+  const auto wildcard_hits =
+      serving_dispatch_wildcard_hits.load(std::memory_order_relaxed);
+  const auto misses = serving_dispatch_misses.load(std::memory_order_relaxed);
+  const auto hits = concrete_hits + wildcard_hits;
+  const auto hit_rate = static_cast<double>(hits) * 100.0 /
+      static_cast<double>(total);
+  TORCH_WARN(
+      "[TunableOp][DispatchCounter] total=",
+      total,
+      " hits=",
+      hits,
+      " concrete=",
+      concrete_hits,
+      " wildcard=",
+      wildcard_hits,
+      " misses=",
+      misses,
+      " hit_rate_pct=",
+      hit_rate);
+}
+
+void RecordServingDispatch(bool tuned_hit, bool via_wildcard, const std::string& op_signature, const std::string& params_signature) {
+  if (!getTuningContext()->IsServingDispatchCounterEnabled()) {
+    return;
+  }
+  if (!tuned_hit) {
+    serving_dispatch_misses.fetch_add(1, std::memory_order_relaxed);
+    // Dump each distinct missing GEMM signature once (capped) so we can see
+    // exactly which shapes/ops fall through to the default (untuned) kernel.
+    if (!op_signature.empty()) {
+      static std::mutex miss_sig_mutex;
+      static std::unordered_set<std::string> logged_miss_sigs;
+      std::lock_guard<std::mutex> lk(miss_sig_mutex);
+      if (logged_miss_sigs.size() < kServingDispatchMaxMissSigs &&
+          logged_miss_sigs.emplace(op_signature + "," + params_signature).second) {
+        TORCH_WARN("[TunableOp][Miss] ", op_signature, ",", params_signature);
+      }
+    }
+  } else if (via_wildcard) {
+    serving_dispatch_wildcard_hits.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    serving_dispatch_concrete_hits.fetch_add(1, std::memory_order_relaxed);
+  }
+  serving_dispatch_total.fetch_add(1, std::memory_order_relaxed);
+  LogServingDispatchSummary(false);
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
@@ -585,6 +668,7 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 
 TuningContext::TuningContext() :
     enable_{false},
+    serving_dispatch_counter_enable_{false},
     tuning_enable_{true},
     record_untuned_enable_{false},
     manager_initialized_{false},
@@ -609,6 +693,7 @@ TuningContext::~TuningContext() {
     return;
   }
   TUNABLE_LOG1("Closing File");
+  LogServingDispatchSummary(true);
   GetTuningResultsManager().CloseRealtimeAppend(); // Since, we do instant logging by default now.
 
   if (untuned_file_.good()) {
@@ -632,6 +717,14 @@ bool TuningContext::IsTunableOpEnabled() const {
     return true;
   }
   return enable_;
+}
+
+void TuningContext::EnableServingDispatchCounter(bool value) {
+  serving_dispatch_counter_enable_ = value;
+}
+
+bool TuningContext::IsServingDispatchCounterEnabled() const {
+  return serving_dispatch_counter_enable_;
 }
 
 void TuningContext::EnableTuning(bool value) {

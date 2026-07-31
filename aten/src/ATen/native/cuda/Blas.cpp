@@ -316,6 +316,7 @@ bool launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
     auto op_sig = gemm.Signature();
     auto concrete_sig = params.Signature();
     auto result = mgr.Lookup(op_sig, concrete_sig);
+    bool via_wildcard = false;
     if (result == at::cuda::tunable::ResultEntry::Null()
         && !tuning_ctx->IsTuningEnabled()) {
       // Concrete miss + tuning disabled. Scan persisted wildcard
@@ -326,13 +327,18 @@ bool launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
       // empty here even when wildcard entries were persisted at
       // compile-time tuning.
       result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
+      via_wildcard = result != at::cuda::tunable::ResultEntry::Null();
       if (result == at::cuda::tunable::ResultEntry::Null()) {
         // Both concrete and wildcard missed -- skip the TunableOp dispatch
         // entirely so we do not invoke the (potentially crashing) Default
         // kernel. Caller (launchGemmAndBiasCublasLt) re-dispatches via
         // launchGemmAndBiasNonTunable.
+        at::cuda::tunable::RecordServingDispatch(false, false, op_sig, concrete_sig);
         return false;
       }
+    }
+    if (!tuning_ctx->IsTuningEnabled()) {
+      at::cuda::tunable::RecordServingDispatch(true, via_wildcard);
     }
     // Either we have a tuned entry (concrete or wildcard), or tuning is
     // enabled and the standard operator() will run FindFastest and store a
