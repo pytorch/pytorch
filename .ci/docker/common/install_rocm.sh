@@ -159,10 +159,11 @@ install_rocm() {
         local therock_nightly_version="${THEROCK_NIGHTLY_VERSION:-7.15.0a20260712}"
         rocm_pip_spec="rocm[libraries,devel,device-all]==${therock_nightly_version}"
     else
-        therock_index_url="${THEROCK_INDEX_URL:-https://repo.amd.com/rocm/whl-multi-arch/}"
+        : "${THEROCK_INDEX_URL:?THEROCK_INDEX_URL must be set}"
+        : "${ROCM_VERSION:?ROCM_VERSION must be set}"
+        therock_index_url="${THEROCK_INDEX_URL}"
         # ROCM_VERSION is the ROCm minor line (e.g. "7.14"); resolve to newest 7.14.x.
-        local rocm_version="${ROCM_VERSION:-7.14}"
-        rocm_pip_spec="rocm[libraries,devel,device-all]==${rocm_version}.*"
+        rocm_pip_spec="rocm[libraries,devel,device-all]==${ROCM_VERSION}.*"
     fi
 
     echo "=============================================="

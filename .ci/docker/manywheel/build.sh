@@ -80,9 +80,8 @@ case ${image} in
         # Common gfx arch list shared by all ROCm builds; each path extends it.
         PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151"
         if [[ "$GPU_ARCH_VERSION" == *"7.14"* ]]; then
-            # ROCm 7.14 installs from the multi-arch TheRock wheel index
-            # (https://repo.amd.com/rocm/whl-multi-arch/) instead of the
-            # rocm/dev-almalinux-8 OS packages, so start from a plain almalinux base.
+            # ROCm 7.14 installs from the TheRock multi-arch wheel index instead of
+            # rocm/dev-almalinux-8 OS packages; start from a plain almalinux base.
             TARGET=rocm_final
             GPU_IMAGE=amd64/almalinux:8
             THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
