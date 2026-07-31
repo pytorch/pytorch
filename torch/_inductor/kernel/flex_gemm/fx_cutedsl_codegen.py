@@ -19,7 +19,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     upcast_compute_type,
     use_cutedsl_fast_math,
 )
-from torch._inductor.kernel import fx_epilogue_lowering as _epilogue_analysis
+from torch._inductor.kernel import gemm_epilogue_analysis as _epilogue_analysis
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
