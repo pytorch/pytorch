@@ -883,11 +883,14 @@ class Tracer(TracerBase):
             parameter_proxy_cache: dict[
                 str, Proxy
             ] = {}  # Reduce number of get_attr calls
+            tracing_thread_id = threading.get_ident()
 
             # Method dispatch on parameters is not recorded unless it's directly used.
             # Thus, we need to insert a proxy when __getattr__ requests a parameter.
             @functools.wraps(_orig_module_getattr)
             def module_getattr_wrapper(mod: torch.nn.Module, attr: str) -> Any:
+                if threading.get_ident() != tracing_thread_id:
+                    return _orig_module_getattr(mod, attr)
                 attr_val = _orig_module_getattr(mod, attr)
                 return self.getattr(attr, attr_val, parameter_proxy_cache)
 
@@ -895,6 +898,9 @@ class Tracer(TracerBase):
             def module_call_wrapper(
                 mod: torch.nn.Module, *args: Any, **kwargs: Any
             ) -> Any:
+                if threading.get_ident() != tracing_thread_id:
+                    return _orig_module_call(mod, *args, **kwargs)
+
                 def forward(*args: Any, **kwargs: Any) -> Any:
                     return _orig_module_call(mod, *args, **kwargs)
 
