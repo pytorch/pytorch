@@ -851,8 +851,7 @@ extra_meta_t metadataFromJson(const std::string& json) {
   extra_meta_t metadata;
   for (const auto& [key, value] : parsed.items()) {
     metadata.emplace(
-        key,
-        value.is_string() ? value.get<std::string>() : value.dump());
+        key, value.is_string() ? value.get<std::string>() : value.dump());
   }
   return metadata;
 }
@@ -871,7 +870,8 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
     explicit DictFrame(std::string name)
         : name_{std::move(name)},
           values_{c10::impl::GenericDict(
-              at::StringType::get(), at::AnyType::get())} {}
+              at::StringType::get(),
+              at::AnyType::get())} {}
 
     std::string name_;
     c10::Dict<c10::IValue, c10::IValue> values_;
@@ -934,8 +934,7 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
     inputs.reserve(value.size());
     for (const auto& input : value) {
       std::visit(
-          [&](const auto& shapes) { inputs.emplace_back(shapes); },
-          input);
+          [&](const auto& shapes) { inputs.emplace_back(shapes); }, input);
     }
     addValue(field.name, c10::IValue(inputs));
   }

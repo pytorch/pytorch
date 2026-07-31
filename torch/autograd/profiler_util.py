@@ -710,7 +710,9 @@ class FunctionEvent(FormattedTimesMixin):
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
         metadata (Dict[str, Any]): Additional metadata keyed by the field names
-            used in exported traces. Available fields vary by activity and backend.
+            used in exported traces. Use
+            ``_ExperimentalConfig(expose_kineto_event_metadata=True)`` to expose
+            Kineto activity metadata. Available fields vary by activity and backend.
         metadata_json (str): Deprecated. Use event_metadata instead.
         event_metadata (EventMetadata): Additional metadata in structured format.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
