@@ -1,5 +1,12 @@
 #include <torch/csrc/profiler/cupti/monitor_pftrace.h>
 
+// TORCH_CUPTI_PFTRACE is defined (see caffe2/CMakeLists.txt) only when the
+// CUPTI stubs were generated at build time, which is what pulls in perfetto +
+// zlib. In that case the real protozero encoder is compiled; otherwise this TU
+// is a dependency-free stub (no perfetto/zlib) whose encoder raises -- the
+// CUPTI monitor is unavailable at runtime without the stubs anyway.
+#ifdef TORCH_CUPTI_PFTRACE
+
 #include <perfetto.h>
 
 #include <nlohmann/json.hpp>
@@ -452,3 +459,29 @@ std::string cuptiMonitorEncodePftrace(
 }
 
 } // namespace torch::profiler::impl
+
+#else // TORCH_CUPTI_PFTRACE
+
+#include <c10/util/Exception.h>
+
+namespace torch::profiler::impl {
+
+std::string cuptiMonitorEncodePftrace(
+    int64_t /*base_ns*/,
+    const std::vector<PftraceTrack>& /*tracks*/,
+    const std::vector<std::string>& /*name_table*/,
+    const std::vector<std::string>& /*category_table*/,
+    const std::vector<PftraceGroup>& /*groups*/,
+    const std::vector<PftraceGpuSpec>& /*gpu_specs*/,
+    const std::vector<PftraceGfxContext>& /*gfx_contexts*/,
+    const PftraceRenderStages& /*stages*/,
+    const PftraceGpuCounter& /*counters*/) {
+  TORCH_CHECK(
+      false,
+      "PyTorch was built without native .pftrace support: the CUPTI stubs were "
+      "not generated at build time. Export a Chrome trace instead.");
+}
+
+} // namespace torch::profiler::impl
+
+#endif // TORCH_CUPTI_PFTRACE
