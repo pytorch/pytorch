@@ -349,6 +349,10 @@ struct TORCH_API TupleElements {
   // c10::SmallVector<IValue> because c10::SmallVector<IValue> always
   // stores the begin/end/capacity pointers, which would be a waste of
   // space in our use case.
+  //
+  // The implementation of TupleElements can be simplified if we can
+  // use variant<vector<IValue>, inplace_vector<IValue, 3>> (C++26).
+  // The default ctor, dtor, and assignment operators should suffice.
   union {
     std::vector<IValue> elementsVector_;
     // Don't want to declare a std::array because the convenient
