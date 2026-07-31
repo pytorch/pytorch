@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import os
+import types
 import unittest
 from collections.abc import Callable
 
@@ -964,6 +965,19 @@ class TestPatternMatcher(TestCase):
             self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
 
+    def test_reciprocal_sqrt_to_rsqrt(self):
+        # reciprocal(sqrt(x)) should fuse into a single rsqrt in the kernel.
+        def fn(x):
+            return torch.reciprocal(torch.sqrt(x))
+
+        x = torch.rand(64) + 1.0
+        result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        # A standalone sqrt (".sqrt(") must not survive; only ".rsqrt(" should.
+        self.assertIn("rsqrt", code)
+        self.assertNotIn(".sqrt(", code)
+        self.assertEqual(result, fn(x))
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
     def test_splitwithsizes_cat(self):
         # Good case
         def fn(a):
@@ -1501,6 +1515,66 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    def test_unfuse_broadcast_bias_baddbmm(self):
+        args = [
+            torch.randn(4, 1, 8, device=GPU_TYPE),
+            torch.randn(4, 6, 5, device=GPU_TYPE),
+            torch.randn(4, 5, 8, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.ops.aten.baddbmm(inp, a, b)
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.baddbmm(*args))
+        FileCheck().check("extern_kernels.baddbmm(").run(code[0])
+
+        @torch.compile()
+        def fn2(inp, a, b):
+            return torch.nn.functional.gelu(torch.ops.aten.baddbmm(inp, a, b))
+
+        actual, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.nn.functional.gelu(torch.baddbmm(*args)))
+        FileCheck().check_not("extern_kernels.baddbmm(").check(
+            "extern_kernels.bmm("
+        ).run(code[0])
+
+        @torch.compile()
+        def fn3(inp, a, b):
+            inp = inp.expand(4, 6, 8)
+            return torch.ops.aten.baddbmm(inp, a, b).relu()
+
+        actual, (code) = run_and_get_code(fn3, args[0], args[1], args[2])
+        expanded_bias = args[0].expand(4, 6, 8)
+        self.assertEqual(expanded_bias.stride(1), 0)
+        self.assertEqual(actual, torch.baddbmm(expanded_bias, args[1], args[2]).relu())
+        FileCheck().check_not("extern_kernels.baddbmm(").check(
+            "extern_kernels.bmm("
+        ).run(code[0])
+
+    def test_unfuse_broadcast_bias_baddbmm_alpha_beta(self):
+        args = [
+            torch.randn(4, 1, 8, device=GPU_TYPE),
+            torch.randn(4, 6, 5, device=GPU_TYPE),
+            torch.randn(4, 5, 8, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.nn.functional.relu(
+                torch.ops.aten.baddbmm(inp, a, b, alpha=0.8, beta=0.2)
+            )
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        expected = torch.nn.functional.relu(
+            torch.baddbmm(args[0], args[1], args[2], alpha=0.8, beta=0.2)
+        )
+        self.assertEqual(actual, expected)
+        FileCheck().check_not("extern_kernels.baddbmm(").check(
+            "extern_kernels.bmm("
+        ).run(code[0])
+
     def test_preserve_accumulator_addmm_with_pointwise(self):
         args = [
             torch.randn(10, 20, device=GPU_TYPE),
@@ -1537,6 +1611,35 @@ class TestPatternMatcher(TestCase):
         actual, (code) = run_and_get_code(torch.compile(mod), args[0], args[1])
         self.assertEqual(actual, mod(*args))
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_addmm_fusion_extra_check_without_beta_kwarg(self):
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        mat1 = graph.placeholder("mat1")
+        mat2 = graph.placeholder("mat2")
+        mm = graph.call_function(torch.ops.aten.mm.default, (mat1, mat2))
+        mm_plus_inp = graph.call_function(torch.ops.aten.add.Tensor, (mm, inp))
+        graph.call_function(torch.ops.aten.relu.default, (mm_plus_inp,))
+        inp_plus_mm = graph.call_function(torch.ops.aten.add.Tensor, (inp, mm))
+        graph.call_function(torch.ops.aten.relu.default, (inp_plus_mm,))
+
+        mps_device = torch.device("mps")
+        with torch._subclasses.FakeTensorMode():
+            inp.meta["val"] = torch.empty(10, 20, device=mps_device)
+            mat1.meta["val"] = torch.empty(10, 15, device=mps_device)
+            mat2.meta["val"] = torch.empty(15, 20, device=mps_device)
+            mm_plus_inp.meta["val"] = torch.empty(10, 20, device=mps_device)
+            inp_plus_mm.meta["val"] = torch.empty(10, 20, device=mps_device)
+
+        for output in (mm_plus_inp, inp_plus_mm):
+            match = types.SimpleNamespace(
+                args=[mat1, mat2],
+                kwargs={"inp": inp},
+                output_node=lambda output=output: output,
+            )
+            self.assertTrue(
+                torch._inductor.fx_passes.post_grad.should_prefer_unfused_addmm(match)
+            )
 
     def test_unfuse_expanded_bias_addmm(self):
         args = [
@@ -2432,6 +2535,7 @@ class TestPatternMatcher(TestCase):
     def test_nested_replacement_args_do_not_percolate_tags(self):
         class DummyMatch:
             def __init__(self, outputs):
+                self.nodes = outputs
                 self._outputs = outputs
 
             def output_nodes(self):
@@ -2603,7 +2707,7 @@ class TestPatternMatcher(TestCase):
         self.assertGreaterEqual(
             view_count_skip_noop,
             view_count_default,
-            f"Expected view count with remove_noop disabled ({view_count_skip_noop}) "
+            lambda msg: f"{msg}\nExpected view count with remove_noop disabled ({view_count_skip_noop}) "
             f"to be >= view count with remove_noop enabled ({view_count_default})",
         )
 
@@ -3420,7 +3524,9 @@ class TestPatternMatcherLogging(LoggingTestCase):
             tol = 0.1
             ratio = actual / expected
 
-            self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
+            self.assertTrue(
+                abs(ratio - 1) < tol, lambda msg: f"{msg}\n{expected} v.s. {actual}"
+            )
 
         self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
 

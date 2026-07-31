@@ -3,6 +3,7 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -183,6 +184,24 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = a + b
         self.assertEqual(list(result), [1, 2, 3, 4])
 
+    @make_dynamo_test
+    def test_user_defined_list_concat_returns_plain_list(self):
+        # out-of-place C sq_concat constructs a fresh base-type object
+        result = UserDefinedList([1]) + UserDefinedList([2])
+        self.assertIs(type(result), list)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_user_defined_list_inplace_concat(self):
+        # in-place C sq_inplace_concat mutates and returns self: subclass
+        # type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a += [2]
+        self.assertEqual(list(a), [1, 2])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
+
     # --- User-defined tuple subclass concatenation ---
 
     @make_dynamo_test
@@ -293,6 +312,39 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d += collections.deque([3, 4])
         # Result respects maxlen of 3
         self.assertEqual(list(d), [2, 3, 4])
+
+    # --- Inplace deque repeat (*=) ---
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat(self):
+        d = collections.deque([1, 2])
+        d *= 3
+        self.assertEqual(list(d), [1, 2, 1, 2, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_with_maxlen(self):
+        d = collections.deque([1, 2], maxlen=3)
+        d *= 3
+        # A bounded deque keeps the last maxlen items after repeating.
+        self.assertEqual(list(d), [2, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_maxlen_zero(self):
+        d = collections.deque([1, 2], maxlen=0)
+        d *= 3
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_zero(self):
+        d = collections.deque([1, 2, 3])
+        d *= 0
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_negative(self):
+        d = collections.deque([1, 2, 3])
+        d *= -1
+        self.assertEqual(list(d), [])
 
     # --- list re-init (list.__init__) ---
 
@@ -605,6 +657,51 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TestSqConcat)
+
+
+class TestSqRepeat(torch._dynamo.test_case.TestCase):
+    """Tests for sq_repeat (*) and sq_inplace_repeat (*=) on sequences."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # --- User-defined subclasses: the inherited C sq_repeat slot ---
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat(self):
+        # CPython runs list's inherited C sq_repeat: result is a plain list,
+        # not the subclass
+        result = UserDefinedList([1, 2]) * 2
+        self.assertEqual(result, [1, 2, 1, 2])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat_reflected(self):
+        result = 2 * UserDefinedList([5])
+        self.assertEqual(result, [5, 5])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_tuple_repeat(self):
+        result = UserDefinedTuple([1, 2]) * 2
+        self.assertEqual(result, (1, 2, 1, 2))
+        self.assertIs(type(result), tuple)
+
+    @make_dynamo_test
+    def test_user_defined_list_inplace_repeat(self):
+        # in-place repeat mutates the object: type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a *= 3
+        self.assertEqual(list(a), [1, 1, 1])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -1335,6 +1432,54 @@ class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
             return list(keys)
 
         self.assertEqual(fn(), [0, 1, 2, 3, 4])
+
+
+class TestRangeContains(torch._dynamo.test_case.TestCase):
+    # range.__contains__ uses the arithmetic fast path only for exact int/bool
+    # operands; everything else falls back to an __eq__ linear scan, matching
+    # CPython range_contains / _PySequence_IterSearch.
+    def test_non_int_members(self):
+        class AlwaysEq:
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        class IntSubclassEq(int):
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                1.0 in range(3),
+                True in range(3),
+                (1 + 0j) in range(3),
+                AlwaysEq() in range(3),
+                IntSubclassEq(11) in range(10),
+                5 in range(3),
+                2.5 in range(3),
+            )
+
+        self.assertEqual(fn(), (True, True, True, True, True, False, False))
+
+    def test_negative_step_and_strided(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                -1 in range(0, -20, -1),
+                1.0 in range(0, -20, -1),
+                2 in range(0, 101, 2),
+                1 in range(0, 101, 2),
+                2.0 in range(0, 101, 2),
+                100.0 in range(0, 101, 2),
+            )
+
+        self.assertEqual(fn(), (True, False, True, False, True, True))
 
 
 if __name__ == "__main__":
