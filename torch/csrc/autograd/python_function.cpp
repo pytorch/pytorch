@@ -23,6 +23,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/autograd/python_context.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -89,10 +90,7 @@ inline void check_legacy_fn_attr_access(
 //
 // See Note [ Persisting PyErr state across autograd engine threads ]
 void throw_python_error() {
-  python_error err;
-  err.persist();
-  // NOLINTNEXTLINE(hicpp-exception-baseclass)
-  throw std::move(err);
+  throw_persisted_python_error();
 }
 
 PyObject* materialize_needs_input_grad(THPFunction* self) {
@@ -222,12 +220,12 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
     THPObjectPtr apply_fn(PyObject_GetAttrString(pyobj(), "apply_boxed"));
     if (!apply_fn)
       throw_python_error();
-    r = THPObjectPtr(PyObject_CallObject(apply_fn, boxedArgs.get()));
+    r = call_with_context(apply_fn, boxedArgs.get());
   } else {
     THPObjectPtr apply_fn(PyObject_GetAttrString(pyobj(), "apply"));
     if (!apply_fn)
       throw_python_error();
-    r = THPObjectPtr(PyObject_CallObject(apply_fn, pyInputs.get()));
+    r = call_with_context(apply_fn, pyInputs.get());
   }
   pyInputs = nullptr;
   if (!r)
@@ -1114,7 +1112,7 @@ torch::jit::Node* _trace_pre_record(
   // Save scalar args and the calling convention
   auto num_args = PyTuple_GET_SIZE(input_objects);
   pyobj_list scalar_args;
-  std::string arg_types;
+  std::string arg_types{};
   arg_types.reserve(num_args);
   scalar_args.reserve(num_args);
   for (const auto i : c10::irange(num_args)) {
@@ -2236,6 +2234,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      (setter)THPFunction_set_compiled_autograd_backward_state,
      nullptr,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -2247,6 +2246,7 @@ static struct PyMethodDef THPFunction_methods[] = {
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {(char*)"apply",
      castPyCFunctionWithKeywords(THPFunction_apply),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
@@ -2261,6 +2261,7 @@ static struct PyMethodDef THPFunction_methods[] = {
      THPFunction_get_compiled_autograd_symints,
      METH_NOARGS,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
