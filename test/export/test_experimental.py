@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree as pytree
 
 
@@ -91,6 +92,8 @@ class GlobalContext:
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
             def __init__(self) -> None:
@@ -1359,6 +1362,8 @@ def forward(self, args_0):
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperimentFlex(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_export_blockmask_with_mask_fn(self, make_mask_fn, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
@@ -1821,6 +1826,8 @@ instantiate_device_type_tests(TestExperimentFlex, globals(), except_for="cpu")
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperimentDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self, device):
         class DummyOp(torch.autograd.Function):
             @staticmethod
