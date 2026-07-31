@@ -18,7 +18,15 @@ import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
+from torch._C._functorch import (
+    _unwrap_for_grad,
+    _wrap_for_grad,
+    is_functorch_wrapped_tensor,
+    TransformType,
+)
 from torch._decomp import register_decomposition
+from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+from torch._functorch.utils import enable_single_level_autograd_function
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
     IntLike,
@@ -5868,6 +5876,455 @@ def scaled_dot_product_flash_attention_for_cpu(
         .permute(1, 2, 0, 3)
     )
     return output, attn
+
+
+def _scaled_dot_product_flash_attention_for_cpu_scores(
+    query: Tensor,
+    key: Tensor,
+    is_causal: bool,
+    attn_mask: Tensor | None,
+    scale: float | None,
+) -> Tensor:
+    computation_dtype = utils.get_computation_dtype(query.dtype)
+    query_acc = query.to(computation_dtype)
+    key_acc = key.to(computation_dtype)
+    scale_factor = scale if scale is not None else query.size(-1) ** -0.5
+    scores = torch.matmul(query_acc, key_acc.transpose(-2, -1)) * scale_factor
+
+    if is_causal:
+        causal_mask = torch.ones(
+            (query.size(-2), key.size(-2)), dtype=torch.bool, device=query.device
+        ).tril()
+        scores = scores.masked_fill(~causal_mask, float("-inf"))
+
+    if attn_mask is not None and attn_mask.numel() != 0:
+        if attn_mask.dtype == torch.bool:
+            scores = scores.masked_fill(~attn_mask, float("-inf"))
+        else:
+            scores = scores + attn_mask
+
+    return scores
+
+
+def _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(
+    query: Tensor, attn_mask: Tensor | None
+) -> None:
+    if attn_mask is None:
+        return
+
+    torch._check(
+        not (attn_mask.requires_grad and torch.is_grad_enabled()),
+        lambda: "The function '_scaled_dot_product_flash_attention_for_cpu' is not differentiable with respect to argument 'attn_mask'. This input cannot have requires_grad True.",
+    )
+    torch._check(
+        attn_mask.dtype == torch.float32 or attn_mask.dtype == query.dtype,
+        lambda: "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query",
+    )
+    torch._check(
+        attn_mask.dim() == 2 or attn_mask.dim() == 4,
+        lambda: "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}",
+    )
+
+
+def _cpu_flash_attention_backward_layout(grad: Tensor) -> Tensor:
+    return grad.transpose(1, 2).contiguous().transpose(1, 2)
+
+
+def _collapse_grouped_query_attention_grad(
+    grad: Tensor, num_key_value_heads: int
+) -> Tensor:
+    if grad.size(1) == num_key_value_heads:
+        return grad
+    return grad.unflatten(
+        1, (num_key_value_heads, grad.size(1) // num_key_value_heads)
+    ).sum(2)
+
+
+def _scaled_dot_product_flash_attention_for_cpu_backward_math(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float,
+    is_causal: bool,
+    attn_mask: Tensor | None,
+    scale: float | None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    torch._check(
+        dropout_p == 0.0,
+        lambda: "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0",
+    )
+    _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(query, attn_mask)
+
+    num_key_value_heads = key.size(1)
+    if query.size(1) != key.size(1):
+        key = key.repeat_interleave(query.size(1) // key.size(1), dim=1)
+        value = value.repeat_interleave(query.size(1) // value.size(1), dim=1)
+
+    computation_dtype = utils.get_computation_dtype(query.dtype)
+    query_acc = query.to(computation_dtype)
+    key_acc = key.to(computation_dtype)
+    value_acc = value.to(computation_dtype)
+    grad_out_acc = grad_out.to(computation_dtype)
+
+    scores = _scaled_dot_product_flash_attention_for_cpu_scores(
+        query_acc,
+        key_acc,
+        is_causal,
+        attn_mask,
+        scale,
+    )
+    masked_rows = torch.all(scores == float("-inf"), dim=-1, keepdim=True)
+    safe_scores = scores.masked_fill(masked_rows, 0.0)
+    attn = torch.softmax(safe_scores, dim=-1)
+    attn = attn.masked_fill(masked_rows, 0.0)
+
+    grad_value = torch.matmul(attn.transpose(-2, -1), grad_out_acc)
+    grad_attn = torch.matmul(grad_out_acc, value_acc.transpose(-2, -1))
+    grad_scores = attn * (grad_attn - torch.sum(grad_attn * attn, dim=-1, keepdim=True))
+    scale_factor = scale if scale is not None else query.size(-1) ** -0.5
+    grad_query = torch.matmul(grad_scores, key_acc) * scale_factor
+    grad_key = torch.matmul(grad_scores.transpose(-2, -1), query_acc) * scale_factor
+
+    grad_key = _collapse_grouped_query_attention_grad(grad_key, num_key_value_heads)
+    grad_value = _collapse_grouped_query_attention_grad(grad_value, num_key_value_heads)
+    return (
+        _cpu_flash_attention_backward_layout(grad_query).to(query.dtype),
+        _cpu_flash_attention_backward_layout(grad_key).to(key.dtype),
+        _cpu_flash_attention_backward_layout(grad_value).to(value.dtype),
+    )
+
+
+def _scaled_dot_product_flash_attention_for_cpu_backward_native(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    dropout_p: float,
+    is_causal: bool,
+    attn_mask: Tensor | None,
+    scale: float | None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    with torch._C._AutoDispatchBelowAutograd():
+        return aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            dropout_p,
+            is_causal,
+            attn_mask=attn_mask,
+            scale=scale,
+        )
+
+
+def _scaled_dot_product_flash_attention_for_cpu_backward_vjp(
+    needs_input_grad: tuple[bool, ...],
+    grad_outputs: tuple[Tensor | None, ...],
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    _out: Tensor,
+    _logsumexp: Tensor,
+    dropout_p: float,
+    is_causal: bool,
+    attn_mask: Tensor | None,
+    scale: float | None,
+) -> tuple[Tensor | None, ...]:
+    # This is the double-backward rule for the generated CPU flash forward.
+    # Recompute from its differentiable inputs because logsumexp is a detached
+    # auxiliary output; differentiating the native saved-tensor partials would
+    # omit that path and produce an incorrect total derivative.
+    def math_backward(
+        grad_out: Tensor, query: Tensor, key: Tensor, value: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        return _scaled_dot_product_flash_attention_for_cpu_backward_math(
+            grad_out,
+            query,
+            key,
+            value,
+            dropout_p,
+            is_causal,
+            attn_mask,
+            scale,
+        )
+
+    create_graph = torch.is_grad_enabled()
+    with torch.enable_grad():
+        inputs = (grad_out, query, key, value)
+        vjp_result = torch.func.vjp(math_backward, *inputs)
+        math_grads = vjp_result[0]
+        vjp_fn = vjp_result[1]
+        materialized_grad_outputs = tuple(
+            torch.zeros_like(math_grad) if grad_grad is None else grad_grad
+            for math_grad, grad_grad in zip(math_grads, grad_outputs)
+        )
+        required_grads = vjp_fn(materialized_grad_outputs)
+
+    result: list[Tensor | None] = [None] * 10
+    for index, (needs_grad, grad) in enumerate(
+        zip(needs_input_grad[: len(inputs)], required_grads)
+    ):
+        if needs_grad:
+            result[index] = grad if create_graph else grad.detach()
+    return tuple(result)
+
+
+class _ScaledDotProductFlashAttentionForCpuBackwardAutograd(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        grad_out: Tensor,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        out: Tensor,
+        logsumexp: Tensor,
+        dropout_p: float,
+        is_causal: bool,
+        attn_mask: Tensor | None,
+        scale: float | None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        return _scaled_dot_product_flash_attention_for_cpu_backward_native(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            dropout_p,
+            is_causal,
+            attn_mask,
+            scale,
+        )
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+        (
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            dropout_p,
+            is_causal,
+            attn_mask,
+            scale,
+        ) = inputs
+        ctx.set_materialize_grads(False)
+        ctx.save_for_backward(grad_out, query, key, value, out, logsumexp, attn_mask)
+        ctx.dropout_p = dropout_p
+        ctx.is_causal = is_causal
+        ctx.scale = scale
+
+    @staticmethod
+    def backward(ctx: Any, *grad_outputs: Any) -> Any:
+        grad_out, query, key, value, out, logsumexp, attn_mask = ctx.saved_tensors
+        return _scaled_dot_product_flash_attention_for_cpu_backward_vjp(
+            ctx.needs_input_grad,
+            grad_outputs,
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            ctx.dropout_p,
+            ctx.is_causal,
+            attn_mask,
+            ctx.scale,
+        )
+
+
+@aten._scaled_dot_product_flash_attention_for_cpu_backward.default.py_impl(
+    DispatchKey.Autograd
+)
+def scaled_dot_product_flash_attention_for_cpu_backward_autograd(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    *,
+    attn_mask: Tensor | None = None,
+    scale: float | None = None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    if not torch.is_grad_enabled() or not torch._C._any_requires_grad(
+        grad_out, query, key, value, out, logsumexp, attn_mask
+    ):
+        return _scaled_dot_product_flash_attention_for_cpu_backward_native(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            dropout_p,
+            is_causal,
+            attn_mask,
+            scale,
+        )
+
+    return _ScaledDotProductFlashAttentionForCpuBackwardAutograd.apply(
+        grad_out,
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        dropout_p,
+        is_causal,
+        attn_mask,
+        scale,
+    )
+
+
+def _scaled_dot_product_flash_attention_for_cpu_backward_functorch(
+    grad_out: Tensor | None,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    *,
+    attn_mask: Tensor | None = None,
+    scale: float | None = None,
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+    interpreter = retrieve_current_functorch_interpreter()
+    if grad_out is None:
+        return None, None, None
+
+    tensor_args = (grad_out, query, key, value, out, logsumexp, attn_mask)
+    if interpreter.key() != TransformType.Grad or not any(
+        arg is not None and is_functorch_wrapped_tensor(arg) for arg in tensor_args
+    ):
+        with torch.enable_grad(), interpreter.lower():
+            return aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out,
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                dropout_p,
+                is_causal,
+                attn_mask=attn_mask,
+                scale=scale,
+            )
+
+    level = interpreter.level()
+
+    class _ScaledDotProductFlashAttentionForCpuBackwardGrad(
+        torch.autograd.function._SingleLevelFunction
+    ):
+        @staticmethod
+        def forward(
+            ctx: Any,
+            grad_out: Tensor,
+            query: Tensor,
+            key: Tensor,
+            value: Tensor,
+            out: Tensor,
+            logsumexp: Tensor,
+            dropout_p: float,
+            is_causal: bool,
+            attn_mask: Tensor | None,
+            scale: float | None,
+        ) -> tuple[Tensor, Tensor, Tensor]:
+            ctx.set_materialize_grads(False)
+            unwrapped_grad_out = _unwrap_for_grad(grad_out, level)
+            unwrapped_query = _unwrap_for_grad(query, level)
+            unwrapped_key = _unwrap_for_grad(key, level)
+            unwrapped_value = _unwrap_for_grad(value, level)
+            unwrapped_out = _unwrap_for_grad(out, level)
+            unwrapped_logsumexp = _unwrap_for_grad(logsumexp, level)
+            unwrapped_attn_mask = (
+                None if attn_mask is None else _unwrap_for_grad(attn_mask, level)
+            )
+            ctx.save_for_backward(
+                unwrapped_grad_out,
+                unwrapped_query,
+                unwrapped_key,
+                unwrapped_value,
+                unwrapped_out,
+                unwrapped_logsumexp,
+                unwrapped_attn_mask,
+            )
+            ctx.dropout_p = dropout_p
+            ctx.is_causal = is_causal
+            ctx.scale = scale
+            with torch.enable_grad(), interpreter.lower():
+                result = (
+                    aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                        unwrapped_grad_out,
+                        unwrapped_query,
+                        unwrapped_key,
+                        unwrapped_value,
+                        unwrapped_out,
+                        unwrapped_logsumexp,
+                        dropout_p,
+                        is_causal,
+                        attn_mask=unwrapped_attn_mask,
+                        scale=scale,
+                    )
+                )
+            return (
+                _wrap_for_grad(result[0], level),
+                _wrap_for_grad(result[1], level),
+                _wrap_for_grad(result[2], level),
+            )
+
+        @staticmethod
+        def backward(ctx: Any, *grad_outputs: Any) -> Any:
+            grad_out, query, key, value, out, logsumexp, attn_mask = ctx.saved_tensors
+            return _scaled_dot_product_flash_attention_for_cpu_backward_vjp(
+                ctx.needs_input_grad,
+                grad_outputs,
+                grad_out,
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                ctx.dropout_p,
+                ctx.is_causal,
+                attn_mask,
+                ctx.scale,
+            )
+
+    with enable_single_level_autograd_function():
+        # pyrefly: ignore [missing-attribute]
+        return _ScaledDotProductFlashAttentionForCpuBackwardGrad.apply(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            dropout_p,
+            is_causal,
+            attn_mask,
+            scale,
+        )
+
+
+_cpu_flash_attention_backward_functorch_lib = torch.library.Library(
+    "aten", "IMPL", "FuncTorchDynamicLayerFrontMode"
+)
+_cpu_flash_attention_backward_functorch_lib.impl(
+    "_scaled_dot_product_flash_attention_for_cpu_backward",
+    _scaled_dot_product_flash_attention_for_cpu_backward_functorch,
+)
 
 
 def register_inplace(aten_op, outplace_op):
