@@ -12,13 +12,13 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
-from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
 from torch._inductor.fx_passes.reinplace import (
     reinplace_inplaceable_ops,
     reinplace_inplaceable_ops_core,
 )
 from torch._inductor.fx_utils import FakeTensorUpdater
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -542,51 +542,44 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
 
-    def test_generalized_scatter_empty_base_chunked_subgraphs_reinplace(self):
-        def chunk_subgraph(chunk_x, projection):
-            hidden_grad = chunk_x @ projection
-            pred = hidden_grad.argmax(dim=-1)
-            tok_losses_chunk = hidden_grad.float().sum(dim=-1)
-            return tok_losses_chunk, pred, hidden_grad
+    def test_generalized_scatter_chunked_codegen_reinplace(self):
+        num_chunks = 2
+        chunk_rows = 2
+        width = 4
 
-        x = torch.randn(4, 4, device=device)
-        projection = torch.randn(4, 4, device=device)
-        chunk_size = 2
-        subgm = make_fx(chunk_subgraph, tracing_mode="fake")(x[:chunk_size], projection)
-
-        def f(x, projection):
-            grad_acc = torch.empty_like(x)
-            predictions = torch.empty((x.shape[0],), dtype=torch.int64, device=x.device)
-            tok_losses = torch.empty(
-                (x.shape[0],), dtype=torch.float32, device=x.device
+        def f(x, w):
+            # Cover a fresh empty base and an initialized base with smaller sources.
+            empty_out = torch.empty((x.shape[0], width), device=x.device, dtype=x.dtype)
+            small_src_out = torch.zeros(
+                (x.shape[0], width), device=x.device, dtype=x.dtype
             )
-            for chunk_idx, start in enumerate(range(0, x.shape[0], chunk_size)):
-                end = start + chunk_size
-                tok_losses_chunk, pred, hidden_grad = invoke_subgraph(
-                    subgm,
-                    f"loss_chunk_{chunk_idx}",
-                    x[start:end],
-                    projection,
+            for i in range(num_chunks):
+                start, end = i * chunk_rows, (i + 1) * chunk_rows
+                small_src = x[start:end]
+                chunk = small_src @ w
+                empty_out = aten.slice_scatter.default(empty_out, chunk, 0, start, end)
+                small_src_out = aten.slice_scatter.default(
+                    small_src_out, small_src, 0, start, end
                 )
-                grad_acc = aten.slice_scatter.default(
-                    grad_acc, hidden_grad, 0, start, end
-                )
-                predictions = aten.slice_scatter.default(
-                    predictions, pred, 0, start, end
-                )
-                tok_losses = aten.slice_scatter.default(
-                    tok_losses, tok_losses_chunk, 0, start, end
-                )
-            return grad_acc, predictions, tok_losses
+            return empty_out, small_src_out
 
-        gm, before_targets, after_targets = self._run_reinplace_pass_with_targets(
-            f, x, projection
+        x = torch.randn(num_chunks * chunk_rows, width, device=device)
+        w = torch.randn(width, width, device=device)
+        compiled = torch.compile(f, fullgraph=True)
+
+        out, (code,) = run_and_get_code(compiled, x, w)
+
+        self.assertEqual(out, (x @ w, x))
+        self.assertEqual(code.count("extern_kernels.mm("), num_chunks)
+        empty_strided = f"empty_strided_{device}"
+        self.assertEqual(
+            code.count(f"{empty_strided}((2, 4), (4, 1), torch.float32)"), 1
         )
-
-        self.assertEqual(before_targets.count(aten.slice_scatter.default), 6)
-        self.assertEqual(after_targets.count(aten.copy_.default), 6)
-        self.assertNotIn(aten.slice_scatter.default, after_targets)
-        self.assertEqual(gm(x, projection), f(x, projection))
+        self.assertEqual(
+            code.count(f"{empty_strided}((4, 4), (4, 1), torch.float32)"), 2
+        )
+        self.assertIn("# reuse", code)
+        self.assertIn("triton_poi_fused_zeros", code)
 
     @parametrize(
         "factory_op",
