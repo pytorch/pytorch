@@ -15,7 +15,7 @@ from .gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
 )
-from .gemm_epilogue_ir import GemmEpilogueIRAnalysis, GemmEpilogueIRExpression
+from .loop_ir_epilogue_lowering import GemmEpilogueIRAnalysis, GemmEpilogueIRExpression
 
 
 class LoopIRCuteDSLCodegen:
