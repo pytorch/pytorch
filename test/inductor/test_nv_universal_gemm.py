@@ -935,6 +935,46 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
+    def test_loop_ir_epilogue_graph_links_reduction_finalizer(self):
+        import sympy
+
+        from torch._inductor.kernel.loop_ir_epilogue_graph import trace_loop_ir_epilogue
+        from torch._inductor.virtualized import V
+
+        index = sympy.Symbol("i", integer=True, nonnegative=True)
+
+        def grouped_sum():
+            value = V.ops.load("gemm", index)
+            value = V.ops.reduction(torch.float32, torch.float32, "sum", value)
+            V.ops.store_reduction("sum", index // 64, value)
+
+        def finalizer():
+            value = V.ops.load("sum", index)
+            one = V.ops.constant(1.0, torch.float32)
+            V.ops.store("out", index, V.ops.sqrt(V.ops.add(value, one)))
+
+        graph = trace_loop_ir_epilogue((grouped_sum, finalizer))
+        boundary = graph.reduction_boundary("out", "gemm")
+        self.assertEqual(graph.nodes[boundary.index].op, "reduction")
+        self.assertEqual(len(graph.reachable_values("out")), 6)
+
+    def test_loop_ir_epilogue_graph_rejects_external_reduction_input(self):
+        import sympy
+
+        from torch._inductor.kernel.loop_ir_epilogue_graph import trace_loop_ir_epilogue
+        from torch._inductor.virtualized import V
+
+        index = sympy.Symbol("i", integer=True, nonnegative=True)
+
+        def reduction():
+            value = V.ops.add(V.ops.load("gemm", index), V.ops.load("other", index))
+            value = V.ops.reduction(torch.float32, torch.float32, "sum", value)
+            V.ops.store_reduction("out", index // 64, value)
+
+        graph = trace_loop_ir_epilogue((reduction,))
+        with self.assertRaisesRegex(NotImplementedError, "consume only gemm"):
+            graph.reduction_boundary("out", "gemm")
+
     def test_grouped_reduction_ir_normalizes_loop_representation(self):
         from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
