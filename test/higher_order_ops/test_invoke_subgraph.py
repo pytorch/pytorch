@@ -5010,14 +5010,14 @@ class TestInvokeSubgraphTrainStepCapture(TestCase):
             normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4, 4]", arg2_1: "f32[1, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1)
-        mm: "f32[4, 4]" = torch.ops.aten.mm.default(arg1_1, t);  t = None
+    def forward(self, arg0_1: "f32[1, 4]", arg1_1: "f32[4, 4]", arg2_1: "f32[4, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1)
+        mm: "f32[4, 4]" = torch.ops.aten.mm.default(arg2_1, t);  t = None
         partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
         invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', mm);  partitioned_fw_subgraph_0_0 = None
         getitem: "f32[4, 4]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
         detach_1: "f32[4, 4]" = torch.ops.aten.detach.default(getitem);  getitem = None
-        t_1: "f32[4, 1]" = torch.ops.aten.t.default(arg2_1)
+        t_1: "f32[4, 1]" = torch.ops.aten.t.default(arg0_1)
         mm_1: "f32[4, 1]" = torch.ops.aten.mm.default(detach_1, t_1)
         sum_1: "f32[]" = torch.ops.aten.sum.default(mm_1);  mm_1 = None
         ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
@@ -5030,7 +5030,7 @@ class GraphModule(torch.nn.Module):
         t_5: "f32[1, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
         empty_like: "f32[4, 4]" = torch.ops.aten.empty_like.default(detach_1, pin_memory = False);  detach_1 = None
         copy: "f32[4, 4]" = torch.ops.aten.copy.default(empty_like, mm_3);  empty_like = mm_3 = None
-        empty_like_1: "f32[1, 4]" = torch.ops.aten.empty_like.default(arg2_1, pin_memory = False);  arg2_1 = None
+        empty_like_1: "f32[1, 4]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False);  arg0_1 = None
         copy_1: "f32[1, 4]" = torch.ops.aten.copy.default(empty_like_1, t_5);  empty_like_1 = t_5 = None
         partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
         partitioned_fw_subgraph_0_0_recomputed = self.partitioned_fw_subgraph_0_0
@@ -5039,10 +5039,10 @@ class GraphModule(torch.nn.Module):
         invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_3_recomputed, copy);  partitioned_bw_subgraph_0_0 = getitem_3_recomputed = copy = None
         getitem_1: "f32[4, 4]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
         t_6: "f32[4, 4]" = torch.ops.aten.t.default(getitem_1);  getitem_1 = None
-        mm_4: "f32[4, 4]" = torch.ops.aten.mm.default(t_6, arg1_1);  t_6 = arg1_1 = None
+        mm_4: "f32[4, 4]" = torch.ops.aten.mm.default(t_6, arg2_1);  t_6 = arg2_1 = None
         t_7: "f32[4, 4]" = torch.ops.aten.t.default(mm_4);  mm_4 = None
         t_8: "f32[4, 4]" = torch.ops.aten.t.default(t_7);  t_7 = None
-        empty_like_2: "f32[4, 4]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False);  arg0_1 = None
+        empty_like_2: "f32[4, 4]" = torch.ops.aten.empty_like.default(arg1_1, pin_memory = False);  arg1_1 = None
         copy_2: "f32[4, 4]" = torch.ops.aten.copy.default(empty_like_2, t_8);  empty_like_2 = t_8 = None
         detach_2: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
         return (detach_2, copy_2, copy_1)
@@ -5054,8 +5054,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, primals_0: "f32[4, 4]", tangents_0: "f32[4, 4]"):
             cos: "f32[4, 4]" = torch.ops.aten.cos.default(primals_0);  primals_0 = None
             mul: "f32[4, 4]" = torch.ops.aten.mul.Tensor(tangents_0, cos);  tangents_0 = cos = None
-            return (mul,)
-""",
+            return (mul,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
