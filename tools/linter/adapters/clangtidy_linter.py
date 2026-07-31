@@ -33,6 +33,14 @@ def scm_root() -> str:
 PYTORCH_ROOT = scm_root()
 
 
+def _default_num_workers() -> int | None:
+    # clang-tidy is memory hungry, so respect MAX_JOBS to cap parallelism.
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
+
+
 # Returns '/usr/local/include/python<version number>'
 def get_python_include_dir() -> str:
     return gp()["include"]
@@ -249,11 +257,24 @@ def main() -> None:
         help="verbose logging",
     )
     parser.add_argument(
+        "-j",
+        "--num-workers",
+        type=int,
+        default=None,
+        help=(
+            "number of clang-tidy processes to run in parallel. Defaults to the "
+            "MAX_JOBS environment variable if set, otherwise the CPU count. "
+            "Lower this to reduce peak memory usage (clang-tidy is memory hungry)."
+        ),
+    )
+    parser.add_argument(
         "filenames",
         nargs="+",
         help="paths to lint",
     )
     args = parser.parse_args()
+
+    num_workers = args.num_workers or _default_num_workers()
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
@@ -294,7 +315,7 @@ def main() -> None:
     binary_path = os.path.abspath(args.binary)
 
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=num_workers,
         thread_name_prefix="Thread",
     ) as executor:
         futures = {

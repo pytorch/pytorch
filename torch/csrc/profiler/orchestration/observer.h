@@ -68,7 +68,6 @@ struct TORCH_API ExperimentalConfig {
       std::string custom_profiler_config = "",
       bool adjust_timestamps = false,
       bool trace_only = false);
-  explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel;

@@ -10,7 +10,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
 
@@ -46,6 +46,7 @@ from .cpp_utils import (
     LAYOUT_TO_ATEN,
 )
 from .wrapper import (
+    _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -56,22 +57,11 @@ from .wrapper import (
 )
 
 
-def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
-    """
-    Convert rational divisions in a solved integer symbol expression to exact
-    integer division before C++ printing.
-    """
-    expr = sympy.together(sympy.sympify(expr))
-    numerator, denominator = sympy.fraction(expr)
-    if denominator == 1:
-        return numerator
-    return CleanDiv(numerator, denominator)
-
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
+    from ..runtime.hints import TritonMeta
 
     # At most, the list nesting can go one layer deep.
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
@@ -106,7 +96,7 @@ class DeferredCpuTritonCallWrapper:
     wrapper_name: str
     kernel_name: str
     arg_types: list[Any]
-    triton_meta: dict[str, Any] | None = None
+    triton_meta: TritonMeta | None = None
     inductor_meta: dict[str, Any] | None = None
 
     def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
@@ -322,7 +312,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_dtypes: OrderedSet[str] = OrderedSet()
         self.used_cached_layouts: OrderedSet[str] = OrderedSet()
         self.used_cached_memory_formats: OrderedSet[str] = OrderedSet()
-        self.used_cond_predicate: OrderedSet[str] = OrderedSet()
+        self.used_switch_selector: OrderedSet[str] = OrderedSet()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -351,7 +341,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             OrderedSet(self.declared_int_array_vars),
             dict(self.codegen_int_array_var_cache),
             OrderedSet(self.kernel_numel_expr),
-            OrderedSet(self.used_cond_predicate),
+            OrderedSet(self.used_switch_selector),
         )
         subgraph_state = [
             (
@@ -372,7 +362,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.declared_int_array_vars,
                 self.codegen_int_array_var_cache,
                 self.kernel_numel_expr,
-                self.used_cond_predicate,
+                self.used_switch_selector,
             ) = wrapper_state
             for graph, removed_buffers, inplaced_to_remove in subgraph_state:
                 graph.removed_buffers = removed_buffers
@@ -432,7 +422,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
@@ -657,6 +647,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         name: str,
         value: ir.TensorBox,
         bound_vars: OrderedSet[sympy.Symbol],
+        deferred_symbol_assignments=None,
     ):
         """Assign symbolic shapes to C++ locals, with replacement aliases."""
         code = self.prefix
@@ -671,54 +662,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
-        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts and graph input metadata can reference
-            # either side of a backed-symbol replacement. Emit aliases so both
-            # the pre-replacement and canonical names are defined.
-            def is_backed_symbol(s: sympy.Symbol) -> bool:
-                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
-
-            def decl_type(s: sympy.Symbol) -> str:
-                if s.is_integer:
-                    return "int64_t"
-                if s.is_float:
-                    return "double"
-                raise AssertionError("Unexpected symbol type")
-
-            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
-                if (
-                    tgt == sym
-                    and isinstance(src, sympy.Symbol)
-                    and src not in bound_vars
-                    and is_backed_symbol(src)
-                    and is_backed_symbol(sym)
-                ):
-                    code.writeline(f"{decl_type(src)} {src} = {sym};")
-                    bound_vars.add(src)
-                elif (
-                    src == sym
-                    and isinstance(tgt, sympy.Symbol)
-                    and tgt not in bound_vars
-                    and is_backed_symbol(sym)
-                    and is_backed_symbol(tgt)
-                ):
-                    code.writeline(f"{decl_type(tgt)} {tgt} = {sym};")
-                    bound_vars.add(tgt)
-
         def codegen_symbol(
             sym_or_exp: sympy.Symbol | sympy.Expr,
             base_name: str,
             name_fn: Callable[[str], str],
             dim: int,
-        ):
+            deferred_symbol_assignments=None,
+        ) -> bool:
             if isinstance(sym_or_exp, sympy.Symbol):
                 if sym_or_exp in bound_vars:
-                    return
+                    return False
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
                 if symbol_is_type(sym_or_exp, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                     self.unbacked_symbol_decls.add(str(sym_or_exp))
-                maybe_emit_replacement_aliases(sym_or_exp)
+                self.maybe_emit_replacement_aliases(sym_or_exp, bound_vars)
+                return True
             elif isinstance(sym_or_exp, sympy.Expr):
                 undefined_symbols = [
                     sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
@@ -727,7 +686,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Skip if expression contains no symbols or if multiple
                     # symbols exists since we assume each base symbol is defined
                     # by other codegen_symbol calls.
-                    return
+                    if (
+                        len(undefined_symbols) > 1
+                        and deferred_symbol_assignments is not None
+                    ):
+
+                        def retry(deferred_symbol_assignments):
+                            return codegen_symbol(
+                                sym_or_exp,
+                                base_name,
+                                name_fn,
+                                dim,
+                                deferred_symbol_assignments,
+                            )
+
+                        deferred_symbol_assignments.append(retry)
+                    return False
 
                 from torch.utils._sympy.solve import try_solve
 
@@ -735,41 +709,98 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 base_name = name_fn(base_name)
                 # Use a size symbol to solve the free symbol
                 size_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
-                code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
                 solution = try_solve(sympy.Eq(sym_or_exp, size_symbol), free_symbol)
                 if solution is not None:
+                    code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
                     expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
                     code.writeline(f"int64_t {free_symbol} = {cexpr(expr)};")
                     bound_vars.add(free_symbol)
-                else:
-                    raise AssertionError(
-                        str(sympy.Eq(sym_or_exp, size_symbol)) + " is not solvable"
-                    )
+                    if symbol_is_type(
+                        free_symbol, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    ):
+                        self.unbacked_symbol_decls.add(str(free_symbol))
+                    self.maybe_emit_replacement_aliases(free_symbol, bound_vars)
+                    return True
+                return False
+            return False
 
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
-            if value.is_integer:
-                decl = "int64_t"
-            elif value.is_float:
+            if symbol_is_type(value, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
                 decl = "double"
             else:
-                raise AssertionError("Unexpected symbol type")
+                decl = "int64_t"
             code.writeline(f"{decl} {value} = {name};")
             bound_vars.add(value)
             if symbol_is_type(value, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                 self.unbacked_symbol_decls.add(str(value))
-            maybe_emit_replacement_aliases(value)
+            self.maybe_emit_replacement_aliases(value, bound_vars)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                codegen_symbol(size, name, sizeof, dim)
+                codegen_symbol(size, name, sizeof, dim, deferred_symbol_assignments)
             for dim, stride in enumerate(value.get_stride()):
-                codegen_symbol(stride, name, strideof, dim)
-        elif isinstance(value, ir.TorchBindObject):
-            # torchbind objects are loaded in proxy executor
+                codegen_symbol(stride, name, strideof, dim, deferred_symbol_assignments)
+        elif isinstance(
+            value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
+        ):
+            # Python-only inputs do not define C++ shape symbols.
             pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
+
+    def maybe_emit_replacement_aliases(  # type: ignore[override]
+        self,
+        sym: sympy.Symbol,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        sizevars = getattr(V.graph, "sizevars", None)
+        shape_env = getattr(sizevars, "shape_env", None)
+        if shape_env is None:
+            return
+
+        def is_backed_symbol(s: sympy.Symbol) -> bool:
+            return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+
+        def decl_type(s: sympy.Symbol) -> str:
+            if symbol_is_type(s, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
+                return "double"
+            return "int64_t"
+
+        for src, tgt in shape_env.replacements.items():
+            if (
+                tgt == sym
+                and isinstance(src, sympy.Symbol)
+                and src not in bound_vars
+                and is_backed_symbol(src)
+                and is_backed_symbol(sym)
+            ):
+                self.prefix.writeline(f"{decl_type(src)} {src} = {sym};")
+                bound_vars.add(src)
+            elif (
+                src == sym
+                and isinstance(tgt, sympy.Symbol)
+                and tgt not in bound_vars
+                and is_backed_symbol(sym)
+                and is_backed_symbol(tgt)
+            ):
+                self.prefix.writeline(f"{decl_type(tgt)} {tgt} = {sym};")
+                bound_vars.add(tgt)
+
+    def bind_input_symbol(
+        self,
+        sym: sympy.Symbol,
+        input_name: str,
+        kind: Literal["size", "stride"],
+        dim: int,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        if sym in bound_vars:
+            return
+        accessor = "sizes" if kind == "size" else "strides"
+        self.prefix.writeline(f"int64_t {sym} = {input_name}.{accessor}()[{dim}];")
+        bound_vars.add(sym)
+        self.maybe_emit_replacement_aliases(sym, bound_vars)
 
     def generate_input_output_runtime_checks(self):
         """
@@ -1613,7 +1644,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if is_constant_buffer:
                 # See NOTE(return_constant) above.
                 self.wrapper_call.writeline(
-                    f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                    "AOTI_TORCH_ERROR_CODE_CHECK("
+                    f"aoti_torch_clone({output}, &output_handles[{idx}]));"
                 )
             else:
                 if output in output2idx:
@@ -1724,7 +1756,34 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             """)
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
+        input_python_indices = [
+            idx
+            for idx, value in enumerate(V.graph.graph_inputs.values())
+            if isinstance(
+                value,
+                (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState),
+            )
+        ]
+        python_only_input_indices = (
+            "set()"
+            if not input_python_indices
+            else "{" + ", ".join(map(str, input_python_indices)) + "}"
+        )
+        wrapper_body = f"""
+                    python_only_input_indices = {python_only_input_indices}
+                    input_tensors = []
+                    input_handle_positions = []
+                    # Preserve graph input slots: Python-only inputs stay None
+                    # and are unpacked as nullptrs by the JIT cpp wrapper.
+                    input_handles = [None] * len(args)
+                    for idx, arg in enumerate(args):
+                        if idx in python_only_input_indices:
+                            continue
+                        input_handle_positions.append(idx)
+                        input_tensors.append(
+                            arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu')
+                        )
+        """
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1737,16 +1796,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
             constants_str = f"[{', '.join(V.graph.constants.keys())}]"
             wrapper_body += f"""
                     constants_tensor = {constants_str}
+                    constants_start_idx = len(input_handles)
+                    input_handles.extend([None] * len(constants_tensor))
+                    input_handle_positions.extend(
+                        range(constants_start_idx, constants_start_idx + len(constants_tensor))
+                    )
                     input_tensors.extend(constants_tensor)
             """
         # Convert vector of at::Tensor to vector of AtenTensorHandle.
         # If we pass at::Tensor, the compilation will be too slow.
         wrapper_body += """
-                    input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
+                    packed_input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
+                    for idx, handle in zip(input_handle_positions, packed_input_handles):
+                        input_handles[idx] = handle
         """
         # Release the inputs for memory reuse.
         wrapper_body += """
                     args.clear()
+                    del input_handle_positions
+                    del packed_input_handles
                     del input_tensors
         """
 
@@ -1989,6 +2057,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]
+        # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure
+        # surfaces instead of being silently swallowed.
         line = f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
@@ -2002,8 +2072,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     raise AssertionError(
                         "Expect reduce to be None for aten.scatter_ with scalar src"
                     )
-        line += ");"
-        self.writeline(line)
+        line += ")"
+        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({line});")
 
     def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
@@ -2021,7 +2091,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             accumulate,
         ]
         args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
-        self.writeline(self.wrap_kernel_call(kernel, args))
+        # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure surfaces instead
+        # of being silently swallowed.
+        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
@@ -2265,10 +2337,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         size: str,
         stride: str,
         op_name: str,
+        dtype: torch.dtype | None = None,
     ) -> None:
         if V.graph.aot_mode and V.graph.is_const_graph:
             return
-        stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
+        dtype_args = (
+            f', {self.codegen_dtype(dtype)}, "{dtype}"' if dtype is not None else ""
+        )
+        stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}"{dtype_args});'
         if V.graph.aot_mode:
             guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
             if V.graph.is_dual_wrapper_mode:
@@ -2280,6 +2356,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 code.writeline(guarded)
         else:
             code.writeline(stmt)
+
+    def _codegen_assert_size_stride_grouped(
+        self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        for name, size, stride in asserts:
+            self._codegen_assert_size_stride(code, name, size, stride, op_name)
 
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
@@ -2500,7 +2582,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ),
             f"&{tmp_name}",
         ]
-        # We return the lines instead of writing here because writing here is bug prune.
+        # We return the lines instead of writing here because writing here is bug prone.
         # If you write aoti_torch__alloc_from_pool lines, you must write the RAIIAtenTensorHandle
         # as well, otherwise you get memory leaks
         allocations_to_write = [
@@ -2732,88 +2814,76 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "codegen invoke_subgraph is not implemented for cpp wrapper"
         )
 
-    def codegen_conditional(self, conditional):
-        """Emit ABI-compatible C++ for a higher-order conditional."""
-        outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
+    def codegen_switch(self, node) -> None:
+        """Emit ABI-compatible C++ for a higher-order cond/switch."""
+        outer_inputs = [f"{buf.codegen_reference()}" for buf in node.operands]
         outer_outputs = []
-        for out in conditional.outputs:
+        for out in node.outputs:
             # in ABI-compatible mode, ir.MultiOutput is not codegened,
             # hence pre-declare output variables directly and separately
             self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
             outer_outputs.append(out.get_name())
 
-        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-            # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the underlying scalar bool Tensor
-            predicate = f"{conditional.predicate.get_name()}_scalar"
-            if predicate not in self.used_cond_predicate:
+        if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
+            # use the ABI shim to extract the scalar selector value from the Tensor;
+            # always as int64 so the branch loop can use uniform index comparisons
+            # (cond: True==1, False==0)
+            selector_var = f"{node.selector.get_name()}_scalar"
+            if selector_var not in self.used_switch_selector:
                 self.codegen_tensor_item(
-                    torch.bool,
-                    conditional.predicate.codegen_reference(),
-                    predicate,
+                    torch.int64,
+                    node.selector.codegen_reference(),
+                    selector_var,
                 )
-                self.used_cond_predicate.add(predicate)
+                self.used_switch_selector.add(selector_var)
         else:
-            # the predicate is not a Tensor: SymBool or Python bool
-            predicate = conditional.predicate.codegen_reference()
+            # ShapeAsConstantBuffer yields a C++ bool/int expression; Cast to int64_t.
+            selector_var = f"static_cast<int64_t>({node.selector.codegen_reference()})"
 
-        def codegen_original_conditional() -> None:
-            self.writeline(f"if ({predicate}) {{")
+        def _emit_branch(header: str, branch) -> None:
+            self.writeline(header)
             with self._preserve_device_guard_state():
-                self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-                self.codegen_subgraph(
-                    conditional.true_subgraph, outer_inputs, outer_outputs
-                )
+                self.writeline(EnterSubgraphLine(self, branch.graph))
+                self.codegen_subgraph(branch, outer_inputs, outer_outputs)
                 self.writeline(ExitSubgraphLine(self))
-            self.writeline("} else {")
-            with self._preserve_device_guard_state():
-                self.writeline(
-                    EnterSubgraphLine(self, conditional.false_subgraph.graph)
-                )
-                self.codegen_subgraph(
-                    conditional.false_subgraph, outer_inputs, outer_outputs
-                )
-                self.writeline(ExitSubgraphLine(self))
+
+        def emit_switch_body() -> None:
+            num_branches = len(node.branches)
+            for b_idx, branch in enumerate(node.branches):
+                if b_idx == 0:
+                    header = f"if ({selector_var} == 0) {{"
+                elif b_idx < num_branches - 1:
+                    header = f"}} else if ({selector_var} == {b_idx}) {{"
+                else:
+                    header = "} else {"
+                _emit_branch(header, branch)
             self.writeline("}")
 
         if not V.graph.is_dual_wrapper_mode:
-            return codegen_original_conditional()
+            return emit_switch_body()
 
-        graphs = (
-            conditional.true_subgraph.graph,
-            conditional.false_subgraph.graph,
-        )
+        graphs = tuple(branch.graph for branch in node.branches)
         jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
         with (
             self._preserve_codegen_state(graphs),
             self._target_buf("wrapper_call", jit_code),
             self.set_writeline(jit_code, jit_code.writeline_jit),
         ):
-            self.writeline("{")
-            with self._preserve_device_guard_state():
-                self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-                self.codegen_subgraph(
-                    conditional.true_subgraph, outer_inputs, outer_outputs
-                )
-                self.writeline(ExitSubgraphLine(self))
-            self.writeline("}")
-            self.writeline("{")
-            with self._preserve_device_guard_state():
-                self.writeline(
-                    EnterSubgraphLine(self, conditional.false_subgraph.graph)
-                )
-                self.codegen_subgraph(
-                    conditional.false_subgraph, outer_inputs, outer_outputs
-                )
-                self.writeline(ExitSubgraphLine(self))
-            self.writeline("}")
+            # JIT pass: visit each branch once for lazy kernel autotune
+            for branch in node.branches:
+                self.writeline("{")
+                with self._preserve_device_guard_state():
+                    self.writeline(EnterSubgraphLine(self, branch.graph))
+                    self.codegen_subgraph(branch, outer_inputs, outer_outputs)
+                    self.writeline(ExitSubgraphLine(self))
+                self.writeline("}")
 
         aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
         with (
             self._target_buf("wrapper_call", aot_code),
             self.set_writeline(aot_code, aot_code.writeline_aot),
         ):
-            codegen_original_conditional()
+            emit_switch_body()
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
@@ -3156,8 +3226,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return type_supported(t.getElementType())
             return isinstance(t, supported_types)
 
+        def uses_symint(t: torch.JitType) -> bool:
+            # SymInt/SymBool/SymFloat are reported as Int/Bool/Float by
+            # JitType.type, so they pass type_supported above.  But the
+            # StableIValue codegen below emits no symbolic-int-aware conversion,
+            # so route such ops to the boxed dispatch path, which handles
+            # c10::SymInt correctly.  real_type preserves the symbolic types.
+            if isinstance(t, (torch.OptionalType, torch.ListType)):
+                return uses_symint(t.getElementType())
+            return (
+                isinstance(t, (torch.SymIntType, torch.SymBoolType))
+                or repr(t) == "SymFloat"
+            )
+
         return all(
-            type_supported(a.type)
+            type_supported(a.type) and not uses_symint(a.real_type)
             for a in chain(op._schema.arguments, op._schema.returns)
         )
 
@@ -3218,7 +3301,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
-            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            if isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()
@@ -3420,12 +3505,12 @@ if (!custom_op_wrapper) {
 
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             def handle_scalar(scalar):
+                if isinstance(scalar, bool):
+                    return f"PyBool_FromLong({1 if scalar else 0})"
                 if isinstance(scalar, int):
                     return f"PyLong_FromLongLong({scalar})"
                 if isinstance(scalar, float):
                     return f"PyFloat_FromDouble({self.generate_float_value(scalar)})"
-                if isinstance(scalar, bool):
-                    return f"PyBool_FromLong({1 if scalar else 0})"
                 if isinstance(scalar, complex):
                     real = self.generate_float_value(scalar.real)
                     imag = self.generate_float_value(scalar.imag)
@@ -3441,11 +3526,16 @@ if (!custom_op_wrapper) {
                     f"scalar {scalar}, {type(scalar)} cannot be handled by handle_scalar"
                 )
 
+            is_any = isinstance(arg_type, torch.AnyType)
+
+            def handle_any(types: type | tuple[type, ...]):
+                return is_any and isinstance(raw_arg, types)
+
             if raw_arg is None:
                 # Py_None is a singleton, so we have to explicitly incref it here
                 lines.append("Py_INCREF(Py_None);\n")
                 return "Py_None"
-            elif isinstance(arg_type, torch.TensorType):
+            elif isinstance(arg_type, torch.TensorType) or handle_any(ir.IRNode):
                 # In some cases, scalar arguments may be passed in place of tensors.
                 if not hasattr(raw_arg, "codegen_reference"):
                     return handle_scalar(raw_arg)
@@ -3459,22 +3549,24 @@ if (!custom_op_wrapper) {
                 return f"PyCapsule_New(reinterpret_cast<void*>({base_handle}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.OptionalType):
                 return generate_py_arg_inner(lines, raw_arg, arg_type.getElementType())
-            elif isinstance(arg_type, torch.IntType):
+            elif isinstance(arg_type, torch.BoolType) or handle_any(bool):
+                return f"PyBool_FromLong({1 if raw_arg else 0})"
+            elif isinstance(arg_type, torch.IntType) or handle_any(int):
                 # int
                 return f"PyLong_FromLongLong({raw_arg})"
-            elif isinstance(arg_type, torch.SymIntType):
+            elif isinstance(arg_type, torch.SymIntType) or handle_any(torch.SymInt):
                 # SymInt
                 expr = (
                     raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
                 )
                 return f"PyLong_FromLongLong({cexpr(expr)})"
-            elif isinstance(arg_type, torch.FloatType):
+            elif isinstance(arg_type, torch.FloatType) or handle_any(float):
                 return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
-            elif isinstance(arg_type, torch.BoolType):
-                return f"PyBool_FromLong({1 if raw_arg else 0})"
-            elif isinstance(arg_type, torch.StringType):
+            elif isinstance(arg_type, torch.StringType) or handle_any(str):
                 return f'PyUnicode_FromString("{raw_arg}")'
-            elif isinstance(arg_type, torch.NumberType):
+            elif isinstance(arg_type, torch.NumberType) or handle_any(
+                (*SymTypes, torch.types.Number, complex)
+            ):
                 # Union[bool, int, float, complex]
                 # torch/_prims_common/__init__.py
                 return handle_scalar(raw_arg)
@@ -3602,7 +3694,8 @@ if (!custom_op_wrapper) {
                         var_name = f"tmp_var_{next(tmp_var_number)}"
                         dispatch_lines.writeline(f"AtenTensorHandle {var_name};")
                         dispatch_lines.writeline(
-                            f"aoti_torch_new_tensor_handle({raii_var}, &{var_name});"
+                            "AOTI_TORCH_ERROR_CODE_CHECK("
+                            f"aoti_torch_new_tensor_handle({raii_var}, &{var_name}));"
                         )
                         return f"torch::stable::detail::from({var_name})"
                     # If the RAII tensor _is_ a temporary scoped to this fallback call,
@@ -3743,6 +3836,12 @@ if (!custom_op_wrapper) {
 
             def codegen_ivalue(raw_arg: Any, arg_type: torch.JitType) -> str:
                 if raw_arg is None:
+                    # A None at a non-optional Tensor arg means an absent tensor.
+                    # Box it as an undefined at::Tensor (ATen's absent-tensor
+                    # sentinel, matching eager value_or(Tensor())); boxing None
+                    # would fail to unbox as `const Tensor&`.  Optionals stay None.
+                    if isinstance(arg_type, torch.TensorType):
+                        return "c10::IValue(at::Tensor())"
                     return "c10::IValue()"
 
                 if isinstance(arg_type, torch.OptionalType):
@@ -3928,14 +4027,41 @@ if (!custom_op_wrapper) {
             }}
             """)
 
-        if len(output_args) == 1 and (output := output_args[0]) is not None:
+        if raw_outputs:
+            num_returned_outputs = 0
+            returned_output_slots = []
+            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+                if isinstance(raw_output_arg, ir.MutationOutput):
+                    continue
+                if output_arg is not None:
+                    returned_output_slots.append((num_returned_outputs, output_arg))
+                num_returned_outputs += 1
+        else:
+            num_returned_outputs = len(output_args)
+            returned_output_slots = [
+                (idx, output_arg)
+                for idx, output_arg in enumerate(output_args)
+                if output_arg is not None
+            ]
+
+        # custom_op_wrapper returns a bare capsule only for a single, non-list
+        # Tensor return. A Tensor[] return (even of length 1) or multiple returns
+        # come back as a Python list that must be indexed with PyList_GET_ITEM.
+        schema_returns = op_overload._schema.returns
+        returns_python_list = len(schema_returns) != 1 or isinstance(
+            schema_returns[0].real_type, torch.ListType
+        )
+        if (
+            num_returned_outputs == 1
+            and returned_output_slots
+            and not returns_python_list
+        ):
             # result is a single tensor
+            _, output = returned_output_slots[0]
             lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
-            # result is a tuple of tensors
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
-                    continue
+            # result is a list of tensors (Tensor[] or multiple returns)
+            for idx, output_arg in returned_output_slots:
                 lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"
 
         if raw_outputs:
