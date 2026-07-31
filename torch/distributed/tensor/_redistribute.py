@@ -9,7 +9,7 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast, TypedDict
+from typing import Any, cast, TypedDict
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -34,8 +34,9 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.types import IntLikeType
+from torch.types import FloatLikeType, IntLikeType
 from torch.utils._debug_mode import get_active_debug_mode
+from torch.utils._typing_utils import not_none
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,26 @@ _FORCE_MIN_COST_REDISTRIBUTION_PLAN: bool | None = None
 # consecutive same-type collectives into flattened operations is skipped,
 # and the unmodified transform_infos list is returned as-is.
 _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION: bool = False
+
+
+def _redistribute_cost_sort_key(cost: FloatLikeType) -> float:
+    if isinstance(cost, float):
+        return cost
+    if isinstance(cost, torch.SymFloat):
+        expr = cost.node.expr
+    else:
+        return float(cost)
+
+    free_symbols = expr.free_symbols
+    if not free_symbols:
+        return float(expr)
+
+    shape_env = not_none(cost.node.shape_env)
+    hint_overrides = shape_env.var_to_hint_override
+    if free_symbols.issubset(hint_overrides):
+        return float(expr.xreplace(hint_overrides))
+
+    return float(shape_env.optimization_hint(expr, fallback=None))
 
 
 @contextlib.contextmanager
@@ -297,7 +318,9 @@ def _get_flattened_mesh_by_layout(
     input) rather than as a get_attr constant holding an unpicklable
     ProcessGroup.
     """
-    if _are_we_tracing() and torch.distributed.config.compile_on_one_rank:
+    import torch.compiler.config
+
+    if _are_we_tracing() and torch.compiler.config.compile_on_one_rank:
         # Pre-check: the custom op can't return None (torch.library doesn't
         # support Optional opaque return types), so guard here first.
         if _get_flattened_mesh_by_layout_impl(mesh, mesh_dims) is None:
@@ -1159,20 +1182,23 @@ class DTensorRedistributePlanner:
         """
         import heapq
 
-        # priority queue (cost, counter, state, path) for Dijkstra's algorithm
-        # use counter to break ties and avoid comparing DistState objects
+        # priority queue (cost_key, counter, cost, state, path) for Dijkstra's
+        # algorithm. The sort key is a non-guarding optimization hint so that
+        # symbolic communication costs do not force heapq to evaluate guards.
+        # Counter breaks ties and avoids comparing DistState objects.
         counter = 0
         pq: list[
             tuple[
                 float,
                 int,
+                FloatLikeType,
                 DTensorRedistributePlanner.DistState,
                 list[DTensorRedistributePlanner.DistState],
             ]
-        ] = [(0, counter, src_state, [src_state])]
+        ] = [(0.0, counter, 0.0, src_state, [src_state])]
         visited = set()
         while pq:
-            cost, _, current_state, path = heapq.heappop(pq)
+            _, _, cost, current_state, path = heapq.heappop(pq)
             if current_state == dst_state:
                 return path
             if current_state in visited:
@@ -1184,10 +1210,19 @@ class DTensorRedistributePlanner:
             )
             for next_state, transition_cost in next_states.items():
                 if next_state not in visited:
-                    new_cost = cost + transition_cost
+                    new_cost = cast(Any, cost) + transition_cost
                     new_path = path + [next_state]
                     counter += 1
-                    heapq.heappush(pq, (new_cost, counter, next_state, new_path))
+                    heapq.heappush(
+                        pq,
+                        (
+                            _redistribute_cost_sort_key(new_cost),
+                            counter,
+                            new_cost,
+                            next_state,
+                            new_path,
+                        ),
+                    )
         raise AssertionError(
             f"No path found from src_state {src_state} to dst_state {dst_state}"
         )

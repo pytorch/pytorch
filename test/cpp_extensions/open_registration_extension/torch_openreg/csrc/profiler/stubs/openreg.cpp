@@ -24,7 +24,7 @@ static void openregCheck(orError_t result, const char* file, int line) {
     } else {
       ss << "OpenReg error: " << result;
     }
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 }
 #define TORCH_OPENREG_CHECK(result) openregCheck(result, __FILE__, __LINE__);
