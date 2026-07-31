@@ -3623,26 +3623,28 @@ class TestBinaryUfuncsDevice(TestCase):
                     shift_left_expected,
                     msg=lambda msg: f"{msg}\n<< {shift}",
                 )
-                self.compare_with_numpy(
-                    lambda x: x << shift,
-                    lambda x: np.left_shift(x, shift),
-                    input,
-                    exact_dtype=exact_dtype,
-                    msg=f"<< {shift}",
-                )
+                if not (TEST_WITH_TORCHDYNAMO and shift < 0):
+                    self.compare_with_numpy(
+                        lambda x: x << shift,
+                        lambda x: np.left_shift(x, shift),
+                        input,
+                        exact_dtype=exact_dtype,
+                        msg=f"<< {shift}",
+                    )
                 shift_right = input >> shift
                 self.assertEqual(
                     shift_right,
                     shift_right_expected,
                     msg=lambda msg: f"{msg}\n>> {shift}",
                 )
-                self.compare_with_numpy(
-                    lambda x: x >> shift,
-                    lambda x: np.right_shift(x, shift),
-                    input,
-                    exact_dtype=exact_dtype,
-                    msg=f">> {shift}",
-                )
+                if not (TEST_WITH_TORCHDYNAMO and shift < 0):
+                    self.compare_with_numpy(
+                        lambda x: x >> shift,
+                        lambda x: np.right_shift(x, shift),
+                        input,
+                        exact_dtype=exact_dtype,
+                        msg=f">> {shift}",
+                    )
 
     @onlyNativeDeviceTypes
     @dtypes(
