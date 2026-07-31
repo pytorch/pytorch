@@ -1,113 +1,52 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/StoreManager.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <set>
 
 namespace c10d::nccl2 {
-
-// Initialize the static counter
-int NCCLBootstrap::counter_ = 0;
-
-const std::string kUniqueidXchgMethodAuto = "auto";
-const std::string kUniqueidXchgMethodTCPStore = "tcpstore";
-const std::string kUniqueidXchgMethodDefault = kUniqueidXchgMethodAuto;
 
 NCCLBootstrap::NCCLBootstrap(
     c10::intrusive_ptr<c10d::Store> store,
     c10::Device device,
     int rank,
     int comm_size,
+    uint64_t generation,
     std::shared_ptr<NcclApi> nccl_api,
-    std::shared_ptr<CudaApi> cuda_api,
     std::chrono::milliseconds timeout)
     : timeout_(timeout),
-      store_(store),
-      created_internal_store_(false),
+      generation_(generation),
+      store_(std::move(store)),
       device_(device),
-      nccl_api_(nccl_api),
-      cuda_api_(cuda_api) {
-  // Rank/size come from the c10d Backend ctor. Upstream torchcomms queried
-  // these from TORCHCOMM_RANK/SIZE env (query_ranksize); under c10d they are
-  // known explicitly, so we use them directly.
-  rank_ = rank;
-  comm_size_ = comm_size;
-
-  const char* uniqueid_xchg_env =
-      std::getenv("TORCHCOMM_NCCL_BOOTSTRAP_UNIQUEID_EXCHANGE_METHOD");
-  if (uniqueid_xchg_env == nullptr) {
-    TC_LOG(INFO)
-        << "TORCHCOMM_NCCL_BOOTSTRAP_UNIQUEID_EXCHANGE_METHOD not set, "
-        << "defaulting to " << kUniqueidXchgMethodDefault;
-    uniqueid_xchg_method_ = kUniqueidXchgMethodDefault;
-  } else {
-    uniqueid_xchg_method_ = uniqueid_xchg_env;
-  }
-  std::transform(
-      uniqueid_xchg_method_.begin(),
-      uniqueid_xchg_method_.end(),
-      uniqueid_xchg_method_.begin(),
-      [](unsigned char c) { return std::tolower(c); });
+      nccl_api_(std::move(nccl_api)),
+      rank_(rank),
+      comm_size_(comm_size) {
+  TORCH_CHECK(store_ != nullptr, "NCCLBootstrap requires a store");
 
   if (device_.index() == -1) {
-    int device_count;
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->getDeviceCount(&device_count),
-        "Failed to get CUDA device count");
-
-    device_ = c10::Device(c10::kCUDA, rank_ % device_count);
+    const auto device_count = c10::cuda::device_count_ensure_non_zero();
+    device_ = c10::Device(
+        c10::kCUDA, static_cast<c10::DeviceIndex>(rank_ % device_count));
     TC_LOG(INFO) << "User did not provide device ID; using device cuda:"
                  << static_cast<int>(device_.index());
   }
-
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->setDevice(device_.index()),
-      fmt::format("Failed to set device to {}", device_.index()));
-
-  // Allocate CUDA memory for a single float32 value used in barrier operations
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->malloc(&barrier_buffer_, sizeof(float)),
-      "Failed to allocate barrier buffer");
 }
 
-NCCLBootstrap::~NCCLBootstrap() noexcept {
-  if (barrier_buffer_ != nullptr) {
-    CUDA_CHECK_IGNORE(
-        cuda_api_,
-        cuda_api_->free(barrier_buffer_),
-        "Failed to free barrier buffer");
-    barrier_buffer_ = nullptr;
-  }
-}
-
-std::string NCCLBootstrap::getNCCLStoreKey() {
-  std::string key = fmt::format("{}{}", getNCCLStoreKeyPrefix(), counter_);
-  counter_++;
-  return key;
-}
-
-std::string NCCLBootstrap::getNCCLStoreKeyPrefix() {
-  return "nccl_storekey_";
-};
-
-int NCCLBootstrap::getNCCLStoreKeyCounter() {
-  return counter_;
-}
-
-ncclUniqueId NCCLBootstrap::exchangeUniqueIdStore() {
+ncclUniqueId NCCLBootstrap::exchangeUniqueId(std::string_view name) {
   ncclUniqueId uniqueId;
 
-  auto key = getNCCLStoreKey();
+  auto store =
+      c10::make_intrusive<::c10d::PrefixStore>(std::string(name), store_);
+  auto key = fmt::format("nccl_storekey_{}", generation_);
   if (rank_ == 0) {
     // Generate unique ID on rank 0
     ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
@@ -121,11 +60,11 @@ ncclUniqueId NCCLBootstrap::exchangeUniqueIdStore() {
     std::vector<uint8_t> vec(
         reinterpret_cast<uint8_t*>(&uniqueId),
         reinterpret_cast<uint8_t*>(&uniqueId) + sizeof(uniqueId));
-    store_->set(key, vec);
+    store->set(key, vec);
   } else {
     // Other ranks read the broadcast ID
-    store_->wait({key}, timeout_);
-    auto vec = store_->get(key);
+    store->wait({key}, timeout_);
+    auto vec = store->get(key);
     if (vec.size() != sizeof(ncclUniqueId)) {
       throw std::runtime_error("Invalid NCCL unique ID size");
     }
@@ -133,63 +72,6 @@ ncclUniqueId NCCLBootstrap::exchangeUniqueIdStore() {
   }
 
   return uniqueId;
-}
-
-ncclUniqueId NCCLBootstrap::exchangeUniqueIdTCPStore(std::string_view name) {
-  store_ = createPrefixStore(std::string(name), timeout_);
-  created_internal_store_ = true;
-
-  return exchangeUniqueIdStore();
-}
-
-bool NCCLBootstrap::isTCPStoreEnabled() {
-  return std::getenv("MASTER_ADDR") && std::getenv("MASTER_PORT");
-}
-
-ncclUniqueId NCCLBootstrap::exchangeUniqueId(std::string_view name) {
-  if (store_ != nullptr) {
-    return exchangeUniqueIdStore();
-  }
-
-  bool is_tcp_store_enabled = isTCPStoreEnabled();
-  if (uniqueid_xchg_method_ != kUniqueidXchgMethodAuto &&
-      uniqueid_xchg_method_ != kUniqueidXchgMethodTCPStore) {
-    throw std::runtime_error(
-        "Invalid unique ID exchange method " + uniqueid_xchg_method_);
-  }
-  if (!is_tcp_store_enabled) {
-    throw std::runtime_error("No way to exchange unique ID");
-  }
-  return exchangeUniqueIdTCPStore(name);
-}
-
-void NCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
-  if (created_internal_store_) {
-    // Delete the internal store object and do a barrier to ensure that all
-    // processes have deleted their store object too.  This way, when we
-    // create the next torchcomm, we can use the same port to create a new store
-    // object.
-    store_.reset();
-
-    auto stream = cuda_api_->getCurrentCUDAStream(device_.index());
-    ncclResult_t result = nccl_api_->allReduce(
-        barrier_buffer_,
-        barrier_buffer_,
-        1,
-        ncclFloat32,
-        ncclSum,
-        nccl_comm,
-        stream);
-    if (result != ncclSuccess) {
-      TC_LOG(ERROR) << "NCCL AllReduce failed: "
-                    << nccl_api_->getErrorString(result);
-    }
-
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->streamSynchronize(stream),
-        "Stream synchronization failed");
-  }
 }
 
 // TorchComm-layer hint keys that are consumed by the backend init code
@@ -288,6 +170,7 @@ void populateNcclConfigFromHints(
 ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
     const std::unordered_map<std::string, std::string>& hints) {
+  c10::cuda::CUDAGuard gpuGuard(device_);
   ncclUniqueId uniqueId;
   ncclComm_t nccl_comm = nullptr;
 
@@ -312,9 +195,9 @@ ncclComm_t NCCLBootstrap::createNcclComm(
         std::string(nccl_api_->getErrorString(ncclErr)));
   }
 
-  cleanupTCPStore(nccl_comm);
-
   return nccl_comm;
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

@@ -53,9 +53,6 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
-  if(USE_MTIA)
-    list(APPEND Caffe2_CPU_SRCS ${ATen_MTIA_SRCS})
-  endif()
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
   list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
   list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
@@ -66,7 +63,6 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
   list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
-  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
@@ -911,7 +907,7 @@ if(USE_PRECOMPILED_HEADERS)
   # Exclude some files from using PCH
   set_source_files_properties(
       # Not built with OpenMP, so PCH is invalid
-      ${Torch_SOURCE_DIR}/aten/src/ATen/MapAllocator.cpp
+      ${CMAKE_SOURCE_DIR}/aten/src/ATen/MapAllocator.cpp
       # Builds with incompatible compiler flags
       ${Caffe2_CPU_SRCS_AVX2}
       ${Caffe2_CPU_SRCS_AVX512}
@@ -972,7 +968,6 @@ endif()
 
 # Compile exposed libraries.
 if(USE_ROCM)
-  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   add_library(torch_hip ${Caffe2_HIP_SRCS})
   # Use CXX linker (clang-cl) which handles MSVC-style link flags natively.
@@ -981,7 +976,6 @@ if(USE_ROCM)
   if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
   endif()
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
   if(USE_NCCL)
@@ -1000,7 +994,6 @@ if(USE_ROCM)
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
 elseif(USE_CUDA)
-  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
@@ -1018,7 +1011,6 @@ elseif(USE_CUDA)
         ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
         ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
   endif()
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
@@ -1483,13 +1475,6 @@ if(USE_ROCM)
     __HIP_PLATFORM_AMD__
     )
 
-  if(NOT ROCM_SOURCE_DIR)
-    set(ROCM_SOURCE_DIR "$ENV{ROCM_SOURCE_DIR}")
-  endif()
-  if($ROCM_SOURCE_DIR STREQUAL "")
-    set(ROCM_SOURCE_DIR "/opt/rocm")
-  endif()
-  message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE
         USE_FLASH_ATTENTION
@@ -1504,6 +1489,9 @@ if(USE_ROCM)
   endif()
   if(TARGET ck_sdpa)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
+  endif()
+  if(USE_HIPSPARSELT)
+    target_compile_definitions(torch_hip PRIVATE USE_HIPSPARSELT)
   endif()
 
   message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND} rocshmem_VERSION=${rocshmem_VERSION}")
@@ -1555,6 +1543,27 @@ if(USE_ROCM)
         target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM USE_ROCM)
 
         target_link_libraries(torch_rocshmem PRIVATE roc::rocshmem)
+
+        # The ASAN ROCm SDK ships the __device__ implementations of the rocSHMEM
+        # API in per-arch bitcode (librocshmem_device_<arch>.bc), separate from
+        # the host archive. Pass it straight to the device (offload) linker so it
+        # joins the device LTO link as bitcode and the symbols our kernels
+        # reference stay live. Routing it through the normal HIP input path
+        # instead recompiles it in isolation with -fvisibility=hidden and
+        # -amdgpu-internalize-symbols, which dead-strips the library symbols
+        # before the consumer's references are ever seen.
+        if(USE_ASAN)
+          foreach(_arch ${_torch_rocshmem_build_arches})
+            string(REGEX REPLACE ":.*" "" _arch_base "${_arch}")
+            set(_dev_bc "${ROCM_PATH}/lib/librocshmem_device_${_arch_base}.bc")
+            if(EXISTS "${_dev_bc}")
+              target_link_options(torch_rocshmem PRIVATE "SHELL:-Xoffload-linker ${_dev_bc}")
+            else()
+              message(WARNING "rocSHMEM device bitcode not found for ${_arch_base}: ${_dev_bc}")
+            endif()
+          endforeach()
+        endif()
+
         target_link_libraries(torch_hip PRIVATE torch_rocshmem)
 
         install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION

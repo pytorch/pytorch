@@ -437,21 +437,31 @@ def _collect_input_tensor_alias_info(
         for input_positions in storage_ref_to_input_positions.values()
     )
 
+    tracing_context = TracingContext.try_get()
+    shape_env = (
+        tracing_context.fake_mode.shape_env
+        if tracing_context is not None and tracing_context.fake_mode is not None
+        else None
+    )
+    maybe_suppress_guards = (
+        shape_env.suppress_guards if shape_env is not None else contextlib.nullcontext
+    )
     storage_overlapping_input_pairs: list[tuple[int, int]] = []
-    for left_pos, left_tensor in enumerate(tensor_inputs):
-        for right_pos, right_tensor in enumerate(tensor_inputs[:left_pos]):
-            symbolic = input_has_symbolic_metadata(
-                left_tensor
-            ) or input_has_symbolic_metadata(right_tensor)
-            if compute_overlapping_tensors(
-                [right_tensor, left_tensor], symbolic=symbolic
-            ):
-                storage_overlapping_input_pairs.append(
-                    (
-                        tensor_input_positions[right_pos],
-                        tensor_input_positions[left_pos],
+    with maybe_suppress_guards():
+        for left_pos, left_tensor in enumerate(tensor_inputs):
+            for right_pos, right_tensor in enumerate(tensor_inputs[:left_pos]):
+                symbolic = input_has_symbolic_metadata(
+                    left_tensor
+                ) or input_has_symbolic_metadata(right_tensor)
+                if compute_overlapping_tensors(
+                    [right_tensor, left_tensor], symbolic=symbolic
+                ):
+                    storage_overlapping_input_pairs.append(
+                        (
+                            tensor_input_positions[right_pos],
+                            tensor_input_positions[left_pos],
+                        )
                     )
-                )
 
     return (
         tensor_input_positions,

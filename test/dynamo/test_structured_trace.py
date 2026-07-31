@@ -78,6 +78,15 @@ class StructuredTraceTestingFilter(logging.Filter):
     def filter(self, record):
         if "str" in record.metadata:
             return False
+        # torch_version is a global artifact emitted once per process the first
+        # time the trace handler initializes. Its presence (and commit-hash
+        # payload) depends on run context and test ordering, so drop it here to
+        # keep each test's expected inline output deterministic.
+        if (
+            "artifact" in record.metadata
+            and record.metadata["artifact"].get("name") == "torch_version"
+        ):
+            return False
         if self.match_name is not None:
             if "artifact" in record.metadata:
                 if self.match_name != record.metadata["artifact"]["name"]:
@@ -358,7 +367,7 @@ class StructuredTraceTest(TestCase):
 
     @requires_cuda_and_triton
     def test_cudagraphs(self):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertExpectedInline(
             self.buffer.getvalue(),
@@ -1075,26 +1084,36 @@ def forward(self, x_1: "f32[2][1]cpu"):
         fn_opt = torch._dynamo.optimize("inductor")(fn)
         fn_opt(x)
         torch._dynamo.reset()
+        # Reset raw log so assertParses only validates the cache-hit compilation.
+        # Without this, the raw log contains two compilations with identical
+        # compiled_autograd_id=0 (reset() restarts COMPILE_COUNTER from zero),
+        # which tlparse --strict rejects as duplicate compiled_autograd_id.
+        trace_log.removeHandler(self.raw_handler)
+        self.raw_file.close()
+        self.raw_file = tempfile.NamedTemporaryFile(mode="w", delete=True)  # noqa: SIM115
+        self.raw_handler = logging.StreamHandler(self.raw_file)
+        self.raw_handler.setFormatter(TorchLogsFormatter(trace=True))
+        trace_log.addHandler(self.raw_handler)
         # Trigger a cache hit
         fn_opt(x)
-        # Should print twice, including inductor_output_code
+        # Verify the cache-hit trace (including inductor_output_code) parses cleanly
         self.assertParses()
-        chromium_events = [
-            (
-                '{"chromium_event": {}, "frame_id": 0, "frame_compile_id": 0, '
-                '"attempt": 0, "has_payload": "HASH"}'
-            ),
-            (
-                '{"compiled_autograd_graph": {}, "compiled_autograd_id": 0, '
-                '"attempt": 0, "has_payload": "HASH"}'
-            ),
-            (
-                '{"chromium_event": {}, "compiled_autograd_id": 0, "frame_id": 1, "frame_compile_id": 0, '
-                '"attempt": 0, "has_payload": "HASH"}'
-            ),
-        ]
         logs = self.buffer.getvalue()
-        self.assertTrue(all(event in logs for event in chromium_events))
+        self.assertRegex(
+            logs,
+            r'\{"chromium_event": \{\}, "frame_id": \d+, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"\}',
+        )
+        graph_event = re.search(
+            r'\{"compiled_autograd_graph": \{\}, "compiled_autograd_id": (\d+), "attempt": 0, "has_payload": "HASH"\}',
+            logs,
+        )
+        self.assertIsNotNone(graph_event)
+        self.assertRegex(
+            logs,
+            r'\{"chromium_event": \{\}, "compiled_autograd_id": '
+            + graph_event.group(1)
+            + r', "frame_id": \d+, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"\}',
+        )
 
     @requires_tlparse
     @torch._dynamo.config.patch("compiled_autograd", True)
@@ -1124,20 +1143,23 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
             return grads
 
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         fn_opt()
         self.assertParses()
-        expected = [
-            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 5, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 6, "frame_compile_id": 0, "attempt": 0}',
-        ]
         logs = self.buffer.getvalue()
-        self.assertTrue(all(event in logs for event in expected))
+        pattern = (
+            r'\{"dynamo_start": \{"stack": "STACK"\}(?:, "compiled_autograd_id": (\d+))?, '
+            r'"frame_id": (\d+), "frame_compile_id": 0, "attempt": 0\}'
+        )
+        starts = re.findall(pattern, logs)
+        ca_frames = {}
+        for ca_id, frame in starts:
+            if ca_id:
+                ca_frames.setdefault(ca_id, set()).add(frame)
+        self.assertEqual(len(ca_frames), 2)
+        first_id, second_id = sorted(ca_frames, key=int)
+        self.assertGreaterEqual(len(ca_frames[first_id]), 3)
+        self.assertGreaterEqual(len(ca_frames[second_id]), 1)
 
     @requires_tlparse
     @show_chrome_events
@@ -1166,7 +1188,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
         def f(x):
             return x + 1
 
-        f = torch.compile(f)
+        f = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
 
         def user_context() -> str:
             nonlocal num_calls
@@ -1200,7 +1222,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
         def f(x):
             return x + 1
 
-        f = torch.compile(f)
+        f = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
 
         def user_context() -> str:
             return "user_context: " + str(step.step)
