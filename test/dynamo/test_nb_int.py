@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 """Tests for nb_int_impl: unified __int__ / int() protocol in Dynamo."""
 
+from _testcapi import instancemethod
+
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import make_dynamo_test
@@ -185,6 +187,23 @@ class NbIntTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertIn("__int__ returned non-int", result)
 
+    def test_int_returning_float_raises(self):
+        # A numeric-but-wrong-type return (float is not int) must still raise.
+        class Bad:
+            def __int__(self):
+                return 3.0
+
+        obj = Bad()
+
+        def fn(x):
+            try:
+                return int(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertIn("__int__ returned non-int (type float)", result)
+
     def test_int_raising_exception_propagates(self):
         class RaisingInt:
             def __int__(self):
@@ -229,6 +248,25 @@ class NbIntTests(TestCase):
 
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0)), 4
+        )
+
+    def test_user_defined_instancemethod_int(self):
+        # __int__ as a PyInstanceMethod (the type pybind11 emits for
+        # C-defined dunders, e.g. py::enum_ members). resolve_type_attr
+        # must not route this back through nb_int_impl (infinite recursion).
+        def _to_int(self):
+            return 0
+
+        class E:
+            __int__ = instancemethod(_to_int)
+
+        obj = E()
+
+        def fn(x):
+            return int(obj)
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0)), 0
         )
 
     # --- nb_index fallback (PyNumber_Long step 3) ---

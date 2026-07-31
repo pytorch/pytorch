@@ -849,7 +849,7 @@ class TestVarlenAttention(NNTestCase):
         "backend",
         ["fa2"]
         + (["fa3"] if IS_SM90 else [])
-        + (["fa4"] if SM100OrLater else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else [])
         + ["cudnn"],
     )
     def test_batch_invariance(
@@ -1144,6 +1144,15 @@ class TestVarlenAttention(NNTestCase):
         if backend == "fa2" and page_size % 256 != 0:
             self.skipTest("FA2 paged KV requires page_size divisible by 256")
 
+        # varlen_attn lives in a Dynamo skipfile, so torch.compile wraps it onto
+        # the process-global wrap_inline "inner" frame - the same code object the
+        # fa3/fa4 aten-op compile below uses. Compiling this whole matrix in one
+        # process accumulates recompiles on that shared cache until it hits
+        # recompile_limit; the non-fullgraph aten-op compile then pins "inner" to
+        # RUN_ONLY, and a later fullgraph compile silently finds no compiled
+        # frames. Reset per parametrization so each stays independent.
+        torch._dynamo.reset()
+
         torch.manual_seed(42)
 
         batch_size = 4
@@ -1303,7 +1312,9 @@ class TestVarlenAttention(NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
     )
     def test_enable_gqa(self, device, dtype, backend):
         torch.manual_seed(42)

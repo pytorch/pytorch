@@ -9,6 +9,7 @@
 #include <c10/util/env.h>
 
 #include <atomic>
+#include <unordered_map>
 
 namespace at::mps {
 
@@ -174,6 +175,7 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
   // insert heap after a buffer was created on it to update the order of heap's set
   pool.heaps.insert(heap);
   params.buffer_block = new BufferBlock(params.size(), params.requested_size, buffer, heap);
+  params.buffer_block->stream = getCurrentMPSStream();
   m_allocated_buffers[params.buffer_block->buffer] = params.buffer_block;
   pool.allocated_size += params.size();
   pool.n_buffers++;
@@ -203,37 +205,47 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
       ++b->gc_count;
     }
   }
-  auto it = pool.available_buffers.lower_bound(&params.search_key);
-  // No cached buffer is >= the request size when this is true; used below to
-  // detect a buffer that grows by a small amount on every step.
-  const bool no_larger_buffer = (it == pool.available_buffers.end());
-  if (it != pool.available_buffers.end()) {
-    BufferBlock* buffer_block = *it;
+  MPSStream* current_stream = getCurrentMPSStream();
+  auto stream_pool_it = pool.available_buffers_by_stream.find(current_stream);
+  bool no_larger_buffer = true;
 
-    // the logic in here is simple: keep reusing existing heaps capacity as long as possible (by splitting
-    // or releasing oversize buffers, if required), and avoid 'new' heap allocations as much as possible.
-    if (buffer_block->size <= params.size() + kLargeHeap) {
-      // return the existing buffer if it already fits the requested size (i.e., not oversize)
-      params.buffer_block = buffer_block;
-    } else {
-      HeapBlock search_key(params.size());
-      // if there's an 'existing' heap with enough capacity, then don't
-      // return the oversize buffer and sub-allocate from that existing heap.
-      if (pool.heaps.lower_bound(&search_key) != pool.heaps.end()) {
-        params.buffer_block = nullptr;
-      } else if (buffer_block->retainCount() <= 1) {
-        // otherwise if buffer is releasable immediately, we make room by releasing the
-        // buffer and reuse the new space within its heap container for the new smaller buffer allocation
-        release_buffer(buffer_block, false);
-        // this will skip unnecessary garbage collection as we'll reuse the newly released space
-        params.has_memory_pressure = false;
-      } else if (params.has_memory_pressure) {
-        // the oversized buffer is busy and not reusable at the moment. So release it (and potentially its heap
-        // container) in allocator, and ARC will later free up its backing memory when the busy command buffer finishes.
-        release_buffer(buffer_block, true);
-      } else {
-        // only if there's no memory pressure, we'll reuse the oversized buffer
+  if (stream_pool_it != pool.available_buffers_by_stream.end()) {
+    auto& stream_buffers = stream_pool_it->second;
+    auto it = stream_buffers.lower_bound(&params.search_key);
+
+    // No cached buffer is >= the request size when this is true; used below to
+    // detect a buffer that grows by a small amount on every step.
+    no_larger_buffer = (it == stream_buffers.end());
+
+    if (it != stream_buffers.end()) {
+      BufferBlock* buffer_block = *it;
+
+      // the logic in here is simple: keep reusing existing heaps capacity as long as possible (by splitting
+      // or releasing oversize buffers, if required), and avoid 'new' heap allocations as much as possible.
+      if (buffer_block->size <= params.size() + kLargeHeap) {
+        // return the existing buffer if it already fits the requested size (i.e., not oversize)
         params.buffer_block = buffer_block;
+      } else {
+        HeapBlock search_key(params.size());
+        // if there's an 'existing' heap with enough capacity, then don't
+        // return the oversize buffer and sub-allocate from that existing heap.
+        if (pool.heaps.lower_bound(&search_key) != pool.heaps.end()) {
+          params.buffer_block = nullptr;
+        } else if (buffer_block->retainCount() <= 1) {
+          // otherwise if buffer is releasable immediately, we make room by releasing the
+          // buffer and reuse the new space within its heap container for the new smaller buffer allocation
+          release_buffer(buffer_block, false);
+          // this will skip unnecessary garbage collection as we'll reuse the newly released space
+          params.has_memory_pressure = false;
+        } else if (params.has_memory_pressure) {
+          // the oversized buffer is busy and not reusable at the moment. So release it (and potentially its heap
+          // container) in allocator, and ARC will later free up its backing memory when the busy command buffer
+          // finishes.
+          release_buffer(buffer_block, true);
+        } else {
+          // only if there's no memory pressure, we'll reuse the oversized buffer
+          params.buffer_block = buffer_block;
+        }
       }
     }
   }
@@ -244,16 +256,17 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
     // buffers. Release the largest one within kNearFitReuseDenom (1/8) of the
     // request to free its heap. The tolerance is kept wider than a bucket so the
     // stranded near-fit is caught anywhere in the power-of-two band.
-    if (no_larger_buffer && !(pool.usage & UsageFlags::SMALL) && !pool.available_buffers.empty()) {
+    if (no_larger_buffer && !(pool.usage & UsageFlags::SMALL) &&
+        stream_pool_it != pool.available_buffers_by_stream.end() && !stream_pool_it->second.empty()) {
       constexpr size_t kNearFitReuseDenom = 8;
-      BufferBlock* nearest = *pool.available_buffers.rbegin();
+      BufferBlock* nearest = *stream_pool_it->second.rbegin();
       if (nearest->size >= params.size() - params.size() / kNearFitReuseDenom && nearest->retainCount() <= 1) {
         release_buffer(nearest, /*remove_empty_heap=*/true);
       }
     }
     return false; // this will make allocator to allocate a new buffer
   }
-  pool.available_buffers.erase(params.buffer_block);
+  erase_available_buffer(pool, params.buffer_block);
   params.buffer_block->requested_size = params.requested_size;
   params.buffer_block->gc_count = 0;
   pool.available_size -= params.buffer_block->size;
@@ -298,7 +311,11 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
         // Free enough available cached blocks to satisfy alloc and retry alloc.
         (release_available_cached_buffers(params) && alloc_buffer(params)) ||
         // Free all cached buffers and retry alloc.
-        (release_cached_buffers() && alloc_buffer(params));
+        (release_cached_buffers() && alloc_buffer(params)) ||
+        // Last resort: wait for buffers parked in-flight (freed but still used by
+        // the GPU) to complete, reclaim them, and retry -- avoids a spurious
+        // watermark OOM when those buffers are about to drain anyway.
+        (wait_for_pending_free_buffers(pool) && (get_free_buffer(params) || alloc_buffer(params)));
   }
 
   BufferBlock* buffer_block = params.buffer_block;
@@ -342,12 +359,32 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   return buffer_block;
 }
 
+bool MPSHeapAllocatorImpl::insert_available_buffer(BufferPool& pool, BufferBlock* buffer_block) {
+  bool inserted = pool.available_buffers.insert(buffer_block).second;
+  auto it = pool.available_buffers_by_stream.find(buffer_block->stream);
+  if (it == pool.available_buffers_by_stream.end()) {
+    it = pool.available_buffers_by_stream
+             .emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>(BufferBlock::Comparator))
+             .first;
+  }
+  it->second.insert(buffer_block);
+  return inserted;
+}
+
+void MPSHeapAllocatorImpl::erase_available_buffer(BufferPool& pool, BufferBlock* buffer_block) {
+  pool.available_buffers.erase(buffer_block);
+  auto it = pool.available_buffers_by_stream.find(buffer_block->stream);
+  if (it != pool.available_buffers_by_stream.end()) {
+    it->second.erase(buffer_block);
+  }
+}
+
 void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   TORCH_INTERNAL_ASSERT(buffer_block->in_use);
 
   BufferPool& pool = *buffer_block->heap->pool;
   // Makes sure the BufferBlock* isn't already present in the pool we're freeing it back into.
-  TORCH_INTERNAL_ASSERT(pool.available_buffers.insert(buffer_block).second);
+  TORCH_INTERNAL_ASSERT(insert_available_buffer(pool, buffer_block));
   pool.available_size += buffer_block->size;
   buffer_block->shape.clear(); // reset shape
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_current_allocated_memory.current >= static_cast<int64_t>(buffer_block->size));
@@ -373,7 +410,7 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   pool.allocated_size -= buffer_block->size;
   pool.available_size -= buffer_block->size;
   m_allocated_buffers.erase(buffer_block->buffer);
-  pool.available_buffers.erase(buffer_block);
+  erase_available_buffer(pool, buffer_block);
   pool.n_buffers--;
   // will re-insert later to keep the heaps list sorted based on heap's new available size (if heap not empty)
   pool.heaps.erase(heap_block);
@@ -550,6 +587,9 @@ void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params) {
 id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
+  // Return any buffers parked in-flight by free() whose GPU work has since
+  // completed back to their pools before serving this allocation.
+  freeInactiveBuffers();
   BufferBlock* buffer_block = alloc_buffer_block(size, usage);
   return buffer_block ? buffer_block->buffer : nullptr;
 }
@@ -685,6 +725,20 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
   return waitedForEvent;
 }
 
+bool MPSHeapAllocatorImpl::wait_for_pending_free_buffers(BufferPool& pool) {
+  std::vector<const void*> buffers;
+  {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    buffers.reserve(pool.buffers_pending_free.size());
+    for (BufferBlock* buffer_block : pool.buffers_pending_free) {
+      buffers.push_back(buffer_block->buffer);
+    }
+  }
+  // waitForEvents CPU-waits on the in-flight buffers and calls freeInactiveBuffers,
+  // returning the completed ones to the pool for the caller to retry allocation.
+  return !buffers.empty() && waitForEvents(buffers);
+}
+
 id_t MPSHeapAllocatorImpl::getBufferId(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
@@ -731,9 +785,20 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
 
     buffer_block = get_allocated_buffer_block(ptr);
     TORCH_INTERNAL_ASSERT(buffer_block);
-    const BufferPool& pool = *buffer_block->heap->pool;
+    BufferPool& pool = *buffer_block->heap->pool;
     if (!(pool.usage & UsageFlags::SCALAR)) {
-      free_buffer(buffer_block);
+      // A buffer marked by recordEvents (used by the GPU in a context where a
+      // subsequent CPU reuse could race it, e.g. a pinned-memory copy) and still
+      // referenced by an in-flight command buffer must not be recycled yet:
+      // handing it to a new allocation could let the CPU overwrite it before the
+      // GPU is done. Park it in limbo; freeInactiveBuffers() reclaims it once its
+      // command buffer completes. Unmarked buffers are only GPU-accessed, so
+      // serial-stream ordering already makes immediate reuse safe.
+      if (buffer_block->event && buffer_block->retainCount() > 1) {
+        pool.buffers_pending_free.insert(buffer_block);
+      } else {
+        free_buffer(buffer_block);
+      }
       return;
     }
   }
@@ -971,7 +1036,10 @@ class MPSPinnedAllocator final : public c10::Allocator {
     }
     auto& shared = _getSharedAllocator();
     c10::DataPtr mps_dp = shared.allocate(nbytes);
-    auto host_ptr_pair = shared.getSharedBufferPtr(mps_dp.get());
+    // shared.allocate() returns a DataPtr whose data pointer is the id<MTLBuffer>
+    // itself; capture it before mps_dp is moved into the backing storage.
+    void* mtl_buffer = mps_dp.get();
+    auto host_ptr_pair = shared.getSharedBufferPtr(mtl_buffer);
     TORCH_INTERNAL_ASSERT(host_ptr_pair.first, "MPS pinned allocator: failed to map shared buffer");
     void* cpu_ptr = const_cast<void*>(host_ptr_pair.first);
     // Hold a refcount on the source MPS storage so the MTLBuffer stays alive
@@ -984,7 +1052,7 @@ class MPSPinnedAllocator final : public c10::Allocator {
     auto* ctx = new PinnedCtx{std::move(mps_storage), cpu_ptr};
     {
       std::lock_guard<std::mutex> lk(s_mutex);
-      s_pinned_ptrs.insert(cpu_ptr);
+      s_pinned_buffers.emplace(cpu_ptr, mtl_buffer);
     }
     return {cpu_ptr, ctx, &deleter, c10::Device(c10::DeviceType::CPU)};
   }
@@ -995,11 +1063,17 @@ class MPSPinnedAllocator final : public c10::Allocator {
     default_copy_data(dest, src, count);
   }
   static bool isPinned(const void* ptr) {
+    return getMTLBuffer(ptr) != nullptr;
+  }
+  // Returns the shared MTLBuffer backing a pinned host allocation (the base of
+  // the storage, keyed by the host-visible pointer), or nullptr if not pinned.
+  static void* getMTLBuffer(const void* ptr) {
     if (!ptr) {
-      return false;
+      return nullptr;
     }
     std::lock_guard<std::mutex> lk(s_mutex);
-    return s_pinned_ptrs.find(ptr) != s_pinned_ptrs.end();
+    auto it = s_pinned_buffers.find(ptr);
+    return it == s_pinned_buffers.end() ? nullptr : it->second;
   }
 
  private:
@@ -1014,15 +1088,15 @@ class MPSPinnedAllocator final : public c10::Allocator {
     auto* pinned = static_cast<PinnedCtx*>(ctx);
     {
       std::lock_guard<std::mutex> lk(s_mutex);
-      s_pinned_ptrs.erase(pinned->cpu_ptr);
+      s_pinned_buffers.erase(pinned->cpu_ptr);
     }
     delete pinned;
   }
   static std::mutex s_mutex;
-  static std::unordered_set<const void*> s_pinned_ptrs;
+  static std::unordered_map<const void*, void*> s_pinned_buffers;
 };
 std::mutex MPSPinnedAllocator::s_mutex;
-std::unordered_set<const void*> MPSPinnedAllocator::s_pinned_ptrs;
+std::unordered_map<const void*, void*> MPSPinnedAllocator::s_pinned_buffers;
 
 MPSPinnedAllocator& _getPinnedAllocator() {
   static MPSPinnedAllocator s_mps_pinned_alloc;
@@ -1041,6 +1115,10 @@ c10::Allocator* getMPSPinnedAllocator() {
   // MPS requires unified memory (enforced in MPSHeapAllocatorImpl::init_allocator),
   // so shared (unified-memory) buffers backing the pinned alias are always usable.
   return &_getPinnedAllocator();
+}
+
+void* getMPSPinnedMTLBuffer(const void* host_ptr) {
+  return MPSPinnedAllocator::getMTLBuffer(host_ptr);
 }
 
 // torch.is_pinned() implementation
