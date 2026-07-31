@@ -16,6 +16,7 @@ specialized implementations for each hardware backend's unique features.
 """
 
 import inspect
+import logging
 import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
@@ -24,6 +25,8 @@ from typing import Any, Literal
 
 import torch
 from torch.utils._pallas import has_torch_tpu
+
+log = logging.getLogger(__name__)
 
 
 get_cuda_stream: Callable[[int], int] | None
@@ -659,6 +662,23 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
         init_device_reg()
     return device_interfaces.items()
 
+def _register_interface_for_privateuse1() -> None:
+    backend = torch._C._get_privateuse1_backend_name()
+    if not backend or backend == "privateuseone":
+        return
+    mod = getattr(torch, backend, None)
+    if mod is None or not hasattr(mod, "get_device_interface"):
+        return
+    try:
+        interface = mod.get_device_interface()
+        if interface is None or not issubclass(interface, DeviceInterface):
+            return
+        register_interface_for_device(backend, interface)
+        for i in range(mod.device_count()):
+            register_interface_for_device(f"{backend}:{i}", interface)
+    except Exception:
+        log.warning("Failed to register device interface for %s", backend, exc_info=True)
+
 
 def init_device_reg() -> None:
     global _device_initialized
@@ -677,5 +697,7 @@ def init_device_reg() -> None:
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)
+
+    _register_interface_for_privateuse1()
 
     _device_initialized = True
