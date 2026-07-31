@@ -35,6 +35,31 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper.prefix = IndentedBuffer()
         return wrapper
 
+    def test_assert_scalar_cpp_message_escaping(self):
+        lines = []
+        wrapper = SimpleNamespace(writeline=lines.append)
+        symbol = sympy.Symbol("u0", integer=True)
+        message = 'bad "quoted" \\ check\nnext\rline\ttab'
+        graph = SimpleNamespace(
+            fx_wrapper=False,
+            cpp_wrapper=True,
+            current_node=None,
+            wrapper_code=SimpleNamespace(
+                codegen_cpp_sizevar=lambda scalar, **kwargs: str(scalar)
+            ),
+        )
+
+        with V.set_graph_handler(graph):
+            ir.AssertScalar(symbol > 0, message).codegen(wrapper)
+
+        self.assertEqual(
+            lines,
+            [
+                'if (!(u0 > 0)) { throw std::runtime_error("bad \\"quoted\\" '
+                '\\\\ check\\nnext\\rline\\ttab"); }'
+            ],
+        )
+
     def test_explicit_symbol_input_assignment_uses_canonical_symbol(self):
         wrapper = self._new_wrapper()
         bound_vars = OrderedSet()

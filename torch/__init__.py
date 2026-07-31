@@ -1642,6 +1642,7 @@ def is_storage(obj: object, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
         True
         >>>
         >>> # TypedStorage (legacy)
+        >>> warnings.filterwarnings("ignore", message=".*TypedStorage is deprecated")  # docs: hide
         >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
         >>> torch.is_storage(typed_storage)
         True
@@ -2181,15 +2182,6 @@ def _check_with(
         raise TypeError(f"cond must be a bool, but got {type(cond)}")
 
     from torch.fx.experimental.symbolic_shapes import expect_true
-
-    if isinstance(cond, SymBool):
-        shape_env = cond.node.shape_env
-        if (
-            shape_env is not None
-            and shape_env._has_branch_local_shape_refinement_for_eager_checks()
-        ):
-            shape_env._assume_branch_local_shape_expr(cond.node.expr)
-            return
 
     if expect_true(cond):
         return

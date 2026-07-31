@@ -17,6 +17,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import copy
 import dis
 import functools
 import glob
@@ -124,6 +125,7 @@ log = logging.getLogger(__name__)
 from torch.fx.experimental._size_hinting import (
     _guarding_hint_or_throw_base,
     _optimization_hint_base,
+    _sub_unbacked_exprs,
 )
 
 
@@ -3861,6 +3863,21 @@ class ValueRangesSLoc:
     upper: SLoc
 
 
+@dataclass(slots=True)
+class _BranchLocalShapeRefinementSnapshot:
+    axioms: dict[sympy.Expr, sympy.Expr]
+    replacements: dict[sympy.Symbol, sympy.Expr]
+    replacements_slocs: dict[sympy.Symbol, SLoc]
+    var_to_range: dict[sympy.Symbol, ValueRanges[sympy.Expr]]
+    var_to_range_sloc: dict[sympy.Symbol, ValueRangesSLoc]
+    divisible: set[sympy.Expr]
+    size_like: set[sympy.Symbol]
+    guard_count: int
+    deferred_runtime_assert_lens: dict[sympy.Symbol | None, int]
+    num_deferred_runtime_asserts: int
+    specialization_stacks: dict[Source, traceback.StackSummary]
+
+
 @contextmanager
 def _suppress_guards(shape_env: ShapeEnv) -> Generator[None, None, None]:
     shape_env._suppress_guards_enter()
@@ -4200,19 +4217,8 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
         self._branch_local_shape_refinement_stack: list[
-            None
-            | tuple[
-                dict[sympy.Expr, sympy.Expr],
-                dict[sympy.Symbol, sympy.Expr],
-                dict[sympy.Symbol, ValueRanges[sympy.Expr]],
-                dict[sympy.Symbol, ValueRangesSLoc],
-                int,
-                dict[sympy.Symbol | None, int],
-                int,
-                Counter[sympy.Symbol],
-            ]
+            _BranchLocalShapeRefinementSnapshot | None
         ] = []
-        self._branch_local_shape_refinement_allow_eager_checks_stack: list[bool] = []
 
         self.specializations: OrderedSet[Specialization] = OrderedSet()
 
@@ -4335,110 +4341,133 @@ class ShapeEnv:
             self.frozen = False
 
     @record_shapeenv_event()
-    def _branch_local_shape_refinement_enter(
-        self, allow_eager_checks: bool = True
-    ) -> None:
+    def _branch_local_shape_refinement_enter(self) -> None:
         self._branch_local_shape_refinement_stack.append(None)
-        self._branch_local_shape_refinement_allow_eager_checks_stack.append(
-            allow_eager_checks
-        )
 
+    def _clear_branch_local_shape_refinement_caches(self) -> None:
+        self._equality_graph = None
+        self._unbacked_replacements = None
+        _sub_unbacked_exprs.cache_clear()
+        self.size_hint.cache_clear()
+        self.guarding_hint_or_throw.cache_clear()
+        self.has_guarding_hint.cache_clear()
+        self._inner_evaluate_expr.cache_clear()
+        self.guard_or_defer_runtime_assert.cache_clear()
+        self.constrain_symbol_range.cache_clear()
+        self._maybe_guard_rel.cache_clear()
+        self._maybe_evaluate_static.cache_clear()
+
+    # Note [Branch-local shape refinement]
+    # A HOP traces every branch against one ShapeEnv, even when a branch
+    # predicate contradicts the example inputs. Predicate facts and explicit
+    # assertions are temporary: snapshot before the first such fact and roll
+    # back their derived state on exit. Ordinary guards emitted while tracing
+    # the branch are real graph guards, so they and their derived facts survive.
+    # Ranges and runtime asserts for new unbacked symbols also survive because
+    # those symbols represent real values created by the branch graph. Nested
+    # scopes restore to the enclosing scope, and enter/assume/exit are recorded
+    # so ShapeEnv event replay observes the same lifetime.
     def _ensure_branch_local_shape_refinement_snapshot(self) -> None:
         if self._branch_local_shape_refinement_stack[-1] is not None:
             return
         self._branch_local_shape_refinement_stack[-1] = (
-            self.axioms.copy(),
-            self.replacements.copy(),
-            self.var_to_range.copy(),
-            {
-                k: ValueRangesSLoc(v.lower, v.upper)
-                for k, v in self.var_to_range_sloc.items()
-            },
-            len(self.guards),
-            {k: len(v) for k, v in self.deferred_runtime_asserts.items()},
-            self.num_deferred_runtime_asserts,
-            self.symbol_guard_counter.copy(),
+            _BranchLocalShapeRefinementSnapshot(
+                axioms=self.axioms.copy(),
+                replacements=self.replacements.copy(),
+                replacements_slocs=self.replacements_slocs.copy(),
+                var_to_range=self.var_to_range.copy(),
+                var_to_range_sloc={
+                    k: ValueRangesSLoc(v.lower, v.upper)
+                    for k, v in self.var_to_range_sloc.items()
+                },
+                divisible=self.divisible.copy(),
+                size_like=self.size_like.copy(),
+                guard_count=len(self.guards),
+                deferred_runtime_assert_lens={
+                    k: len(v) for k, v in self.deferred_runtime_asserts.items()
+                },
+                num_deferred_runtime_asserts=self.num_deferred_runtime_asserts,
+                specialization_stacks=self.specialization_stacks.copy(),
+            )
         )
 
     @record_shapeenv_event()
     def _branch_local_shape_refinement_exit(self) -> None:
         frame = self._branch_local_shape_refinement_stack.pop()
-        self._branch_local_shape_refinement_allow_eager_checks_stack.pop()
         if frame is None:
             return
-        (
-            old_axioms,
-            old_replacements,
-            old_var_to_range,
-            old_var_to_range_sloc,
-            old_guard_len,
-            old_deferred_runtime_assert_lens,
-            old_num_deferred_runtime_asserts,
-            old_symbol_guard_counter,
-        ) = frame
 
-        old_range_symbols = set(old_var_to_range)
+        old_range_symbols = set(frame.var_to_range)
         new_var_to_range = {
-            k: v for k, v in self.var_to_range.items() if k not in old_var_to_range
+            k: v for k, v in self.var_to_range.items() if k not in frame.var_to_range
         }
         new_var_to_range_sloc = {
             k: v
             for k, v in self.var_to_range_sloc.items()
-            if k not in old_var_to_range_sloc
+            if k not in frame.var_to_range_sloc
         }
+        new_size_like = self.size_like & set(new_var_to_range)
         new_deferred_runtime_asserts = {
             k: v
             for k, v in self.deferred_runtime_asserts.items()
-            if k not in old_deferred_runtime_assert_lens
+            if k not in frame.deferred_runtime_assert_lens
             and not (isinstance(k, sympy.Symbol) and k in old_range_symbols)
         }
+        new_guards = self.guards[frame.guard_count :]
 
-        changed = (
-            self.axioms != old_axioms
-            or self.replacements != old_replacements
-            or self.var_to_range != old_var_to_range
-            or self.var_to_range_sloc != old_var_to_range_sloc
-        )
-        self.axioms = old_axioms
-        self.replacements = old_replacements
-        self.var_to_range = old_var_to_range
+        self.axioms.clear()
+        self.axioms.update(frame.axioms)
+        self.replacements.clear()
+        self.replacements.update(frame.replacements)
+        self.replacements_slocs.clear()
+        self.replacements_slocs.update(frame.replacements_slocs)
+        self.var_to_range.clear()
+        self.var_to_range.update(frame.var_to_range)
         self.var_to_range.update(new_var_to_range)
-        self.var_to_range_sloc = old_var_to_range_sloc
+        self.var_to_range_sloc.clear()
+        self.var_to_range_sloc.update(frame.var_to_range_sloc)
         self.var_to_range_sloc.update(new_var_to_range_sloc)
-        if len(self.guards) != old_guard_len:
-            del self.guards[old_guard_len:]
-            changed = True
+        self.divisible.clear()
+        self.divisible.update(frame.divisible)
+        self.size_like.clear()
+        self.size_like.update(frame.size_like | new_size_like)
+        self.specialization_stacks.clear()
+        self.specialization_stacks.update(frame.specialization_stacks)
         for k in list(self.deferred_runtime_asserts):
-            old_len = old_deferred_runtime_assert_lens.get(k)
+            old_len = frame.deferred_runtime_assert_lens.get(k)
             if old_len is None:
                 self.deferred_runtime_asserts.pop(k)
-                changed = True
             elif len(self.deferred_runtime_asserts[k]) != old_len:
                 del self.deferred_runtime_asserts[k][old_len:]
-                changed = True
         self.deferred_runtime_asserts.update(new_deferred_runtime_asserts)
 
-        new_num_deferred_runtime_asserts = old_num_deferred_runtime_asserts + sum(
+        self.num_deferred_runtime_asserts = frame.num_deferred_runtime_asserts + sum(
             len(v) for v in new_deferred_runtime_asserts.values()
         )
-        if self.num_deferred_runtime_asserts != new_num_deferred_runtime_asserts:
-            self.num_deferred_runtime_asserts = new_num_deferred_runtime_asserts
-            changed = True
-        if self.symbol_guard_counter != old_symbol_guard_counter:
-            self.symbol_guard_counter = old_symbol_guard_counter
-            changed = True
-        if changed:
-            self._replacements_version_counter += 1
-            self._update_version_counter()
-            self._version_counter += 1
-            self._maybe_evaluate_static.cache_clear()
+
+        self._replacements_version_counter += 1
+        self._resimplify_floor_div_axioms = True
+        self._update_version_counter()
+        self._version_counter += 1
+        self._clear_branch_local_shape_refinement_caches()
+
+        # Real guards produced while tracing the branch apply to the compiled
+        # graph. Rebuild their derived facts after removing counterfactual facts.
+        persistent_facts = [guard.expr for guard in new_guards]
+        persistent_facts.extend(
+            runtime_assert.expr
+            for runtime_asserts in new_deferred_runtime_asserts.values()
+            for runtime_assert in runtime_asserts
+        )
+        for expr in persistent_facts:
+            self._maybe_guard_rel(expr)
+            self.axioms.update(dict(self.get_implications(self.simplify(expr))))
+        self._update_version_counter()
 
     @contextmanager
-    def branch_local_shape_refinement(
-        self, allow_eager_checks: bool = True
-    ) -> Generator[None, None, None]:
+    def _branch_local_shape_refinement(self) -> Generator[None, None, None]:
         """Temporarily add counterfactual shape facts while tracing a HOP branch."""
-        self._branch_local_shape_refinement_enter(allow_eager_checks)
+        self._branch_local_shape_refinement_enter()
         try:
             yield
         finally:
@@ -4447,8 +4476,17 @@ class ShapeEnv:
     def _has_branch_local_shape_refinement(self) -> bool:
         return bool(self._branch_local_shape_refinement_stack)
 
-    def _has_branch_local_shape_refinement_for_eager_checks(self) -> bool:
-        return any(self._branch_local_shape_refinement_allow_eager_checks_stack)
+    def _clone_for_branch(self) -> ShapeEnv:
+        """Copy the current reasoning state as an independent branch baseline."""
+        shape_env = copy.copy(self)
+        shape_env.should_record_events = False
+        shape_env.check_recorded_events = False
+        shape_env.is_recording = False
+        shape_env.tracked_fakes = None
+        shape_env.events = []
+        shape_env.fake_tensor_cache = {}
+        shape_env._branch_local_shape_refinement_stack = []
+        return copy.deepcopy(shape_env)
 
     def _has_branch_local_shape_refinement_snapshot(self) -> bool:
         return any(
@@ -4482,6 +4520,8 @@ class ShapeEnv:
                     and isinstance(replacement, sympy.Expr)
                     and symbol not in replacement.free_symbols
                 ):
+                    # Branch facts may intentionally contradict outer ranges,
+                    # so _set_replacement's global range checks do not apply.
                     if self.replacements.get(symbol) != replacement:
                         self.replacements[symbol] = replacement
                         changed = True
@@ -4491,7 +4531,7 @@ class ShapeEnv:
             self._replacements_version_counter += 1
             self._update_version_counter()
             self._version_counter += 1
-            self._maybe_evaluate_static.cache_clear()
+            self._clear_branch_local_shape_refinement_caches()
         return True
 
     def check_equal(self, other: ShapeEnv) -> None:
@@ -4531,7 +4571,6 @@ class ShapeEnv:
             # transferred symbols through recorded registration events.
             "foreign_unbacked_symbol_cache",
             "_branch_local_shape_refinement_stack",
-            "_branch_local_shape_refinement_allow_eager_checks_stack",
         )
 
         # Mapping of the value of each to-be-compared field into the values that

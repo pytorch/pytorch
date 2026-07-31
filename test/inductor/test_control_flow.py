@@ -690,7 +690,7 @@ class CondTests(TestCase):
                 num_predicates=0,
             )
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_assert_branch_refinement(self, device):
         def fn(x):
@@ -706,9 +706,9 @@ class CondTests(TestCase):
         x = torch.randn(8, 12, device=device)
         opt_fn = torch.compile(fn, dynamic=True)
 
-        torch.testing.assert_close(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_check_branch_refinement(self, device):
         def fn(x):
@@ -725,9 +725,28 @@ class CondTests(TestCase):
         mark_unbacked(x, 0, min=1, max=16)
         opt_fn = torch.compile(fn, dynamic=True)
 
-        torch.testing.assert_close(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_true_branch_shape_refinement(self, device):
+        def fn(x):
+            def true_fn(x):
+                torch._check(x.shape[0] == 1)
+                return x.view(x.shape[1]) * 2
+
+            def false_fn(x):
+                return x.view(x.shape[0] * x.shape[1]).clone()
+
+            return torch.cond(x.shape[0] == 1, true_fn, false_fn, (x,))
+
+        x = torch.randn(8, 12, device=device)
+        mark_unbacked(x, 0, min=1, max=16)
+        opt_fn = torch.compile(fn, dynamic=True)
+
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_check_runtime_failure(self, device):
         def fn(x):
@@ -742,12 +761,12 @@ class CondTests(TestCase):
 
         x = torch.randn(8, 12, device=device)
         opt_fn = torch.compile(fn, dynamic=True)
-        torch.testing.assert_close(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
 
         with self.assertRaisesRegex(RuntimeError, "bad true branch"):
             opt_fn(torch.randn(12, 12, device=device))
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_check_rejects_unsupported_error_type(self, device):
         def fn(x):
@@ -768,7 +787,7 @@ class CondTests(TestCase):
         ):
             opt_fn(x)
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_check_rejects_callable_message(self, device):
         def fn(x):
@@ -792,7 +811,7 @@ class CondTests(TestCase):
         ):
             opt_fn(x)
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_check_false_branch_runtime_failure(self, device):
         def fn(x):
@@ -809,14 +828,14 @@ class CondTests(TestCase):
 
         x1 = torch.randn(1, 12, device=device)
         mark_unbacked(x1, 0, min=0, max=16)
-        torch.testing.assert_close(opt_fn(x1), fn(x1))
+        self.assertEqual(opt_fn(x1), fn(x1))
 
         x0 = torch.randn(0, 12, device=device)
         mark_unbacked(x0, 0, min=0, max=16)
         with self.assertRaisesRegex(RuntimeError, "bad false branch"):
             opt_fn(x0)
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_assert_runtime_failure(self, device):
         def fn(x):
@@ -831,12 +850,12 @@ class CondTests(TestCase):
 
         x = torch.randn(8, 12, device=device)
         opt_fn = torch.compile(fn, dynamic=True)
-        torch.testing.assert_close(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
 
         with self.assertRaisesRegex(RuntimeError, "assertion error"):
             opt_fn(torch.randn(12, 12, device=device))
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_tensor_predicate_inactive_shape_assert(self, device):
         def fn(x, pred):
@@ -853,13 +872,13 @@ class CondTests(TestCase):
 
         x_true = torch.randn(8, 12, device=device)
         pred_true = torch.tensor(True, device=device)
-        torch.testing.assert_close(opt_fn(x_true, pred_true), fn(x_true, pred_true))
+        self.assertEqual(opt_fn(x_true, pred_true), fn(x_true, pred_true))
 
         x_false = torch.randn(12, 12, device=device)
         pred_false = torch.tensor(False, device=device)
-        torch.testing.assert_close(opt_fn(x_false, pred_false), fn(x_false, pred_false))
+        self.assertEqual(opt_fn(x_false, pred_false), fn(x_false, pred_false))
 
-    @requires_gpu
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_assert_scalar_truthiness(self, device):
         def fn(x):
@@ -875,7 +894,7 @@ class CondTests(TestCase):
         x = torch.randn(8, 12, device=device)
         mark_unbacked(x, 0, min=0, max=16)
         opt_fn = torch.compile(fn, dynamic=True)
-        torch.testing.assert_close(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
 
         x0 = torch.randn(0, 12, device=device)
         mark_unbacked(x0, 0, min=0, max=16)

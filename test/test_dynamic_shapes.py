@@ -73,7 +73,7 @@ from torch.utils._sympy.functions import (
     Min,
     Mod,
 )
-from torch.utils._sympy.value_ranges import ValueRangeError
+from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 
 aten = torch.ops.aten
@@ -311,7 +311,7 @@ class TestPySymInt(TestCase):
         b = sympy.Symbol("b", integer=True, positive=True)
         shape_env._set_replacement(a, b, "test")
 
-        with shape_env.branch_local_shape_refinement():
+        with shape_env._branch_local_shape_refinement():
             self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(b, 1)))
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
 
@@ -319,16 +319,102 @@ class TestPySymInt(TestCase):
         self.assertNotIn(b, shape_env.replacements)
         self.assertEqual(shape_env.simplify(a), b)
 
+    def test_branch_local_shape_refinement_preserves_replacement_aliases(self):
+        from torch._inductor.sizevars import SizeVarAllocator
+
+        shape_env = ShapeEnv()
+        value = shape_env.create_unbacked_symint().node.expr
+        sizevars = SizeVarAllocator(shape_env)
+
+        with shape_env._branch_local_shape_refinement():
+            self.assertTrue(
+                shape_env._assume_branch_local_shape_expr(sympy.Eq(value, 1))
+            )
+            self.assertEqual(sizevars.simplify(value), 1)
+
+        self.assertIs(sizevars.replacements, shape_env.replacements)
+        self.assertEqual(shape_env.simplify(value), value)
+        self.assertEqual(sizevars.simplify(value), value)
+
     def test_branch_local_shape_refinement_event_replay(self):
         shape_env = ShapeEnv(should_record_events=True)
         a = sympy.Symbol("a", integer=True, positive=True)
 
-        with shape_env.branch_local_shape_refinement():
+        with shape_env._branch_local_shape_refinement():
             self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(a, 1)))
-            replayed = replay_shape_env_events(shape_env.events)
-
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
-            self.assertEqual(replayed.simplify(a), sympy.Integer(1))
+
+        replayed = replay_shape_env_events(shape_env.events)
+        self.assertEqual(shape_env.simplify(a), a)
+        self.assertEqual(replayed.simplify(a), a)
+        shape_env.check_equal(replayed)
+
+    def test_branch_local_shape_refinement_preserves_divisibility(self):
+        shape_env = ShapeEnv()
+        a = sympy.Symbol("a", integer=True, positive=True)
+        b = sympy.Symbol("b", integer=True, positive=True)
+        divisible = sympy.Mod(a, 2)
+        shape_env._add_divisible(divisible)
+
+        with shape_env._branch_local_shape_refinement():
+            self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(a, 4)))
+            shape_env.simplify(b // 2)
+
+        self.assertIn(divisible, shape_env.divisible)
+
+    def test_branch_local_shape_refinement_does_not_suppress_checks(self):
+        shape_env = ShapeEnv()
+        value = shape_env.create_unbacked_symint()
+        shape_env.constrain_symbol_range(value.node.expr, 0, 16)
+
+        with shape_env._branch_local_shape_refinement():
+            with self.assertRaisesRegex(RuntimeError, "Expected cond to be True"):
+                torch._check(value < 0)
+
+    def test_branch_local_shape_refinement_clears_stateful_caches(self):
+        shape_env = ShapeEnv()
+        value = shape_env.create_unbacked_symint()
+        expr = value.node.expr
+        runtime_assert = expr < 10
+
+        with self.assertWarnsRegex(FutureWarning, "use guarding_hint_or_throw"):
+            self.assertIsNone(shape_env.size_hint(expr, allow_none=True))
+
+        with shape_env._branch_local_shape_refinement():
+            self.assertTrue(
+                shape_env._assume_branch_local_shape_expr(sympy.Eq(expr, 4))
+            )
+            self.assertTrue(
+                shape_env.guard_or_defer_runtime_assert(runtime_assert, "test")
+            )
+            shape_env.constrain_symbol_range(expr, 0, 9)
+            with self.assertWarnsRegex(FutureWarning, "use guarding_hint_or_throw"):
+                self.assertEqual(shape_env.size_hint(expr, allow_none=True), 4)
+
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 0)
+        with self.assertWarnsRegex(FutureWarning, "use guarding_hint_or_throw"):
+            self.assertIsNone(shape_env.size_hint(expr, allow_none=True))
+        self.assertTrue(shape_env.guard_or_defer_runtime_assert(runtime_assert, "test"))
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 1)
+        shape_env.constrain_symbol_range(expr, 0, 9)
+        self.assertEqual(shape_env.var_to_range[expr], ValueRanges(0, 9))
+
+    def test_branch_local_shape_refinement_clears_optimization_hint_caches(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint().node.expr
+        b = shape_env.create_unbacked_symint().node.expr
+        predicate = shape_env.create_unbacked_symint().node.expr
+        shape_env.constrain_symbol_range(a, 0, 3)
+        shape_env.constrain_symbol_range(b, 0, 7)
+
+        with shape_env._branch_local_shape_refinement():
+            self.assertTrue(shape_env._assume_branch_local_shape_expr(predicate > 0))
+            self.assertTrue(
+                shape_env.guard_or_defer_runtime_assert(sympy.Eq(a, b), "test")
+            )
+            self.assertEqual(shape_env.optimization_hint(b), 3)
+
+        self.assertEqual(shape_env.optimization_hint(b), 7)
 
     @unittest.skipIf(not TEST_Z3, "requires z3")
     def test_branch_local_shape_refinement_skips_target_expr(self):
@@ -341,7 +427,7 @@ class TestPySymInt(TestCase):
         shape_env._set_replacement(a, b, "test")
         target_exprs = set(shape_env.validator._target_exprs)
 
-        with shape_env.branch_local_shape_refinement():
+        with shape_env._branch_local_shape_refinement():
             self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(b, 1)))
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
 

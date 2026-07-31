@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 def _branch_refinement_context(pred, branch, shape_env=None):
     if not isinstance(pred, torch.SymBool):
         if shape_env is not None:
-            return shape_env.branch_local_shape_refinement(allow_eager_checks=False)
+            return shape_env._branch_local_shape_refinement()
         return contextlib.nullcontext()
 
     pred_shape_env = pred.node.shape_env
@@ -51,9 +51,10 @@ def _branch_refinement_context(pred, branch, shape_env=None):
 
     @contextlib.contextmanager
     def ctx():
+        # Keep this local so importing cond does not eagerly import sympy.
         import sympy
 
-        with pred_shape_env.branch_local_shape_refinement():
+        with pred_shape_env._branch_local_shape_refinement():
             expr = pred.node.expr if branch else sympy.Not(pred.node.expr)
             pred_shape_env._assume_branch_local_shape_expr(expr)
             yield
@@ -497,17 +498,17 @@ def _merge_output(
         if not (a is None and b is None):
             raise AssertionError(f"expected both a and b to be None, got a={a}, b={b}")
         return None
+    if mode.shape_env is None:
+        raise AssertionError("mode.shape_env is None")
 
     def min_max(s0, s1):
         def _bound(s0, lower_bound: bool):
             if isinstance(s0, int):
                 return s0
-            r = mode.shape_env.var_to_range.get(  # type: ignore[union-attr]
+            r = mode.shape_env.var_to_range.get(
                 s0.node.expr,
                 torch.utils._sympy.value_ranges.ValueRanges.unknown(),
             )
-            if r is None:
-                r = torch.utils._sympy.value_ranges.ValueRanges.unknown()
             return r.lower if lower_bound else r.upper
 
         return min(_bound(s0, True), _bound(s1, True)), max(

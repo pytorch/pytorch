@@ -146,6 +146,7 @@ if TYPE_CHECKING:
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
+    from .kernel.gemm_epilogue import GemmReductionPlan
     from .utils import IndentedBuffer
 
 else:
@@ -1307,7 +1308,21 @@ def get_reduction_combine_fn(
     reduction_type: str, dtype: torch.dtype, arg_break_ties_left: bool = True
 ) -> Callable[..., object]:
     if reduction_type in REDUCTION_COMBINE_FN:
-        return REDUCTION_COMBINE_FN[reduction_type]
+        combine_fn = REDUCTION_COMBINE_FN[reduction_type]
+
+        if (
+            config.strict_signed_zero
+            and reduction_type in ("max", "min")
+            and is_float_dtype(dtype)
+        ):
+
+            def strict_signed_zero_combine_fn(a: object, b: object) -> OpsValue:
+                value = combine_fn(a, b)
+                return ops.where(ops.eq(a, b), b, value)
+
+            return strict_signed_zero_combine_fn
+
+        return combine_fn
 
     elif reduction_type in (
         "argmax",
@@ -6578,6 +6593,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
+        local_reduce: GemmReductionPlan | None = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
@@ -6629,6 +6645,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
+            local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
         )
@@ -9322,14 +9339,19 @@ class AssertScalar(ExternKernel):
             # TODO fix
             pass
         elif V.graph.cpp_wrapper:
-            symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)), None)
-            symbol_str = f"std::to_string({symbol})" if symbol is not None else '""'
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
+            msg = (
+                self.msg.replace("\\", "\\\\")
+                .replace('"', '\\"')
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+            )
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
+                f'if (!({sizevar})) {{ throw std::runtime_error("{msg}"); }}'
             )
         else:
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
@@ -10700,9 +10722,11 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
+            opcount = self.data.inner_fn_opcount()
+            if "inline_asm_elementwise" in opcount.used_ops:
+                return True
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu
-                opcount = self.data.inner_fn_opcount()
                 heavy_ops = [
                     "exp",
                     "log",
@@ -10921,7 +10945,7 @@ class Switch(ExternKernel):
     IR node representing torch.cond and torch.switch.
 
     For torch.cond: ``selector`` is a boolean scalar tensor, branches contains exactly
-    two subgraphs (true branch, false branch), and is_cond=True.
+    two subgraphs (false branch, true branch), and is_cond=True.
     For torch.switch: ``selector`` is an integer scalar tensor, branches contains one
     subgraph per case, and is_cond=False.
 
@@ -11008,11 +11032,11 @@ class Switch(ExternKernel):
             shape_env: ShapeEnv, branch: bool | None
         ) -> AbstractContextManager[None]:
             if branch is None or not isinstance(fake_pred, torch.SymBool):
-                return shape_env.branch_local_shape_refinement(allow_eager_checks=False)
+                return shape_env._branch_local_shape_refinement()
 
             @contextlib.contextmanager
             def ctx() -> Generator[None, None, None]:
-                with shape_env.branch_local_shape_refinement():
+                with shape_env._branch_local_shape_refinement():
                     expr = (
                         fake_pred.node.expr
                         if branch
@@ -11050,20 +11074,24 @@ class Switch(ExternKernel):
             # pyrefly: ignore [bad-return]
             return ret
 
-        # Cond branches are stored as [false, true] for selector-based codegen,
-        # but lower true first so its unconstrained input layout remains the
-        # parent graph's template. Switch branches use their natural order.
-        branch_indices = (
-            range(len(branches) - 1, -1, -1) if is_cond else range(len(branches))
-        )
-        for branch_index in branch_indices:
-            subgraph = branches[branch_index]
+        if is_cond:
+            branches_to_lower = [
+                (0, branches[0], False),
+                (1, branches[1], True),
+            ]
+        else:
+            branches_to_lower = [
+                (branch_index, subgraph, None)
+                for branch_index, subgraph in enumerate(branches)
+            ]
+        for branch_index, subgraph, branch_truth in branches_to_lower:
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
                     example_inputs=fake_operands,
                     subgraph_name=subgraph.name,
+                    shape_env=V.graph.sizevars.shape_env._clone_for_branch(),
                 )
                 branch_out_args = subgraph.graph_module.graph.output_node().args[0]
                 if not isinstance(branch_out_args, Sequence):
@@ -11073,8 +11101,7 @@ class Switch(ExternKernel):
                 ]
                 with V.set_graph_handler(subgraph.graph):
                     with _branch_refinement_context(
-                        subgraph.graph.sizevars.shape_env,
-                        branch_index == 1 if is_cond else None,
+                        subgraph.graph.sizevars.shape_env, branch_truth
                     ):
                         subgraph.graph.run(*fake_operands)
                     # Force subgraph outputs to the expected strides from

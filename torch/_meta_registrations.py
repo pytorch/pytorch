@@ -1071,6 +1071,7 @@ def assert_scalar_meta(val, assert_msg):
     if isinstance(val, SymBool):
         shape_env = val.node.shape_env
         if shape_env is not None and shape_env._has_branch_local_shape_refinement():
+            shape_env._assume_branch_local_shape_expr(val.node.expr)
             return
 
         from torch.fx.experimental.symbolic_shapes import expect_true
@@ -4635,6 +4636,9 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
 @out_wrapper()
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
+    # reduces over all dimensions if dims=() is passed
+    if dims == () or dims == []:
+        dims = None
     dims = utils.reduction_dims(input.shape, dims)
     output_shape = _compute_reduction_shape(input, dims, keepdim)
     return input.new_empty(output_shape, dtype=output_dtype)
