@@ -134,6 +134,133 @@ def _replace_invoke_subgraph_node(node, module, output_tokens, input_tokens):
                     output_tokens.append(user)
 
 
+def _get_output_node(module):
+    output_node = next(reversed(module.graph.find_nodes(op="output")))
+    if output_node is None:
+        raise AssertionError("Output node not found in graph")
+    return output_node
+
+
+def _get_output_args(module):
+    output_node = _get_output_node(module)
+    outs = output_node.args[0]
+    if not isinstance(outs, tuple):
+        raise AssertionError(f"Expected output tuple, got {type(outs)}")
+    return outs
+
+
+def _getitem_source_and_index(node):
+    if (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and node.target is operator.getitem
+        and len(node.args) > 1
+        and isinstance(node.args[0], torch.fx.Node)
+        and isinstance(node.args[1], int)
+    ):
+        return node.args[0], node.args[1]
+    return None
+
+
+def _producer_num_token_outputs(module, producer, cond_token_counts):
+    if producer.op != "call_function":
+        return 0
+    if producer.target is with_effects:
+        return 1
+    if producer.target is torch.ops.higher_order.invoke_subgraph:
+        subgraph_node = producer.args[0]
+        if subgraph_node.op == "get_attr" and module.get_submodule(
+            subgraph_node.target
+        ).meta.get("has_with_effects", False):
+            return 1
+        return 0
+    if producer.target is torch.ops.higher_order.cond:
+        return _get_cond_token_count(module, producer, cond_token_counts)
+    return 0
+
+
+def _is_definite_token_output(module, node, cond_token_counts):
+    getitem = _getitem_source_and_index(node)
+    if getitem is None:
+        return False
+    producer, index = getitem
+    return index < _producer_num_token_outputs(module, producer, cond_token_counts)
+
+
+def _get_cond_token_count(module, node, cond_token_counts):
+    cached = cond_token_counts.get(node)
+    if cached is not None:
+        return cached
+
+    true_graph_node = node.args[1]
+    false_graph_node = node.args[2]
+    if true_graph_node.op != "get_attr" or false_graph_node.op != "get_attr":
+        raise AssertionError(
+            "Expected cond branch nodes to be get_attr nodes, "
+            f"got {true_graph_node.op} and {false_graph_node.op}"
+        )
+
+    definite_token_indices = set()
+    for branch_node in node.args[1:3]:
+        submod = module.get_submodule(branch_node.target)
+        for index, out in enumerate(_get_output_args(submod)):
+            if _is_definite_token_output(submod, out, cond_token_counts):
+                definite_token_indices.add(index)
+
+    num_tokens = 0
+    while num_tokens in definite_token_indices:
+        num_tokens += 1
+    cond_token_counts[node] = num_tokens
+    return num_tokens
+
+
+def _get_passthrough_cond_tokens(module, num_tokens):
+    return {
+        out
+        for out in _get_output_args(module)[:num_tokens]
+        if isinstance(out, torch.fx.Node) and out.op == "placeholder"
+    }
+
+
+def _replace_cond_node(node, module, num_tokens, output_tokens, input_tokens):
+    """Remove effect-token inputs and outputs from a cond node."""
+    operands = node.args[3]
+    if not isinstance(operands, (list, tuple)):
+        raise AssertionError(f"Expected cond operands to be a sequence, got {operands}")
+
+    if num_tokens == 0:
+        return
+
+    input_tokens.extend(
+        token
+        for token in operands[:num_tokens]
+        if isinstance(token, torch.fx.Node) and token.op == "placeholder"
+    )
+    node.args = (*node.args[:3], type(operands)(operands[num_tokens:]))
+    if "val" in node.meta and isinstance(node.meta["val"], (list, tuple)):
+        node.meta["val"] = node.meta["val"][num_tokens:]
+
+    for user in list(node.users.keys()):
+        if user.target is not operator.getitem:
+            raise AssertionError(
+                f"Expected user target to be operator.getitem, but got {user.target}"
+            )
+        if user.args[1] >= num_tokens:
+            user.args = (node, user.args[1] - num_tokens)
+        else:
+            for user_user in list(user.users.keys()):
+                if user_user.op == "output":
+                    output_tokens.append(user)
+
+
+def _collect_passthrough_cond_tokens(passthrough_tokens, output_tokens, input_tokens):
+    if not passthrough_tokens:
+        return
+
+    input_tokens.extend(passthrough_tokens)
+    output_tokens.extend(passthrough_tokens)
+
+
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     """
     Removes the existence of tokens from the exported program, including:
@@ -155,9 +282,66 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
         if len(with_effect_nodes) > 0:
             module.meta["has_with_effects"] = True
 
+    def module_has_with_effects(module):
+        if module.meta.get("has_with_effects", False):
+            return True
+
+        for node in module.graph.nodes:
+            if node.target is torch.ops.higher_order.cond:
+                for branch_node in node.args[1:3]:
+                    if branch_node.op != "get_attr":
+                        continue
+                    if module_has_with_effects(getattr(module, branch_node.target)):
+                        module.meta["has_with_effects"] = True
+                        return True
+            elif node.target is torch.ops.higher_order.invoke_subgraph:
+                subgraph_node = node.args[0]
+                if subgraph_node.op == "get_attr" and module_has_with_effects(
+                    getattr(module, subgraph_node.target)
+                ):
+                    module.meta["has_with_effects"] = True
+                    return True
+
+        return False
+
+    module_has_with_effects(ep.graph_module)
+
+    cond_token_counts = {}
+    cond_branch_token_counts = {}
+    for prefix, module in ep.graph_module.named_modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            if node.target is not torch.ops.higher_order.cond:
+                continue
+            num_tokens = _get_cond_token_count(module, node, cond_token_counts)
+            if num_tokens == 0:
+                continue
+            for branch_node in node.args[1:3]:
+                if branch_node.op == "get_attr":
+                    qualified_branch_name = (
+                        f"{prefix}.{branch_node.target}"
+                        if prefix
+                        else branch_node.target
+                    )
+                    cond_branch_token_counts[qualified_branch_name] = max(
+                        num_tokens,
+                        cond_branch_token_counts.get(qualified_branch_name, 0),
+                    )
+
+    passthrough_cond_tokens = {}
+    for name, module in ep.graph_module.named_modules():
+        if (
+            isinstance(module, torch.fx.GraphModule)
+            and name in cond_branch_token_counts
+        ):
+            passthrough_cond_tokens[name] = _get_passthrough_cond_tokens(
+                module, cond_branch_token_counts[name]
+            )
+
     # Process each module with the replace hook to ensure graph signature is updated
     with ep.graph_module._set_replace_hook(ep.graph_signature.get_replace_hook()):
-        for _, module in ep.graph_module.named_modules():
+        for name, module in ep.graph_module.named_modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
 
@@ -179,10 +363,23 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
                     _replace_invoke_subgraph_node(
                         node, module, output_tokens, input_tokens
                     )
+                elif node.target is torch.ops.higher_order.cond:
+                    _replace_cond_node(
+                        node,
+                        module,
+                        cond_token_counts.get(node, 0),
+                        output_tokens,
+                        input_tokens,
+                    )
+
+            if name in passthrough_cond_tokens:
+                _collect_passthrough_cond_tokens(
+                    passthrough_cond_tokens[name], output_tokens, input_tokens
+                )
 
             # Remove tokens from the output node
             if len(output_tokens) > 0:
-                output_node = next(reversed(module.graph.find_nodes(op="output")))
+                output_node = _get_output_node(module)
                 output_args = output_node.args[0]
                 if len(output_args) < len(output_tokens):
                     raise AssertionError(
@@ -190,7 +387,10 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
                         f"{output_tokens} output tokens found\n"
                         f"{module.graph}"
                     )
-                output_node.args = (tuple(output_args[len(output_tokens) :]),)
+                output_tokens_set = set(output_tokens)
+                output_node.args = (
+                    tuple(out for out in output_args if out not in output_tokens_set),
+                )
 
             module.graph.eliminate_dead_code()
 
