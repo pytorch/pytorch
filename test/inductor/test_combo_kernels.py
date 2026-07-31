@@ -2508,7 +2508,8 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         )
 
     @requires_gpu_and_triton
-    def test_disabled_autotune_keeps_indirect_indexing(self):
+    @parametrize("mode", ["autotune_disabled", "deterministic"])
+    def test_no_benchmark_keeps_indirect_indexing(self, mode):
         def fn(a, b, c, idx):
             return a[idx + 1024], b * 2.0, c + 1.0
 
@@ -2518,11 +2519,38 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             torch.randn(256, device=GPU_TYPE),
             torch.full((256,), -1024, device=GPU_TYPE, dtype=torch.int64),
         ]
-        with fresh_cache(), torch._inductor.config.patch({"combo_kernels_autotune": 0}):
+        config = (
+            {"combo_kernels_autotune": 0}
+            if mode == "autotune_disabled"
+            else {"deterministic": True}
+        )
+        with fresh_cache(), torch._inductor.config.patch(config):
             out, code = run_and_get_code(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         FileCheck().check("'num_kernels': 3").run(code[0])
 
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_deterministic_mode(self):
+        # Deterministic mode bans timing-based benchmarking (may_ban_benchmarking).
+        # Compile-time autotune must skip its subkernel benchmark and fall back to
+        # default configs -- not crash.
+        def f(a, b, c, d, e, g):
+            return a + b, c * d, e.sum(-1), g.amax(-1)
+
+        inps = [
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(1024, 512, device=GPU_TYPE),
+            torch.randn(1024, 768, device=GPU_TYPE),
+        ]
+        counters.clear()
+        with fresh_cache(), torch._inductor.config.patch(deterministic=True):
+            out = torch.compile(f)(*inps)
+        self.assertEqual(out, f(*inps))
+        # No timing-based benchmark ran in deterministic mode.
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
 
 
 @instantiate_parametrized_tests
