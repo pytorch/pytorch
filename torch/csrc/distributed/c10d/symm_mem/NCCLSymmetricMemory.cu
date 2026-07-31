@@ -492,6 +492,7 @@ NCCLCftHandle NCCLSymmetricMemory::get_peer_cft_handle(int peer) {
       peer >= 0 && peer < world_size_,
       "NCCLSymmetricMemory::get_peer_cft_handle: invalid peer ",
       peer);
+  c10::cuda::CUDAGuard guard(device_idx_);
   ncclCftLeId le_id = 0;
   size_t le_offset = 0;
   C10D_NCCL_CHECK(

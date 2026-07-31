@@ -150,6 +150,12 @@ RankFixture setUpRank(const std::string& path, int rank, int size) {
       std::nullopt,
       std::nullopt);
   tensor.zero_();
+  // Drain the zero-fill before rendezvous. It is enqueued on this rank's
+  // stream, but peers write into this buffer through the fabric engine, which
+  // that stream does not order against -- a peer's put becomes launchable as
+  // soon as it clears rendezvous, so a still-pending zero_ could land on top
+  // of the payload.
+  AT_CUDA_CHECK(cudaStreamSynchronize(at::cuda::getCurrentCUDAStream(rank)));
   RankFixture fixture{pg, tensor, symm_mem::rendezvous(tensor, kGroupName)};
   EXPECT_NE(fixture.nccl(), nullptr)
       << "expected the NCCL symmetric memory backend to be active";
