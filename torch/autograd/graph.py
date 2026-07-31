@@ -16,11 +16,13 @@ from collections.abc import (
 from typing import (
     Any,
     cast,
+    Generic,
     Literal,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
     TypeAlias,
+    TypeVar,
     Union,
 )
 from weakref import WeakKeyDictionary, WeakValueDictionary
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "AutogradContextVar",
     "saved_tensors_hooks",
     "save_on_cpu",
     "disable_saved_tensors_hooks",
@@ -53,6 +56,73 @@ __all__ = [
 
 
 log = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+_UNSET: Any = object()
+
+
+class AutogradContextVar(Generic[_T]):
+    """A :class:`contextvars.ContextVar` wrapper whose value is visible in autograd hooks during backward.
+
+    The autograd engine may run backward hooks (:class:`Node` pre/post hooks,
+    tensor hooks, :meth:`torch.autograd.Function.backward`, saved-tensor
+    hooks, etc.) on device worker threads. Plain :class:`~contextvars.ContextVar`
+    values set on the thread calling :func:`torch.autograd.backward` are not
+    visible on those threads. ``AutogradContextVar`` mirrors the
+    :class:`~contextvars.ContextVar` API, but :meth:`get` returns the value
+    the variable had when backward was launched, on whatever thread the hook
+    runs on.
+
+    During backward, values are read from a snapshot taken at backward launch:
+    calling :meth:`set` inside a hook running on an autograd worker thread
+    only affects that worker thread and does not propagate back to the calling
+    thread.
+
+    Example::
+
+        >>> import torch
+        >>> cv = torch.autograd.graph.AutogradContextVar("cv", default="unset")
+        >>> x = torch.randn(2, requires_grad=True)
+        >>> y = (x * 2).sum()
+        >>> _ = x.register_hook(lambda g: print(cv.get()))
+        >>> token = cv.set("hello")
+        >>> y.backward()  # prints "hello" even if hooks run on a worker thread
+        hello
+        >>> cv.reset(token)
+    """
+
+    def __init__(self, name: str, *, default: _T = _UNSET) -> None:
+        if default is _UNSET:
+            self._var: contextvars.ContextVar[_T] = contextvars.ContextVar(name)
+        else:
+            self._var = contextvars.ContextVar(name, default=default)
+
+    @property
+    def name(self) -> str:
+        return self._var.name
+
+    def get(self, default: _T = _UNSET) -> _T:
+        # A value set on the current thread (including mutations made by
+        # earlier hooks on this thread) takes precedence over the snapshot.
+        if self._var in contextvars.copy_context():
+            return self._var.get()
+        # The engine stashes the caller's contextvars.Context in ATen TLS at
+        # backward launch (see _engine_run_backward); GraphTask propagates
+        # that TLS to worker threads before any hook runs.
+        if torch._C._is_key_in_tls("context"):
+            ctx = torch._C._get_obj_in_tls("context")
+            if ctx is not None and self._var in ctx:
+                return ctx[self._var]
+        if default is _UNSET:
+            return self._var.get()
+        return self._var.get(default)
+
+    def set(self, value: _T) -> "contextvars.Token[_T]":
+        return self._var.set(value)
+
+    def reset(self, token: "contextvars.Token[_T]") -> None:
+        self._var.reset(token)
 
 
 class Node(abc.ABC):
