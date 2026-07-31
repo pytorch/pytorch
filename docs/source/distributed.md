@@ -403,6 +403,10 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_impl
+```
+
+```{eval-rst}
 .. autofunction:: get_backend_config
 ```
 
@@ -424,6 +428,18 @@ check whether the process group has already been initialized use {func}`torch.di
 
 ```{eval-rst}
 .. autofunction:: get_pg_count
+```
+
+```{eval-rst}
+.. autofunction:: set_timeout
+```
+
+### Fault-tolerant reconfiguration
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._supports_reconfigure
+.. autofunction:: torch.distributed.distributed_c10d._get_reconfigure_handle
+.. autofunction:: torch.distributed.distributed_c10d._reconfigure
 ```
 
 ## Shutdown
@@ -629,7 +645,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: all_gather_into_tensor
+.. autofunction:: all_gather_single
 ```
 
 ```{eval-rst}
@@ -642,6 +658,10 @@ if rank == 0:
 
 ```{eval-rst}
 .. autofunction:: gather
+```
+
+```{eval-rst}
+.. autofunction:: gather_into_tensor
 ```
 
 ```{eval-rst}
@@ -661,7 +681,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: reduce_scatter_tensor
+.. autofunction:: reduce_scatter_single
 ```
 
 ```{eval-rst}
@@ -687,6 +707,7 @@ if rank == 0:
 
 ```{eval-rst}
 .. autoclass:: ReduceOp
+    :members:
 ```
 
 ```{eval-rst}
@@ -1730,10 +1751,4 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
-```
-
-```{toctree}
-:hidden:
-
-distributed._dist2
 ```

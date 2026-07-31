@@ -12,10 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    skipIfTorchDynamo,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 
@@ -518,7 +515,6 @@ class TestCase(__TestCase):
                 pass
 
     # Test list()'s use of iterators.
-    @torch._dynamo.error_on_graph_break(False)
     def test_builtin_list(self):
         self.assertEqual(list(SequenceClass(5)), list(range(5)))
         self.assertEqual(list(SequenceClass(0)), [])
@@ -693,7 +689,6 @@ class TestCase(__TestCase):
                 pass
 
     # Test zip()'s use of iterators.
-    @skipIfTorchDynamo("infinite loop")
     def test_builtin_zip(self):
         self.assertEqual(list(zip()), [])
         self.assertEqual(list(zip(*[])), [])

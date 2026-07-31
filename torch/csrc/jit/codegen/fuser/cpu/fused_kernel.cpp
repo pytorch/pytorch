@@ -158,7 +158,7 @@ static bool programExists(const std::string& program) {
   std::stringstream ss;
   c10::printQuotedString(ss, program);
   at::jit::TemplateEnv env;
-  env.s("program", ss.str());
+  env.s("program", std::move(ss).str());
   std::string cmd = format(check_exists_string, env);
 #ifdef _MSC_VER
   return (run(cmd.c_str()) == 0);
