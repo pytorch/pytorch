@@ -161,7 +161,7 @@ RankFixture setUpRank(const std::string& path, int rank, int size) {
 // visible from the handle. The answer is uniform across ranks.
 bool cftAvailable(symm_mem::NCCLSymmetricMemory* hdl) {
   try {
-    (void)hdl->get_handler(hdl->get_rank());
+    (void)hdl->get_peer_cft_handle(hdl->get_rank());
     return true;
   } catch (const c10::Error& e) {
     LOG(WARNING) << "Skipping: host-side CFT unavailable: " << e.what();
@@ -194,7 +194,7 @@ void testDevicePutCft(
     if (peer == rank) {
       continue;
     }
-    const auto handle = hdl->get_handler(peer);
+    const auto handle = hdl->get_peer_cft_handle(peer);
     cftPutKernel<<<1, kThreads, 0, stream>>>(
         handle.le_id,
         handle.le_offset + static_cast<size_t>(rank) * kSlotBytes,

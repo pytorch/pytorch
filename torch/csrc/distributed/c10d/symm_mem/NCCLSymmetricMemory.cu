@@ -486,11 +486,11 @@ static constexpr const char* kHostCftHint =
     "(ProcessGroupNCCL.NCCLConfig.host_cft_mode).";
 #endif // NCCL_HAS_HOST_CFT
 
-NCCLCftHandle NCCLSymmetricMemory::get_handler(int peer) {
+NCCLCftHandle NCCLSymmetricMemory::get_peer_cft_handle(int peer) {
 #ifdef NCCL_HAS_HOST_CFT
   TORCH_CHECK(
       peer >= 0 && peer < world_size_,
-      "NCCLSymmetricMemory::get_handler: invalid peer ",
+      "NCCLSymmetricMemory::get_peer_cft_handle: invalid peer ",
       peer);
   ncclCftLeId le_id = 0;
   size_t le_offset = 0;
@@ -506,7 +506,7 @@ NCCLCftHandle NCCLSymmetricMemory::get_handler(int peer) {
 #endif
 }
 
-NCCLCftHandle NCCLSymmetricMemory::get_multimem_handler() {
+NCCLCftHandle NCCLSymmetricMemory::get_multimem_cft_handle() {
 #ifdef NCCL_HAS_HOST_CFT
   // Unlike the unicast query, this one may still have to bind the multicast
   // team (and barrier over the group) if the endpoint wasn't created eagerly.

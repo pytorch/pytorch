@@ -25,7 +25,8 @@ struct NCCLCftHandle {
   size_t le_offset;
 };
 
-class NCCLSymmetricMemory : public SymmetricMemory {
+// TORCH_API because torch_python downcasts to it for the CFT handle bindings.
+class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
  public:
   NCCLSymmetricMemory(c10::intrusive_ptr<NCCLPeerAllocInfo> pai, size_t offset);
 
@@ -64,13 +65,13 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   // CFT handle addressing `peer`'s copy of this buffer. Requires the group's
   // communicator to have been created with `hostCftMode` enabled and the peer
   // to be inside the flat CFT team.
-  NCCLCftHandle get_handler(int peer);
+  NCCLCftHandle get_peer_cft_handle(int peer);
 
   // CFT handle addressing the multicast (multimem) view of this buffer, for
-  // the `putMultimem` / `redMultimem` device ops. Unlike `get_handler`, the
-  // first call is collective over the group unless the multicast endpoint was
-  // already created at window-registration time (i.e. `hostCftMode` on).
-  NCCLCftHandle get_multimem_handler();
+  // the `putMultimem` / `redMultimem` device ops. Unlike the unicast query,
+  // the first call is collective over the group unless the multicast endpoint
+  // was already created at window-registration time (i.e. `hostCftMode` on).
+  NCCLCftHandle get_multimem_cft_handle();
 
   size_t get_offset() override;
 

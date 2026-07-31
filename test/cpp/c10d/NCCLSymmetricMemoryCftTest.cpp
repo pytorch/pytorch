@@ -87,7 +87,7 @@ RankFixture setUpRank(const std::string& path, int rank, int size) {
 // proceed into a collective.
 bool cftAvailable(symm_mem::NCCLSymmetricMemory* hdl) {
   try {
-    (void)hdl->get_handler(hdl->get_rank());
+    (void)hdl->get_peer_cft_handle(hdl->get_rank());
     return true;
   } catch (const c10::Error& e) {
     LOG(WARNING) << "Skipping: host-side CFT unavailable: " << e.what();
@@ -104,10 +104,10 @@ void testUnicastCft(const std::string& path, int rank, int size) {
     return;
   }
 
-  const auto self = hdl->get_handler(rank);
+  const auto self = hdl->get_peer_cft_handle(rank);
   std::set<uint32_t> le_ids;
   for (int peer = 0; peer < size; ++peer) {
-    const auto handle = hdl->get_handler(peer);
+    const auto handle = hdl->get_peer_cft_handle(peer);
     EXPECT_TRUE(le_ids.insert(handle.le_id).second)
         << "peer " << peer << " reuses le_id " << handle.le_id;
     // Every rank maps the buffer at the same offset in the symmetric space, so
@@ -115,8 +115,8 @@ void testUnicastCft(const std::string& path, int rank, int size) {
     EXPECT_EQ(handle.le_offset, self.le_offset);
   }
 
-  EXPECT_THROW((void)hdl->get_handler(size), c10::Error);
-  EXPECT_THROW((void)hdl->get_handler(-1), c10::Error);
+  EXPECT_THROW((void)hdl->get_peer_cft_handle(size), c10::Error);
+  EXPECT_THROW((void)hdl->get_peer_cft_handle(-1), c10::Error);
 
   c10d::unregister_process_group(kGroupName);
 }
@@ -130,11 +130,11 @@ void testMulticastCft(const std::string& path, int rank, int size) {
     return;
   }
 
-  const auto self = hdl->get_handler(rank);
+  const auto self = hdl->get_peer_cft_handle(rank);
   try {
     // Collective on first call unless the endpoint was created eagerly at
     // window registration, so every rank has to reach this.
-    const auto mc = hdl->get_multimem_handler();
+    const auto mc = hdl->get_multimem_cft_handle();
     // The multicast endpoint is distinct from the unicast one, but it
     // addresses the same window, hence the same offset.
     EXPECT_EQ(mc.le_offset, self.le_offset);
