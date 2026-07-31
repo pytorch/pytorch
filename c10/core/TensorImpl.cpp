@@ -5,6 +5,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -192,9 +193,12 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
-  TORCH_CHECK(
-      fake_device.type() != c10::DeviceType::Meta,
-      "FakeTensor does not support meta device");
+  if (fake_device.type() == c10::DeviceType::Meta) {
+    auto mode = c10::impl::FakeTensorModeTLS::get_state();
+    TORCH_CHECK(
+        mode == nullptr || mode->allow_meta_,
+        "device.type must not be 'meta' when allow_meta is False");
+  }
 
   // in python FakeTensor, it checks whether or not
   // we are in in_kernel_invocation manager to determine
@@ -211,13 +215,15 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // where the fake device logic is instead of just calling device_default()
   set_custom_device(true);
 
-  // change backend key from Meta to the fake device
+  // change backend key from Meta to the fake device; a no-op when fake_device
+  // is itself meta, since the tensor is already backed by MetaBit
   _change_backend_component_keys(fake_device);
 }
 
 void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
-  // normalize device index for indexed device types (not CPU)
-  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU) {
+  // normalize device index for indexed device types (not CPU or meta)
+  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU &&
+      fake_device.type() != c10::DeviceType::Meta) {
     const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
     if (guard_impl) {
       fake_device = guard_impl->getDevice();
@@ -619,6 +625,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
+  dest_impl->custom_device_ = src_impl->custom_device_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
@@ -644,7 +651,6 @@ void TensorImpl::copy_generic_tensor_metadata(
   // policy is NOT (you have no Python object to dispatch to!)
   // NB: subclass relevant policy doesn't have to be copied; the
   // constructor sets this up
-
   dest_impl->refresh_sizes_strides_policy();
   dest_impl->refresh_layout_policy();
   dest_impl->refresh_device_policy();
@@ -1059,5 +1065,93 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 }
 
 } // namespace impl
+
+void FakeTensorMode::set_constant(
+    const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+    c10::intrusive_ptr<c10::TensorImpl> constant,
+    c10::StorageImpl* constant_storage) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  // a registered fake tensor always has ExtraMeta (set by set_fake_device)
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  // The cleanup contract requires this fake to belong to this mode: ~ExtraMeta
+  // calls extra_meta->fake_tensor_mode_->remove_constant(extra_meta), so an
+  // entry registered here against a different mode would leak / dangle.
+  TORCH_INTERNAL_ASSERT(extra_meta->fake_tensor_mode_.get() == this);
+  if (constant_storage) {
+    constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
+  }
+  extra_meta->has_fake_constant_ = true;
+  tensor_to_constant_[extra_meta] = std::move(constant);
+}
+
+c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
+    c10::TensorImpl* fake_impl) const {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  if (extra_meta == nullptr) {
+    return nullptr;
+  }
+  auto it = tensor_to_constant_.find(extra_meta);
+  if (it == tensor_to_constant_.end()) {
+    return nullptr;
+  }
+  return it->second;
+}
+
+void FakeTensorMode::invalidate_constant_aliases(
+    c10::StorageImpl* storage_impl) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  auto it = constant_storage_mapping_.find(storage_impl);
+  if (it == constant_storage_mapping_.end()) {
+    return;
+  }
+  for (auto& weak_ref : it->second) {
+    auto impl = weak_ref.lock();
+    if (impl) {
+      if (auto* extra_meta = impl->maybe_get_extra_meta()) {
+        // clear the flag so the tensor's later ~ExtraMeta skips the redundant
+        // remove_constant (the entry is gone); safe since impl is alive here.
+        extra_meta->has_fake_constant_ = false;
+        tensor_to_constant_.erase(extra_meta);
+      }
+    }
+  }
+  constant_storage_mapping_.erase(it);
+}
+
+void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  // get the constant storage associated with this tensor
+  auto constant_it = tensor_to_constant_.find(extra_meta);
+  if (constant_it == tensor_to_constant_.end()) {
+    return;
+  }
+  c10::StorageImpl* storage = constant_it->second->has_storage()
+      ? constant_it->second->storage().unsafeGetStorageImpl()
+      : nullptr;
+  tensor_to_constant_.erase(constant_it);
+  if (storage == nullptr) {
+    return;
+  }
+  // remove all invalid aliases from constant_storage_mapping_
+  auto it = constant_storage_mapping_.find(storage);
+  if (it == constant_storage_mapping_.end()) {
+    return;
+  }
+  auto& aliases = it->second;
+  std::erase_if(aliases, [](const c10::weak_intrusive_ptr<c10::TensorImpl>& w) {
+    return w.expired();
+  });
+  if (aliases.empty()) {
+    constant_storage_mapping_.erase(it);
+  }
+}
+
+ExtraMeta::~ExtraMeta() {
+  if (has_fake_constant_ && fake_tensor_mode_) {
+    fake_tensor_mode_->remove_constant(this);
+  }
+}
 
 } // namespace c10
