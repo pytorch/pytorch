@@ -18,6 +18,7 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
+from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -82,12 +83,9 @@ def _effective_num_warps(conf: BaseConfig) -> int:
 
 
 def _is_slow_hopper_wgmma_config(conf: BaseConfig) -> bool:
-    if config.max_autotune_gemm_search_space != "DEFAULT":
-        return False
-
     # Hopper WGMMA codegen can hit pathological ptxas compile times. Keep the
-    # default search space focused on lower-pipeline-pressure configs, plus the
-    # 128x256x64 config that is known to win for large Hopper matmuls.
+    # default search space focused on lower-pipeline-pressure configs, while
+    # retaining a post-scaling 128x256x64 tile that wins on large matmuls.
     if conf.num_stages >= 5:
         return True
     if conf.num_stages >= 4 and _effective_num_warps(conf) >= 8:
@@ -95,7 +93,7 @@ def _is_slow_hopper_wgmma_config(conf: BaseConfig) -> bool:
     return False
 
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+USE_META_WS = meta_ws_enabled()
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
@@ -2238,7 +2236,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
-        target_device = kwargs.pop("target_device", kernel_inputs.device())
+        target_device = kernel_inputs.device()
         # Get the appropriate config generator
         configs = self._get_config_generator()
         # origami is a C++ perf model that requires concrete m, n, k; feeding it
@@ -2724,7 +2722,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and USE_META_WS
+                and not USE_META_WS
             )
             yield {
                 **template_kwargs,
@@ -3021,8 +3019,21 @@ class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
         target_device: torch.device | None = None,
         **kwargs: Any,
     ) -> list[BaseConfig]:
-        if _is_hopper_cuda(target_device):
+        # This is intentionally limited to standard MM. The reported ptxas
+        # pathology is from its BF16 WGMMA codegen; int8, scaled, and TMA
+        # templates use different codegen and need separate evidence before
+        # inheriting the same performance tradeoff.
+        if config.max_autotune_gemm_search_space == "DEFAULT" and _is_hopper_cuda(
+            target_device
+        ):
+            original_count = len(configs)
             configs = [c for c in configs if not _is_slow_hopper_wgmma_config(c)]
+            if len(configs) != original_count:
+                log.debug(
+                    "Hopper WGMMA: pruned %d/%d slow standard MM configs",
+                    original_count - len(configs),
+                    original_count,
+                )
         return super()._filter_scaled_configs(
             configs, target_device=target_device, **kwargs
         )
