@@ -694,11 +694,14 @@ class TestFP8Matmul(TestCase):
     def test_float8_basics_layout_permutations(self, device) -> None:
         if "cuda" in device:
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                # SM 10 and 11 support all permutations, SM 12 TT and TN, SM 9 only TN
+                # SM 8.9 and 9 only support TN
+                # SM 10 and 11 support all permutations
+                # SM 12 support depends on CUDA version
                 major, minor = torch.cuda.get_device_capability(0)
-                if major in (10, 11):
+                cuda_version = _get_torch_cuda_version()
+                if major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
                     layouts_supported = True
-                elif major == 12 and (minor == 1 or _get_torch_cuda_version() >= (13, 1)):
+                elif major == 12 and (minor == 1 or cuda_version >= (13, 1)):
                     layouts_supported = x_cm
                 else:
                     layouts_supported = (x_cm, y_cm) == (True, False)
@@ -731,6 +734,45 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_float8_scale_result(self, device) -> None:
+        torch.manual_seed(0)
+        a = torch.randint(-1, 2, (32, 16), device=device).float().to(e4m3_type)
+        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(e4m3_type)
+        scale = torch.ones((), device=device)
+        scale_result = torch.full((), 0.5, device=device)
+
+        actual = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            scale_result=scale_result,
+            out_dtype=e4m3_type,
+        )
+        expected = (a.float() @ b.float()).mul(scale_result).to(e4m3_type)
+
+        self.assertEqual(actual, expected)
+
+        high_precision = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            scale_result=scale_result,
+            out_dtype=torch.bfloat16,
+        )
+        unscaled = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            out_dtype=torch.bfloat16,
+        )
+        self.assertEqual(high_precision, unscaled)
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
