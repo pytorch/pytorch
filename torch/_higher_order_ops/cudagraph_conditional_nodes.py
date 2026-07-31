@@ -180,6 +180,8 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                         f"Got {if_spec} and {else_spec}."
                     )
                 for if_out, else_out in zip(if_outs, else_outs):
+                    # None and tensors are both pytree leaves, so matching tree
+                    # specs alone cannot validate corresponding leaf types.
                     if isinstance(if_out, torch.Tensor) and isinstance(
                         else_out, torch.Tensor
                     ):
@@ -193,12 +195,13 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                             "non-tensor constants. "
                             f"Got {if_out} and {else_out}."
                         )
-                    elif not (type(if_out) is int or if_out is None) or not (
-                        type(else_out) is int or else_out is None
+                    elif not all(
+                        type(out) is int or out is None for out in (if_out, else_out)
                     ):
                         raise ValueError(
                             "For cudagraph captured torch.cond(), non-tensor "
-                            "constant branch outputs must be ints or None. "
+                            "constant branch outputs must be int (but not bool) "
+                            "or None. "
                             f"Got {if_out} and {else_out}."
                         )
                     elif if_out != else_out:

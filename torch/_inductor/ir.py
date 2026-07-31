@@ -146,6 +146,7 @@ if TYPE_CHECKING:
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
+    from .kernel.gemm_epilogue import GemmReductionPlan
     from .utils import IndentedBuffer
 
 else:
@@ -1308,7 +1309,21 @@ def get_reduction_combine_fn(
     reduction_type: str, dtype: torch.dtype, arg_break_ties_left: bool = True
 ) -> Callable[..., object]:
     if reduction_type in REDUCTION_COMBINE_FN:
-        return REDUCTION_COMBINE_FN[reduction_type]
+        combine_fn = REDUCTION_COMBINE_FN[reduction_type]
+
+        if (
+            config.strict_signed_zero
+            and reduction_type in ("max", "min")
+            and is_float_dtype(dtype)
+        ):
+
+            def strict_signed_zero_combine_fn(a: object, b: object) -> OpsValue:
+                value = combine_fn(a, b)
+                return ops.where(ops.eq(a, b), b, value)
+
+            return strict_signed_zero_combine_fn
+
+        return combine_fn
 
     elif reduction_type in (
         "argmax",
@@ -6579,6 +6594,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
+        local_reduce: GemmReductionPlan | None = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
@@ -6630,6 +6646,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
+            local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
         )
@@ -10704,9 +10721,11 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
+            opcount = self.data.inner_fn_opcount()
+            if "inline_asm_elementwise" in opcount.used_ops:
+                return True
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu
-                opcount = self.data.inner_fn_opcount()
                 heavy_ops = [
                     "exp",
                     "log",
@@ -11015,15 +11034,14 @@ class Switch(ExternKernel):
                 if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
                     ret.append(output)
                 else:
-                    assert isinstance(fake, torch.Tensor), (output, fake)
+                    if not isinstance(fake, torch.Tensor):
+                        raise AssertionError((output, fake))
                     strides = fake.stride()
                     # merged strides can contain unbacked symbols (from mismatched
                     # branch output shapes) undefined inside the subgraph
                     if has_free_unbacked_symbols(strides):
-                        assert isinstance(branch_fake, torch.Tensor), (
-                            output,
-                            branch_fake,
-                        )
+                        if not isinstance(branch_fake, torch.Tensor):
+                            raise AssertionError((output, branch_fake))
                         strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
@@ -11089,7 +11107,8 @@ class Switch(ExternKernel):
                             f"at output {i}."
                         )
                     if isinstance(r_o, ShapeAsConstantBuffer):
-                        assert isinstance(b_o, ShapeAsConstantBuffer)
+                        if not isinstance(b_o, ShapeAsConstantBuffer):
+                            raise AssertionError((r_o, b_o))
                         if r_o.expr != b_o.expr:
                             raise NotImplementedError(
                                 f"Inductor does not support {op_name} branches with "
@@ -11137,7 +11156,8 @@ class Switch(ExternKernel):
             if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
                 outputs.append(output)
                 continue
-            assert isinstance(merged_output, torch.Tensor), (output, merged_output)
+            if not isinstance(merged_output, torch.Tensor):
+                raise AssertionError((output, merged_output))
             outputs.append(
                 MultiOutput(
                     FixedLayout(

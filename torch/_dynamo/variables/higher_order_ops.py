@@ -2531,7 +2531,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     unimplemented(
                         gb_type="torch.cond: unsupported branch return type (constant non-int)",
                         context=str(ret_val),
-                        explanation="Constants returned from branches must be ints or None.",
+                        explanation="Constants returned from branches must be int (but not bool) or None.",
                         hints=[
                             *graph_break_hints.USER_ERROR,
                         ],
@@ -2755,12 +2755,12 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     # Python floats in branch outputs are blocked upstream by
                     # validate_subgraph_output_types (shared HOP gate); we
                     # mirror the whitelist here to keep the error specific to
-                    # torch.switch. bool is implicitly accepted via the int check.
-                    if not (isinstance(const, int) or const is None):
+                    # torch.switch.
+                    if not (type(const) is int or const is None):
                         unimplemented(
                             gb_type="torch.switch: unsupported branch return type (constant)",
                             context=str(ret_val),
-                            explanation="Constants returned from branches must be int or None.",
+                            explanation="Constants returned from branches must be int (but not bool) or None.",
                             hints=[*graph_break_hints.USER_ERROR],
                         )
             return ret_val, ret_spec, ret_graph, ret_lifted_freevars
@@ -3016,17 +3016,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
         _check_all_tensorvariable(additional_inputs_vars)
-
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.associative_scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-            )
 
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
@@ -3293,18 +3282,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 explanation=f"Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
                 hints=[
                     *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
-        # scan_length check
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         _check_all_tensorvariable(init_vars)

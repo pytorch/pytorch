@@ -122,6 +122,22 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.12
@@ -164,14 +180,17 @@ case "$tag" in
   pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=21
+    TVM=yes
     ;;
   pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
     CLANG_VERSION=21
+    TVM=yes
     ;;
   pytorch-linux-jammy-py3.13-clang21)
     ANACONDA_PYTHON_VERSION=3.13
     CLANG_VERSION=21
+    TVM=yes
     ;;
   pytorch-linux-jammy-py3.14-clang21)
     ANACONDA_PYTHON_VERSION=3.14
@@ -228,12 +247,6 @@ case "$tag" in
     KATEX=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
-    ANACONDA_PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
-    CLANG_VERSION=18
-    TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
@@ -398,6 +411,7 @@ build_image() {
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
+       --build-arg "TVM=${TVM}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
