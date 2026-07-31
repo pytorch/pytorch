@@ -9335,18 +9335,23 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.fx_wrapper:
             # TODO fix
             pass
         elif V.graph.cpp_wrapper:
-            symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
+            msg = (
+                self.msg.replace("\\", "\\\\")
+                .replace('"', '\\"')
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+            )
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
+                f'if (!({sizevar})) {{ throw std::runtime_error("{msg}"); }}'
             )
         else:
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
@@ -10940,7 +10945,7 @@ class Switch(ExternKernel):
     IR node representing torch.cond and torch.switch.
 
     For torch.cond: ``selector`` is a boolean scalar tensor, branches contains exactly
-    two subgraphs (true branch, false branch), and is_cond=True.
+    two subgraphs (false branch, true branch), and is_cond=True.
     For torch.switch: ``selector`` is an integer scalar tensor, branches contains one
     subgraph per case, and is_cond=False.
 
@@ -11017,6 +11022,30 @@ class Switch(ExternKernel):
                 # Symbolic integer or constant - pass directly
                 fake_operands.append(fx_op)
         fake_outputs = V.graph.current_node.meta["val"]
+        fx_pred = V.graph.current_node.args[0]
+        if isinstance(fx_pred, Node):
+            fake_pred = fx_pred.meta["val"]
+        else:
+            fake_pred = fx_pred
+
+        def _branch_refinement_context(
+            shape_env: ShapeEnv, branch: bool | None
+        ) -> AbstractContextManager[None]:
+            if branch is None or not isinstance(fake_pred, torch.SymBool):
+                return shape_env._branch_local_shape_refinement()
+
+            @contextlib.contextmanager
+            def ctx() -> Generator[None, None, None]:
+                with shape_env._branch_local_shape_refinement():
+                    expr = (
+                        fake_pred.node.expr
+                        if branch
+                        else sympy.Not(fake_pred.node.expr)
+                    )
+                    shape_env._assume_branch_local_shape_expr(expr)
+                    yield
+
+            return ctx()
 
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
@@ -11045,13 +11074,24 @@ class Switch(ExternKernel):
             # pyrefly: ignore [bad-return]
             return ret
 
-        for subgraph in branches:
+        if is_cond:
+            branches_to_lower = [
+                (0, branches[0], False),
+                (1, branches[1], True),
+            ]
+        else:
+            branches_to_lower = [
+                (branch_index, subgraph, None)
+                for branch_index, subgraph in enumerate(branches)
+            ]
+        for branch_index, subgraph, branch_truth in branches_to_lower:
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
                     example_inputs=fake_operands,
                     subgraph_name=subgraph.name,
+                    shape_env=V.graph.sizevars.shape_env._clone_for_branch(),
                 )
                 branch_out_args = subgraph.graph_module.graph.output_node().args[0]
                 if not isinstance(branch_out_args, Sequence):
@@ -11060,7 +11100,10 @@ class Switch(ExternKernel):
                     a.meta["val"] if isinstance(a, Node) else a for a in branch_out_args
                 ]
                 with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_operands)
+                    with _branch_refinement_context(
+                        subgraph.graph.sizevars.shape_env, branch_truth
+                    ):
+                        subgraph.graph.run(*fake_operands)
                     # Force subgraph outputs to the expected strides from
                     # FakeTensor metadata. Branches share the merged strides
                     # unless those carry an unbacked symbol (mismatched inner

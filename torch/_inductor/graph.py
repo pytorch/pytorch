@@ -953,6 +953,7 @@ class GraphLowering(torch.fx.Interpreter):
         gm: torch.fx.GraphModule,
         example_inputs: list[torch.Tensor],
         subgraph_name: str,
+        shape_env: ShapeEnv | None = None,
     ) -> SubgraphLowering:
         """
         Make a subgraph of the current graph with all inherited parts, except
@@ -961,12 +962,13 @@ class GraphLowering(torch.fx.Interpreter):
         wrapper code.  The subgraph name is qualified by the parent graph's
         name. Note that the lifting of subgraph is supported for python wrapper
         only. For cpp wrapper, we inline the subgraphs in the parent wrapper.
+        A supplied shape_env isolates branch-local symbolic facts from the parent.
         """
         return SubgraphLowering(
             parent=self,
             gm=gm,
             example_inputs=example_inputs,
-            shape_env=self._shape_env,
+            shape_env=self._shape_env if shape_env is None else shape_env,
             cpp_wrapper=self.cpp_wrapper,
             aot_mode=self.aot_mode,
             extern_node_serializer=self.extern_node_serializer,
