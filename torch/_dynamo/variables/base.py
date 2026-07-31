@@ -2084,8 +2084,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         UDOV.getattro_impl differs -- it invokes the __getattr__ fallback -- so
         inlining getattro_impl here would break __getattribute__ for UDOVs.
 
-        The base delegates to getattro_impl, which is equivalent for base VTs
-        since they have no __getattr__ (call_getattr_fallback returns None).
+        The base delegates to getattro_impl.  That is equivalent for VTs whose
+        __getattr__ hook (if any) is call_getattr_fallback, which the base
+        implements as returning None; a VT that instead folds an equivalent
+        lookup into its own getattro_impl override should override this too.
 
         CPython: explicit __getattribute__ resolves to _Py_slot_tp_getattro /
         PyObject_GenericGetAttr, bypassing the __getattr__ chain that
