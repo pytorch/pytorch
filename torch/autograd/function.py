@@ -5,7 +5,7 @@ import itertools
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Any, Concatenate, TypeVar
+from typing import Any, Concatenate, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -297,6 +297,15 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
     r"""
     This class is used for internal autograd work. Do not use.
     """
+
+    _saved_tensors_accessed_and_cleared: bool
+    _compiled_autograd_saved_tensors_state: torch.Tensor
+    _clear_saved_tensors_on_access: bool
+    _forward_cls: Any
+
+    if TYPE_CHECKING:
+
+        def _compiled_autograd_clear_saved_tensors(self) -> None: ...
 
     def _get_user_fn(self):
         backward_fn = self._forward_cls.backward  # type: ignore[attr-defined]
