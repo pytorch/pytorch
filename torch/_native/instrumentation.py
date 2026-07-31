@@ -77,9 +77,11 @@ __all__ = [
     "InstrumentedHelionKernel",
     "InstrumentedTritonKernel",
     "instrument_cutedsl_compile",
+    "instrument_flydsl_compile",
     "instrument_helion_kernel",
     "instrument_triton_kernel",
     "instrumented_cutedsl_cache",
+    "instrumented_flydsl_cache",
     "instrumented_helion_kernel",
     "instrumented_triton_cache",
 ]

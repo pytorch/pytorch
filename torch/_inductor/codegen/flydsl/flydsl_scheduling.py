@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import hashlib
 import logging
-import os
 from collections.abc import Sequence
 from typing import cast
 
@@ -186,19 +185,4 @@ class FlyDSLScheduling(BaseScheduling):
     @staticmethod
     def _build_flydsl_gpu_arch(device_index) -> str | None:
         """Best-effort ROCm arch string for FlyDSL worker precompilation."""
-        arch = os.environ.get("FLYDSL_GPU_ARCH")
-        if arch:
-            return arch.split(":", 1)[0]
-
-        hsa_arch = os.environ.get("HSA_OVERRIDE_GFX_VERSION")
-        if hsa_arch:
-            if hsa_arch.startswith("gfx"):
-                return hsa_arch
-            if hsa_arch.count(".") == 2:
-                major, minor, stepping = hsa_arch.split(".")
-                try:
-                    return f"gfx{major}{minor}{int(stepping):x}"
-                except ValueError:
-                    log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", hsa_arch)
-
         return _resolve_rocm_arch(device_index)

@@ -161,6 +161,19 @@ class TestFlyDSLTemplate(TestCase):
                 "gfx90a",
             )
 
+    def test_scheduling_preserves_hsa_override_feature_flags(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "FLYDSL_GPU_ARCH": "",
+                "HSA_OVERRIDE_GFX_VERSION": "gfx950:sramecc+",
+            },
+        ):
+            self.assertEqual(
+                FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0),
+                "gfx950:sramecc+",
+            )
+
     def test_scheduling_ignores_generic_arch(self):
         with (
             mock.patch.dict(
