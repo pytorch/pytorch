@@ -1170,20 +1170,15 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
   py::gil_scoped_acquire gil;
   py::handle py_op = getTorchApiFunction(op);
 
-  // Match Python FakeTensorMode: iterate op_implementations_checks which
-  // includes both the dict lookup (dispatch_to_op_implementations_dict) and
-  // pattern-based checks (constructors, like-ops, etc.).
   py::handle op_impl_checks = get_op_implementations_checks();
 
   auto active = get_active_fake_mode();
   auto stamp =
       make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/true);
 
-  // Pop and parse the op's args once, then try each matching op_impl against the
-  // same parsed args. A rejected (NotImplemented) impl leaves the parsed args
-  // untouched, so we avoid re-popping/re-parsing the stack per check
-  // (O(checks x args) on the hot dispatch path). Args are restored -- including
-  // if a callback raises -- unless one impl commits its results.
+  // Check op_impl_checks for op: if an impl applies, run it; otherwise keep
+  // going (it returns NotImplemented). Args are popped and parsed once because a
+  // NotImplemented impl won't change them.
   const auto& schema = op.schema();
   auto arguments = torch::jit::pop(*stack, schema.arguments().size());
   bool committed = false;
@@ -1340,9 +1335,7 @@ py::object getFakeModePyObj(const c10::FakeTensorMode* mode) {
   if (mode == nullptr || mode->fake_mode_pyobj_ == nullptr) {
     return py::none();
   }
-  // fake_mode_pyobj_ is a *weak* reference to the Python CppFakeTensorMode (the
-  // Python object owns this C++ mode through a capsule, so a strong
-  // back-reference would form an uncollectable cycle). A dead referent -> None.
+  // fake_mode_pyobj_ is a weak ref to the python object CppFakeTensorMode to avoid cycles
   PyObject* obj = nullptr;
   if (PyWeakref_GetRef(mode->fake_mode_pyobj_->ptr(getPyInterpreter()), &obj) <=
       0) {

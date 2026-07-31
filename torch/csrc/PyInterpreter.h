@@ -5,7 +5,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 namespace c10 {
-struct FakeTensorMode;
+struct FakeTensorMode;  // c++ faketensormode
 }
 
 namespace torch::detail {
@@ -16,7 +16,6 @@ TORCH_PYTHON_API py::handle getTorchApiFunction(const c10::OperatorHandle& op);
 TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();
 TORCH_PYTHON_API void initializeGlobalPyInterpreter();
 
-// Resolve the Python CppFakeTensorMode backing a C++ FakeTensorMode. The
-// back-reference is weak (see fake_mode_pyobj_), so this returns None when the
-// mode is unset or the Python object has been collected.
+// get the python CppFakeTensorMode object, returns None when mode is unset or
+// python object no longer exists
 TORCH_PYTHON_API py::object getFakeModePyObj(const c10::FakeTensorMode* mode);
