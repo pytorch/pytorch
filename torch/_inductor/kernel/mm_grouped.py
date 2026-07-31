@@ -9,7 +9,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
-from torch.utils._triton import has_triton
+from torch.utils._triton import _device_supports_tensor_descriptor, has_triton
 
 from ..ir import ChoiceCaller, Layout, TensorBox
 from ..lowering import register_lowering
@@ -150,7 +150,9 @@ def has_grouped_mm_triton_support() -> bool:
         # The grouped GEMM Triton template is supported on ROCm too. ATen
         # remains a separate autotune choice when fallback kernels are enabled.
         return True
-    return torch.cuda.get_device_capability() >= (9, 0)
+    # The template has a non-TMA load path, so it is not restricted to the
+    # architectures that support tensor descriptors.
+    return torch.cuda.get_device_capability() >= (8, 0)
 
 
 def _rocm_gcn_arch() -> str:
@@ -443,7 +445,7 @@ def _tuned_grouped_mm_common(
         use_tma_load = (
             triton_has_make_tensor_descriptor
             or triton_has_experimental_make_tensor_descriptor
-        )
+        ) and _device_supports_tensor_descriptor()
         kwargs = {
             "SCALED": scaled,
             "A_IS_2D": a_is_2d,
