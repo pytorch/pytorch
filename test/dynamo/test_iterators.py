@@ -1,16 +1,24 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
+import itertools
 import sys
 import types
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     make_dynamo_test,
     xfailIfPy313AndEarlier,
 )
+
+
+_test_store_global_module_keys = None
+_test_cached_attribute_dict_keys_holder = None
+_test_cached_attribute_dict_keys_dict = None
 
 
 class CustomIterable:
@@ -171,6 +179,78 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         for key in iter(m):
             result.append(key)
         self.assertEqual(sorted(result), ["a", "b", "c"])
+
+    def test_mappingproxy_keys_view_nested_resume_sees_later_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            views = [proxy.keys()]
+            torch._dynamo.graph_break()
+            d["foo"] = 1
+            return t + (1 if "foo" in views[0] else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_mappingproxy_keys_view_closure_resume_sees_later_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            keys = proxy.keys()
+
+            def inner():
+                return "foo" in keys
+
+            torch._dynamo.graph_break()
+            d["foo"] = 1
+            return t + (1 if inner() else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_mappingproxy_values_view_resume_sees_later_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            values = proxy.values()
+            torch._dynamo.graph_break()
+            d["foo"] = 3
+            return t + (1 if 3 in values else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 3})
+        finally:
+            d.clear()
+
+    def test_mappingproxy_items_view_resume_sees_later_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            items = proxy.items()
+            torch._dynamo.graph_break()
+            d["foo"] = 3
+            return t + (1 if ("foo", 3) in items else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 3})
+        finally:
+            d.clear()
 
     @make_dynamo_test
     def test_dict_keys_iteration(self):
@@ -780,6 +860,729 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         keys = d.keys().__iter__()
         result = sorted(keys)
         self.assertEqual(result, ["a", "b", "c"])
+
+    def test_copied_dict_keys_view_not_invalidated_by_source_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            c = d.copy()
+            keys = c.keys()
+            d["foo"] = 1
+            return t + (1 if "foo" in keys else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_dead_mappingproxy_keys_view_does_not_block_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            n = len(proxy.keys())
+            d["foo"] = 1
+            return t + n
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_dict_view_mapping_blocks_backing_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            mapping = proxy.keys().mapping
+            d["foo"] = 1
+            return t + (1 if "foo" in mapping else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dictionary mutation when a dict view is live",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_dict_view_mapping_resume_sees_later_dict_mutation(self):
+        d = {}
+        proxy = types.MappingProxyType(d)
+
+        @torch.compile(backend="eager")
+        def fn(t):
+            mapping = proxy.keys().mapping
+            torch._dynamo.graph_break()
+            d["foo"] = 1
+            return t + (1 if "foo" in mapping else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_consumed_local_dict_keys_view_does_not_block_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            keys = d.keys()
+            n = len(keys)
+            d["foo"] = 1
+            return t + n
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_future_global_dict_keys_view_blocks_dict_mutation(self):
+        d = {}
+        global_keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            d["foo"] = 1
+            return t + (1 if "foo" in global_keys else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dictionary mutation when a dict view is live|Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_store_global_marks_module_dict_view_stale(self):
+        global _test_store_global_module_keys
+
+        name = "_test_store_global_marks_module_dict_view_stale"
+        globals().pop(name, None)
+        _test_store_global_module_keys = globals().keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            global _test_store_global_marks_module_dict_view_stale
+            _test_store_global_marks_module_dict_view_stale = 1
+            return t + (1 if name in _test_store_global_module_keys else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertNotIn(name, globals())
+        finally:
+            globals().pop(name, None)
+            _test_store_global_module_keys = None
+
+    def test_unrelated_future_global_container_dict_keys_view_no_graph_break(self):
+        d = {}
+        holder = {"view": d.keys(), "n": 0}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            d["foo"] = 1
+            return t + holder["n"]
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_unrelated_module_attribute_dict_keys_view_no_graph_break(self):
+        d = {}
+        module_name = "test_unrelated_module_attribute_dict_keys_view"
+        module = types.ModuleType(module_name)
+        module.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = module
+            d["foo"] = 1
+            return t + len(h.__name__)
+
+        try:
+            self.assertEqual(
+                fn(torch.tensor([0.0])), torch.tensor([float(len(module_name))])
+            )
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_unrelated_instance_attribute_dict_keys_view_no_graph_break(self):
+        class Holder:
+            pass
+
+        d = {}
+        holder = Holder()
+        holder.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = holder
+            d["foo"] = 1
+            return t + len(h.__class__.__name__)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([6.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_rebound_nonlocal_dict_keys_view_does_not_block_dict_mutation(self):
+        d = {}
+        keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal keys
+            keys = 0
+            d["foo"] = 1
+            return t + keys
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_rebound_nonlocal_dict_keys_view_with_live_closure_no_graph_break(self):
+        d = {}
+        keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal keys
+
+            def inner():
+                return keys
+
+            keys = 0
+            d["foo"] = 1
+            return t + inner()
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_live_cell_symbolic_dict_keys_view_reflects_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            keys = d.keys()
+
+            def inner():
+                return keys
+
+            d["foo"] = 1
+            return t + 1, inner()
+
+        try:
+            out, keys = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(keys), ["foo"])
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_live_cell_container_symbolic_dict_keys_view_reflects_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            keys = [d.keys()]
+
+            def inner():
+                return keys
+
+            d["foo"] = 1
+            return t + 1, inner()[0]
+
+        try:
+            out, keys = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(keys), ["foo"])
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_preexisting_cell_container_dict_keys_view_blocks_mutation(self):
+        d = {}
+        views = [d.keys()]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            before = 1 if "foo" in views[0] else 0
+            d["foo"] = 1
+            after = 1 if "foo" in views[0] else 0
+            return t + before + after
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_live_cell_symbolic_dict_items_view_reflects_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            items = d.items()
+
+            def inner():
+                return items
+
+            d["foo"] = 1
+            return t + 1, inner()
+
+        try:
+            out, items = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(items), [("foo", 1)])
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_live_cell_symbolic_dict_values_view_reflects_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            values = d.values()
+
+            def inner():
+                return values
+
+            d["foo"] = 1
+            return t + 1, inner()
+
+        try:
+            out, values = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(values), [1])
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_uninitialized_cell_does_not_block_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            def inner():
+                return keys
+
+            d["foo"] = 1
+            keys = d.keys()
+            return t + (1 if "foo" in inner() else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_function_attribute_dict_keys_view_blocks_dict_mutation(self):
+        d = {}
+
+        def holder():
+            pass
+
+        holder.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = holder
+            d["foo"] = 1
+            return t + (1 if "foo" in h.keys else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+            del holder.keys
+
+    def test_module_attribute_dict_keys_view_blocks_dict_mutation(self):
+        d = {}
+        module = types.ModuleType("test_module_attribute_dict_keys_view")
+        module.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = module
+            d["foo"] = 1
+            return t + (1 if "foo" in h.keys else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_instance_and_class_attribute_dict_keys_views_block_dict_mutation(self):
+        class Holder:
+            pass
+
+        d = {}
+        holder = Holder()
+        holder.keys = d.keys()
+        Holder.class_keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = holder
+            cls = Holder
+            d["foo"] = 1
+            return (
+                t
+                + (1 if "foo" in h.keys else 0)
+                + (1 if "foo" in cls.class_keys else 0)
+            )
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+            del Holder.class_keys
+
+    def test_cached_attribute_dict_keys_view_rechecked_after_mutation(self):
+        global _test_cached_attribute_dict_keys_dict
+        global _test_cached_attribute_dict_keys_holder
+
+        class Holder:
+            pass
+
+        d = {}
+        holder = Holder()
+        holder.keys = d.keys()
+        _test_cached_attribute_dict_keys_holder = holder
+        _test_cached_attribute_dict_keys_dict = d
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            before = 1 if "foo" in _test_cached_attribute_dict_keys_holder.keys else 0
+            _test_cached_attribute_dict_keys_dict["foo"] = 1
+            after = 1 if "foo" in _test_cached_attribute_dict_keys_holder.keys else 0
+            return t + before + after
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+            _test_cached_attribute_dict_keys_holder = None
+            _test_cached_attribute_dict_keys_dict = None
+
+    def test_cached_dict_keys_rhs_set_operation_rechecked_after_mutation(self):
+        d = {}
+        holder = {"view": d.keys()}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            _ = holder["view"].__class__
+            d["foo"] = 1
+            return t + len({"foo"} - holder["view"])
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dict view loaded after dictionary mutation",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_cached_dict_keys_consumers_rechecked_after_mutation(self):
+        def extend(keys):
+            result = []
+            result.extend(keys)
+            return len(result)
+
+        operations = {
+            "len": len,
+            "not": lambda keys: int(not keys),
+            "frozenset": lambda keys: len(frozenset(keys)),
+            "fromkeys": lambda keys: len(dict.fromkeys(keys)),
+            "extend": extend,
+        }
+
+        for name, operation in operations.items():
+            with self.subTest(name=name):
+                d = {}
+                holder = {"view": d.keys()}
+
+                @torch.compile(backend="eager", fullgraph=True)
+                def fn(t):
+                    _ = holder["view"].__class__
+                    d["foo"] = 1
+                    return t + operation(holder["view"])
+
+                try:
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported,
+                        "Dict view loaded after dictionary mutation",
+                    ):
+                        fn(torch.tensor([0.0]))
+                    self.assertEqual(d, {})
+                finally:
+                    d.clear()
+                    torch._dynamo.reset()
+
+    def test_preexisting_dict_keys_set_operations(self):
+        keys = {"a": 1, "b": 2}.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return (
+                t + len({"a", "c"} - keys),
+                t + len({"a", "c"} & keys),
+                t + len({"a", "c"} ^ keys),
+                t + len({"a", "c"} | keys),
+                t + int({"a", "b"} == keys),
+                t + len(frozenset(keys)),
+                t + len(dict.fromkeys(keys)),
+            )
+
+        actual = fn(torch.tensor([0.0]))
+        expected = tuple(
+            torch.tensor([float(value)]) for value in (1, 1, 2, 3, 1, 2, 2)
+        )
+        self.assertEqual(actual, expected)
+
+    def test_rebound_instance_attribute_dict_keys_view_does_not_block_mutation(self):
+        class Holder:
+            pass
+
+        d = {}
+        holder = Holder()
+        holder.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            h = holder
+            h.keys = 0
+            d["foo"] = 1
+            return t + h.keys
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_dict_view_liveness_scan_does_not_guard_scalar_locals(self):
+        # A scalar live local must not be realized or guarded while checking
+        # unrelated attribute writes for live dict views.
+        class Holder:
+            def __init__(self):
+                self.global_var = None
+                self.compiling = False
+
+            def set(self, value):
+                self.global_var = value
+                self.compiling = True
+                return None
+
+            def reset(self, token):
+                if self.compiling or token is None:
+                    self.global_var = None
+                    self.compiling = False
+
+        holder = Holder()
+
+        def fn(t, collect_outputs):
+            token = holder.set({})
+            try:
+                y = t + 1
+            finally:
+                holder.reset(token)
+            torch._dynamo.graph_break()
+            if collect_outputs:
+                return y + 1
+            return y
+
+        cnt = CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        self.assertEqual(compiled(torch.tensor([0.0]), False), torch.tensor([1.0]))
+        self.assertEqual(compiled(torch.tensor([0.0]), True), torch.tensor([2.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_dict_view_liveness_analysis_cached_for_loop_mutations(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            for i in range(20):
+                d[i] = i  # noqa: PERF403 - repeated mutation instruction is the test
+            return t
+
+        real_livevars_analysis = torch._dynamo.side_effects.livevars_analysis
+        with mock.patch.object(
+            torch._dynamo.side_effects,
+            "livevars_analysis",
+            wraps=real_livevars_analysis,
+        ) as wrapped_livevars_analysis:
+            try:
+                self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+                self.assertEqual(wrapped_livevars_analysis.call_count, 1)
+            finally:
+                d.clear()
+
+    def test_dict_view_liveness_scan_handles_deep_tee_state(self):
+        # The tee buffer forms a deep linked VT graph; scanning it must stay
+        # iterative to avoid recursion limits during iterator mutations.
+        class MutatingIterator:
+            def __init__(self, values):
+                self.values = values
+                self.index = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.index >= len(self.values):
+                    raise StopIteration
+                value = self.values[self.index]
+                self.index += 1
+                return value
+
+        def fn(values):
+            it1, it2 = itertools.tee(MutatingIterator(values))
+            return len(list(it1)), len(list(it2))
+
+        values = list(range(1000))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertEqual(compiled(values), fn(values))
+
+    def test_nullified_attribute_mutation_does_not_stale_dict_view(self):
+        class Holder:
+            def __init__(self):
+                self.flag = 0
+
+        holder = Holder()
+
+        def fn(t):
+            holder.flag = 1
+            holder.flag = 0
+            torch._dynamo.graph_break()
+            keys = holder.__dict__.keys()
+            return t + len(keys)
+
+        cnt = CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        self.assertEqual(compiled(torch.tensor([0.0])), torch.tensor([1.0]))
+        self.assertEqual(holder.__dict__, {"flag": 0})
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pending_attribute_dict_keys_view_blocks_dict_mutation(self):
+        class Holder:
+            pass
+
+        d = {}
+        keys = d.keys()
+        holder = Holder()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            holder.keys = keys
+            d["foo"] = 1
+            return t + (1 if "foo" in holder.keys else 0)
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dictionary mutation when a dict view is live",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_dead_new_object_dict_keys_view_does_not_block_mutation(self):
+        class Holder:
+            pass
+
+        d = {}
+        keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            holder = Holder()
+            holder.keys = keys
+            d["foo"] = 1
+            return t + 1
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_rebound_class_attribute_dict_keys_view_does_not_block_mutation(self):
+        class Holder:
+            pass
+
+        d = {}
+        Holder.keys = d.keys()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            cls = Holder
+            cls.keys = 0
+            d["foo"] = 1
+            return t + cls.keys
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([0.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+            del Holder.keys
 
     @make_dynamo_test
     def test_dict_values_view_iteration(self):

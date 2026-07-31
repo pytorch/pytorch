@@ -301,6 +301,20 @@ class CallFunctionNoArgsSource(WeakRefCallSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class CallMethodNoArgsSource(ChainedSource):
+    member: str
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.load_method(self.member)
+        codegen.call_method(0)
+
+    @property
+    def _name_template(self) -> str:
+        return f"{{0}}.{self.member}()"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 

@@ -97,6 +97,14 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             cache = tx.output.variable_tracker_cache
             cached = cache.get(source)
             if cached is not None:
+                # Avoid importing sets while the variables package initializes.
+                from .sets import DictKeySetVariable
+
+                unwrapped_cached = cached.unwrap()
+                if isinstance(unwrapped_cached, DictKeySetVariable):
+                    tx.output.side_effects.check_dict_view_loaded_after_mutation(
+                        unwrapped_cached.backing_dict_id, source
+                    )
                 return cached
             vt = LazyVariableTracker(LazyCache(value, source), source=source)
             cache[source] = vt

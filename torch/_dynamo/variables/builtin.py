@@ -2233,17 +2233,21 @@ class BuiltinVariable(BaseBuiltinVariable):
                 f"frozenset expected at most 1 argument, got {len(args)}",
             )
 
-        if istype(args[0], variables.FrozensetVariable):
+        arg = args[0].realize()
+
+        if istype(arg, variables.FrozensetVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
-            return args[0]
+            return arg
 
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
-        if isinstance(args[0], (variables.SetVariable, variables.ConstDictVariable)):
-            items = list(args[0].items.keys())
+        if isinstance(arg, (variables.SetVariable, variables.ConstDictVariable)):
+            if isinstance(arg, variables.SetVariable):
+                arg._check_read_guard(tx)
+            items = list(arg.items.keys())
         else:
-            items = unpack_iterable(tx, args[0])
+            items = unpack_iterable(tx, arg)
         fs = FrozensetVariable(items, mutation_type=ValueMutationNew())
         return fs
 
@@ -2989,6 +2993,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_not_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker
     ) -> VariableTracker | None:
+        a = a.realize()
         if isinstance(a, SymNodeVariable):
             return SymNodeVariable.create(
                 tx,
@@ -3002,6 +3007,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
         if isinstance(a, (ListVariable, ConstDictVariable, SetVariable)):
+            if isinstance(a, SetVariable):
+                a._check_read_guard(tx)
             return VariableTracker.build(tx, len(a.items) == 0)
         if isinstance(a, UserDefinedObjectVariable):
             bool_result = self.call_bool(tx, a)
@@ -3143,6 +3150,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             )
 
         arg, value = args
+        arg = arg.realize()
 
         def _make_result(
             items: dict[VariableTracker, VariableTracker],
@@ -3175,6 +3183,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
         # an existing set/frozenset/dict.
         if isinstance(arg, (variables.SetVariable, ConstDictVariable)):
+            if isinstance(arg, variables.SetVariable):
+                arg._check_read_guard(tx)
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
             return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
         if isinstance(arg, dict):

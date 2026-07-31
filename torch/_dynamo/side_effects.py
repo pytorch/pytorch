@@ -42,6 +42,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import is_structseq_class
 
 from . import config, graph_break_hints, utils, variables
+from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -56,6 +57,7 @@ from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
     is_pybind11_enum_member,
+    istype,
     nn_module_new,
     object_new,
 )
@@ -244,10 +246,14 @@ class SideEffects:
             ],
         ]
         | None = None,
+        mutated_dict_backing_ids: set[int] | None = None,
+        dict_backing_mutation_versions: dict[int, int] | None = None,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
+        self._variable_to_object_id: dict[int, int] = {}
+        self._rebuild_variable_to_object_id()
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
@@ -257,6 +263,13 @@ class SideEffects:
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
+        self._mutated_dict_backing_ids = mutated_dict_backing_ids or set()
+        self._dict_backing_mutation_versions = {}
+        if dict_backing_mutation_versions is not None:
+            self._dict_backing_mutation_versions.update(dict_backing_mutation_versions)
+        else:
+            for backing_id in self._mutated_dict_backing_ids:
+                self._dict_backing_mutation_versions[backing_id] = 1
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var: ListVariable | None = None
@@ -379,6 +392,9 @@ class SideEffects:
             and self.attr_mutation_kinds == other.attr_mutation_kinds
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
+            and self._mutated_dict_backing_ids == other._mutated_dict_backing_ids
+            and self._dict_backing_mutation_versions
+            == other._dict_backing_mutation_versions
         )
 
     def diff(self, other: "SideEffects") -> str | None:
@@ -402,6 +418,13 @@ class SideEffects:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
             return "tensor_hooks"
+        elif self._mutated_dict_backing_ids != other._mutated_dict_backing_ids:
+            return "mutated_dict_backing_ids"
+        elif (
+            self._dict_backing_mutation_versions
+            != other._dict_backing_mutation_versions
+        ):
+            return "dict_backing_mutation_versions"
         else:
             return None
 
@@ -423,6 +446,8 @@ class SideEffects:
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
+            mutated_dict_backing_ids=set(self._mutated_dict_backing_ids),
+            dict_backing_mutation_versions=dict(self._dict_backing_mutation_versions),
         )
 
     def __contains__(self, item: Any) -> bool:
@@ -430,6 +455,19 @@ class SideEffects:
 
     def __getitem__(self, item: Any) -> VariableTracker:
         return self.id_to_variable[id(item)]
+
+    def _rebuild_variable_to_object_id(self) -> None:
+        self._variable_to_object_id.clear()
+        for object_id, variable in self.id_to_variable.items():
+            self._variable_to_object_id.setdefault(id(variable), object_id)
+            if isinstance(variable, variables.UserDefinedDictVariable):
+                self._variable_to_object_id.setdefault(id(variable._base_vt), object_id)
+
+    def _set_tracked_variable(self, object_id: int, variable: VariableTracker) -> None:
+        self.id_to_variable[object_id] = variable
+        self._variable_to_object_id[id(variable)] = object_id
+        if isinstance(variable, variables.UserDefinedDictVariable):
+            self._variable_to_object_id[id(variable._base_vt)] = object_id
 
     def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
         output_graph = self.output_graph_weakref()
@@ -522,6 +560,12 @@ class SideEffects:
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"
             )
+        backing_id = (
+            self._dict_backing_id_for_attribute_mutation(item)
+            if name != "__dict__"
+            else None
+        )
+        self._check_live_dict_view_mutation(backing_id)
         # For constant attribute mutations on outer-scope objects, defer
         # the side-effect check and validate after tracing that the
         # mutation was nullified (value restored to original).
@@ -548,6 +592,8 @@ class SideEffects:
         item_source = getattr(item, "source", None)
         if item_source is not None:
             self.mutated_sources.add(AttrSource(item_source, name))
+        if backing_id is not None and not deferred:
+            self._mark_dict_backing_id_mutated(backing_id)
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -651,7 +697,11 @@ class SideEffects:
         return self.load_attr(gvar, name)
 
     def store_global(
-        self, gvar: VariableTracker, name: str, value: VariableTracker
+        self,
+        gvar: VariableTracker,
+        name: str,
+        value: VariableTracker,
+        global_dict: dict[str, Any],
     ) -> None:
         if not isinstance(gvar, variables.VariableTracker):
             raise AssertionError(
@@ -661,7 +711,11 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker for value, got {type(value)} in store_global"
             )
+        backing_id = self._dict_backing_id(global_dict)
+        self._check_live_dict_view_mutation(backing_id)
         self.store_attr(gvar, name, value)
+        if backing_id is not None:
+            self._mark_dict_backing_id_mutated(backing_id)
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -737,7 +791,7 @@ class SideEffects:
             )
 
         variable.mutation_type = mutation_type_cls()
-        self.id_to_variable[id(item)] = variable
+        self._set_tracked_variable(id(item), variable)
         self.keepalive.append(item)
         return variable
 
@@ -763,7 +817,7 @@ class SideEffects:
         if id(variable) in self.id_to_variable:
             return
         variable.mutation_type = AttributeMutationNew()
-        self.id_to_variable[id(variable)] = variable
+        self._set_tracked_variable(id(variable), variable)
         self.keepalive.append(variable)
 
     def track_object_new(
@@ -779,7 +833,7 @@ class SideEffects:
             mutation_type=AttributeMutationNew(cls_source),
             **options,
         )
-        self.id_to_variable[id(obj)] = variable
+        self._set_tracked_variable(id(obj), variable)
         self.keepalive.append(obj)
         return variable
 
@@ -936,7 +990,7 @@ class SideEffects:
             mutation_type=AttributeMutationNew(cls_source),
             **kwargs,
         )
-        self.id_to_variable[id(obj)] = variable
+        self._set_tracked_variable(id(obj), variable)
         self.keepalive.append(obj)
         return variable
 
@@ -947,7 +1001,7 @@ class SideEffects:
         variable = variables.CellVariable(
             mutation_type=AttributeMutationNew(),
         )
-        self.id_to_variable[id(obj)] = variable
+        self._set_tracked_variable(id(obj), variable)
         self.keepalive.append(obj)
         return variable
 
@@ -961,7 +1015,7 @@ class SideEffects:
             pre_existing_contents=contents,
             source=source,
         )
-        self.id_to_variable[id(cell)] = variable
+        self._set_tracked_variable(id(cell), variable)
         self.keepalive.append(cell)
         return variable
 
@@ -970,7 +1024,7 @@ class SideEffects:
             mutation_type=AttributeMutationExisting(),
             source=source,
         )
-        self.id_to_variable[id(item)] = variable
+        self._set_tracked_variable(id(item), variable)
         self.keepalive.append(item)
         return variable
 
@@ -1092,6 +1146,7 @@ class SideEffects:
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
         }
+        self._rebuild_variable_to_object_id()
         self.store_attr_mutations = {
             k: v
             for k, v in self.store_attr_mutations.items()
@@ -1107,6 +1162,8 @@ class SideEffects:
         if var in self.ignore_mutation_on_these_variables:
             return
 
+        backing_id = self._dict_backing_id_for_value_mutation(var)
+        self._check_live_dict_view_mutation(backing_id)
         self.check_allowed_side_effect(var)
         # Capture user stack for this mutation
         self._capture_user_stack(var)
@@ -1117,9 +1174,266 @@ class SideEffects:
             self.mutated_sources.add(var.source)
         if var.source and isinstance(var, variables.ConstDictVariable):
             self._has_existing_dict_mutation = True
+        if backing_id is not None:
+            self._mark_dict_backing_id_mutated(backing_id)
 
     def has_existing_dict_mutation(self) -> bool:
         return self._has_existing_dict_mutation
+
+    def has_mutated_dict_backing_id(self, backing_id: int | None) -> bool:
+        return backing_id is not None and backing_id in self._mutated_dict_backing_ids
+
+    def check_dict_view_loaded_after_mutation(
+        self, backing_id: int | None, source: Source
+    ) -> None:
+        if not self.has_mutated_dict_backing_id(backing_id):
+            return
+        unimplemented(
+            gb_type="Dict view loaded after dictionary mutation",
+            context=f"View source: {source.name}",
+            explanation=(
+                "Dynamo cannot safely trace use of a dict view after "
+                "the dictionary it aliases was mutated."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def has_mutated_dict_backing_id_since(
+        self, backing_id: int | None, mutation_version: int
+    ) -> bool:
+        return (
+            backing_id is not None
+            and self.dict_backing_mutation_version(backing_id) > mutation_version
+        )
+
+    def dict_backing_mutation_version(self, backing_id: int | None) -> int:
+        if backing_id is None:
+            return 0
+        return self._dict_backing_mutation_versions.get(backing_id, 0)
+
+    def _mark_dict_backing_id_mutated(self, backing_id: int) -> None:
+        self._mutated_dict_backing_ids.add(backing_id)
+        self._dict_backing_mutation_versions[backing_id] = (
+            self._dict_backing_mutation_versions.get(backing_id, 0) + 1
+        )
+
+    def _dict_backing_id(self, value: Any) -> int | None:
+        backing_dict = utils.get_dict_backing_dict(value)
+        if backing_dict is None:
+            return None
+        return id(backing_dict)
+
+    def _tracked_object_id_for_var(self, var: VariableTracker) -> int | None:
+        return self._variable_to_object_id.get(id(var))
+
+    def _dict_backing_id_for_value_mutation(self, var: VariableTracker) -> int | None:
+        if isinstance(var, variables.ConstDictVariable):
+            return self._tracked_object_id_for_var(var)
+        return None
+
+    def _dict_backing_id_for_attribute_mutation(
+        self, item: VariableTracker
+    ) -> int | None:
+        if isinstance(item, variables.UserDefinedClassVariable):
+            return self._dict_backing_id(item.value.__dict__)
+
+        if isinstance(item, variables.UserDefinedObjectVariable):
+            value = item.get_real_python_backed_value()
+            if value is not variables.base.NO_SUCH_SUBOBJ:
+                try:
+                    instance_dict = object.__getattribute__(value, "__dict__")
+                except AttributeError:
+                    return None
+                return self._dict_backing_id(instance_dict)
+
+        return None
+
+    def _check_live_dict_view_mutation(self, backing_id: int | None) -> None:
+        if backing_id is None or not self._is_dict_view_backing_id_live(backing_id):
+            return
+
+        unimplemented(
+            gb_type="Dictionary mutation when a dict view is live",
+            context="A live dict view aliases the mutated dictionary",
+            explanation=(
+                "Dynamo cannot safely trace a dictionary mutation while a live "
+                "dict view that aliases the same dictionary may be observed later."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def _is_dict_view_backing_id_live(self, backing_id: int) -> bool:
+        output_graph = self.output_graph_weakref()
+        if output_graph is None:
+            return False
+
+        live_backing_ids: set[int] = set()
+        seen_real_values: set[int] = set()
+
+        def visit_cell_contents(
+            cell: variables.CellVariable, cache: dict[int, Any] | None = None
+        ) -> None:
+            if self.has_pending_mutation_of_attr(cell, "cell_contents"):
+                contents = self.load_attr(cell, "cell_contents", check=False)
+                visit_vt(contents, cache)
+            elif cell.pre_existing_contents is not None:
+                # Do not recursively scan arbitrary containers captured before
+                # tracing. A view that is actually loaded later is protected by
+                # the builder load/cache-hit checks.
+                collect_from_vt(cell.pre_existing_contents.unwrap())
+
+        def collect_from_real_value(value: Any) -> None:
+            obj_id = id(value)
+            if obj_id in seen_real_values:
+                return
+            seen_real_values.add(obj_id)
+
+            if isinstance(
+                value, (utils.dict_keys, utils.dict_values, utils.dict_items)
+            ):
+                view_backing_id = self._dict_backing_id(value)
+                if view_backing_id is not None:
+                    live_backing_ids.add(view_backing_id)
+                return
+
+            if isinstance(value, (str, bytes, int, float, bool, type(None))):
+                return
+
+            if isinstance(value, dict):
+                for key, val in value.items():
+                    collect_from_real_value(key)
+                    collect_from_real_value(val)
+                return
+
+            if isinstance(value, (list, tuple, set, frozenset, collections.deque)):
+                for item in value:
+                    collect_from_real_value(item)
+                return
+
+            if isinstance(value, CellType):
+                tracked_cell = self.id_to_variable.get(id(value))
+                if isinstance(tracked_cell, variables.CellVariable):
+                    visit_cell_contents(tracked_cell)
+                    return
+                try:
+                    collect_from_real_value(value.cell_contents)
+                except ValueError:
+                    pass
+                return
+
+            # Arbitrary Python objects can have enormous reachable graphs
+            # (for example unittest TestCase instances under dynamo-wrapped
+            # tests).  Only Python-backed VariableTrackers should trigger
+            # attribute scans; values merely reached through an attribute or
+            # container are handled when/if Dynamo loads them later.
+            return
+
+        def collect_from_vt(var: VariableTracker) -> None:
+            if isinstance(
+                var, (variables.DictViewVariable, variables.MappingProxyVariable)
+            ):
+                view_backing_id = var.backing_dict_id
+                if view_backing_id is not None:
+                    live_backing_ids.add(view_backing_id)
+            elif isinstance(var, variables.DictKeySetVariable):
+                view_backing_id = var.backing_dict_id
+                if view_backing_id is not None:
+                    live_backing_ids.add(view_backing_id)
+
+        def visit_vt(value: Any, cache: dict[int, Any] | None = None) -> None:
+            if cache is None:
+                cache = {}
+
+            def mark_seen(candidate: Any) -> bool:
+                value_id = id(candidate)
+                if value_id in cache:
+                    return False
+                cache[value_id] = candidate
+                return True
+
+            pending = [value]
+            while pending:
+                value = pending.pop()
+                if not mark_seen(value):
+                    continue
+
+                if isinstance(value, VariableTracker):
+                    if (
+                        isinstance(value, variables.LazyVariableTracker)
+                        and not value.is_realized()
+                    ):
+                        collect_from_real_value(value.peek_value())
+                        continue
+
+                    unwrapped = value.unwrap()
+                    if unwrapped is not value:
+                        if not mark_seen(unwrapped):
+                            continue
+                        value = unwrapped
+
+                    collect_from_vt(value)
+
+                    if isinstance(value, variables.CellVariable):
+                        visit_cell_contents(value, cache)
+                        continue
+
+                    nonvars = value._nonvar_fields
+                    for key, subvalue in value.__dict__.items():
+                        if key not in nonvars:
+                            pending.append(subvalue)
+                    if value in self.store_attr_mutations:
+                        pending.append(self.store_attr_mutations[value])
+                elif istype(value, (list, tuple)):
+                    pending.extend(value)
+                elif istype(value, (dict, collections.OrderedDict)):
+                    pending.extend(value.values())
+
+        def vt_matches_real_value(var: VariableTracker, value: Any) -> bool:
+            try:
+                return var.get_real_python_backed_value() is value
+            except NotImplementedError:
+                pass
+            try:
+                return var.as_python_constant() is value
+            except NotImplementedError:
+                return False
+
+        tx = output_graph.current_tx
+        while tx is not None:
+            if tx.instruction_pointer is not None:
+                cache_key = (id(tx), tx.current_instruction)
+                live_locals = output_graph.livevars_analysis_cache.get(cache_key)
+                if live_locals is None:
+                    live_locals = livevars_analysis(
+                        tx.instructions, tx.current_instruction
+                    )
+                    output_graph.livevars_analysis_cache[cache_key] = live_locals
+            else:
+                live_locals = set(tx.symbolic_locals)
+            vt_cache: dict[int, Any] = {}
+            visit_vt(tx.stack, vt_cache)
+            for name, local_vt in tx.symbolic_locals.items():
+                if name not in live_locals:
+                    continue
+                visit_vt(local_vt, vt_cache)
+
+            for name, value in tx.f_locals.items():
+                if name in tx.cell_and_freevars() or name not in live_locals:
+                    continue
+                if isinstance(value, (str, bytes, int, float, bool, type(None))):
+                    continue
+                if name in tx.symbolic_locals and vt_matches_real_value(
+                    tx.symbolic_locals[name].unwrap(), value
+                ):
+                    collect_from_real_value(value)
+
+            tx = tx.parent
+
+        for item, attrs in self.store_attr_mutations.items():
+            if not isinstance(item.mutation_type, AttributeMutationNew):
+                visit_vt(attrs)
+
+        return backing_id in live_backing_ids
 
     def _get_modified_vars(self) -> list[VariableTracker]:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -1538,6 +1852,7 @@ class SideEffects:
     def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
+        self._variable_to_object_id.clear()
 
 
 @register_side_effect_replay_handler(
