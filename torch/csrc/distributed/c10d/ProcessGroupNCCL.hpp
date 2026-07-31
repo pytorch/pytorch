@@ -1240,7 +1240,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   const c10::intrusive_ptr<Store>& globalStore() const;
 
   // Returns the global ranks of a PG.
-  const std::vector<uint64_t>& groupRanks() const;
+  std::vector<uint64_t> groupRanks() const;
 
   // Util function to assign timeout to each work.
   void assignTimeoutToWork(

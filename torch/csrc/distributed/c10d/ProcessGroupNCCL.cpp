@@ -2661,9 +2661,9 @@ const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {
   return globalStore_;
 }
 
-const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
+std::vector<uint64_t> ProcessGroupNCCL::groupRanks() const {
   if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
-    static std::vector<uint64_t> globalRanks(size_);
+    std::vector<uint64_t> globalRanks(size_);
     std::iota(globalRanks.begin(), globalRanks.end(), 0);
     return globalRanks;
   }
