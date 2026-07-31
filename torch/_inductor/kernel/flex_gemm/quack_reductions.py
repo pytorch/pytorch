@@ -33,7 +33,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
-    statically_known_equal,
 )
 from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
     NormalizedGetItem,
@@ -44,6 +43,11 @@ from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
     NormalizedSqueeze,
     NormalizedView,
 )
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionGeometry,
+    iter_fx_node_inputs,
+)
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
@@ -57,6 +61,45 @@ from torch.utils._ordered_set import OrderedSet
 
 def normalize_shape(shape: Any) -> Any:
     return tuple(shape) if isinstance(shape, (list, tuple, torch.Size)) else shape
+
+
+@dataclasses.dataclass(frozen=True)
+class GroupedTensorSSALayout(GemmReductionGeometry):
+    """Describe a grouped M/N TensorSSA view inside the generated epilogue."""
+
+    def fragment_group_size_expr(self, source: Any) -> str:
+        """Return the local group size available in this epilogue fragment."""
+        return (
+            f"cutlass.const_expr(min({self.group_size}, "
+            f"cute.size({source}.shape, mode=[0])))"
+        )
+
+    def fragment_repeat_expr(self, source: Any) -> str:
+        """Return the repeat count needed to cover the current epilogue fragment."""
+        return (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({self.group_size}, cute.size({source}.shape, mode=[0])))"
+        )
+
+    def tensorssa_shape(self, source: Any) -> str:
+        fragment_group_size = self.fragment_group_size_expr(source)
+        repeats = self.fragment_repeat_expr(source)
+        if self.axis == 1:
+            return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
+        return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
+
+    def keepdim_shape(self, source: Any) -> str:
+        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
+
+    @property
+    def needs_physical_combine(self) -> bool:
+        return self.needs_physical_callbacks
+
+    @property
+    def reduction_profile(self) -> str:
+        if self.axis == 1:
+            return "((None, 1, None), 1, 1)"
+        return "((1, None, None), 1, 1)"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -359,7 +402,7 @@ def _generate_like(
 
 
 def _keepdim_and_broadcast(
-    kernel: Any, reduced: Any, layout: FlexGemmLocalReduceGeometry, source: Any
+    kernel: Any, reduced: Any, layout: GroupedTensorSSALayout, source: Any
 ) -> tuple[Any, Any]:
     """Materialize keepdim and store-shaped forms of a grouped reduction."""
     keepdim_source = _generate_like(
@@ -452,20 +495,13 @@ def is_shape_preserving_pointwise_node(node: torch.fx.Node) -> bool:
     return is_pointwise_node(node) and node_preserves_tensor_shapes(node)
 
 
-def iter_fx_node_inputs(value: Any):
-    """Yield FX node inputs nested in args/kwargs-style containers."""
-    result: list[torch.fx.Node] = []
-    torch.fx.map_arg(value, lambda node: result.append(node))
-    yield from result
-
-
 def lower_view_or_reshape(
     node: torch.fx.Node,
     normalized: NormalizedView,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
-    active_grouped_layouts: OrderedSet[FlexGemmLocalReduceGeometry],
+    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    active_grouped_layouts: OrderedSet[GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
 ) -> Any | None:
@@ -494,7 +530,7 @@ def lower_grouped_n_split(
     normalized: NormalizedSplit,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
+    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
 ) -> tuple[Any, ...] | None:
     """Split an analyzed grouped-main value into per-lane TensorSSA values."""
     layout = grouped_tensors.get(node)
@@ -577,7 +613,7 @@ def lower_prepare_softmax_online(
     normalized: NormalizedPrepareSoftmax,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
+    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any:
     """Lower analyzed online-softmax preparation."""
@@ -619,7 +655,7 @@ def lower_tensorssa_reduce(
     normalized: NormalizedReduction,
     env: dict[torch.fx.Node, Any],
     kernel: Any,
-    grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry],
+    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction],
 ) -> Any:

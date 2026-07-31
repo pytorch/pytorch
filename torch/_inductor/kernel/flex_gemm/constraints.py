@@ -5,11 +5,10 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
-import sympy
-
-from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import (
-    statically_known_true as fx_statically_known_true,
+from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
+from torch._inductor.kernel.gemm_epilogue_utils import (
+    statically_known,
+    statically_known_shape_equal,
 )
 
 
@@ -145,33 +144,9 @@ FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
 )
 
 
-def statically_known(expr: Any) -> bool:
-    """Return whether a symbolic predicate is known true without adding guards."""
-    if isinstance(expr, bool):
-        return expr
-    if isinstance(expr, sympy.Basic):
-        return V.graph.sizevars.statically_known_true(expr)
-    return fx_statically_known_true(expr)
-
-
-def statically_known_equal(lhs: Any, rhs: Any) -> bool:
-    """Return whether symbolic shape values are known equal without adding guards."""
-    return statically_known(lhs == rhs)
-
-
 def statically_known_multiple(value: Any, divisor: int) -> bool:
     """Return whether a symbolic shape value is known divisible without guards."""
     return statically_known(value % divisor == 0)
-
-
-def statically_known_shape_equal(
-    actual_shape: Sequence[Any], expected_shape: Sequence[Any]
-) -> bool:
-    """Compare possibly symbolic shape tuples without adding guards."""
-    return len(actual_shape) == len(expected_shape) and all(
-        statically_known_equal(actual, expected)
-        for actual, expected in zip(actual_shape, expected_shape)
-    )
 
 
 def is_flex_gemm_partial_reduction_shape(
@@ -485,67 +460,7 @@ def grouped_main_output_config_supported(config: Any, n: Any) -> bool:
     )
 
 
-@dataclasses.dataclass(frozen=True)
-class FlexGemmLocalReduceGeometry:
-    """Describe the canonical grouped M/N layout used by FlexGEMM epilogues.
-
-    This type also owns the TensorSSA shape contract used by grouped main
-    outputs.
-
-    Attributes:
-        group: Number of contiguous M or N elements in each local group.
-        axis: GEMM output axis being grouped: 0 for M, 1 for N.
-    """
-
-    group: int
-    axis: int
-
-    def __post_init__(self) -> None:
-        """Reject geometry outside the GEMM tile's M/N grouping model."""
-        validate_local_reduce_group_axis(self.group, self.axis)
-
-    @property
-    def reduce_dims(self) -> tuple[int, ...]:
-        return (-1, 2) if self.axis == 1 else (-2, 1)
-
-    def matches_reduction_dim(self, dim: Any) -> bool:
-        """Return whether an FX reduction selects this layout's grouped dimension."""
-        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
-        return len(dims) == 1 and dims[0] in self.reduce_dims
-
-    def fragment_group_size_expr(self, source: Any) -> str:
-        """Return the local group size available in this epilogue fragment."""
-        return (
-            f"cutlass.const_expr(min({self.group}, "
-            f"cute.size({source}.shape, mode=[0])))"
-        )
-
-    def fragment_repeat_expr(self, source: Any) -> str:
-        """Return the repeat count needed to cover the current epilogue fragment."""
-        return (
-            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
-            f"// min({self.group}, cute.size({source}.shape, mode=[0])))"
-        )
-
-    def tensorssa_shape(self, source: Any) -> str:
-        fragment_group_size = self.fragment_group_size_expr(source)
-        repeats = self.fragment_repeat_expr(source)
-        if self.axis == 1:
-            return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
-        return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
-
-    def keepdim_shape(self, source: Any) -> str:
-        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
-
-    @property
-    def reduction_profile(self) -> str:
-        if self.axis == 1:
-            return "((None, 1, None), 1, 1)"
-        return "((1, None, None), 1, 1)"
-
-    @property
-    def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.axis, self.group)
+FlexGemmLocalReduceGeometry = GemmReductionGeometry
 
 
 @dataclasses.dataclass(frozen=True)
