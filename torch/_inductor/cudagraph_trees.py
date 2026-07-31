@@ -1,4 +1,4 @@
-"""
+﻿"""
 CUDA graph trees are a safety abstraction over CUDAGraphs, similar to make_graph_callables,
 which share the same memory pool.  Sharing a memory pool is an extremely
 important optimization when chaining multiple CUDA graphs together, as it
@@ -2384,7 +2384,7 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
-        self.storage_reallocated_function_ids: set[FunctionID] = set()
+        self.storage_reallocated_function_ids: OrderedSet[FunctionID] = OrderedSet()
         self.has_live_user_visible_output_cloning = False
 
         # Note: [Backward Generation Handling]
