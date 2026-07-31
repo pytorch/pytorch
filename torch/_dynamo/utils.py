@@ -5861,15 +5861,17 @@ def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
 
 # skip_code the two marker fns above: they are called from compiled bytecode
 # (behind PyCodegen's profiler gate) with the eval-frame callback active, so they
-# must not be traced. skip_code makes the eval-frame hook skip their frame via a
-# static flag with no per-call disable wrapper. Non-recursive (SKIP frame, DEFAULT
-# callees) is sufficient -- the callees when profiling (_RecordFunctionFast +
-# __enter__/__exit__) are C, which the hook never intercepts. The C
-# set_code_exec_strategy is used directly because torch._dynamo.disable / .skip
-# cannot be imported at utils import time (circular import).
+# must not be traced. skip_code makes the eval-frame hook skip the frame via a
+# static flag with no per-call disable wrapper. Skip recursively (SKIP frame AND
+# callees) so nothing in the marker's dynamic extent is ever traced -- the same
+# guarantee the old @torch._disable_dynamo gave, but for free: unlike a disable
+# wrapper the recursive skip is just a flag with no per-call cost, so there is no
+# reason to leave callees traceable. The C set_code_exec_strategy is used directly
+# because torch._dynamo.disable / .skip cannot be imported at utils import time
+# (circular import).
 _pregraph_marker_skip = torch._C._dynamo.eval_frame._FrameExecStrategy(
     torch._C._dynamo.eval_frame._FrameAction.SKIP,
-    torch._C._dynamo.eval_frame._FrameAction.DEFAULT,
+    torch._C._dynamo.eval_frame._FrameAction.SKIP,
 )
 torch._C._dynamo.eval_frame.set_code_exec_strategy(
     record_pregraph_bytecode_enter.__code__, _pregraph_marker_skip
