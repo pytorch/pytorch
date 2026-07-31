@@ -2000,6 +2000,122 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = opt_fn()
         self.assertEqual(result, ((1, 2), (3, 4)))
 
+    def test_min_max_key_and_default(self):
+        # Items are non-constant (tensors), so the fully-constant fold path is
+        # skipped; the key maps each to a compile-time-constant (ndim), which is
+        # what the key comparison requires. Comparison is on key(item) but the
+        # original tensor is returned.
+        def fn(x, y, z):
+            tensors = [x, y, z]
+            return (
+                max(tensors, key=lambda t: t.ndim).sum(),
+                min(tensors, key=lambda t: t.ndim).sum(),
+                max(tensors, key=lambda t: t.ndim, default=x).sum(),
+                max([], default=y).sum(),
+                min([x + 1], default=z).sum(),
+                max(x, z, key=lambda t: t.ndim).sum(),
+                min(x, z, key=lambda t: t.ndim).sum(),
+            )
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x, y, z = torch.randn(2), torch.randn(2, 2), torch.randn(2, 2, 2)
+        self.assertEqual(opt(x, y, z), fn(x, y, z))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_min_max_key_none(self):
+        # key=None behaves like no key argument at all.
+        def fn(x):
+            return x + max([4, 1, 7], key=None) + min([4, 1, 7], key=None)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_min_max_default_none_sentinel(self):
+        # A real default=None must be honored for empty iterables and not be
+        # confused with the internal "omitted" sentinel (which raises).
+        def fn(x):
+            return (
+                max((), default=None),
+                min((), default=None),
+                max((), default=0),
+                x + 1,
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(opt(x)[:3], (None, None, 0))
+
+    def test_min_max_default_varargs_type_error(self):
+        def fn(a, b):
+            return max(a, b, default=0)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(1, 2)
+        with self.assertRaises(TypeError):
+            opt(1, 2)
+
+    def test_min_max_empty_no_default_value_error(self):
+        def fn(xs):
+            return max(xs)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_indexable(self):
+        # int(x, base) resolves base via __index__ (PyNumber_AsSsize_t), so a
+        # non-constant __index__-able base must be accepted. Previously this
+        # raised an "invalid call to builtin op handler" graph break because
+        # call_int ignored the base argument entirely.
+        class MyIndexable:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn(x):
+            a = int("101", base=MyIndexable(2))
+            b = int("101", MyIndexable(36))
+            c = int(b"ff", base=MyIndexable(16))
+            return x + a + b + c
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_int_base_out_of_range_value_error(self):
+        class MyIndexable:
+            def __index__(self):
+                return 37
+
+        def fn(xs):
+            return int("43", base=MyIndexable())
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_non_string_type_error(self):
+        def fn(n):
+            return int(n, base=16)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(5)
+        with self.assertRaises(TypeError):
+            opt(5)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -10917,7 +11033,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend=counter)
         def fn(x):
-            return x * x
+            return torch.ones(2) * x
 
         fn(0)
         fn(1)
@@ -17170,7 +17286,6 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(opt(), "1:2:3")
 
     @unittest.skipIf(sys.version_info >= (3, 12), "comprehensions inlined in 3.12+")
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_listcomp_implicit_iterator_survives_graph_break(self):
         """Regression test: the implicit .0 iterator in a list comprehension
         must survive graph breaks under NGB.
@@ -17198,7 +17313,6 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt(x)
         self.assertTrue(torch.all(result > x))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_module_hooks_dict_reconstructed_as_ordered_dict(self):
         """Empty hooks dicts on nn.Module must be reconstructed as OrderedDict,
         not plain dict, so that weakref.ref() works in RemovableHandle.
@@ -17212,6 +17326,93 @@ def forward(self, L_x_ : torch.Tensor):
         opt = torch.compile(fn, backend="eager")
         result = opt()
         self.assertEqual(result.shape, (3, 7))
+
+    def test_custom_op_register_fake_inside_traced_function(self):
+        """Custom op defined with register_fake inside a traced function must
+        produce correct results. register_fake mutates _abstract_fn on the real
+        CustomOpDef as a side effect, so when the op is called before that
+        side effect is applied, get_fake_value graph-breaks ("Custom op missing
+        fake impl during tracing") and the op call falls back to eager. The
+        surrounding tensor ops still compile (exercising the resume path).
+        """
+        from typing import Tuple
+
+        def get_my_op():
+            @torch.library.custom_op("test::ngb_id", mutates_args=[])
+            def ngb_id(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            @ngb_id.register_fake
+            def _(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            return ngb_id
+
+        def fn(x):
+            x = x + 1  # non-empty prefix so a partial graph compiles
+            my_op = get_my_op()
+            return my_op(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt)
+        x = torch.randn(3)
+        result = opt(x)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], x + 1)
+        # The op call graph-breaks to eager; the surrounding ops still compile.
+        self.assertGreaterEqual(cnt.frame_count, 1)
+
+    def test_custom_op_missing_fake_impl_hard_errors(self):
+        """A custom op genuinely missing its fake impl (register_fake never
+        called) must still hard-error under compile. The missing-fake-impl
+        graph break is scoped to the register_fake-side-effect-pending case, so
+        it must NOT silently swallow this into an eager fallback.
+        """
+
+        @torch.library.custom_op("test::ngb_missing_fake", mutates_args=[])
+        def ngb_missing_fake(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return ngb_missing_fake(x) + 1
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
+
+    def test_custom_op_defined_inside_without_fake_hard_errors(self):
+        """A custom op DEFINED INSIDE the traced function but never
+        register_fake'd must still hard-error, and the gate must key off a
+        pending `_abstract_fn` mutation SPECIFICALLY, not any pending mutation.
+
+        Unlike test_custom_op_missing_fake_impl_hard_errors (op at module
+        scope, whose opdef is untracked so the gate short-circuits at
+        `vt is None`), the opdef here is tracked in side_effects. We store an
+        unrelated attribute on it so it has a pending NON-`_abstract_fn`
+        mutation: a gate that checked `has_pending_mutation(vt)` instead of
+        `has_pending_mutation_of_attr(vt, "_abstract_fn")` would then wrongly
+        graph-break and silently fall the genuinely-broken op back to eager.
+        The specific check hard-errors as it must.
+        """
+
+        def get_op():
+            @torch.library.custom_op("test::ngb_inside_nofake", mutates_args=[])
+            def op(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            return op
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            my_op = get_op()
+            # pending non-_abstract_fn mutation on the tracked opdef
+            my_op._unrelated_marker = 1
+            return my_op(x)
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
 
 
 instantiate_parametrized_tests(MiscTests)
