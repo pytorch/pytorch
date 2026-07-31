@@ -3593,6 +3593,7 @@ class CPUReproTests(TestCase):
         eps = torch.tensor(0.9, dtype=torch.float64)
         self.common(fn, (input, eps))
 
+    @slowTest
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
