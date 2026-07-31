@@ -3,10 +3,15 @@ from contextlib import contextmanager
 
 import torch
 import torch._prims_common as utils
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch._inductor.utils import get_gpu_type
 
 
 aten = torch.ops.aten
+
+# Device is passed via environment variable from the parent test process
+# (consistent with bisector CLI pattern: TORCH_COMPILE_BACKEND, TORCH_BISECT_BACKEND).
+# Falls back to get_gpu_type() for backwards compatibility when run standalone.
+_DEVICE = os.environ.get("TORCH_TEST_DEVICE", get_gpu_type())
 
 
 def bad_exp_decomp(self, rate=1.0, generator=None):
@@ -49,7 +54,7 @@ def vq(x):
 def test_fn():
     with patch_exp_decomp():
         vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
-        x = torch.randn(4, 400, 256, device=GPU_TYPE)
+        x = torch.randn(4, 400, 256, device=_DEVICE)
         out_compiled = vq_compiled(x)
 
     return 1 if out_compiled.isnan().any() else 0
