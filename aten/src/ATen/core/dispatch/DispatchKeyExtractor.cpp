@@ -64,7 +64,7 @@ std::string DispatchKeyExtractor::dumpState() const {
     }
   }
   oss << ' ' << nonFallthroughKeys_ << '\n';
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void DispatchKeyExtractor::checkInvariants(const FunctionSchema& schema) const {

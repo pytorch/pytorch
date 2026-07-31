@@ -31,7 +31,9 @@ class TestScatterOpt(TestCase):
     def do_acc_test(self, f, *args):
         expect = f(*args)
         actual = torch.compile(f)(*args)
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
+        self.assertTrue(
+            same(expect, actual, tol=1e-3), lambda msg: f"{msg}\n{expect=}\n{actual=}\n"
+        )
 
     def test_3d_tensor(self):
         L, M, N = 2, 1024, 2048
@@ -172,8 +174,15 @@ class TestScatterOpt(TestCase):
             expect = f(x)
             actual = torch.compile(f)(x)
             self.assertEqual(expect.dtype, dtype)
-            self.assertEqual(actual.dtype, dtype, f"dtype not preserved for {dtype}")
-            self.assertTrue(same(expect, actual, tol=1e-2), f"{expect=}\n{actual=}\n")
+            self.assertEqual(
+                actual.dtype,
+                dtype,
+                lambda msg: f"{msg}\ndtype not preserved for {dtype}",
+            )
+            self.assertTrue(
+                same(expect, actual, tol=1e-2),
+                lambda msg: f"{msg}\n{expect=}\n{actual=}\n",
+            )
             self.check_metric()
 
     def test_cross_entropy_loss(self):
