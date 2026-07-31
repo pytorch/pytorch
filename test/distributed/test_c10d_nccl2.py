@@ -6,6 +6,7 @@ import time
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import ReconfigureOptions
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
@@ -186,6 +187,27 @@ class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-lazy"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_not_supported(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertFalse(backend.supports_reconfigure)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not support get_reconfigure_handle"
+        ):
+            backend.get_reconfigure_handle()
+        with self.assertRaisesRegex(RuntimeError, "does not support reconfigure"):
+            backend.reconfigure(ReconfigureOptions())
+
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.enable_reconfigure = True
+        with self.assertRaisesRegex(
+            RuntimeError, "nccl-lazy does not support enable_reconfigure"
+        ):
+            dist.ProcessGroupNCCLLazy(
+                dist.HashStore(), self.rank, self.world_size, opts
+            )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
