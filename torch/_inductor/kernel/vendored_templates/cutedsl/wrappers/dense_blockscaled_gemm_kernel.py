@@ -34,6 +34,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     canonical_tensorssa_reduction_type,
     materialize_tensorssa_reduction,
 )
+from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_op_scope
 
 
 log = logging.getLogger(__name__)
@@ -198,35 +199,6 @@ def _ones_alpha():
     return tw
 
 
-def _epilogue_op_scope(cute):
-    import operator
-
-    from cutlass._mlir.dialects import math as mlir_math
-
-    def relu(x):
-        return cute.math.max(x, cute.full_like(x, 0.0))
-
-    def sigmoid(x):
-        return 1.0 / (1.0 + cute.math.exp(-x))
-
-    def gelu(x):
-        return 0.5 * x * (1.0 + cute.math.erf(x * 0.7071067811865476))
-
-    return {
-        "cutlass": cutlass,
-        "operator": operator,
-        "mlir_math": mlir_math,
-        "cute": cute,
-        "erf": cute.math.erf,
-        "exp": cute.math.exp,
-        "gelu": gelu,
-        "relu": relu,
-        "sigmoid": sigmoid,
-        "silu": lambda x: x * sigmoid(x),
-        "tanh": cute.math.tanh,
-    }
-
-
 def _local_reduce_abi_tensor(args):
     reduction = args.local_reduce
     tensor = reduction.output
@@ -346,7 +318,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     for node in ast.parse(epilogue_op).body
                     if isinstance(node, ast.FunctionDef)
                 )
-                scope = _epilogue_op_scope(cute)
+                scope = gemm_epilogue_op_scope(cute)
                 exec(epilogue_op, scope)
                 epilogue_op = scope[fn_name]
         epilogue = _EpilogueABI.from_args(args, "compile_time_tensor")
