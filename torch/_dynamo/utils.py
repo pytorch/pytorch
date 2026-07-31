@@ -4057,6 +4057,32 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
+def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> bool:
+    """True if ``target`` is a custom op whose ``register_fake`` ran earlier in
+    this trace -- i.e. its ``_abstract_fn`` has a pending (not-yet-applied)
+    attribute mutation. Distinguishes an op defined+register_fake'd inside the
+    compiled function (recoverable via graph break) from a genuinely
+    unregistered op (should hard-error with actionable guidance).
+
+    Only detects the ``CustomOpDef.register_fake`` method form (a tracked
+    pending ``_abstract_fn`` store on ``tx.output.side_effects``); other forms
+    (e.g. an op with no ``CustomOpDef``, or a definition inside a HOP body whose
+    mutation lives in a subtracer) fall through to the hard error, preserving
+    pre-existing behavior."""
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    from torch._library.custom_ops import _maybe_get_opdef
+
+    opdef = _maybe_get_opdef(target)
+    if opdef is None:
+        return False
+    side_effects = tx.output.side_effects
+    vt = side_effects.id_to_variable.get(id(opdef))
+    if vt is None:
+        return False
+    return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4271,6 +4297,32 @@ def _get_fake_value_impl(
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
                 hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
+            )
+        elif "no fake impl registered" in str(cause) and _custom_op_fake_impl_pending(
+            tx, node.target
+        ):
+            # A custom op was defined and register_fake'd inside the compiled
+            # function, then called. Under nested graph breaks Dynamo traces
+            # into the inlined op definition, so register_fake's mutation of
+            # _abstract_fn is recorded as a pending side effect rather than run
+            # eagerly; it is not yet applied to the real op when the op is called
+            # here, so its fake kernel raises "no fake impl registered". (Without
+            # nested graph breaks the definition graph-breaks and the op is fully
+            # registered before the call, so this path is not hit.) Graph break:
+            # the definition (and register_fake) run eagerly and the op call
+            # itself falls back to eager -- it is not captured into the resumed
+            # graph. Unlike the generic RuntimeError below this is recoverable,
+            # so do NOT wrap it as a hard TorchRuntimeError.
+            # NB: gated on a pending _abstract_fn mutation so a genuinely
+            # unregistered op still hard-errors below with actionable guidance.
+            unimplemented(
+                gb_type="Custom op missing fake impl during tracing",
+                context=f"{node.target}",
+                explanation="A custom operator was defined and register_fake'd "
+                "inside the compiled function, then called before the "
+                "register_fake side effect was applied.",
+                hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
