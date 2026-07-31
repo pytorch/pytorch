@@ -28,13 +28,14 @@ from ...ir import (
     Reduction,
 )
 from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
-from ...kernel.gemm_epilogue_ir import (
+from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+from ...kernel.loop_ir_epilogue_lowering import (
+    centered_mean_consumer_type_ir,
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
     grouped_reduction_ir,
     single_source_affine_ir,
 )
-from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
