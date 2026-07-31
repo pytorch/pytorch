@@ -44,6 +44,7 @@ from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
@@ -100,6 +101,8 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_export_with_extension_op_serialization(self):
         class TestModule(torch.nn.Module):
             def forward(self, x):
@@ -937,6 +940,8 @@ def forward(self, x):
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -1915,6 +1920,8 @@ instantiate_parametrized_tests(TestDeserialize)
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSchemaVersioning(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -1942,6 +1949,8 @@ unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kw
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_save_buffer(self):
         inp = (torch.tensor([0.1, 0.1]),)
 
@@ -2264,6 +2273,8 @@ class TestSaveLoad(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -2541,6 +2552,8 @@ def forward(self, x):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestPredispatchSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_predispatch_jvp_serialize_roundtrip(self):
         """Test that JVP predispatch wrapper functions survive serialization round-trip."""
         from torch._functorch.predispatch import (
@@ -2631,6 +2644,8 @@ class TestPredispatchSerialization(TestCase):
 
 
 class TestSerializeAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_weight_sharing(self, device) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -2660,6 +2675,8 @@ class TestSerializeAccelerator(TestCase):
 
 
 class TestDeserializeAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     _check_graph_nodes = TestDeserialize._check_graph_nodes
     check_graph = TestDeserialize.check_graph
 
@@ -2682,6 +2699,8 @@ class TestDeserializeAccelerator(TestCase):
 
 
 class TestSaveLoadAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_save_load_accelerator_tensor(self, device) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -2709,6 +2728,8 @@ class TestSaveLoadAccelerator(TestCase):
 
 
 class TestSerializeTriton(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
 
     def _gate_triton(self, device) -> None:
         if not has_triton_package() or not has_triton():
