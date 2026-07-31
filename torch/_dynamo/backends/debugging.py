@@ -300,12 +300,12 @@ class AOTEagerOutputCode(OutputCode):
 
     def post_compile(self, *args: Any, **kwargs: Any) -> None:
         if self.gm is None and self._serialized_gm is not None:
-            from torch._subclasses import FakeTensorMode
+            from torch._subclasses import make_fake_mode
             from torch.fx._graph_pickler import GraphPickler
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
             from torch.fx.graph import _BoxedCodeGen
 
-            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+            fake_mode = make_fake_mode(shape_env=ShapeEnv())
             gm = GraphPickler.loads(self._serialized_gm, fake_mode)
             if not isinstance(gm, torch.fx.GraphModule):
                 raise AssertionError(f"Expected torch.fx.GraphModule, got {type(gm)}")

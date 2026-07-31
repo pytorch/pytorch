@@ -4089,7 +4089,7 @@ class GuardsStatePickler(pickle.Pickler):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.fake_mode = torch._subclasses.FakeTensorMode()
+        self.fake_mode = torch._subclasses.make_fake_mode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
@@ -4110,7 +4110,7 @@ class GuardsStatePickler(pickle.Pickler):
         dispatch_keys_raw: int,
         grad: torch.Tensor,
     ) -> torch.Tensor:
-        fake_mode = torch._subclasses.FakeTensorMode()
+        fake_mode = torch._subclasses.make_fake_mode()
         tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         ret = tensor_converter.from_meta_and_device(
             fake_mode,

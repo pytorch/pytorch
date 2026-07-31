@@ -26,7 +26,7 @@ from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.out_dtype import out_dtype
-from torch._subclasses import fake_tensor
+from torch._subclasses import make_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -37,14 +37,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_SLOW
-
-
-def make_fake_mode(shape_env=None, **kwargs):
-    if config.use_cpp_fake_tensor:
-        raise NotImplementedError("c++ faketensor not implemented yet")
-    if shape_env is not None:
-        kwargs["shape_env"] = shape_env
-    return fake_tensor.FakeTensorMode(**kwargs)
 
 
 @torch._dynamo.assume_constant_result

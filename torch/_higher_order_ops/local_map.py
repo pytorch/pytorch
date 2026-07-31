@@ -216,7 +216,7 @@ def create_hop_fw_bw(
     from torch._dispatch.python import suspend_functionalization
     from torch._functorch.aot_autograd import AOTConfig, create_joint
     from torch._guards import detect_fake_mode
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import make_fake_mode
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 
@@ -250,7 +250,7 @@ def create_hop_fw_bw(
 
             fake_mode = detect_fake_mode(_args)
             if fake_mode is None:
-                fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+                fake_mode = make_fake_mode(allow_non_fake_inputs=True)
 
             with fake_mode:
                 fw_inputs = redistribute_fw_inputs(

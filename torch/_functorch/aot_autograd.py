@@ -29,7 +29,7 @@ from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import FakeTensorMode, make_fake_mode
 from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1863,7 +1863,7 @@ def aot_export_joint_simple(
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)
         if fake_mode is None:
-            fake_mode = FakeTensorMode()
+            fake_mode = make_fake_mode()
         with fake_mode:
             fw_module(*args)
     return fx_g

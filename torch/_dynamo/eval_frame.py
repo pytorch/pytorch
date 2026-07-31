@@ -2645,7 +2645,7 @@ def export(
             example_inputs = []
             graph_captured_input = ()
             graph_captured_result = ()
-            fake_mode = torch._subclasses.FakeTensorMode(
+            fake_mode = torch._subclasses.make_fake_mode(
                 shape_env=ShapeEnv(), export=True
             )
             if out_guards is None:
