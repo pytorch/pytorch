@@ -1378,11 +1378,13 @@ target_include_directories(torch_cpu PRIVATE
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/nlohmann/include)
 
-# The native .pftrace encoder's build deps are only pulled in when the CUPTI stubs were
-# generated above (CUPTI_STUBS_GENERATED): the encoder is useless without the CUPTI monitor,
-# which is unavailable at runtime absent the stubs. TORCH_CUPTI_PFTRACE selects the real
-# encoder in monitor_pftrace.cpp; without it that TU compiles a dependency-free stub that
-# raises, so neither perfetto nor zlib is required.
+# The native .pftrace encoder's only extra build dep (perfetto) is pulled in
+# just when the CUPTI stubs were generated above (CUPTI_STUBS_GENERATED): the
+# encoder is useless without the CUPTI monitor, which is unavailable at runtime
+# absent the stubs. TORCH_CUPTI_PFTRACE selects the real encoder in
+# monitor_pftrace.cpp; without it that TU compiles a dependency-free stub that
+# raises, so perfetto is not required. (Compression uses the in-tree miniz,
+# already on torch_cpu's include path above, so it needs no gating.)
 if(CUPTI_STUBS_GENERATED)
   target_compile_definitions(torch_cpu PRIVATE TORCH_CUPTI_PFTRACE)
   # Perfetto SDK amalgamation: the CUPTI monitor's native .pftrace encoder
@@ -1397,10 +1399,6 @@ if(CUPTI_STUBS_GENERATED)
   set_source_files_properties(
     ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc
     PROPERTIES COMPILE_FLAGS "-w")
-  # zlib for monitor_pftrace.cpp: it gzips the assembled trace in C++ so the
-  # uncompressed buffer never crosses the pybind boundary back to Python.
-  find_package(ZLIB REQUIRED)
-  target_link_libraries(torch_cpu PRIVATE ZLIB::ZLIB)
 endif()
 
 install(DIRECTORY

@@ -1725,7 +1725,11 @@ def _gpu_annotation_render_column(
 
 
 def _window_to_pftrace(
-    cpu_data: dict, trace_window: dict, base_ns: int, output_path: str
+    cpu_data: dict,
+    trace_window: dict,
+    base_ns: int,
+    output_path: str,
+    compression_level: int = 1,
 ) -> None:
     """Encode the monitor's columnar window straight to a Perfetto-native trace (.pftrace),
     concatenated with the Kineto CPU events -- NO chrome-dict materialization. Full parity with
@@ -2197,7 +2201,14 @@ def _window_to_pftrace(
     )
     # encode_pftrace returns gzip-compressed bytes (compressed in C++), so write as-is.
     out = torch._C._profiler._cupti_monitor.encode_pftrace(
-        base_ns, tracks, name_table, cat_table, group_tuples, render, counters
+        base_ns,
+        tracks,
+        name_table,
+        cat_table,
+        group_tuples,
+        render,
+        counters,
+        compression_level,
     )
     with open(output_path, "wb") as f:
         f.write(out)
@@ -2209,6 +2220,7 @@ def merge_trace_window_into_chrome_trace(
     trace_window: dict[str, object],
     *,
     trace_name: str | None = None,
+    pftrace_compression_level: int = 1,
 ) -> None:
     cpu_trace_path = str(cpu_trace_path)
     output_path = str(output_path)
@@ -2221,7 +2233,9 @@ def merge_trace_window_into_chrome_trace(
     # Perfetto-native output: encode straight from the columnar window (skip building the
     # chrome event dicts entirely -- that build dominates the JSON path).
     if ".pftrace" in output_path:
-        _window_to_pftrace(data, trace_window, base_ns, output_path)
+        _window_to_pftrace(
+            data, trace_window, base_ns, output_path, pftrace_compression_level
+        )
         return
     original_events = list(data.get("traceEvents", []))
     cpu_thread_by_external_id: dict[int, tuple[int, int]] = {}

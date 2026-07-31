@@ -1,54 +1,75 @@
 #include <torch/csrc/profiler/cupti/monitor_pftrace.h>
 
 // TORCH_CUPTI_PFTRACE is defined (see caffe2/CMakeLists.txt) only when the
-// CUPTI stubs were generated at build time, which is what pulls in perfetto +
-// zlib. In that case the real protozero encoder is compiled; otherwise this TU
-// is a dependency-free stub (no perfetto/zlib) whose encoder raises -- the
-// CUPTI monitor is unavailable at runtime without the stubs anyway.
+// CUPTI stubs were generated at build time, which is what pulls in perfetto. In
+// that case the real protozero encoder is compiled; otherwise this TU is a
+// dependency-free stub (no perfetto) whose encoder raises -- the CUPTI monitor
+// is unavailable at runtime without the stubs anyway.
 #ifdef TORCH_CUPTI_PFTRACE
 
 #include <perfetto.h>
 
 #include <nlohmann/json.hpp>
 
-#include <zlib.h>
-
 #include <array>
 #include <cmath>
 #include <map>
 #include <set>
+
+// miniz is included last: its zlib-compatible macros (deflate, compress, ...)
+// must not shadow identifiers in the perfetto/nlohmann/std headers above. We
+// use only the mz_-prefixed API below, so the macros are harmless here.
+#include <miniz.h>
 
 namespace torch::profiler::impl {
 
 namespace {
 namespace pbz = perfetto::protos::pbzero;
 
-// gzip-compress (level 1, fast) with a gzip wrapper (windowBits 15|16) so the
-// result is a ready-to-write .pftrace.gz. Done here, not in Python, so the
-// uncompressed trace (tens of MB) never crosses the pybind boundary. Falls back
-// to the uncompressed bytes if zlib init fails.
-std::string gzipCompress(const std::string& data) {
-  z_stream zs{};
-  if (deflateInit2(&zs, 1, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY) !=
-      Z_OK) {
+// gzip-compress at the given level (0-9; 1 = fast, the default) so the result
+// is a ready-to-write .pftrace.gz. Done here, not in Python, so the
+// uncompressed trace (tens of MB) never crosses the pybind boundary. miniz (the
+// in-tree deflate) has no gzip-header mode, so we deflate raw (windowBits -15)
+// and wrap it in a minimal gzip frame: a 10-byte header + the raw stream + an
+// 8-byte trailer (CRC32 then uncompressed size mod 2^32, both little-endian).
+// Falls back to the uncompressed bytes if deflate init fails (e.g. an
+// out-of-range level).
+std::string gzipCompress(const std::string& data, int level) {
+  mz_stream zs{};
+  if (mz_deflateInit2(&zs, level, MZ_DEFLATED, -15, 8, MZ_DEFAULT_STRATEGY) !=
+      MZ_OK) {
     return data;
   }
-  // deflate does not modify the input; the const_cast satisfies zlib's
-  // non-const Bytef* API.
+  // deflate does not modify the input; the const_cast satisfies miniz's
+  // non-const next_in.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.data()));
-  zs.avail_in = static_cast<uInt>(data.size());
+  zs.next_in = reinterpret_cast<unsigned char*>(const_cast<char*>(data.data()));
+  zs.avail_in = static_cast<unsigned int>(data.size());
   std::string out;
   out.reserve(data.size() / 3 + 64);
+  // gzip header: magic (1f 8b), deflate method (08), no flags, zero mtime, no
+  // extra flags, unknown OS (ff).
+  static constexpr std::array<char, 10> kHeader = {
+      '\x1f', '\x8b', '\x08', 0, 0, 0, 0, 0, 0, '\xff'};
+  out.append(kHeader.data(), kHeader.size());
   std::array<char, 1 << 16> buf{};
-  int ret = Z_OK;
+  int ret = MZ_OK;
   do {
-    zs.next_out = reinterpret_cast<Bytef*>(buf.data());
-    zs.avail_out = static_cast<uInt>(buf.size());
-    ret = deflate(&zs, Z_FINISH);
+    zs.next_out = reinterpret_cast<unsigned char*>(buf.data());
+    zs.avail_out = static_cast<unsigned int>(buf.size());
+    ret = mz_deflate(&zs, MZ_FINISH);
     out.append(buf.data(), buf.size() - zs.avail_out);
-  } while (ret == Z_OK);
-  deflateEnd(&zs);
+  } while (ret == MZ_OK);
+  mz_deflateEnd(&zs);
+  const auto crc = static_cast<uint32_t>(mz_crc32(
+      MZ_CRC32_INIT,
+      reinterpret_cast<const unsigned char*>(data.data()),
+      data.size()));
+  for (uint32_t trailer : {crc, static_cast<uint32_t>(data.size())}) {
+    for (int i = 0; i < 4; ++i) {
+      out.push_back(static_cast<char>((trailer >> (8 * i)) & 0xff));
+    }
+  }
   return out;
 }
 
@@ -140,7 +161,8 @@ std::string cuptiMonitorEncodePftrace(
     const std::vector<PftraceGpuSpec>& gpu_specs,
     const std::vector<PftraceGfxContext>& gfx_contexts,
     const PftraceRenderStages& stages,
-    const PftraceGpuCounter& counters) {
+    const PftraceGpuCounter& counters,
+    int compression_level) {
   protozero::HeapBuffered<pbz::Trace> trace;
 
   // Time base: the packet timestamps are absolute (base_ns + offset,
@@ -455,7 +477,7 @@ std::string cuptiMonitorEncodePftrace(
     }
   }
 
-  return gzipCompress(trace.SerializeAsString());
+  return gzipCompress(trace.SerializeAsString(), compression_level);
 }
 
 } // namespace torch::profiler::impl
@@ -475,7 +497,8 @@ std::string cuptiMonitorEncodePftrace(
     const std::vector<PftraceGpuSpec>& /*gpu_specs*/,
     const std::vector<PftraceGfxContext>& /*gfx_contexts*/,
     const PftraceRenderStages& /*stages*/,
-    const PftraceGpuCounter& /*counters*/) {
+    const PftraceGpuCounter& /*counters*/,
+    int /*compression_level*/) {
   TORCH_CHECK(
       false,
       "PyTorch was built without native .pftrace support: the CUPTI stubs were "
