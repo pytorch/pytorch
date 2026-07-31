@@ -161,7 +161,7 @@ class TestCommunicationHooks(FSDPTest):
             self.assertEqual(
                 grad[0].item(),
                 expected_grad,
-                msg=f"Expected hook grad of {expected_grad} but got {grad[0].item()}",
+                msg=lambda msg: f"{msg}\nExpected hook grad of {expected_grad} but got {grad[0].item()}",
             )
 
     def _get_submodules(self, fsdp_net):

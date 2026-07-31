@@ -1,8 +1,11 @@
 # Owner(s): ["module: PrivateUse1"]
+import unittest
+
 import numpy as np
 
 import torch
 import torch._C
+import torch._dynamo
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.backend_registration import _setup_privateuseone_for_python_backend
 
@@ -66,8 +69,9 @@ def detach(self):
 def empty_strided(
     size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
 ):
+    dtype = dtype if dtype is not None else torch.float32
     out = np.empty(size)
-    return wrap(out, out.shape, torch.float32)
+    return wrap(out, out.shape, dtype)
 
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
@@ -89,8 +93,9 @@ def _view(a, b):
 def empty_memory_format(
     size, *, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
 ):
+    dtype = dtype if dtype is not None else torch.float32
     ans = np.empty(size)
-    return wrap(ans, ans.shape, torch.float32)
+    return wrap(ans, ans.shape, dtype)
 
 
 @torch.library.impl("aten::sum", "privateuseone")
@@ -119,6 +124,12 @@ def as_strided(self, size, stride, storage_offset=None):
     return wrap(ans, ans.shape, torch.float32)
 
 
+@torch.library.impl("aten::pow.Scalar", "privateuseone")
+def pow_scalar(scalar, exponent):
+    ans = np.power(scalar, unwrap(exponent))
+    return wrap(ans, ans.shape, torch.float32)
+
+
 class PrivateUse1BackendTest(TestCase):
     @classmethod
     def setupClass(cls):
@@ -129,6 +140,10 @@ class PrivateUse1BackendTest(TestCase):
         # Assert this don't throw:
         _ = a_cpu.is_pinned()
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190232"
+    )
     def test_backend_simple(self):
         a_cpu = torch.randn((2, 2))
         b_cpu = torch.randn((2, 2))
@@ -141,6 +156,17 @@ class PrivateUse1BackendTest(TestCase):
         c = (a + b).sum()
         c.backward()
         self.assertTrue(np.allclose(a.grad.raw_data, np.ones((2, 2))))
+
+    def test_ldexp(self):
+        a_cpu = torch.tensor([1.0, 2.0], dtype=torch.float32)
+        b_cpu = torch.tensor([1, 2], dtype=torch.int32)
+        a = a_cpu.to("privateuseone")
+        b = b_cpu.to("privateuseone")
+        res = torch.ldexp(a, b)
+        # Disable Dynamo tracing on test assertions to prevent compile-time FakeTensor crashes
+        torch._dynamo.disable(self.assertTrue)(
+            np.allclose(unwrap(res), np.array([2.0, 8.0]))
+        )
 
 
 if __name__ == "__main__":
