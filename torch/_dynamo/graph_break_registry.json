@@ -5376,6 +5376,14 @@
     {
       "Gb_type": "autograd.Function with custom vmap staticmethod",
       "Context": "{self.fn_cls.__name__}.vmap",
+      "Explanation": "Dynamo cannot trace an autograd.Function that defines its own vmap staticmethod under vmap; eager applies and validates that rule.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "autograd.Function with custom vmap staticmethod",
+      "Context": "{self.fn_cls.__name__}.vmap",
       "Explanation": "Dynamo cannot trace an autograd.Function that defines its own vmap staticmethod; eager applies and validates that rule.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."

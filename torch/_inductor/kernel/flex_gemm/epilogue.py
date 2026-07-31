@@ -972,7 +972,7 @@ class FlexGemmEpilogueEmitter:
         }
         self.grouped_tensors = dict(analysis.local_reduce.grouped_tensors)
         self.active_grouped_layouts = OrderedSet(
-            GroupedTensorSSALayout(geometry.axis, geometry.group)
+            GroupedTensorSSALayout(group=geometry.group, axis=geometry.axis)
             for geometry in analysis.required_geometries
         )
         self.store_sources: dict[torch.fx.Node, Any] = {}

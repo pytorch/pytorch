@@ -2145,6 +2145,12 @@ def object_generic_getattr(
     """
     from .user_defined import is_data_descriptor
 
+    # Step 0: dunders whose generic getset-descriptor resolution would lose
+    # Dynamo-side state (e.g. __dict__ must be the mutation-tracked dict).
+    shortcut = obj.lookup_dunder_shortcut(tx, name)
+    if shortcut is not None:
+        return shortcut
+
     source = obj.source and AttrSource(obj.source, name)
 
     # Step 1: MRO walk.
@@ -2180,10 +2186,13 @@ def object_generic_getattr(
         type_name = py_type.__name__
     except NotImplementedError:
         type_name = type(obj).__name__
+    # CPython sets AttributeError.name/.obj; user code (and our own reconstruct
+    # path) reads them, so populate both rather than just the message.
     raise_observed_exception(
         AttributeError,
         tx,
         args=[f"'{type_name}' object has no attribute '{name}'"],
+        kwargs={"name": variables.ConstantVariable.create(name), "obj": obj},
     )
 
 
