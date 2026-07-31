@@ -8,8 +8,10 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Macros.h>
 
+#include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Window.hpp>
@@ -26,6 +28,11 @@
 // one-sided window APIs (supportsWindow / new_window) and the c10d::Window
 // interface. Downstream backends can guard their overrides with #ifdef.
 #define C10D_BACKEND_HAS_WINDOW 1
+
+// Feature macro: when defined, c10d::Backend exposes abort-hook registration
+// and c10d::ProcessGroup additionally exposes pre/post collective hooks (see
+// Hooks.hpp). Downstream backends can guard their overrides with #ifdef.
+#define C10D_BACKEND_HAS_HOOKS 1
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -164,11 +171,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support shrink"));
   }
 
-  virtual void setTimeout(std::chrono::milliseconds timeout) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support setting timeout"));
+  virtual void setTimeout(std::chrono::milliseconds /*timeout*/) {
+    TORCH_WARN(
+        "Backend ",
+        getBackendName(),
+        " does not support setting timeout; the new value is ignored");
   }
 
   // Fault Tolerance / Reconfigure API
@@ -212,6 +219,29 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support new_window"));
+  }
+
+  // Abort Hook API
+  //
+  // Abort hooks are invoked before the backend aborts on a timeout or error,
+  // letting users capture debug information. Hooks are keyed by an opaque
+  // hook_id so they can be individually unregistered.
+  virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support registerAbortHook"));
+  }
+
+  virtual void unregisterAbortHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support unregisterAbortHook"));
   }
 
   virtual void startCoalescing() {
@@ -369,6 +399,22 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support gather"));
   }
 
+  // Gathers a single tensor inputBuffer from every rank into a single flat
+  // outputBuffer on the root rank, interpreted as a contiguous collection of
+  // size inputBuffer * WORLD_SIZE. This is the single-tensor analog of gather
+  // that avoids materializing a per-rank output tensor list.
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const GatherOptions& /* opts */ = GatherOptions()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support gather_into_tensor"));
+  }
+
   virtual c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
@@ -475,17 +521,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support monitoredBarrier, only GLOO supports monitored barrier."));
   }
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
+  // Deprecated no-op: sequence numbers now always start at 0 on every rank, so
+  // there is no initial value to agree on. Kept for backward compatibility with
+  // existing callers; it warns and does nothing.
   virtual void setSequenceNumberForGroup() {
-    auto backendName = getBackendName();
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            backendName,
-            " does not yet support sequence numbers."));
+    TORCH_WARN_ONCE(
+        "setSequenceNumberForGroup() is deprecated and is now a no-op; "
+        "sequence numbers always start at 0 on every rank. Remove calls to "
+        "_set_sequence_number_for_group().");
   }
 
   // Retrieves the current sequence number for the whole group, which should be
@@ -624,9 +667,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual ErrorType getError() {
-    TORCH_CHECK(
-        false,
-        c10::str("Backend ", getBackendName(), " does not support getError"));
+    return ErrorType::SUCCESS;
   }
 
   virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
@@ -679,15 +720,25 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemoryStats"));
   }
 
+  c10::impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const c10::impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int rank_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int size_;
+  int rank_;
+  int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
@@ -699,8 +750,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 
   bool use_pg_for_symm_mem_rendezvous_ = false;
+
+  c10::impl::PyObjectSlot pyobj_slot_;
 };
 
 } // namespace c10d
+
+namespace c10::detail {
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+} // namespace c10::detail
 
 #undef C10D_BACKEND_FORWARDING_GUARD

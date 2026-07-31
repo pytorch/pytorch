@@ -89,6 +89,7 @@
     :toctree: generated
     :nosignatures:
 
+    FlopCounterMode
     baddbmm_flop
     bmm_flop
     conv_backward_flop
