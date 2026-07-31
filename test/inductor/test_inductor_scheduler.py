@@ -435,6 +435,33 @@ class TestScheduler(TestCase):
                 )
             )
 
+    def test_nested_reduction_parent_half_domain(self):
+        self.assertEqual(
+            NestedReduction._parent_half_domain(
+                NestedReduction.GroupedAxis.R,
+                16,
+                128,
+                512,
+            ),
+            (128, 256),
+        )
+        self.assertIsNone(
+            NestedReduction._parent_half_domain(
+                NestedReduction.GroupedAxis.X,
+                16,
+                128,
+                512,
+            )
+        )
+        self.assertIsNone(
+            NestedReduction._parent_half_domain(
+                NestedReduction.GroupedAxis.R,
+                1,
+                128,
+                512,
+            )
+        )
+
     def test_nested_reduction_axis_from_loop_body(self):
         outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
         grouped_x0, grouped_x1, grouped_r = sympy.symbols(
