@@ -842,7 +842,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 // Materializes Kineto's typed metadata into profiler-owned IValues.
 class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
  public:
-  typed_metadata_t metadata() {
+  typed_metadata_t metadata() && {
     return std::move(metadata_);
   }
 
@@ -1328,7 +1328,7 @@ class TransferEvents {
               [&](ExtraFields<EventType::Kineto>& i) {
                 IValueMetadataVisitor visitor;
                 activity->visitTypedMetadata(visitor);
-                i.typed_metadata_ = visitor.metadata();
+                i.typed_metadata_ = std::move(visitor).metadata();
               },
               [](auto&) { return; }));
         }
