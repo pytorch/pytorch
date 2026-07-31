@@ -112,10 +112,8 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_X86,
+    isRocmArchAnyOf,
     MACOS_VERSION,
-    MI200_ARCH,
-    MI300_ARCH,
-    MI350_ARCH,
     NAVI_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -6131,9 +6129,6 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,
         )
 
-    # The forced Triton conv-backward autotune below compiles pathologically
-    # slowly on these ROCm arches, timing out CI. Skip until fixed (see #178945).
-    @skipIfRocmArch(NAVI_ARCH + MI350_ARCH + MI300_ARCH + MI200_ARCH)
     @skip_if_cpu
     @config.patch(
         {
@@ -6199,29 +6194,37 @@ for dtype in (torch.int32, torch.int64):
         output_h = (input_h + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
         output_w = (input_w + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
 
+        dtype = torch.float32
+        use_fp16 = False
+        rtol = 0.001
         if TEST_WITH_ROCM:
             # using the same error tolerance as test_convolution1.
             atol = 6e-5
-            rtol = 0.001
+            if isRocmArchAnyOf(NAVI_ARCH):
+                use_fp16 = True
+                dtype = torch.float16
+                atol = 3e-1
         else:
             # Greatest absolute difference: 0.00027943775057792664 at index (92, 109, 0, 0) (up to 0.0002 allowed)
             # Greatest relative difference: 0.007547957822680473 at index (92, 109, 0, 0) (up to 0.001 allowed)
             atol = 3e-4
-            rtol = 0.001
 
-        weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
+        weight = torch.randn(
+            [out_channels, in_channels // groups, kernel, kernel], dtype=dtype
+        )
         if nhwc:
             weight = weight.to(memory_format=torch.channels_last)
         self.common(
             fn,
             (
-                torch.randn([2, out_channels, output_h, output_w]),
-                torch.randn([2, in_channels, input_h, input_w]),
+                torch.randn([2, out_channels, output_h, output_w], dtype=dtype),
+                torch.randn([2, in_channels, input_h, input_w], dtype=dtype),
                 weight,
             ),
             atol=atol,
             rtol=rtol,
             check_lowp=False,
+            reference_in_float=not use_fp16,
         )
 
     @skip_if_cpu
@@ -6798,6 +6801,7 @@ for dtype in (torch.int32, torch.int64):
         self.common(m1, (torch.randn(1, 2),))
         m2 = nn.AdaptiveAvgPool2d(0)
         self.common(m2, (torch.randn(1, 2, 3),))
+        self.common(m2, (torch.randint(0, 8, (1, 2, 3)),))
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -19131,6 +19135,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out.stride(), (1,))
         self.assertTrue(out._is_zerotensor())
 
+    def test_issue_190765_tiny_repro(self):
+        def fn(p):
+            return torch.flip(torch.repeat_interleave(torch.flatten(p + 1.0), 2), [0])
+
+        torch.manual_seed(0)
+        p = torch.randn(2, 2, dtype=torch.float32, device=self.device)
+        compiled = torch.compile(fn, backend="inductor", dynamic=True)
+        for _ in range(4):
+            self.assertEqual(compiled(p), fn(p))
+
+    def test_issue_190765_intermediate_graph(self):
+        def postprocess(z):
+            return torch.flip(torch.repeat_interleave(torch.flatten(z), 2), [0])
+
+        def fn(x, a, b):
+            left = (x @ a).transpose(0, 1)
+            right = (x @ b).transpose(0, 1)
+            return postprocess((left + right).transpose(0, 1))
+
+        torch.manual_seed(0)
+        x = torch.randn(8, 6, dtype=torch.float32, device=self.device)
+        a = torch.randn(6, 8, dtype=torch.float32, device=self.device)
+        b = torch.randn(6, 8, dtype=torch.float32, device=self.device)
+        compiled = torch.compile(fn, backend="inductor", dynamic=True)
+        for _ in range(4):
+            self.assertEqual(compiled(x, a, b), fn(x, a, b))
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -19641,6 +19672,29 @@ if RUN_GPU:
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_barrier_on_reduction_loop_readback(self):
+            # A buffer stored in a reduction loop and read back after it needs
+            # a barrier, or one warp may read what another wrote.
+            def fn(a, b, w, bias):
+                y = a + b
+                mean = y.mean(-1, keepdim=True)
+                var = y.var(-1, keepdim=True, unbiased=False)
+                normed = (y - mean) * torch.rsqrt(var + 1e-6) * w + bias
+                return y, normed
+
+            N = 4096
+            inps = [
+                torch.randn(64, N, device=GPU_TYPE),
+                torch.randn(64, N, device=GPU_TYPE),
+                torch.randn(N, device=GPU_TYPE),
+                torch.randn(N, device=GPU_TYPE),
+            ]
+            fn_opt = torch.compile(fn, backend="inductor")
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertTrue("tl.debug_barrier()" in code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
