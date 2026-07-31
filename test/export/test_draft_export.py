@@ -13,7 +13,7 @@ from torch.export._draft_export import DraftExportReport, FailureReport, Failure
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS, run_tests, TestCase
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -22,6 +22,8 @@ from torch.utils._pytree import tree_leaves
 
 
 class TestDraftExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -792,6 +794,8 @@ class TestDraftExport(TestCase):
 
 
 class TestDraftExportDeviceGuard(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_missing_meta_kernel_device_mismatch(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 
