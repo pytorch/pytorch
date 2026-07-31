@@ -722,6 +722,82 @@
       ]
     }
   ],
+  "GB6479": [
+    {
+      "Gb_type": "module hook registration after hook state mutation",
+      "Context": "module={module}",
+      "Explanation": "Dynamo cannot defer module hook registration after mutating hook state in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "module hook registration after hook state mutation",
+      "Context": "module={self.obj}",
+      "Explanation": "Dynamo cannot defer module hook registration after mutating hook state in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4602": [
+    {
+      "Gb_type": "module hook registration after hook state access",
+      "Context": "module={module}",
+      "Explanation": "Dynamo cannot defer module hook registration after reading hook state in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "module hook registration after hook state access",
+      "Context": "module={self.obj}",
+      "Explanation": "Dynamo cannot defer module hook registration after reading hook state in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3033": [
+    {
+      "Gb_type": "module hook registration after handle state access",
+      "Context": "RemovableHandle state accessed before registration",
+      "Explanation": "Dynamo cannot defer module hook registration after RemovableHandle state was accessed in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7666": [
+    {
+      "Gb_type": "pending module hook dictionary read",
+      "Context": "getattro_impl: {module} {name}",
+      "Explanation": "Dynamo cannot read nn.Module hook state after deferring a hook registration in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7849": [
+    {
+      "Gb_type": "RemovableHandle state read after module hook registration",
+      "Context": "context",
+      "Explanation": "Dynamo cannot read RemovableHandle state after deferring a module hook registration in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8500": [
+    {
+      "Gb_type": "module hook removed before replay",
+      "Context": "RemovableHandle.remove",
+      "Explanation": "Dynamo cannot remove a module hook before its deferred registration has been replayed.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4297": [
     {
       "Gb_type": "Call to `torch._dynamo.skip_frame()`",
@@ -1141,6 +1217,16 @@
       "Explanation": "{seq} unpacked to a list for the UNPACK_SEQUENCE bytecode (i.e. `a, b, c = d`) with unexpected length.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB1809": [
+    {
+      "Gb_type": "pending module hook state alias read",
+      "Context": "source={self.source}",
+      "Explanation": "Dynamo cannot access an alias of nn.Module hook state after deferring a hook registration in the same forward.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5221,6 +5307,16 @@
       "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB8475": [
+    {
+      "Gb_type": "unsupported nn.Module hook registration",
+      "Context": "call_method: {module} {fn.__name__}",
+      "Explanation": "Dynamo cannot trace this nn.Module hook registration without partially applying its side effects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

@@ -525,6 +525,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if self.value is torch.utils.hooks.RemovableHandle and name in (
+            "next_id",
+            "__dict__",
+        ):
+            tx.output.side_effects.observe_removable_handle_state(
+                f"RemovableHandle.{name}"
+            )
+
         source = AttrSource(self.source, name) if self.source is not None else None
 
         # --- Dynamo-specific pre-checks ---
@@ -4574,6 +4582,16 @@ class RemovableHandleVariable(VariableTracker):
             if self.idx != self.REMOVED:
                 if self.idx is None:
                     raise AssertionError("idx must not be None for hook removal")
+                if tx.output.side_effects.is_pending_module_hook_handle(self.idx):
+                    unimplemented(
+                        gb_type="module hook removed before replay",
+                        context="RemovableHandle.remove",
+                        explanation=(
+                            "Dynamo cannot remove a module hook before its deferred "
+                            "registration has been replayed."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
