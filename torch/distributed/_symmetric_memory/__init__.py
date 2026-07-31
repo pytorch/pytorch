@@ -444,6 +444,63 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
+def _ring_addmm_reduce_scatter(
+    mm_out_op: torch._ops.OpOverload,
+    A_shards: tuple[torch.Tensor, ...],
+    B: torch.Tensor,
+    output: torch.Tensor,
+    reduce_op: str,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """
+    Reduce-scatter GEMM schedule that rotates partial sums around the ring and
+    uses GEMM's C operand for accumulation.
+    """
+    M_shard, N = output.shape
+    dtype = output.dtype
+    num_d_buffers = max(2, len(A_shards) - 1)
+    p2p_workspace_size_req = num_d_buffers * output.numel() * output.element_size()
+    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    group_size = symm_mem.world_size
+    rank = symm_mem.rank
+    left_peer = (rank - 1 + group_size) % group_size
+    right_peer = (rank + 1) % group_size
+    signal_channel = 1
+
+    local_d_full = symm_mem.get_buffer(rank, (num_d_buffers * M_shard, N), dtype)
+    left_d_full = symm_mem.get_buffer(left_peer, (num_d_buffers * M_shard, N), dtype)
+
+    symm_mem.barrier(channel=0)
+
+    for i in range(group_size):
+        tile_idx = (rank - 1 - i + group_size) % group_size
+        a_tile = A_shards[tile_idx]
+        if i < group_size - 1:
+            buf_idx = i % num_d_buffers
+            d_target = local_d_full[buf_idx * M_shard : (buf_idx + 1) * M_shard, :]
+        else:
+            d_target = output
+
+        if i == 0:
+            mm_out_op(a_tile, B, out=d_target)
+        else:
+            symm_mem.wait_signal(src_rank=left_peer, channel=signal_channel)
+            prev_buf_idx = (i - 1) % num_d_buffers
+            c_source = left_d_full[
+                prev_buf_idx * M_shard : (prev_buf_idx + 1) * M_shard, :
+            ]
+            torch.addmm(c_source, a_tile, B, beta=1, out=d_target)
+
+        if i < group_size - 1:
+            symm_mem.put_signal(dst_rank=right_peer, channel=signal_channel)
+
+    if reduce_op == "avg":
+        output.div_(group_size)
+
+    symm_mem.barrier(channel=0)
+    return output
+
+
 lib = torch.library.Library("symm_mem", "DEF")
 lib.define(
     "fused_all_gather_matmul("
@@ -1332,6 +1389,19 @@ def _fused_matmul_reduce_scatter_impl(
     leading_dims[1] //= group.size()
     x = x.flatten(0, -2)
     A_shards = x.chunk(group.size())
+
+    if A.dim() == 2 and scatter_dim == 0 and not kwargs and reduce_op in ("sum", "avg"):
+        output = x.new_empty(
+            A_shards[0].shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        )
+        return _ring_addmm_reduce_scatter(
+            mm_out_op,
+            A_shards,
+            B,
+            output,
+            reduce_op,
+            group_name,
+        )
 
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:

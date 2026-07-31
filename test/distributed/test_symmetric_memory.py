@@ -1005,6 +1005,34 @@ class AsyncTPTest(MultiProcContinuousTest):
                 f"Expected strides to match: {output_0.stride()} vs {output_1.stride()}"
             )
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_fused_matmul_reduce_scatter_2d_dim0(self, reduce_op: str) -> None:
+        self._init_process()
+
+        M = 64
+        N = 16
+        K = 128
+        group = dist.group.WORLD
+        rank = self.rank
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(M, K, device="cuda")
+        B = torch.rand(K, N, device="cuda")
+
+        output_0 = _fused_matmul_reduce_scatter_fallback(
+            A, B, reduce_op, scatter_dim=0, group_name=group.group_name
+        )
+        output_1 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+            A, B, reduce_op, scatter_dim=0, group_name=group.group_name
+        )
+
+        self.assertTrue(torch.allclose(output_0, output_1))
+        self.assertEqual(output_0.stride(), output_1.stride())
+
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
