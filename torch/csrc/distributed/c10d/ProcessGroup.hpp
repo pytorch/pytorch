@@ -510,8 +510,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Gathers a single tensor inputBuffer from every rank into a single flat
   // outputBuffer on the root rank. Single-tensor analog of gather.
-  // Named after the torchcomms backend naming scheme.
-  virtual c10::intrusive_ptr<Work> gather_single(
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const GatherOptions& opts = GatherOptions()) {
@@ -538,17 +537,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       c10d::register_work(outputBuffer, work);
     }
     return work;
-  }
-
-  // Deprecated: use gather_single instead. Kept as an alias for backward
-  // compatibility.
-  C10_DEPRECATED_MESSAGE(
-      "ProcessGroup::gather_into_tensor is deprecated, use gather_single instead.")
-  virtual c10::intrusive_ptr<Work> gather_into_tensor(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const GatherOptions& opts = GatherOptions()) {
-    return gather_single(outputBuffer, inputBuffer, opts);
   }
 
   virtual c10::intrusive_ptr<Work> scatter(

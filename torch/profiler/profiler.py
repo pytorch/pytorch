@@ -304,6 +304,12 @@ class _KinetoProfile:
                 )
 
                 arm_graph_dependency_recording()
+            # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
+            # the recorder reads each graph's event nodes at its one-time instantiate().
+            if self._custom_profiler_config.get("enable_event_node_ids"):
+                from torch.profiler._cupti._event_nodes import arm_event_node_recording
+
+                arm_event_node_recording()
         elif "cupti_monitor_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cupti_monitor_async_export is only supported with the cupti_monitor "
@@ -373,6 +379,12 @@ class _KinetoProfile:
                 # instantiate + arrow rendering); off unless the config requests them.
                 enable_graph_dependencies=bool(
                     self._custom_profiler_config.get("enable_graph_dependencies")
+                ),
+                # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
+                # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
+                # CUDA_EVENT record kind.
+                enable_event_node_ids=bool(
+                    self._custom_profiler_config.get("enable_event_node_ids")
                 ),
                 # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
                 pftrace_compression_level=int(

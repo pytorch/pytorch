@@ -1,6 +1,7 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
+import ctypes
 import gc
 import typing
 import weakref
@@ -709,12 +710,26 @@ class CUDAGraph(_CUDAGraph):
                         "graph_id": int,
                         "node_id": int,
                         "kernel_name": str or None,
+                        "event_ptr": int,
+                        "host_fn_addr": int,
+                        "host_fn_name": str or None,
                         "dependencies": [int, ...],
                         "dependents": [int, ...],
                     },
                     ...,
                 ],
             }
+
+        ``event_ptr`` is the ``cudaEvent_t`` handle (as an int) an event-record
+        or event-wait node records / waits on -- these nodes produce no timed
+        CUPTI record, so matching a wait to the record that signals it is the
+        only way to reason about the cross-stream sync it encodes. It is ``0``
+        for other node types.
+
+        ``host_fn_addr`` / ``host_fn_name`` are populated for host nodes (a CPU
+        callback run as a graph node): the callback address and a best-effort
+        demangled symbol name for it (``None`` when it resolves to no exported
+        symbol). They are ``0`` / ``None`` for other node types.
 
         Each node's ``graph_id`` is remapped to the exec graph id so that
         ``tools_id`` values match those reported by CUPTI-based profilers.
@@ -785,6 +800,29 @@ class CUDAGraph(_CUDAGraph):
                     if err == _cuda_driver.CUresult.CUDA_SUCCESS:
                         kernel_name = name.decode() if isinstance(name, bytes) else name
 
+            # Event record/wait nodes carry a cudaEvent_t but emit no timed CUPTI record;
+            # capture the handle so a wait node can be matched to the record that signals it.
+            event_ptr = 0
+            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord:
+                err, ev = _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
+                if err == _cuda_runtime.cudaError_t.cudaSuccess:
+                    event_ptr = int(ev)
+            elif ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent:
+                err, ev = _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
+                if err == _cuda_runtime.cudaError_t.cudaSuccess:
+                    event_ptr = int(ev)
+
+            # Host nodes carry no name in the CUPTI record; recover the callback address
+            # from the node params and resolve a best-effort symbol name (see
+            # _resolve_host_fn_name). Both are None/0 for other node types.
+            host_fn_addr = 0
+            host_fn_name = None
+            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeHost:
+                err, params = _cuda_runtime.cudaGraphHostNodeGetParams(node)
+                if err == _cuda_runtime.cudaError_t.cudaSuccess:
+                    host_fn_addr = int(params.fn)
+                    host_fn_name = _resolve_host_fn_name(host_fn_addr)
+
             node_infos.append(
                 {
                     "index": i,
@@ -793,6 +831,9 @@ class CUDAGraph(_CUDAGraph):
                     "graph_id": graph_id,
                     "node_id": node_id,
                     "kernel_name": kernel_name,
+                    "event_ptr": event_ptr,
+                    "host_fn_addr": host_fn_addr,
+                    "host_fn_name": host_fn_name,
                     "dependencies": [],
                     "dependents": [],
                 }
@@ -829,6 +870,29 @@ class CUDAGraph(_CUDAGraph):
         if self._caching_graph_data:
             self._instantiate_graph_data = data
         return data
+
+
+class _DlInfo(ctypes.Structure):
+    _fields_ = [
+        ("dli_fname", ctypes.c_char_p),
+        ("dli_fbase", ctypes.c_void_p),
+        ("dli_sname", ctypes.c_char_p),
+        ("dli_saddr", ctypes.c_void_p),
+    ]
+
+
+def _resolve_host_fn_name(addr: int) -> str | None:
+    """Best-effort symbol name for a host-node callback address via dladdr + demangle.
+    Returns None when the address resolves to no exported symbol (e.g. an anonymous
+    trampoline). Host nodes carry no name in the CUPTI record, so this is the only source."""
+    if not addr:
+        return None
+    info = _DlInfo()
+    if not ctypes.CDLL(None).dladdr(ctypes.c_void_p(addr), ctypes.byref(info)):
+        return None
+    if not info.dli_sname:
+        return None
+    return torch._C._demangle(info.dli_sname.decode())
 
 
 def _dump_graph_dot(cuda_graph: CUDAGraph, path: str, *, verbose: bool = True) -> None:
