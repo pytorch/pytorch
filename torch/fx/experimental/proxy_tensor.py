@@ -11,7 +11,6 @@ import functools
 import inspect
 import logging
 import operator
-import sys
 import threading
 import typing
 import typing_extensions
@@ -40,11 +39,16 @@ import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
-from torch._custom_class_base import CustomClassBase
+from torch._custom_class_base import (
+    _enter_custom_class_creation_epoch,
+    _exit_custom_class_creation_epoch,
+    _get_custom_class_creation_serial,
+    _record_creation,
+    CustomClassBase,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
-    _OPAQUE_TYPES,
     get_reconstruct_fn,
     is_custom_class_obj,
     is_opaque_constant_type,
@@ -1574,23 +1578,32 @@ class PythonKeyTracer(Tracer):
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
-    allow_opaque_closure_constants: bool = False
 
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
         _init_proxy_trackers(self)
-        self._allowed_opaque_constants: dict[int, object] = {}
-        self._allowed_opaque_module_attrs: dict[int, tuple[object, ...]] = {}
-        self._allowed_generator_cdata: set[int] = set()
+        self._custom_class_creation_epoch = 0
 
     def trace(  # type: ignore[override]
         self,
         root: Module | Callable[..., Any],
         concrete_args: dict[str, object] | None = None,
     ) -> fx.Graph:
-        self._snapshot_allowed_opaque_constants(root)
-        self._snapshot_opaque_class_constants()
-        return super().trace(root, concrete_args)
+        # Nested tracers inherit the outer epoch, so an object created by an
+        # outer trace cannot become a constant in an inner graph.
+        (
+            self._custom_class_creation_epoch,
+            creation_epoch_token,
+        ) = _enter_custom_class_creation_epoch()
+        self.script_object_tracker = WeakIdKeyDictionary(
+            dict=None, ref_type=_WeakHashRef
+        )
+        self.opaque_tracker = WeakIdKeyDictionary()
+        self._opaque_real_obj_proxy = {}
+        try:
+            return super().trace(root, concrete_args)
+        finally:
+            _exit_custom_class_creation_epoch(creation_epoch_token)
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -1602,9 +1615,6 @@ class PythonKeyTracer(Tracer):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if id(m) in self._allowed_opaque_module_attrs:
-            for value in self._allowed_opaque_module_attrs[id(m)]:
-                self._record_allowed_opaque_constant(value)
         return forward(*args, **kwargs)
 
     # We don't want to turn getattr calls into proxies. So we just return the actual value.
@@ -1629,7 +1639,7 @@ class PythonKeyTracer(Tracer):
             # pyrefly: ignore [bad-return]
             return a.constant
 
-        # Try reconstructing untracked opaque reference types from existing
+        # Try reconstructing untracked symbolic custom classes from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
         if isinstance(a, (FakeScriptObject, CustomClassBase)):
             proxy = self._get_tracked_opaque_proxy(a)
@@ -1642,15 +1652,25 @@ class PythonKeyTracer(Tracer):
             if is_opaque_symbolic_type(
                 type(real_obj)
             ) and not self._allow_constant_opaque(real_obj):
+                if isinstance(real_obj, torch.Generator):
+                    guidance = (
+                        "Create the Generator outside the traced function and pass "
+                        "it as an input."
+                    )
+                else:
+                    guidance = (
+                        "Pass the object as a graph input or create it before tracing "
+                        "and capture it in a module/class attribute, closure, or "
+                        "referenced global. Alternatively, register a reconstruct_fn "
+                        "that derives it from tracked inputs."
+                    )
                 raise RuntimeError(
-                    f"An untracked reference-type opaque object "
+                    f"An untracked symbolic custom class object "
                     f"({type(real_obj).__name__}) reached FX graph creation. "
                     "FX would otherwise bake this object into the graph as "
                     "a get_attr constant with no input guard, which can "
-                    "produce stale or missing objects when the graph is "
-                    "reused. Pass the opaque object as a graph input or "
-                    "make it a module/class attribute, or register a "
-                    "reconstruct_fn that derives it from tracked inputs."
+                    "produce stale or missing objects when the graph is reused. "
+                    f"{guidance}"
                 )
 
         return super().create_arg(a)  # type: ignore[return-value]
@@ -1660,109 +1680,37 @@ class PythonKeyTracer(Tracer):
     ) -> CustomClassBase:
         return a.real_obj if isinstance(a, FakeScriptObject) else a
 
+    @staticmethod
+    def _is_default_generator(obj: torch.Generator) -> bool:
+        obj_any = typing.cast(Any, obj)
+        cdata = obj_any._cdata
+        device = obj_any.device
+        if device.type == "cpu":
+            return cdata == typing.cast(Any, torch.default_generator)._cdata
+        if device.type == "mps":
+            default = getattr(torch.mps, "_default_mps_generator", None)
+            return default is not None and cdata == typing.cast(Any, default)._cdata
+        device_module = getattr(torch, device.type, None)
+        default_generators = getattr(device_module, "default_generators", ())
+        index = device.index or 0
+        return (
+            index < len(default_generators)
+            and cdata == typing.cast(Any, default_generators[index])._cdata
+        )
+
     def _allow_constant_opaque(self, obj: CustomClassBase) -> bool:
         # Internal compiler-owned opaque types can opt into FX constants.
-        leaf_module = sys.modules.get("torch._higher_order_ops.invoke_leaf_function")
-        if leaf_module is not None and type(obj) is getattr(
-            leaf_module, "_LeafCallable", None
-        ):
+        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
+
+        if type(obj) is _LeafCallable:
             return True
-        # Export lifts pre-existing module/captured opaque attributes into
-        # explicit custom object inputs immediately after make_fx.
-        if self._allowed_opaque_constants.get(id(obj)) is obj:
+        if isinstance(obj, torch.Generator) and self._is_default_generator(obj):
             return True
-        if isinstance(obj, torch.Generator):
-            return typing.cast(Any, obj)._cdata in self._allowed_generator_cdata
-        return False
-
-    def _record_allowed_opaque_constant(self, obj: object) -> None:
-        self._allowed_opaque_constants[id(obj)] = obj
-        if isinstance(obj, torch.Generator):
-            self._allowed_generator_cdata.add(typing.cast(Any, obj)._cdata)
-
-    def _snapshot_allowed_opaque_constants(
-        self, root: Module | Callable[..., Any]
-    ) -> None:
-        seen: set[int] = set()
-
-        def snapshot_class(cls: type[object]) -> None:
-            for base in cls.__mro__:
-                for value in vars(base).values():
-                    if isinstance(value, CustomClassBase):
-                        self._record_allowed_opaque_constant(value)
-
-        def snapshot_obj(obj: object) -> None:
-            obj_id = id(obj)
-            if obj_id in seen:
-                return
-            seen.add(obj_id)
-            if isinstance(obj, CustomClassBase):
-                self._record_allowed_opaque_constant(obj)
-            if isinstance(obj, torch.nn.Module):
-                for _, mod in obj.named_modules(remove_duplicate=False):
-                    attr_values = tuple(
-                        value
-                        for value in vars(mod).values()
-                        if isinstance(value, CustomClassBase)
-                    )
-                    if isinstance(mod, CustomClassBase):
-                        self._record_allowed_opaque_constant(mod)
-                    for value in attr_values:
-                        self._record_allowed_opaque_constant(value)
-                    self._allowed_opaque_module_attrs[id(mod)] = attr_values
-                    snapshot_class(type(mod))
-                return
-            if isinstance(obj, type):
-                snapshot_class(obj)
-                return
-            if inspect.ismethod(obj):
-                snapshot_obj(obj.__self__)
-                snapshot_obj(obj.__func__)
-                return
-            if inspect.isfunction(obj):
-                for cell in obj.__closure__ or ():
-                    try:
-                        value = cell.cell_contents
-                    except ValueError:
-                        pass
-                    else:
-                        if (
-                            not isinstance(value, CustomClassBase)
-                            or self.allow_opaque_closure_constants
-                        ):
-                            snapshot_obj(value)
-                for value in obj.__defaults__ or ():
-                    snapshot_obj(value)
-                for value in (obj.__kwdefaults__ or {}).values():
-                    snapshot_obj(value)
-
-        snapshot_obj(root)
-        if not callable(root):
-            return
-        for value in getattr(root, "__globals__", {}).values():
-            if isinstance(value, type) and is_opaque_symbolic_type(value):
-                for attr in value.__dict__.values():
-                    if isinstance(attr, CustomClassBase):
-                        self._record_allowed_opaque_constant(attr)
-
-    def _snapshot_allowed_opaque_inputs(self, args: tuple[object, ...]) -> None:
-        # Some factory ops pass Generator kwargs directly to C++ without
-        # proxy-tracking the corresponding make_fx input. Only preserve
-        # generators that actually came from the trace inputs.
-        for value in pytree.tree_leaves(args):
-            if isinstance(value, torch.Generator):
-                self._record_allowed_opaque_constant(value)
-
-    def _snapshot_opaque_class_constants(self) -> None:
-        def snapshot_cls(cls: type[object]) -> None:
-            for attr in cls.__dict__.values():
-                if isinstance(attr, CustomClassBase):
-                    self._record_allowed_opaque_constant(attr)
-            for subcls in cls.__subclasses__():
-                snapshot_cls(subcls)
-
-        for cls in _OPAQUE_TYPES:
-            snapshot_cls(cls)
+        creation_serial = _get_custom_class_creation_serial(obj)
+        return (
+            creation_serial is not None
+            and creation_serial <= self._custom_class_creation_epoch
+        )
 
     def _get_tracked_opaque_proxy(
         self, obj: FakeScriptObject | CustomClassBase
@@ -1810,13 +1758,12 @@ class PythonKeyTracer(Tracer):
     def _try_reconstruct_opaque(
         self, a: FakeScriptObject | CustomClassBase
     ) -> fx.node.Node | None:
-        """Try to reconstruct an opaque object from existing graph inputs.
+        """Try to reconstruct a symbolic custom class from existing graph inputs.
 
-        When make_fx encounters an untracked opaque reference type (e.g. a
-        DeviceMesh submesh captured by a backward closure), this method checks
-        if the type has a registered reconstruct_fn that can derive the object
-        from inputs already in the graph.  Returns an FX Node on success,
-        None on failure (falls back to get_attr constant).
+        When make_fx encounters an untracked object (e.g. a DeviceMesh submesh
+        captured by a backward closure), this method checks if the type has a
+        registered reconstruct_fn that can derive the object from inputs already
+        in the graph. Returns an FX Node on success, or None on failure.
         """
         real_obj = self._opaque_real_obj(a)
 
@@ -2680,14 +2627,11 @@ class _ModuleStackTracer(PythonKeyTracer):
     See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
-    allow_opaque_closure_constants: bool = True
-
     def __init__(self, scope_root: GraphModule) -> None:
         super().__init__()
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
-        self._snapshot_allowed_opaque_constants(scope_root)
         self.enable_attr_proxy = False
         self.submodule_paths = {}
         for name, m in self.scope_root.named_modules(remove_duplicate=False):
@@ -2827,9 +2771,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         return self.attr_proxy_map[attr_val]
 
     def trace(  # type: ignore[override]
-        self,
-        root: Module | Callable[..., Any],
-        concrete_args: dict[str, object] | None = None,
+        self, root: Module | Callable[..., Any], concrete_args: dict[str, object] | None
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
 
@@ -3334,12 +3276,9 @@ class _MakefxTracer:
         # by the context set before dispatch_trace.
         import torch._dynamo
 
-        if self.fx_tracer is None:
-            raise AssertionError("fx_tracer should not be None")
-        # Capture provenance before fake_signature and wrap_key hide the
-        # original callable and inputs behind generated wrapper functions.
-        self.fx_tracer._snapshot_allowed_opaque_constants(f)
-        self.fx_tracer._snapshot_allowed_opaque_inputs(args)
+        for value in pytree.tree_leaves(args):
+            if isinstance(value, torch.Generator):
+                _record_creation(value)
 
         phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
 
@@ -3386,6 +3325,8 @@ class _MakefxTracer:
 
                 stack.enter_context(_LegacyToFunctionalCollectiveMode())
 
+            if self.fx_tracer is None:
+                raise AssertionError("fx_tracer should not be None")
             try:
                 t = dispatch_trace(
                     wrap_key(func, args, self.fx_tracer, self.pre_dispatch),

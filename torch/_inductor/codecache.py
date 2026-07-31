@@ -1074,20 +1074,21 @@ class CacheabilityValidator:
                     self.bypass(
                         f"Can't cache HigherOrderOperator: {node.target.name()}"
                     )
-                # TODO: this check is broken in two ways:
-                # 1. FX uses "get_attr" (with underscore), not "getattr"
-                # 2. It only checks for ScriptObject, not FakeScriptObject
-                # Fixing it would also bypass AOTAutogradCache (which calls
-                # _check_can_cache), so we'd need to decouple the two first.
-                if node.op == "getattr" and isinstance(
-                    getattr(self.gm, node.target), torch._C.ScriptObject
-                ):
-                    self.bypass("Can't cache torchbind objects")
                 if include_constants and node.op == "get_attr":
                     try:
                         attr = self._get_attr(module, node.target)
                     except AttributeError:
                         continue
+                    real_attr = (
+                        attr.real_obj if isinstance(attr, FakeScriptObject) else attr
+                    )
+                    if is_opaque_symbolic_type(type(real_attr)):
+                        from torch._higher_order_ops.invoke_leaf_function import (
+                            _LeafCallable,
+                        )
+
+                        if type(real_attr) is not _LeafCallable:
+                            self.bypass("Can't cache symbolic custom class constants")
                     self._check_cache_key_object(attr)
 
     @staticmethod
