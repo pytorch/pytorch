@@ -1089,14 +1089,23 @@ class AutogradFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         # A custom vmap staticmethod is only honored by eager's
         # custom_function_call_vmap, which also validates the (output, out_dims)
-        # tuple it returns.  Tracing apply() would silently skip that check, so
-        # graph break and let eager run the rule.
-        if "vmap" in self.fn_cls.__dict__:
+        # tuple it returns.  Tracing apply() under vmap would silently skip that
+        # check, so graph break and let eager run the rule.  Only under an active
+        # vmap interpreter: outside vmap the rule is never consulted and such a
+        # Function traces normally.
+        from torch._functorch.autograd_function import has_overridden_vmap_rule
+
+        interpreter = torch._C._functorch.peek_interpreter_stack()
+        if (
+            interpreter is not None
+            and interpreter.key() == torch._C._functorch.TransformType.Vmap
+            and has_overridden_vmap_rule(self.fn_cls)
+        ):
             unimplemented(
                 gb_type="autograd.Function with custom vmap staticmethod",
                 context=f"{self.fn_cls.__name__}.vmap",
                 explanation="Dynamo cannot trace an autograd.Function that defines its own "
-                "vmap staticmethod; eager applies and validates that rule.",
+                "vmap staticmethod under vmap; eager applies and validates that rule.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 

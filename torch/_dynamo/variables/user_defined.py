@@ -3280,6 +3280,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
         return None
 
+    def lookup_dunder_shortcut(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        """__dict__/__class__ must resolve to the mutation-tracked dict and the
+        real type rather than through the generic getset-descriptor path.
+
+        Called from every entry point into the lookup -- getattro_impl (before
+        the user __getattribute__ dispatch, to avoid re-entering it) and
+        object_generic_getattr (which explicit __getattribute__ and
+        super().__getattribute__ reach directly).  Returns None to decline.
+        """
+        if name == "__dict__":
+            if not hasattr(self.value, "__dict__"):
+                raise_observed_exception(AttributeError, tx)
+            return self.get_dict_vt(tx)
+
+        if name == "__class__":
+            cls_source = (
+                AttrSource(self.source, name) if self.source else self.cls_source
+            )
+            return VariableTracker.build(tx, type(self.value), cls_source)
+
+        return None
+
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -3294,16 +3318,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # calls self.getattro_impl(tx, "__class__") internally.  If
         # __getattribute__ is overridden, that dispatch would re-enter the
         # attribute lookup and recurse infinitely.
-        if name == "__dict__":
-            if not hasattr(self.value, "__dict__"):
-                raise_observed_exception(AttributeError, tx)
-            return self.get_dict_vt(tx)
-
-        if name == "__class__":
-            cls_source = (
-                AttrSource(self.source, name) if self.source else self.cls_source
-            )
-            return VariableTracker.build(tx, type(self.value), cls_source)
+        shortcut = self.lookup_dunder_shortcut(tx, name)
+        if shortcut is not None:
+            return shortcut
 
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
