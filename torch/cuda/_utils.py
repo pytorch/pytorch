@@ -75,25 +75,39 @@ def _check_cuda(result: int) -> None:
 def _check_cuda_bindings(result: Any) -> Any:
     """Check a cuda.bindings (cuda-python) call result for errors.
 
-    All cuda.bindings runtime calls return ``(error, *outputs)``.  This
+    All cuda.bindings driver/runtime calls return ``(error, *outputs)``. This
     helper unpacks the tuple, raises on non-success, and returns the
     outputs (``None`` for zero outputs, scalar for one, tuple otherwise).
     """
     if not _HAS_CUDA_BINDINGS:
         raise RuntimeError("cuda.bindings is not available")
+    # We assume that `result`` is a return value from cuda bindings API calls.
+    # This means it is always a tuple, of length >= 1 and the first element
+    # represents the error with a `value` attribute.
+    # See also cuda-python error handling here:
+    # https://github.com/NVIDIA/cuda-python/blob/88363f8f17636ecd28772b2b8ad41a33895b41bb/
+    # cuda_bindings/cuda/bindings/_example_helpers/helper_cuda.py#L11-L31
     err, *out = result
-    if (
-        err
-        != _cuda_bindings_runtime.cudaError_t.cudaSuccess  # pyrefly: ignore[missing-attribute]
-    ):
-        _, err_str = (
-            _cuda_bindings_runtime.cudaGetErrorString(  # pyrefly: ignore[missing-attribute]
-                err
-            )
-        )
+    if err.value:
+        # pyrefly: ignore [missing-attribute]
+        if isinstance(err, _cuda_bindings_driver.CUresult):
+            # pyrefly: ignore [missing-attribute]
+            err2, name = _cuda_bindings_driver.cuGetErrorString(err)
+            # pyrefly: ignore [missing-attribute]
+            success = _cuda_bindings_driver.CUresult.CUDA_SUCCESS
+            # cuGetErrorString can fail and leave name NULL. cudaGetErrorString
+            # returns a fallback string for unknown runtime errors.
+            err_str = name if err2 == success else "<unknown>"
+        # pyrefly: ignore [missing-attribute]
+        elif isinstance(err, _cuda_bindings_runtime.cudaError_t):
+            # pyrefly: ignore [missing-attribute]
+            err_str = _cuda_bindings_runtime.cudaGetErrorString(err)[1]
+        else:
+            err_str = "unknown error type"
         if isinstance(err_str, bytes):
             err_str = err_str.decode()
         raise RuntimeError(f"CUDA error: {err} ({err_str})")
+
     if len(out) == 0:
         return None
     if len(out) == 1:
@@ -505,11 +519,15 @@ class _CudaKernel:
         device_props = torch.cuda.get_device_properties()
         # HIP doesn't have shared_memory_per_block_optin in device properties, so we hard-code it here
         if torch.version.hip:
-            # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
-            # CDNA4 allows a max of 160KB shared memory
-            max_shared_mem = (
-                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
-            )
+            # navi, CDNA1-CDNA3 allows a max of 64KB shared memory,
+            # CDNA4 (gfx950) 160KB, and CDNA5 (gfx1250) 320KB.
+            gcn_arch = device_props.gcnArchName.split(":", 1)[0]
+            if gcn_arch == "gfx950":
+                max_shared_mem = 160 * 1024
+            elif gcn_arch == "gfx1250":
+                max_shared_mem = 320 * 1024
+            else:
+                max_shared_mem = 65536
         else:
             max_shared_mem = getattr(
                 device_props, "shared_memory_per_block_optin", 49152
