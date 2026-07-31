@@ -311,7 +311,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
 
-    from torch._inductor.kernel.flex_gemm.epilogue import (
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
@@ -470,8 +470,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce, local_reduce_out_index
+    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_reduction_plan(
+        epilogue_analysis.reduction_plan, local_reduce_out_index
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
