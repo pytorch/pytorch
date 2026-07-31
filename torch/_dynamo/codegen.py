@@ -68,17 +68,19 @@ if TYPE_CHECKING:
 # PyCodegen.make_call_generated_code). Emitted via bytecode_from_template so the
 # `if` compiles to the correct per-Python-version jump opcodes. The values
 # (profiler flag, marker fns) are pre-loaded into the mapped locals by the caller.
-def _pregraph_marker_enter_template(is_profiler_enabled, marker_enter):
+def _pregraph_marker_enter_template(is_profiler_enabled, utils_module):
     # `cm` is remapped to the caller's shared cm var and read by the exit
     # template, so it is not "unused" despite what a local static check sees.
+    # The marker fn is looked up on utils_module INSIDE the branch so its attr
+    # load only runs when a profiler is active.
     cm = None
     if is_profiler_enabled:
-        cm = marker_enter()  # noqa: F841
+        cm = utils_module.record_pregraph_bytecode_enter()  # noqa: F841
 
 
-def _pregraph_marker_exit_template(cm, marker_exit):
+def _pregraph_marker_exit_template(cm, utils_module):
     if cm is not None:
-        marker_exit(cm)
+        utils_module.record_pregraph_bytecode_exit(cm)
 
 
 @dataclasses.dataclass
@@ -728,6 +730,7 @@ class PyCodegen:
         )
 
         cm_var = None
+        marker_module_var = None
         if config.record_runtime_overhead:
             # Runtime profiler gate for the "Pregraph bytecode" marker: emit it
             # into the compiled bytecode but only call it when a profiler is
@@ -741,14 +744,17 @@ class PyCodegen:
             #   if cm is not None:
             #       record_pregraph_bytecode_exit(cm)
             cm_var = self.new_var()
+            marker_module_var = self.new_var()
             enter_map = {
                 "is_profiler_enabled": self.new_var(),
-                "marker_enter": self.new_var(),
+                "utils_module": marker_module_var,
                 "cm": cm_var,
             }
-            # Pre-load the template's locals. Reconstruct inline (not via
-            # load_import_from, whose CSE temp would get an unconditional
-            # DELETE_FAST from clear_tempvars()).
+            # Pre-load the template's locals: the profiler flag and the
+            # torch._dynamo.utils module (the marker fns are looked up on it
+            # inside the gated branch, so their attr loads only run when
+            # profiling). Reconstruct inline (not via load_import_from, whose CSE
+            # temp would get an unconditional DELETE_FAST from clear_tempvars()).
             self(
                 AttrSource(
                     self.tx.import_source("torch.autograd.profiler"),
@@ -762,14 +768,9 @@ class PyCodegen:
                     )
                 ]
             )
-            self(
-                AttrSource(
-                    self.tx.import_source(utils.__name__),
-                    "record_pregraph_bytecode_enter",
-                )
-            )
+            self(self.tx.import_source(utils.__name__))
             self.extend_output(
-                [create_instruction("STORE_FAST", argval=enter_map["marker_enter"])]
+                [create_instruction("STORE_FAST", argval=marker_module_var)]
             )
             self.extend_output(
                 bytecode_from_template(
@@ -802,18 +803,10 @@ class PyCodegen:
         if config.record_runtime_overhead:
             # Record the pregraph bytecode end, matched to the gated start above:
             #   if cm is not None: record_pregraph_bytecode_exit(cm)
-            if cm_var is None:
-                raise AssertionError("cm_var must not be None")
-            exit_map = {"cm": cm_var, "marker_exit": self.new_var()}
-            self(
-                AttrSource(
-                    self.tx.import_source(utils.__name__),
-                    "record_pregraph_bytecode_exit",
-                )
-            )
-            self.extend_output(
-                [create_instruction("STORE_FAST", argval=exit_map["marker_exit"])]
-            )
+            # Reuses cm and the utils module the enter block already loaded.
+            if cm_var is None or marker_module_var is None:
+                raise AssertionError("enter block must set cm_var / marker_module_var")
+            exit_map = {"cm": cm_var, "utils_module": marker_module_var}
             self.extend_output(
                 bytecode_from_template(
                     _pregraph_marker_exit_template, varname_map=exit_map
