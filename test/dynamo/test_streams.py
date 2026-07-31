@@ -15,17 +15,15 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
+    requires_accelerator,
     requires_cuda,
+    requires_xpu,
     TEST_WITH_ROCM,
-    TEST_XPU,
 )
 
 
@@ -47,6 +45,140 @@ def strip_annotation_desc(gm_str: str) -> str:
     return re.sub(r"(# Annotation: \{[^}]*\}).*", r"\1", gm_str)
 
 
+class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
+    @unittest.skip("Needs graph break support with annotation context")
+    def test_stream_enter_exit_graph_break(self):
+        pass
+
+    @unittest.skip("Needs graph break support with annotation context")
+    def test_nested_stream_enter_exit_graph_break(self):
+        pass
+
+    def test_is_marked_side_effectful(self):
+        self.assertIn(
+            torch.ops.streams.fork.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.join.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.wait_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+        self.assertIn(
+            torch.ops.streams.record_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+        self.assertIn(
+            torch.ops.streams.synchronize_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+
+    def test_sync_dealloc_has_fake_impl(self):
+        """Test that sync_dealloc has a registered fake impl.
+
+        Without a fake impl, Inductor's backward compilation crashes when the
+        backward graph contains cross-stream sync_dealloc ops.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            t = torch.randn(4)
+            # Should not raise "no fake impl registered"
+            torch.ops.streams.sync_dealloc.default(0, 1, t)
+
+    def test_record_stream_has_fake_impl(self):
+        """Test that record_stream's fake impl has the correct signature."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            t = torch.randn(4)
+            # Should not raise due to signature mismatch
+            torch.ops.streams.record_stream.default(t, 0)
+
+    def test_expand_dict_returning_deps_triton_kernel(self) -> None:
+        """Triton kernel dicts must not be passed through control_deps.
+
+        triton_kernel_wrapper_functional returns a dict.  If the dict node is
+        threaded through control_deps as a pass-through value,
+        decompose_triton_kernel_wrapper_functional later replaces it with a
+        raw Python dict (via replace_with_graph -> replace_all_uses_with),
+        corrupting the graph and causing KeyError during lowering.
+
+        _expand_dict_returning_deps should insert per-key getitem nodes
+        *before* the sync so that only tensor-valued nodes are passed through.
+        """
+        import operator
+
+        from torch._functorch._aot_autograd.streams import _expand_dict_returning_deps
+
+        graph = torch.fx.Graph()
+        # Placeholder input
+        x = graph.placeholder("x")
+        x.meta["val"] = torch.empty(4, 4)
+
+        # Simulate a triton_kernel_wrapper_functional call returning a dict
+        triton_func = graph.call_function(
+            torch.ops.higher_order.triton_kernel_wrapper_functional,
+            kwargs={
+                "kernel_idx": 0,
+                "constant_args_idx": 0,
+                "grid": [(1, 1, 1)],
+                "tma_descriptor_metadata": {},
+                "kwargs": {"Out": x},
+                "tensors_to_clone": ["Out"],
+            },
+        )
+        triton_func.meta["val"] = {"Out": torch.empty(4, 4)}
+
+        # Simulate a sync node (record_event) between triton_func and getitem
+        sync_node = graph.call_function(
+            torch.ops.streams.record_event.default,
+            args=(0, 0),
+        )
+
+        # getitem user AFTER the sync -- this is the problematic pattern
+        getitem_out = graph.call_function(
+            operator.getitem,
+            args=(triton_func, "Out"),
+        )
+        getitem_out.meta["val"] = torch.empty(4, 4)
+
+        # Use getitem_out so it's live
+        add_node = graph.call_function(torch.ops.aten.add.Tensor, args=(getitem_out, x))
+        graph.output(add_node)
+
+        # Build visited set: everything at or before sync_node
+        visited: set[torch.fx.Node] = set()
+        for n in graph.nodes:
+            visited.add(n)
+            if n is sync_node:
+                break
+
+        # deps_with_uses_after_sync: triton_func has getitem_out as after-sync user
+        deps = [triton_func]
+
+        expanded = _expand_dict_returning_deps(deps, visited, graph, sync_node)
+
+        # The triton_func dict should NOT be in the expanded list
+        self.assertNotIn(triton_func, expanded)
+
+        # Instead, we should have a new getitem node for key "Out"
+        self.assertEqual(len(expanded), 1)
+        new_gi = expanded[0]
+        self.assertEqual(new_gi.target, operator.getitem)
+        self.assertEqual(new_gi.args, (triton_func, "Out"))
+
+        # The new getitem should be BEFORE the sync in graph order
+        node_order = list(graph.nodes)
+        self.assertLess(node_order.index(new_gi), node_order.index(sync_node))
+
+        # The old getitem_out should have been erased; add_node now uses new_gi
+        self.assertNotIn(getitem_out, set(graph.nodes))
+        self.assertIn(new_gi, add_node.all_input_nodes)
+
+
+@requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -56,12 +188,10 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
-    @onlyAccelerator
     def test_stream_weakref(self, device):
         s = torch.Stream(device=device)
         weakref.ref(s)
 
-    @onlyAccelerator
     def test_event_weakref(self, device):
         e = torch.Event(device=device)
         weakref.ref(e)
@@ -89,7 +219,6 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self.assertEqual(called, [True])
         del _weakref_keepalive
 
-    @onlyAccelerator
     def test_backend_stream_event_weakref_callback(self, device):
         device_mod = getattr(torch, torch.device(device).type, None)
         if (
@@ -101,7 +230,6 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self._assert_weakref_callback_fires(device_mod.Stream)
         self._assert_weakref_callback_fires(device_mod.Event)
 
-    @onlyAccelerator
     def test_stream_enter_exit(self, device):
         def fn(x, y, s1, s2):
             with s1:
@@ -145,7 +273,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_context_graph_break(self, device):
         def fn(x, y):
@@ -174,7 +301,6 @@ class <lambda>(torch.nn.Module):
         self.assertExpectedInline(print_graph(fw_graphs[0]), """""")
         self.assertExpectedInline(print_graph(fw_graphs[1]), """""")
 
-    @onlyAccelerator
     def test_stream_input(self, device):
         def fn(x, y, s):
             z = torch.add(x, y)
@@ -191,7 +317,6 @@ class <lambda>(torch.nn.Module):
         actual = fn_opt(*inp)
         self.assertEqual(expected, actual)
 
-    @onlyAccelerator
     def test_local_stream_return(self, device):
         def fn(x, y):
             s = torch.Stream(device=device)
@@ -219,7 +344,6 @@ class <lambda>(torch.nn.Module):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent())
         self.assertEqual(res, torch.ones(2))
 
-    @onlyAccelerator
     def test_nested_stream_enter_exit(self, device):
         def fn(x, y, s0, s1, s2):
             with s1:
@@ -265,15 +389,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @unittest.skip("Needs graph break support with annotation context")
-    def test_stream_enter_exit_graph_break(self):
-        pass
-
-    @unittest.skip("Needs graph break support with annotation context")
-    def test_nested_stream_enter_exit_graph_break(self):
-        pass
-
-    @onlyAccelerator
     def test_local_stream_enter_exit(self, device):
         def fn(x, y):
             s2 = torch.Stream(device=device)
@@ -314,7 +429,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_local_stream_nested_enter_exit(self, device):
         def fn(x, y):
             s2 = torch.Stream(device=device)
@@ -357,7 +471,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_new_stream_api(self, device) -> None:
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
         from torch._dynamo.variables.streams import new_stream
@@ -382,7 +495,6 @@ class <lambda>(torch.nn.Module):
 
         fn(torch.ones(2, 2, device=device))
 
-    @onlyAccelerator
     def test_current_stream_api(self, device) -> None:
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
         from torch._dynamo.variables.streams import get_current_stream
@@ -411,7 +523,6 @@ class <lambda>(torch.nn.Module):
 
         fn(torch.ones(2, 2, device=device))
 
-    @onlyAccelerator
     def test_stream_with_mutation(self, device):
         def fn(x, y):
             s2 = torch.Stream(device=device)
@@ -461,7 +572,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_stream_backward_simple(self, device) -> None:
         def fn(x, y):
             s2 = torch.Stream(device=device)
@@ -542,7 +652,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_stream_backward_sync(self, device) -> None:
         def fn(x, y):
             s2 = torch.Stream(device=device)
@@ -663,7 +772,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_event_tracing(self, device):
         def fn(x) -> None:
             e = torch.Event(device=device)
@@ -694,7 +802,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_run_opcheck_fork_join(self, device):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
@@ -716,7 +823,6 @@ class <lambda>(torch.nn.Module):
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
 
-    @onlyAccelerator
     def test_run_opcheck_wait_record(self, device):
         from torch._dynamo.variables.streams import record_event, wait_event
         from torch.library import opcheck
@@ -740,7 +846,6 @@ class <lambda>(torch.nn.Module):
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
 
-    @onlyAccelerator
     def test_run_opcheck_wait_record_stream(self, device):
         from torch._dynamo.variables.streams import wait_stream
         from torch.library import opcheck
@@ -760,7 +865,6 @@ class <lambda>(torch.nn.Module):
         finally:
             reset_user_object_tracking()
 
-    @onlyAccelerator
     def test_record_stream_problem_basic(self, device):
         # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
         # for what this tests/solves for
@@ -854,7 +958,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_record_stream_problem_interleaved(self, device):
         # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
         # for what this tests/solves for
@@ -1111,7 +1214,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_epilogue_copy_streams_inference(self, device):
         def fn(x):
             with torch.Stream(device=device):
@@ -1143,7 +1245,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_epilogue_copy_streams_external(self, device):
         @torch.compile(backend="eager")
         def fn(x):
@@ -1159,7 +1260,6 @@ class <lambda>(torch.nn.Module):
         ):
             extract_graph(fn, *inp)
 
-    @onlyAccelerator
     def test_control_deps_wrapping_record_event(self, device) -> None:
         """Test wrapping record_event with control_deps on a two-stream graph.
 
@@ -1225,7 +1325,6 @@ class <lambda>(torch.nn.Module):
         wait_ctrl_node = control_deps_nodes[1]
         self.assertIn(record_ctrl_node, wait_ctrl_node.args[0])
 
-    @onlyAccelerator
     def test_control_deps_wrapping_wait_event(self, device) -> None:
         """Test wrapping wait_event with control_deps on a two-stream graph.
 
@@ -1274,7 +1373,6 @@ class <lambda>(torch.nn.Module):
         )
         self.assertEqual(len(control_deps_nodes), 2)
 
-    @onlyAccelerator
     def test_control_deps_prevents_invalid_reordering(self, device) -> None:
         """
         Test that control_deps creates proper data dependencies that prevent invalid reordering.
@@ -1351,7 +1449,6 @@ class <lambda>(torch.nn.Module):
         with self.assertRaises(RuntimeError):
             graph.lint()
 
-    @onlyAccelerator
     def test_cross_event_deps_multiple_events(self, device) -> None:
         """Stress test: multiple events across three streams.
 
@@ -1449,7 +1546,6 @@ class <lambda>(torch.nn.Module):
 
         graph.lint()
 
-    @onlyAccelerator
     def test_cross_event_deps_event_reuse(self, device) -> None:
         """Test that reusing an event updates the cross-event dependency.
 
@@ -1951,7 +2047,6 @@ class <lambda>(torch.nn.Module):
         self.assertIs(following_work.args[0].args[0], ctrl)
         graph.lint()
 
-    @onlyAccelerator
     def test_epilogue_copy_stream_tracking(self, device):
         """
         Test that epilogue copies for mutated inputs use the correct stream.
@@ -2035,7 +2130,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_inductor_lowering(self, device):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
@@ -2049,27 +2143,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.ones(2, 2, device=device),)
             fn(*inp)
 
-    def test_is_marked_side_effectful(self):
-        self.assertIn(
-            torch.ops.streams.fork.default, torch.fx.node._side_effectful_functions
-        )
-        self.assertIn(
-            torch.ops.streams.join.default, torch.fx.node._side_effectful_functions
-        )
-        self.assertIn(
-            torch.ops.streams.wait_event.default,
-            torch.fx.node._side_effectful_functions,
-        )
-        self.assertIn(
-            torch.ops.streams.record_event.default,
-            torch.fx.node._side_effectful_functions,
-        )
-        self.assertIn(
-            torch.ops.streams.synchronize_event.default,
-            torch.fx.node._side_effectful_functions,
-        )
-
-    @onlyAccelerator
     def test_backward_sync_control_deps_e2e(self, device) -> None:
         """
         End-to-end test verifying that backward sync nodes are wrapped with control_deps.
@@ -2120,110 +2193,6 @@ class GraphModule(torch.nn.Module):
             "Expected control_deps nodes in backward graph for stream synchronization",
         )
 
-    def test_sync_dealloc_has_fake_impl(self):
-        """Test that sync_dealloc has a registered fake impl.
-
-        Without a fake impl, Inductor's backward compilation crashes when the
-        backward graph contains cross-stream sync_dealloc ops.
-        """
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        with FakeTensorMode():
-            t = torch.randn(4)
-            # Should not raise "no fake impl registered"
-            torch.ops.streams.sync_dealloc.default(0, 1, t)
-
-    def test_record_stream_has_fake_impl(self):
-        """Test that record_stream's fake impl has the correct signature."""
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        with FakeTensorMode():
-            t = torch.randn(4)
-            # Should not raise due to signature mismatch
-            torch.ops.streams.record_stream.default(t, 0)
-
-    def test_expand_dict_returning_deps_triton_kernel(self) -> None:
-        """Triton kernel dicts must not be passed through control_deps.
-
-        triton_kernel_wrapper_functional returns a dict.  If the dict node is
-        threaded through control_deps as a pass-through value,
-        decompose_triton_kernel_wrapper_functional later replaces it with a
-        raw Python dict (via replace_with_graph -> replace_all_uses_with),
-        corrupting the graph and causing KeyError during lowering.
-
-        _expand_dict_returning_deps should insert per-key getitem nodes
-        *before* the sync so that only tensor-valued nodes are passed through.
-        """
-        import operator
-
-        from torch._functorch._aot_autograd.streams import _expand_dict_returning_deps
-
-        graph = torch.fx.Graph()
-        # Placeholder input
-        x = graph.placeholder("x")
-        x.meta["val"] = torch.empty(4, 4)
-
-        # Simulate a triton_kernel_wrapper_functional call returning a dict
-        triton_func = graph.call_function(
-            torch.ops.higher_order.triton_kernel_wrapper_functional,
-            kwargs={
-                "kernel_idx": 0,
-                "constant_args_idx": 0,
-                "grid": [(1, 1, 1)],
-                "tma_descriptor_metadata": {},
-                "kwargs": {"Out": x},
-                "tensors_to_clone": ["Out"],
-            },
-        )
-        triton_func.meta["val"] = {"Out": torch.empty(4, 4)}
-
-        # Simulate a sync node (record_event) between triton_func and getitem
-        sync_node = graph.call_function(
-            torch.ops.streams.record_event.default,
-            args=(0, 0),
-        )
-
-        # getitem user AFTER the sync -- this is the problematic pattern
-        getitem_out = graph.call_function(
-            operator.getitem,
-            args=(triton_func, "Out"),
-        )
-        getitem_out.meta["val"] = torch.empty(4, 4)
-
-        # Use getitem_out so it's live
-        add_node = graph.call_function(torch.ops.aten.add.Tensor, args=(getitem_out, x))
-        graph.output(add_node)
-
-        # Build visited set: everything at or before sync_node
-        visited: set[torch.fx.Node] = set()
-        for n in graph.nodes:
-            visited.add(n)
-            if n is sync_node:
-                break
-
-        # deps_with_uses_after_sync: triton_func has getitem_out as after-sync user
-        deps = [triton_func]
-
-        expanded = _expand_dict_returning_deps(deps, visited, graph, sync_node)
-
-        # The triton_func dict should NOT be in the expanded list
-        self.assertNotIn(triton_func, expanded)
-
-        # Instead, we should have a new getitem node for key "Out"
-        self.assertEqual(len(expanded), 1)
-        new_gi = expanded[0]
-        self.assertEqual(new_gi.target, operator.getitem)
-        self.assertEqual(new_gi.args, (triton_func, "Out"))
-
-        # The new getitem should be BEFORE the sync in graph order
-        node_order = list(graph.nodes)
-        self.assertLess(node_order.index(new_gi), node_order.index(sync_node))
-
-        # The old getitem_out should have been erased; add_node now uses new_gi
-        self.assertNotIn(getitem_out, set(graph.nodes))
-        self.assertIn(new_gi, add_node.all_input_nodes)
-
-    @onlyAccelerator
     def test_record_stream(self, device):
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
@@ -2242,7 +2211,6 @@ class GraphModule(torch.nn.Module):
         )
         self.assertTrue(found, "record_stream op not found in graph")
 
-    @onlyAccelerator
     def test_event_record_after_input_mutation_errors(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2257,7 +2225,6 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device)
             )
 
-    @onlyAccelerator
     def test_event_record_after_input_mutation_stack_traces(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2279,7 +2246,6 @@ class GraphModule(torch.nn.Module):
             self.assertIn("Event record occurred here:", msg)
             self.assertIn("e.record()", msg)
 
-    @onlyAccelerator
     def test_event_record_after_input_mutation_record_event(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2293,7 +2259,6 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device)
             )
 
-    @onlyAccelerator
     def test_event_record_after_input_mutation_through_view(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2309,7 +2274,6 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device)
             )
 
-    @onlyAccelerator
     def test_event_record_after_input_mutation_input_event(self, device):
         def fn(x, e):
             s = torch.Stream(device=device)
@@ -2324,7 +2288,6 @@ class GraphModule(torch.nn.Module):
                 torch.Event(device=device),
             )
 
-    @onlyAccelerator
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2338,7 +2301,6 @@ class GraphModule(torch.nn.Module):
             torch.ones(2, 2, device=device)
         )
 
-    @onlyAccelerator
     def test_event_record_on_different_stream_no_error(self, device):
         def fn(x):
             s0 = torch.Stream(device=device)
@@ -2354,7 +2316,6 @@ class GraphModule(torch.nn.Module):
             torch.ones(2, 2, device=device)
         )
 
-    @onlyAccelerator
     def test_event_not_returned_no_error(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2373,7 +2334,6 @@ class GraphModule(torch.nn.Module):
         IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/178155",
     )
-    @onlyAccelerator
     @unittest.skip("https://github.com/pytorch/pytorch/issues/177771")
     def test_backend_event_record_on_stream(self, device):
         """Backend Event should be accepted by torch.Stream.record_event (C++ type check)."""
@@ -2384,7 +2344,6 @@ class GraphModule(torch.nn.Module):
         e = device_mod.Event()
         s.record_event(e)
 
-    @onlyAccelerator
     def test_event_synchronize_tracing(self, device):
         def fn(x):
             e = torch.Event(device=device)
@@ -2425,7 +2384,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @onlyAccelerator
     def test_event_synchronize_inductor_lowering(self, device):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
@@ -2440,7 +2398,6 @@ class <lambda>(torch.nn.Module):
             inp = (torch.ones(2, 2, device=device),)
             fn(*inp)
 
-    @onlyAccelerator
     def test_control_deps_wrapping_synchronize_event(self, device) -> None:
         """Test that synchronize_event threads recorded ops' values through.
 
@@ -2558,7 +2515,6 @@ class <lambda>(torch.nn.Module):
             "mul should depend on synchronize_event's getitem, not record_event's",
         )
 
-    @onlyAccelerator
     def test_external_event_synchronize_threads_inputs(self, device) -> None:
         """When the event was recorded externally, synchronize threads graph inputs through."""
 
@@ -2624,7 +2580,6 @@ class <lambda>(torch.nn.Module):
 
         graph.lint()
 
-    @onlyAccelerator
     def test_event_synchronize_control_deps_e2e(self, device):
         """E2E: compute → record → synchronize → use result through torch.compile."""
 
@@ -2641,7 +2596,6 @@ class <lambda>(torch.nn.Module):
         compiled_result = torch.compile(f)(inp)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(eager_result, compiled_result)
 
-    @onlyAccelerator
     def test_event_synchronize_e2e(self, device):
         def f(a_list):
             a_cpu_list = []
@@ -2666,7 +2620,6 @@ class <lambda>(torch.nn.Module):
         compiled_result = f_compiled(inputs)
         self.assertEqual(eager_result, compiled_result)
 
-    @onlyAccelerator
     def test_event_record_wait_on_default_stream(self, device):
         device_mod = getattr(torch, torch.device(device).type, None)
         if device_mod is None or not hasattr(device_mod, "Event"):
@@ -2685,7 +2638,6 @@ class <lambda>(torch.nn.Module):
         compiled_result = f_compiled(x)
         self.assertEqual(eager_result, compiled_result)
 
-    @onlyAccelerator
     def test_record_stream_inductor_output_code(self, device) -> None:
         """Verify record_stream is ordered between the producing kernel and the
         consuming kernel in inductor-generated wrapper code."""
@@ -2710,7 +2662,6 @@ class <lambda>(torch.nn.Module):
             "torch.ops.streams.record_stream.default("
         ).check("return").run(code)
 
-    @onlyAccelerator
     def test_del_multi_stream_sync_dealloc(self, device):
         def fn(x, y):
             s = torch.Stream(device=device)
@@ -2737,7 +2688,6 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
-    @onlyAccelerator
     def test_del_same_stream_no_sync_dealloc(self, device):
         def fn(x, y):
             s = torch.Stream(device=device)
@@ -2762,7 +2712,6 @@ class <lambda>(torch.nn.Module):
         graph_str = print_graph(fw_graphs[0])
         self.assertNotIn("sync_dealloc", graph_str)
 
-    @onlyAccelerator
     def test_del_single_stream_no_sync_dealloc(self, device):
         def fn(x, y):
             z = torch.add(x, y)
@@ -2782,7 +2731,6 @@ class <lambda>(torch.nn.Module):
         graph_str = print_graph(fw_graphs[0])
         self.assertNotIn("sync_dealloc", graph_str)
 
-    @onlyAccelerator
     def test_del_attr_multi_stream_sync_dealloc(self, device):
         class Holder:
             pass
@@ -2814,7 +2762,6 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
-    @onlyAccelerator
     def test_del_subscr_multi_stream_sync_dealloc(self, device):
         def fn(x, y):
             s = torch.Stream(device=device)
@@ -2842,7 +2789,6 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
-    @onlyAccelerator
     def test_current_stream_with_entered_stream(self, device):
         """Verify that torch.accelerator.current_stream().stream_id returns the
         correct value when inside a stream context for a user-created stream."""
@@ -2856,7 +2802,6 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
 
-    @onlyAccelerator
     def test_recorded_events_append_runtime_objects(self, device):
         events = []
 
@@ -2893,7 +2838,9 @@ class <lambda>(torch.nn.Module):
         self.assertGreaterEqual(events[0].elapsed_time(events[1]), 0.0)
 
 
-instantiate_device_type_tests(TestStreams, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestStreams, globals(), allow_xpu=True, except_for=("cpu",)
+)
 
 
 @requires_cuda
@@ -3005,7 +2952,7 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_default, default_s.cuda_stream)
 
 
-@unittest.skipUnless(TEST_XPU, "xpu only")
+@requires_xpu
 class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
     def test_dynamo_registry_no_dangling_weakref(self):
         reset_user_object_tracking()
