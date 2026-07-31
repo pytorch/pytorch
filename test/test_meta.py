@@ -2268,6 +2268,35 @@ class TestMetaKernelRegistrations(TestCase):
             )
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_grid_sampler_2d_cpu_fallback_meta(self):
+        # The meta kernels' whole contract is output metadata, so compare
+        # shape/stride/dtype against eager for the forward and both backward
+        # outputs. Covers contiguous, channels_last and non-contiguous inputs.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def check(inp, grid):
+            expected = torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+            grad_out = torch.randn_like(expected)
+            bwd = torch.ops.aten._grid_sampler_2d_cpu_fallback_backward
+            exp_gi, exp_gg = bwd(grad_out, inp, grid, 0, 0, True)
+            with FakeTensorMode() as mode:
+                f_inp, f_grid = mode.from_tensor(inp), mode.from_tensor(grid)
+                f_out = torch._grid_sampler_2d_cpu_fallback(f_inp, f_grid, 0, 0, True)
+                f_gi, f_gg = bwd(
+                    mode.from_tensor(grad_out), f_inp, f_grid, 0, 0, True
+                )
+            for fake, real in ((f_out, expected), (f_gi, exp_gi), (f_gg, exp_gg)):
+                self.assertEqual(fake.shape, real.shape)
+                self.assertEqual(fake.stride(), real.stride())
+                self.assertEqual(fake.dtype, real.dtype)
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        check(inp, grid)
+        check(inp.contiguous(memory_format=torch.channels_last), grid)
+        check(inp.transpose(2, 3).contiguous().transpose(2, 3), grid)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):
         cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
         meta_result = torch.ops.aten._make_dep_token(device=torch.device("meta"))
