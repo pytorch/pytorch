@@ -547,9 +547,13 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)");
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
+  m.def(
+      "memcpy_to_multicast_(Tensor(a!) symm_mem_out, Tensor src, int byte_offset, str group_name) -> Tensor(a!)");
 
   m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "nvshmem_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def(
       "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
@@ -557,6 +561,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
   m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "nccl_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(
@@ -595,7 +601,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
 c10::intrusive_ptr<SymmetricMemory> rendezvous_op(
     const at::Tensor& tensor,
-    std::optional<std::string> group_name) {
+    const std::optional<std::string>& group_name) {
   return c10d::symmetric_memory::rendezvous(tensor, group_name);
 }
 

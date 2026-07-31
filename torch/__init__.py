@@ -36,6 +36,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
+    LiteralString as _LiteralString,
     Never as _Never,
     ParamSpec as _ParamSpec,
     Self as _Self,
@@ -179,6 +180,7 @@ else:
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
+        import importlib.util
         import sysconfig
 
         from torch.version import cuda as cuda_version
@@ -186,6 +188,13 @@ if sys.platform == "win32":
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
         th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
+        # Anchor the DLL dir on the compiled _C extension rather than __file__:
+        # editable installs (e.g. scikit-build-core) run this __init__ from the
+        # source tree, whose lib/ is empty, while _C and its dependent DLLs live
+        # in the installed tree. In a wheel install both resolve to the same dir.
+        _spec = importlib.util.find_spec("torch._C")
+        if _spec is not None and _spec.origin:
+            th_dll_path = os.path.join(os.path.dirname(_spec.origin), "lib")
         usebase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
@@ -380,6 +389,89 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
 
 
+# ROCm runtime libs a TheRock-built libtorch DT_NEEDEDs, mirroring the set
+# bundled by .ci/manywheel/repair_wheel.py::ROCM_SO_FILES. Ordered leaf-first so
+# that RTLD_GLOBAL preloading satisfies inter-lib NEEDED entries as we go.
+_rocm_core_libs: list[str] = [
+    "libamd_comgr.so",
+    "libhsa-runtime64.so",
+    "libamdhip64.so",
+    "libhiprtc.so",
+    "librocm-core.so",
+    "libroctx64.so",
+    "libroctracer64.so",
+    "librocblas.so",
+    "libhipblas.so",
+    "libhipblaslt.so",
+    "librocfft.so",
+    "libhipfft.so",
+    "librocrand.so",
+    "libhiprand.so",
+    "librocsolver.so",
+    "libhipsolver.so",
+    "librocsparse.so",
+    "libhipsparse.so",
+    "libhipsparselt.so",
+    "libMIOpen.so",
+    "librccl.so",
+]
+
+
+def _preload_rocm_deps() -> None:
+    """Preload TheRock ROCm runtime libs, the ROCm analogue of _preload_cuda_deps.
+
+    TheRock ships the ROCm runtime as the ``rocm`` pip package, unpacked to
+    ``<site-packages>/_rocm_sdk_core`` (a sibling of ``torch/``; the same layout
+    torch.utils.cpp_extension._find_rocm_home() keys off). Its runtime libs live
+    in ``_rocm_sdk_core/lib`` and the vendored OS-side "sysdeps" (libdrm, liblzma,
+    ... renamed to ``librocm_sysdeps_*.so``) live in
+    ``_rocm_sdk_core/lib/rocm_sysdeps/lib``. Neither dir is on the default loader
+    search path, so a wheel built against TheRock -- whose torch .so files carry
+    NEEDED entries such as ``librocm_sysdeps_liblzma.so.5`` and
+    ``libamdhip64.so`` -- is only importable when those dirs are reachable
+    (e.g. via LD_LIBRARY_PATH from /etc/rocm_env.sh). Preloading the libs here
+    (RTLD_GLOBAL, before ``import torch._C``) makes the wheel self-resolving
+    regardless of the environment, the same way _preload_cuda_deps handles the
+    nvidia-*-cu12 wheels. Because this lives in torch source it travels with any
+    build (bare ``setup.py`` / ``python -m build``), not just the CI script.
+
+    No-ops on non-Linux, on non-ROCm builds (``torch.version.hip is None`` covers
+    CUDA and CPU), and on OS-managed ROCm where ``_rocm_sdk_core`` is absent
+    (the apt/``/opt/rocm`` path, whose libs are already on the loader path).
+    """
+    if platform.system() != "Linux":
+        return
+
+    from torch.version import hip as hip_version
+
+    if hip_version is None:
+        return
+
+    import importlib.util
+
+    spec = importlib.util.find_spec("_rocm_sdk_core")
+    if spec is None or spec.origin is None:
+        return
+    root_lib = os.path.join(os.path.dirname(spec.origin), "lib")
+    sysdeps_lib = os.path.join(root_lib, "rocm_sysdeps", "lib")
+
+    def _preload(pattern: str) -> None:
+        # Best-effort: preload every match with RTLD_GLOBAL so its symbols/soname
+        # satisfy libtorch's NEEDED entries. A lib whose own deps are not yet
+        # resolvable just fails silently; preloading the rest still lets the
+        # loader resolve libtorch.
+        for sofile in sorted(glob.glob(pattern)):
+            try:
+                ctypes.CDLL(sofile, mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass
+
+    # sysdeps first: the core libs (and libtorch) depend on them.
+    _preload(os.path.join(sysdeps_lib, "librocm_sysdeps_*.so*"))
+    for base in _rocm_core_libs:
+        _preload(os.path.join(root_lib, base + "*"))
+
+
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
     if platform.system() == "Windows":
@@ -390,6 +482,32 @@ def _load_global_deps() -> None:
     lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
+
+    # TheRock ROCm wheels keep the runtime in _rocm_sdk_core, which is not on the
+    # loader search path; front-load it so libtorch_global_deps' NEEDED entries
+    # (and, further down, libtorch_hip's) resolve. No-ops for CUDA/CPU builds and
+    # for OS-managed ROCm. See _preload_rocm_deps.
+    _preload_rocm_deps()
+
+    # In scikit-build-core editable installs with redirect mode, native libs are
+    # installed to the dist package location rather than relative to __file__.
+    if not os.path.exists(global_deps_lib_path):
+        try:
+            from importlib.metadata import distribution
+
+            installed = distribution("torch").locate_file(
+                os.path.join("torch", "lib", lib_name)
+            )
+            # The importlib metadata SimplePath protocol was missing the exists
+            # method in older versions; however, the actual Path implementation
+            # has it and newer versions of importlib metadata have added it to
+            # the protocol, making the following ignore unnecessary from
+            # importlib_metadata 7.0.1 and Python 3.13 onwards.
+            # pyrefly: ignore[missing-attribute]
+            if installed.exists():
+                global_deps_lib_path = str(installed)
+        except Exception:
+            pass
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1524,6 +1642,7 @@ def is_storage(obj: object, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
         True
         >>>
         >>> # TypedStorage (legacy)
+        >>> warnings.filterwarnings("ignore", message=".*TypedStorage is deprecated")  # docs: hide
         >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
         >>> torch.is_storage(typed_storage)
         True
@@ -1754,6 +1873,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
         * :func:`torch.Tensor.index_put` with ``accumulate=False``
@@ -1770,6 +1890,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1805,7 +1926,6 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -2050,7 +2170,7 @@ def is_warn_always_enabled() -> builtins.bool:
 def _check_with(
     error_type: type[BaseException],
     cond: builtins.bool | SymBool,
-    message: str | _Callable[[], object] | None,
+    message: _LiteralString | _Callable[[], object] | None,
 ) -> None:
     if not isinstance(cond, (builtins.bool, SymBool)):
         if isinstance(cond, torch.Tensor):
@@ -2088,7 +2208,8 @@ def _check_with(
 
 
 def _check(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2100,9 +2221,10 @@ def _check(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(RuntimeError, cond, message)
 
@@ -2114,7 +2236,7 @@ def _check(
 )
 def _check_is_size(
     i: "IntLikeType",
-    message: str | _Callable[[], object] | None = None,
+    message: _LiteralString | _Callable[[], object] | None = None,
     *,
     max: "IntLikeType | None" = None,
 ) -> None:
@@ -2149,7 +2271,8 @@ def _check_is_size(
 
 
 def _check_index(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2161,15 +2284,17 @@ def _check_index(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(IndexError, cond, message)
 
 
 def _check_value(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2181,15 +2306,17 @@ def _check_value(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(ValueError, cond, message)
 
 
 def _check_type(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2201,15 +2328,17 @@ def _check_type(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(TypeError, cond, message)
 
 
 def _check_not_implemented(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2221,9 +2350,10 @@ def _check_not_implemented(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(NotImplementedError, cond, message)
 
@@ -2231,7 +2361,7 @@ def _check_not_implemented(
 def _check_tensor_all_with(
     error_type: type[BaseException],
     cond: "torch.Tensor",
-    message: str | _Callable[[], object] | None = None,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     if not is_tensor(cond):
         raise TypeError(f"cond must be a tensor, but got {type(cond)}")
@@ -2244,7 +2374,8 @@ def _check_tensor_all_with(
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
 def _check_tensor_all(
-    cond: "torch.Tensor", message: str | _Callable[[], object] | None = None
+    cond: "torch.Tensor",
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2257,9 +2388,10 @@ def _check_tensor_all(
         cond (:class:`torch.Tensor`): Tensor of dtype ``torch.bool``. If any
             element is ``False``, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_tensor_all_with(RuntimeError, cond, message)
 
@@ -2766,6 +2898,7 @@ from torch._linalg_utils import (  # type: ignore[misc]
     eig,
     lstsq,
     matrix_rank,
+    qr,
     solve,
 )
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -2978,7 +3111,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2994,7 +3127,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -3011,7 +3144,7 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -3095,7 +3228,7 @@ def compile(
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
           This is an unsafe feature and there is no backward compatibility guarantee provided
           for dynamo guards as data types.
-          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          For stable helper functions to use, see the documentation in `torch.compiler`, for example:
           - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
           - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
           - `torch.compiler.keep_tensor_guards_unsafe`
@@ -3152,11 +3285,18 @@ def compile(
         backend = get_default_backend()
 
     # Auto-wrap ParamsSpec → ShapesSpec for convenience
-    if shapes_spec is not None:
+    if dynamic_shapes is not None:
         from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 
-        if isinstance(shapes_spec, ParamsSpec):
-            shapes_spec = ShapesSpec(shapes_spec)
+        if isinstance(dynamic_shapes, ParamsSpec):
+            dynamic_shapes = ShapesSpec(dynamic_shapes)
+
+    # If ``model`` carries an ``@dynamic_spec(...)`` decorator, the attached
+    # ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
+    if model is not None:
+        from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
+
+        dynamic_shapes = _resolve_dynamic_shapes(model, dynamic_shapes)
 
     # Decorator mode
     if model is None:
@@ -3175,7 +3315,7 @@ def compile(
                 disable=disable,
                 recompile_limit=recompile_limit,
                 isolate_recompiles=isolate_recompiles,
-                shapes_spec=shapes_spec,
+                dynamic_shapes=dynamic_shapes,
             )
 
         return fn
@@ -3234,7 +3374,7 @@ def compile(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         isolate_recompiles=isolate_recompiles,
-        shapes_spec=shapes_spec,
+        dynamic_shapes=dynamic_shapes,
     )(model)  # type: ignore[return-value]
 
 
