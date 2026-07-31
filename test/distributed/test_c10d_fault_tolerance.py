@@ -323,5 +323,17 @@ class ReconfigureContractTest(TestCase):
             pg.reconfigure(c10d.ReconfigureOptions())
 
 
+class BackendCapabilityContractTest(TestCase):
+    """Ensures base-Backend bindings are safe to call on any backend (e.g. Gloo)
+    without throwing, so hasattr-based capability detection stays valid."""
+
+    def test_get_error_returns_success_on_base_backend(self) -> None:
+        from torch._C._distributed_c10d import Backend as C10DBackend, ErrorType
+
+        backend = C10DBackend(0, 1)
+        self.assertTrue(hasattr(backend, "get_error"))
+        self.assertEqual(backend.get_error(), ErrorType.SUCCESS)
+
+
 if __name__ == "__main__":
     run_tests()
