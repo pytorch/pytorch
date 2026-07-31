@@ -39,6 +39,7 @@ from functorch import (
 )
 from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import allow_in_graph
 from torch._functorch.eager_transforms import _slice_argnums
 from torch._functorch.make_functional import (
@@ -5595,6 +5596,337 @@ class TestCompileTransforms(TestCase):
             self.assertEqual(result, expected)
         finally:
             pytree._deregister_pytree_node(Input)
+
+    @onlyCPU
+    def test_compile_grad_cpu_sdpa_higher_order(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181177
+        layer_norm = nn.LayerNorm([3]).to(device)
+        rrelu = nn.RReLU().to(device).eval()
+
+        def model(x):
+            y = layer_norm(x)
+            y = rrelu(y)
+            return F.scaled_dot_product_attention(y, y, y).mean()
+
+        torch.manual_seed(0)
+        x = torch.randn([5, 15, 9, 3], device=device)
+        expected = torch.func.grad(model)(x)
+
+        torch._dynamo.reset()
+        result = torch.compile(torch.func.grad(model), backend="inductor")(x)
+        self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_higher_order(self, device):
+        cases = (
+            ("default", False, None, 2, 2, None),
+            ("causal_scale", True, 0.37, 2, 2, None),
+            ("fully_masked_row", False, None, 2, 2, "masked_row"),
+            ("causal_with_mask", True, None, 2, 2, "masked_row"),
+            ("empty_2d_mask", False, None, 2, 2, "empty_2d"),
+            ("empty_4d_mask", False, None, 2, 2, "empty_4d"),
+            ("grouped_query_attention", False, None, 4, 2, None),
+        )
+        for (
+            name,
+            is_causal,
+            scale,
+            query_heads,
+            key_value_heads,
+            mask_kind,
+        ) in cases:
+            with self.subTest(name=name):
+                torch.manual_seed(0)
+                query = torch.randn(
+                    1,
+                    query_heads,
+                    3,
+                    4,
+                    device=device,
+                    dtype=torch.double,
+                    requires_grad=True,
+                )
+                key = torch.randn(
+                    1,
+                    key_value_heads,
+                    4,
+                    4,
+                    device=device,
+                    dtype=torch.double,
+                    requires_grad=True,
+                )
+                value = torch.randn_like(key, requires_grad=True)
+                attn_mask = None
+                if mask_kind == "masked_row":
+                    attn_mask = torch.zeros(
+                        1, 1, 3, 4, device=device, dtype=torch.double
+                    )
+                    attn_mask[..., 1, :] = float("-inf")
+                elif mask_kind == "empty_2d":
+                    attn_mask = torch.empty(0, 0, device=device, dtype=torch.double)
+                elif mask_kind == "empty_4d":
+                    attn_mask = torch.empty(
+                        1, 1, 0, 0, device=device, dtype=torch.double
+                    )
+
+                out, logsumexp = (
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                        query,
+                        key,
+                        value,
+                        is_causal=is_causal,
+                        attn_mask=attn_mask,
+                        scale=scale,
+                    )
+                )
+                grad_out = torch.randn_like(out, requires_grad=True)
+
+                with enable_python_dispatcher():
+                    actual_grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                        grad_out,
+                        query,
+                        key,
+                        value,
+                        out,
+                        logsumexp,
+                        0.0,
+                        is_causal,
+                        attn_mask=attn_mask,
+                        scale=scale,
+                    )
+
+                tangents = tuple(torch.randn_like(grad) for grad in actual_grads)
+                actual_hvp = torch.autograd.grad(
+                    sum(
+                        (grad * tangent).sum()
+                        for grad, tangent in zip(actual_grads, tangents)
+                    ),
+                    (grad_out, query, key, value),
+                )
+                self.assertTrue(all(not grad.requires_grad for grad in actual_hvp))
+
+                reference_attn_mask = (
+                    attn_mask
+                    if attn_mask is not None and attn_mask.numel() != 0
+                    else None
+                )
+                if is_causal:
+                    causal_mask = torch.ones(
+                        query.size(-2),
+                        key.size(-2),
+                        device=device,
+                        dtype=torch.bool,
+                    ).tril()
+                    causal_bias = torch.zeros_like(
+                        causal_mask, dtype=query.dtype
+                    ).masked_fill(~causal_mask, float("-inf"))
+                    reference_attn_mask = (
+                        causal_bias
+                        if reference_attn_mask is None
+                        else causal_bias + reference_attn_mask
+                    )
+
+                with torch.nn.attention.sdpa_kernel(
+                    backends=[torch.nn.attention.SDPBackend.MATH]
+                ):
+                    reference_out = F.scaled_dot_product_attention(
+                        query,
+                        key,
+                        value,
+                        attn_mask=reference_attn_mask,
+                        scale=scale,
+                        enable_gqa=query_heads != key_value_heads,
+                    )
+                reference_grads = torch.autograd.grad(
+                    reference_out,
+                    (query, key, value),
+                    grad_out,
+                    create_graph=True,
+                )
+                reference_hvp = torch.autograd.grad(
+                    sum(
+                        (grad * tangent).sum()
+                        for grad, tangent in zip(reference_grads, tangents)
+                    ),
+                    (grad_out, query, key, value),
+                )
+
+                self.assertEqual(actual_hvp, reference_hvp, atol=1e-8, rtol=1e-6)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_nested_grad(self, device):
+        def model(x):
+            return F.scaled_dot_product_attention(x, x, x).sum()
+
+        nested_grad = torch.func.grad(lambda x: torch.func.grad(model)(x).sum())
+        torch.manual_seed(0)
+        x = torch.randn(1, 2, 3, 4, device=device)
+
+        with torch.nn.attention.sdpa_kernel(
+            backends=[torch.nn.attention.SDPBackend.MATH]
+        ):
+            expected = nested_grad(x)
+        with enable_python_dispatcher():
+            eager_actual = nested_grad(x)
+        self.assertEqual(eager_actual, expected)
+
+        torch._dynamo.reset()
+        compiled_actual = torch.compile(
+            nested_grad, backend="inductor", fullgraph=True
+        )(x)
+        self.assertEqual(compiled_actual, expected)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_preserves_nonfinite_native_grads(self, device):
+        torch.manual_seed(0)
+        query = torch.zeros(
+            1, 2, 3, 4, device=device, dtype=torch.float16, requires_grad=True
+        )
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+        grad_out = torch.randn_like(query, requires_grad=True)
+        scale = 1e5
+
+        with torch._C._AutoDispatchBelowAutograd():
+            out, logsumexp = (
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, key, value, scale=scale
+                )
+            )
+            native_grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out, query, key, value, out, logsumexp, 0.0, False, scale=scale
+            )
+
+        with enable_python_dispatcher():
+            actual_grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out, query, key, value, out, logsumexp, 0.0, False, scale=scale
+            )
+
+        self.assertTrue(torch.isinf(native_grads[0]).any())
+        self.assertFalse(torch.isnan(native_grads[0]).any())
+        self.assertEqual(actual_grads, native_grads)
+
+        tangents = [torch.zeros_like(grad) for grad in actual_grads]
+        inf_index = torch.isinf(actual_grads[0]).nonzero()[0]
+        tangents[0][tuple(inf_index)] = 1.0
+        actual_hvp = torch.autograd.grad(
+            actual_grads, (grad_out, query, key, value), tangents
+        )
+
+        with torch.nn.attention.sdpa_kernel(
+            backends=[torch.nn.attention.SDPBackend.MATH]
+        ):
+            reference_out = F.scaled_dot_product_attention(
+                query, key, value, scale=scale
+            )
+        reference_grads = torch.autograd.grad(
+            reference_out,
+            (query, key, value),
+            grad_out,
+            create_graph=True,
+        )
+        reference_hvp = torch.autograd.grad(
+            reference_grads, (grad_out, query, key, value), tangents
+        )
+        self.assertEqual(actual_hvp, reference_hvp)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_first_order_stays_fused(self, device):
+        torch.manual_seed(0)
+        query = torch.randn(1, 2, 8, 4, device=device, requires_grad=True)
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+        out, logsumexp = (
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                query, key, value
+            )
+        )
+        grad_out = torch.randn_like(out, requires_grad=True)
+
+        def backward(grad_out, query, key, value, out, logsumexp):
+            with enable_python_dispatcher():
+                return torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                    grad_out, query, key, value, out, logsumexp, 0.0, False
+                )
+
+        graph = make_fx(backward)(grad_out, query, key, value, out, logsumexp)
+        targets = [
+            node.target for node in graph.graph.nodes if node.op == "call_function"
+        ]
+        self.assertEqual(
+            targets.count(
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default
+            ),
+            1,
+        )
+        self.assertNotIn(torch.ops.aten.bmm.default, targets)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_undefined_grad_out(self, device):
+        observed = []
+
+        def model(query):
+            out, logsumexp = (
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, query, query
+                )
+            )
+            observed.append(
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                    None, query, query, query, out, logsumexp, 0.0, False
+                )
+            )
+            return query.sum()
+
+        query = torch.randn(1, 2, 3, 4, device=device)
+        torch.func.grad(model)(query)
+        self.assertEqual(observed, [(None, None, None)])
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_subset_requires_grad(self, device):
+        torch.manual_seed(0)
+        query = torch.randn(1, 2, 3, 4, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn_like(query, requires_grad=True)
+        grad_out = torch.randn_like(query)
+        with torch._C._AutoDispatchBelowAutograd():
+            out, logsumexp = (
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, key, value
+                )
+            )
+
+        with enable_python_dispatcher():
+            grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out, query, key, value, out, logsumexp, 0.0, False
+            )
+        tangents = tuple(torch.randn_like(grad) for grad in grads)
+        (value_hvp,) = torch.autograd.grad(grads, value, tangents)
+        self.assertNotEqual(value_hvp.abs().max().item(), 0.0)
+
+        out = out.detach().requires_grad_()
+        logsumexp = logsumexp.detach().requires_grad_()
+        with enable_python_dispatcher():
+            grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out,
+                query,
+                key,
+                value.detach(),
+                out,
+                logsumexp,
+                0.0,
+                False,
+            )
+        out_grads = torch.autograd.grad(
+            sum(grad.sum() for grad in grads),
+            (out, logsumexp),
+            allow_unused=True,
+        )
+        # This registration defines the generated forward's double-backward
+        # convention, not the standalone native backward kernel's numerical
+        # Jacobian. derivatives.yaml marks logsumexp non-differentiable, so
+        # following these saved-tensor partials would produce a wrong Hessian.
+        self.assertEqual(out_grads, (None, None))
 
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)
