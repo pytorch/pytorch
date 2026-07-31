@@ -418,9 +418,22 @@ class _BracketState(threading.local):
     Thread-local so concurrent executions of a retained node (separate
     graph tasks on different engine threads) cannot interleave each
     other's scope snapshots; within one thread pre/post pair up LIFO.
-    If the node throws, the engine skips its posthooks (call_function has
-    no try/finally around fn) and the entry leaks; it then sits below any
-    later pushes, so subsequent pairs on the thread still pair correctly.
+
+    If the node throws, its posthook never runs (the engine's
+    call_function has no try/finally around fn) and the prehook's entry
+    is left on the stack. That is harmless. Say a retained node runs
+    three times on one thread and the second run throws:
+
+        run 1: prehook push [e1]; posthook pops e1     -> []
+        run 2: prehook push [e2]; node throws, no pop  -> [e2]
+        run 3: prehook push [e2, e3]; posthook pops e3 -> [e2]
+
+    Pops always take the top, so the leaked e2 sits below all later
+    entries and every subsequent run still pops its own. The only loss
+    is e2 itself: that run's kernels go unrecorded, which is moot since
+    its backward failed. (The region/creation-hook TLS the prehook set
+    is not leaked -- the engine task's ThreadLocalStateGuard restores
+    those on unwind.)
     """
 
     def __init__(self) -> None:
@@ -616,15 +629,18 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
     def creation_hook(node: Any) -> None:
         _freeze_region_hook(node, generation)
 
-    if backward:
-        prev = _enter_region({**(_current_region() or {}), **annotation})
-        try:
+    # Enter the region even when backward=False: the region must reflect the
+    # full dynamic scope so that nodes hooked by a nested backward=True scope
+    # (or by an executing hooked node) freeze this annotation too.
+    prev = _enter_region({**(_current_region() or {}), **annotation})
+    try:
+        if backward:
             with torch.autograd.graph.node_creation_hook(creation_hook):
                 yield
-        finally:
-            _exit_region(prev)
-    else:
-        yield
+        else:
+            yield
+    finally:
+        _exit_region(prev)
 
     tools_ids = _end_kernel_scope(scope)
     if tools_ids:

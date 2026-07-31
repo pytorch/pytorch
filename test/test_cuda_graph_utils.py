@@ -64,6 +64,30 @@ class TestMarkKernels(TestCase):
                     fwd += 1
         return fwd, bwd
 
+    def _distinct_annotations(self):
+        """The set of distinct resolved annotations, one per kernel group.
+
+        Asserts every toolsId resolved to exactly one annotation dict, then
+        normalizes kernels sharing an annotation down to one entry (a
+        frozenset of the dict's items). This makes exact assertions possible
+        while staying invariant over how many kernels each op decomposes
+        into.
+        """
+        distinct = set()
+        for tid, anns in get_kernel_annotations().items():
+            self.assertEqual(len(anns), 1, f"toolsId {hex(tid)}: {anns}")
+            distinct.add(frozenset(anns[0].items()))
+        return distinct
+
+    def assertAnnotations(self, *expected):
+        """Assert the distinct resolved annotations equal ``expected`` dicts."""
+        self.assertEqual(
+            self._distinct_annotations(), {frozenset(e.items()) for e in expected}
+        )
+
+    def _bwd(self, ann):
+        return {**ann, "autograd_phase": "backward"}
+
     def test_noop_outside_capture(self):
         x = torch.randn(8, device="cuda")
         with mark_kernels("test"):
@@ -126,11 +150,7 @@ class TestMarkKernels(TestCase):
             with mark_kernels("phase_a"):
                 _ = x + 1
 
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            for ann in anns:
-                self.assertEqual(ann, {"name": "phase_a"})
+        self.assertAnnotations({"name": "phase_a"})
 
     def test_multiple_scopes_no_overlap(self):
         graph = torch.cuda.CUDAGraph()
@@ -142,19 +162,9 @@ class TestMarkKernels(TestCase):
             with mark_kernels("scope_2"):
                 _ = x * 2
 
-        annotations = get_kernel_annotations()
-        scope_1_ids = set()
-        scope_2_ids = set()
-        for tid, anns in annotations.items():
-            self.assertEqual(len(anns), 1)
-            if anns[0] == {"name": "scope_1"}:
-                scope_1_ids.add(tid)
-            elif anns[0] == {"name": "scope_2"}:
-                scope_2_ids.add(tid)
-
-        self.assertGreater(len(scope_1_ids), 0)
-        self.assertGreater(len(scope_2_ids), 0)
-        self.assertEqual(len(scope_1_ids & scope_2_ids), 0)
+        # One annotation per toolsId (asserted by the helper) means no kernel
+        # was claimed by both scopes.
+        self.assertAnnotations({"name": "scope_1"}, {"name": "scope_2"})
 
     def test_dict_annotation(self):
         graph = torch.cuda.CUDAGraph()
@@ -165,11 +175,7 @@ class TestMarkKernels(TestCase):
             with mark_kernels(annotation):
                 _ = x + 1
 
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            self.assertEqual(anns[0]["name"], "all_gather")
-            self.assertEqual(anns[0]["Group size"], 2)
+        self.assertAnnotations(annotation)
 
     def test_clear_resets_state(self):
         graph = torch.cuda.CUDAGraph()
@@ -197,9 +203,7 @@ class TestMarkKernels(TestCase):
                 pass
             _ = x * 2
 
-        for anns in get_kernel_annotations().values():
-            for ann in anns:
-                self.assertNotEqual(ann, "empty")
+        self.assertAnnotations()
 
     def test_only_annotates_scope_kernels(self):
         graph = torch.cuda.CUDAGraph()
@@ -212,12 +216,7 @@ class TestMarkKernels(TestCase):
                 _ = x + 3
             _ = x - 1
 
-        annotations = get_kernel_annotations()
-        total_annotated = sum(len(anns) for anns in annotations.values())
-        self.assertGreater(total_annotated, 0)
-        for anns in annotations.values():
-            for ann in anns:
-                self.assertEqual(ann, {"name": "tagged"})
+        self.assertAnnotations({"name": "tagged"})
 
     def test_nested_scopes_innermost_wins(self):
         """With nested string scopes, the innermost name wins."""
@@ -231,25 +230,7 @@ class TestMarkKernels(TestCase):
                     _ = x * 2  # nested: inner should win
                 _ = x - 1  # outer only
 
-        annotations = get_kernel_annotations()
-        outer_ids = set()
-        inner_ids = set()
-        for tid, anns in annotations.items():
-            self.assertEqual(
-                len(anns),
-                1,
-                lambda msg: f"{msg}\ntoolsId {hex(tid)} has {len(anns)} annotations",
-            )
-            ann = anns[0]
-            self.assertIsInstance(ann, dict)
-            if ann["name"] == "outer":
-                outer_ids.add(tid)
-            elif ann["name"] == "inner":
-                inner_ids.add(tid)
-
-        self.assertGreater(len(outer_ids), 0, "Should have outer-only kernels")
-        self.assertGreater(len(inner_ids), 0, "Should have inner kernels")
-        self.assertEqual(len(outer_ids & inner_ids), 0)
+        self.assertAnnotations({"name": "outer"}, {"name": "inner"})
 
     def test_nested_dict_scopes_inner_wins_common_keys(self):
         """With truly nested dict scopes, inner wins for common keys,
@@ -272,25 +253,10 @@ class TestMarkKernels(TestCase):
                     _ = x * 2  # nested
                 _ = x - 1  # outer only
 
-        annotations = get_kernel_annotations()
-        outer_only_ids = set()
-        nested_ids = set()
-        for tid, anns in annotations.items():
-            self.assertEqual(len(anns), 1)
-            ann = anns[0]
-            self.assertIsInstance(ann, dict)
-            if ann["name"] == "ag_collective":
-                outer_only_ids.add(tid)
-            elif ann["name"] == "all_gather":
-                nested_ids.add(tid)
-                # Inner wins for common keys
-                self.assertEqual(ann["stream"], 62)
-                # Inner-only keys preserved
-                self.assertEqual(ann["In msg nelems"], 1024)
-                self.assertEqual(ann["dtype"], "bfloat16")
-
-        self.assertGreater(len(outer_only_ids), 0, "Should have outer-only kernels")
-        self.assertGreater(len(nested_ids), 0, "Should have nested kernels")
+        # Nested kernels: inner wins common keys ("name", "stream"),
+        # inner-only keys preserved; nothing of outer's survives since
+        # inner_ann covers all its keys.
+        self.assertAnnotations(outer_ann, inner_ann)
 
     def test_same_range_scopes_inner_wins_common_keys(self):
         """With same-range scopes (inner ctx exits first), inner wins
@@ -312,18 +278,9 @@ class TestMarkKernels(TestCase):
                 with mark_kernels(inner_ann):
                     _ = x + 1
 
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            self.assertEqual(len(anns), 1)
-            ann = anns[0]
-            self.assertIsInstance(ann, dict)
-            # Inner wins for common keys
-            self.assertEqual(ann["name"], "all_gather", "Inner name should win")
-            self.assertEqual(ann["stream"], 62, "Inner stream should win")
-            # Inner-only keys preserved
-            self.assertEqual(ann["In msg nelems"], 1024)
-            self.assertEqual(ann["dtype"], "bfloat16")
+        # Inner wins common keys ("name", "stream") and keeps its own;
+        # outer contributes nothing since inner covers all its keys.
+        self.assertAnnotations(inner_ann)
 
     def test_string_scope_in_dict_scope_contends_for_name(self):
         """A string annotation wraps to {"name": ...}, so a string scope
@@ -338,14 +295,8 @@ class TestMarkKernels(TestCase):
                 with mark_kernels("inner"):
                     _ = x + 1
 
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            self.assertEqual(len(anns), 1)
-            ann = anns[0]
-            # Inner string scope wins the "name" slot; outer-only keys survive.
-            self.assertEqual(ann["name"], "inner")
-            self.assertEqual(ann["dtype"], "bfloat16")
+        # Inner string scope wins the "name" slot; outer-only keys survive.
+        self.assertAnnotations({"name": "inner", "dtype": "bfloat16"})
 
     def test_no_enable_records_nothing(self):
         # Without enable_annotations=True the capture is un-annotated, so
@@ -370,11 +321,7 @@ class TestMarkKernels(TestCase):
             with mark_kernels("auto"):
                 _ = x + 1
 
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            for ann in anns:
-                self.assertEqual(ann, {"name": "auto"})
+        self.assertAnnotations({"name": "auto"})
 
     def test_enable_annotations_does_not_clear(self):
         """Annotations from a previous graph survive a second capture."""
@@ -387,8 +334,7 @@ class TestMarkKernels(TestCase):
             with mark_kernels("first"):
                 _ = x + 1
 
-        first_count = len(get_kernel_annotations())
-        self.assertGreater(first_count, 0)
+        self.assertAnnotations({"name": "first"})
 
         graph2 = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph2, enable_annotations=True):
@@ -396,7 +342,7 @@ class TestMarkKernels(TestCase):
                 _ = x * 2
 
         # Both graphs' annotations should be present.
-        self.assertGreater(len(get_kernel_annotations()), first_count)
+        self.assertAnnotations({"name": "first"}, {"name": "second"})
 
     def test_enable_annotations_remaps_to_exec_graph(self):
         """enable_annotations=True must remap toolsIds to the exec graph ID."""
@@ -442,13 +388,7 @@ class TestMarkKernels(TestCase):
                 aux_stream.record_event(aux_done)
             capture_stream.wait_event(aux_done)
 
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            self.assertEqual(len(anns), 1)
-            ann = anns[0]
-            self.assertEqual(ann["name"], "aux")
-            self.assertEqual(ann["stream"], expected_stream_id)
+        self.assertAnnotations({"name": "aux", "stream": expected_stream_id})
 
     def test_mark_stream_annotates_target_already_capturing_when_synced(self):
         graph = torch.cuda.CUDAGraph()
@@ -477,13 +417,7 @@ class TestMarkKernels(TestCase):
 
             capture_stream.wait_event(aux_done)
 
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            self.assertEqual(len(anns), 1)
-            ann = anns[0]
-            self.assertEqual(ann["name"], "aux_branch")
-            self.assertEqual(ann["stream"], expected_stream_id)
+        self.assertAnnotations({"name": "aux_branch", "stream": expected_stream_id})
 
     def _exec_graph_id(self, graph):
         from cuda.bindings import runtime as cuda_runtime
@@ -651,9 +585,10 @@ class TestMarkKernels(TestCase):
             capture_stream.wait_event(aux_done)
 
         annotations = get_kernel_annotations()
+        # Exactly the one mul kernel: the pre-existing dependent branch
+        # (base * 2) must not be swept up by the scope's walk.
         self.assertEqual(len(annotations), 1)
-        for anns in annotations.values():
-            self.assertEqual(anns, [{"name": "tagged"}])
+        self.assertAnnotations({"name": "tagged"})
 
     def test_backward_kernels_annotated(self):
         """Backward kernels of ops run inside a scope carry its annotation."""
@@ -666,13 +601,13 @@ class TestMarkKernels(TestCase):
             z = y.sum()
             _ = torch.autograd.grad(z, x)
 
-        fwd, bwd = self._count_phases("fwd_scope")
-        # The 2 forward kernels (mul, sin), and the backward kernels of
-        # their autograd nodes (SinBackward0, MulBackward0), captured
-        # outside the forward scope but tagged via node-creation hooks and
-        # marked with autograd_phase=backward.
-        self.assertEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
+        # Forward kernels (mul, sin) tagged plain; backward kernels of their
+        # autograd nodes (SinBackward0, MulBackward0), captured outside the
+        # forward scope, tagged via node-creation hooks with
+        # autograd_phase=backward. Nothing else (sum, grad plumbing) tagged.
+        ann = {"name": "fwd_scope"}
+        self.assertAnnotations(ann, self._bwd(ann))
+        self.assertEqual(self._count_phases("fwd_scope")[0], 2)
 
     def test_backward_direct_with_preallocated_grad(self):
         """Direct .backward() with .grad preallocated before capture, so the
@@ -687,9 +622,9 @@ class TestMarkKernels(TestCase):
                 y = (x * 2).sin()
             y.sum().backward()
 
-        fwd, bwd = self._count_phases("scope")
-        self.assertEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
+        # AccumulateGrad's in-place add stays untagged (helper would flag it).
+        ann = {"name": "scope"}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_multi_use_leaf(self):
         """A leaf used by two scopes: each scope's backward nodes carry their
@@ -705,10 +640,10 @@ class TestMarkKernels(TestCase):
                 b = x.cos()
             (a + b).sum().backward()
 
-        for name in ("branch_a", "branch_b"):
-            fwd, bwd = self._count_phases(name)
-            self.assertEqual(fwd, 1, name)
-            self.assertGreaterEqual(bwd, 1, name)
+        # Each branch's forward and backward kernels carry exactly their own
+        # scope; the shared add/sum/AccumulateGrad work carries neither.
+        ann_a, ann_b = {"name": "branch_a"}, {"name": "branch_b"}
+        self.assertAnnotations(ann_a, ann_b, self._bwd(ann_a), self._bwd(ann_b))
 
     def test_backward_false_annotates_forward_only(self):
         """backward=False tags the two forward kernels and nothing from the
@@ -727,14 +662,25 @@ class TestMarkKernels(TestCase):
             z = y.sum()
             _ = torch.autograd.grad(z, x)
 
-        annotations = get_kernel_annotations()
-        tagged = [
-            tid
-            for tid, anns in annotations.items()
-            for ann in anns
-            if ann["name"] == "fwd_only"
-        ]
-        self.assertEqual(len(tagged), 2)
+        # Only the plain forward tag exists: no backward-phase variant at all.
+        self.assertAnnotations({"name": "fwd_only"})
+        self.assertEqual(self._count_phases("fwd_only")[0], 2)
+
+    def test_backward_false_outer_keys_inherited_via_inner_scope(self):
+        """A backward=False scope still contributes its annotation to the
+        region, so nodes hooked by a nested backward=True scope freeze the
+        outer keys into their backward tags."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels({"name": "outer", "phase": "P"}, backward=False):
+                with mark_kernels("inner"):
+                    y = (x * 2).sin()
+            _ = torch.autograd.grad(y.sum(), x)
+
+        merged = {"name": "inner", "phase": "P"}
+        self.assertAnnotations(merged, self._bwd(merged))
 
     def test_backward_scope_inside_custom_backward_wins(self):
         """A mark_kernels opened inside a node's backward execution is
@@ -760,20 +706,13 @@ class TestMarkKernels(TestCase):
                 y = Scoped.apply(x)
             _ = torch.autograd.grad(y.sum(), x)
 
-        inner = 0
-        for anns in get_kernel_annotations().values():
-            for ann in anns:
-                if ann["name"] == "bwd_inner":
-                    # Inner scope wins common keys; keys unique to the
-                    # inherited node annotation survive the merge, and the
-                    # kernels are marked as backward work.
-                    self.assertEqual(ann["who"], "inner")
-                    self.assertEqual(ann["fwd_only"], 1)
-                    self.assertEqual(ann["autograd_phase"], "backward")
-                    inner += 1
-                elif ann["who"] == "outer":
-                    self.assertEqual(ann["name"], "fwd")
-        self.assertGreaterEqual(inner, 1)
+        # Backward kernels: the inner scope wins common keys ("name", "who"),
+        # keys unique to the inherited node annotation ("fwd_only") survive
+        # the merge, and the kernels are marked as backward work.
+        self.assertAnnotations(
+            {"name": "fwd", "who": "outer", "fwd_only": 1},
+            self._bwd({"name": "bwd_inner", "who": "inner", "fwd_only": 1}),
+        )
 
     def test_backward_scope_around_backward_call_merges(self):
         """A mark_kernels active around backward() merges into backward
@@ -787,17 +726,15 @@ class TestMarkKernels(TestCase):
             with mark_kernels({"name": "bwd_pass", "step": 7}, backward=False):
                 _ = torch.autograd.grad(y.sum(), x)
 
-        merged = 0
-        for anns in get_kernel_annotations().values():
-            for ann in anns:
-                if ann.get("autograd_phase") == "backward" and "step" in ann:
-                    # Node annotation is dynamically inner: wins "name",
-                    # keeps its forward keys; wrapper-only keys survive.
-                    self.assertEqual(ann["name"], "fwd")
-                    self.assertEqual(ann["layer"], 3)
-                    self.assertEqual(ann["step"], 7)
-                    merged += 1
-        self.assertGreaterEqual(merged, 2)
+        # Hooked-node backward kernels: the node annotation is dynamically
+        # inner, so it wins "name" and keeps its forward keys, while
+        # wrapper-only keys ("step") survive. Backward kernels of unmarked
+        # nodes (sum's) get the wrapper tag alone.
+        self.assertAnnotations(
+            {"name": "fwd", "layer": 3},
+            {"name": "fwd", "layer": 3, "step": 7, "autograd_phase": "backward"},
+            {"name": "bwd_pass", "step": 7},
+        )
 
     def test_backward_unmarked_nodes_not_tagged(self):
         """Backward kernels of nodes created outside any scope stay untagged:
@@ -861,10 +798,8 @@ class TestMarkKernels(TestCase):
                 y = (x * 3).cos()
             _ = torch.autograd.grad(y.sum(), x)
 
-        self.assertEqual(self._count_phases("old"), (0, 0))
-        fwd, bwd = self._count_phases("new")
-        self.assertEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
+        ann = {"name": "new"}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_accumulate_grad_excluded(self):
         """AccumulateGrad work is never tagged: a .backward() run (which
@@ -949,15 +884,15 @@ class TestMarkKernels(TestCase):
                 y = InnerGrad.apply(x)
             _ = torch.autograd.grad(y.sum(), x)
 
-        fwd, bwd = self._count_phases("inner_bwd")
-        # The scope's lexical kernels during backward count as its forward
-        # work; the nested backward of nodes created under it counts as
-        # backward work owned by it.
-        self.assertGreaterEqual(fwd + bwd, 3)
-        for anns in get_kernel_annotations().values():
-            for ann in anns:
-                if ann.get("name") == "inner_bwd":
-                    self.assertNotEqual(ann.get("who"), "outer")
+        # "inner_bwd" owns the inner graph's work as backward (its lexical
+        # kernels run inside InnerGrad's bracket, whose posthook tag wins the
+        # per-kernel merge over the scope's own plain record); "fwd" owns its
+        # forward kernel and the rest of InnerGrad's backward.
+        self.assertAnnotations(
+            {"name": "fwd"},
+            self._bwd({"name": "fwd"}),
+            self._bwd({"name": "inner_bwd"}),
+        )
 
     def test_backward_mark_stream_differentiable(self):
         """mark_stream around differentiable work: the stream id recorded
@@ -977,20 +912,8 @@ class TestMarkKernels(TestCase):
             capture_stream.wait_stream(side)
             _ = torch.autograd.grad(y.sum(), x)
 
-        fwd = bwd = 0
-        stream_ids = set()
-        for anns in get_kernel_annotations().values():
-            for ann in anns:
-                if ann.get("name") != "lane":
-                    continue
-                if ann.get("autograd_phase") == "backward":
-                    bwd += 1
-                else:
-                    fwd += 1
-                    stream_ids.add(ann.get("stream"))
-        self.assertEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
-        self.assertEqual(len(stream_ids), 1)
+        ann = {"name": "lane", "stream": _get_stream_id(side)}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_nested_dict_annotations_without_name(self):
         """Nested dict scopes need no "name" key; backward merge still
@@ -1004,15 +927,8 @@ class TestMarkKernels(TestCase):
                     y = (x * 2).sin()
             _ = torch.autograd.grad(y.sum(), x)
 
-        bwd = 0
-        for anns in get_kernel_annotations().values():
-            for ann in anns:
-                if ann.get("autograd_phase") == "backward":
-                    self.assertEqual(ann["kind"], "inner")
-                    self.assertEqual(ann["layer"], 1)
-                    self.assertTrue(ann["extra"])
-                    bwd += 1
-        self.assertGreaterEqual(bwd, 2)
+        merged = {"layer": 1, "kind": "inner", "extra": True}
+        self.assertAnnotations(merged, self._bwd(merged))
 
     def test_backward_node_after_inner_scope_exit(self):
         """A node created after an inner scope exits, while the outer is
@@ -1027,13 +943,14 @@ class TestMarkKernels(TestCase):
                 z = y * 3  # created under outer only
             _ = torch.autograd.grad(z.sum(), x)
 
-        fwd_i, bwd_i = self._count_phases("inner")
-        fwd_o, bwd_o = self._count_phases("outer")
         # sin: forward tagged inner (inner wins merge), backward inherits
         # both (inner wins). mul: forward and backward tagged outer only.
-        self.assertEqual((fwd_i, fwd_o), (1, 1))
-        self.assertGreaterEqual(bwd_i, 1)
-        self.assertGreaterEqual(bwd_o, 1)
+        self.assertAnnotations(
+            {"name": "inner"},
+            {"name": "outer"},
+            self._bwd({"name": "inner"}),
+            self._bwd({"name": "outer"}),
+        )
 
     def test_backward_explicit_backward_entry_point(self):
         """torch.autograd.backward(...) (not Tensor.backward) also runs the
@@ -1047,9 +964,8 @@ class TestMarkKernels(TestCase):
                 y = (x * 2).sin()
             torch.autograd.backward((y,), (torch.ones_like(y),))
 
-        fwd, bwd = self._count_phases("scope")
-        self.assertEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
+        ann = {"name": "scope"}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_create_graph_second_order_attributed(self):
         """Nodes created during a create_graph backward inherit the forward
@@ -1063,11 +979,13 @@ class TestMarkKernels(TestCase):
             (gx,) = torch.autograd.grad(y.sum(), x, create_graph=True)
             _ = torch.autograd.grad(gx.sum(), x)
 
-        fwd, bwd = self._count_phases("L")
-        self.assertEqual(fwd, 2)
-        # First-order backward kernels (>=2) plus second-order kernels from
-        # nodes created during the first backward.
-        self.assertGreaterEqual(bwd, 4)
+        ann = {"name": "L"}
+        self.assertAnnotations(ann, self._bwd(ann))
+        # Second-order kernels tag identically to first-order ones, so the
+        # distinct set can't tell them apart; the backward count can:
+        # first-order kernels (>=2) plus second-order kernels from nodes
+        # created during the first backward.
+        self.assertGreaterEqual(self._count_phases("L")[1], 4)
 
     def test_backward_second_order_through_uncaptured_first(self):
         """Ownership propagates even when the first backward runs eagerly:
@@ -1084,8 +1002,8 @@ class TestMarkKernels(TestCase):
         with torch.cuda.graph(graph_bwd2, enable_annotations=True):
             _ = torch.autograd.grad(gx.sum(), x)
 
-        _fwd, bwd = self._count_phases("L")
-        self.assertGreaterEqual(bwd, 1)
+        ann = {"name": "L"}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_checkpoint_recompute_attributed(self):
         """Checkpoint recomputation during backward creates fresh nodes;
@@ -1101,12 +1019,11 @@ class TestMarkKernels(TestCase):
             y = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
             _ = torch.autograd.grad(y.sum(), x)
 
-        fwd, bwd = self._count_phases("ckpt")
-        # The scope tags its original forward kernels, the recomputed
-        # forward kernels (created during backward), and the backward
-        # kernels of the recomputed nodes.
-        self.assertGreaterEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
+        # The scope tags its original forward kernels plain; the recomputed
+        # forward kernels (created during backward) and the backward kernels
+        # of the recomputed nodes get the backward-phase tag.
+        ann = {"name": "ckpt"}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_make_graphed_callables_annotations(self):
         """make_graphed_callables(enable_annotations=True) records marks from
@@ -1135,9 +1052,8 @@ class TestMarkKernels(TestCase):
         self.assertIsNotNone(module.lin.weight.grad)
         self.assertIsNotNone(module.lin.bias.grad)
 
-        fwd, bwd = self._count_phases("layer")
-        self.assertGreaterEqual(fwd, 2)  # addmm + relu
-        self.assertGreaterEqual(bwd, 2)
+        ann = {"name": "layer"}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_captured_in_separate_graph(self):
         """Backward captured in its own graph (the make_graphed_callables
@@ -1153,9 +1069,8 @@ class TestMarkKernels(TestCase):
         with torch.cuda.graph(graph_bwd, enable_annotations=True):
             _ = torch.autograd.grad(y, x, grad_outputs=grad_out, retain_graph=True)
 
-        fwd, bwd = self._count_phases("layer")
-        self.assertEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
+        ann = {"name": "layer"}
+        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_nested_scopes_inner_wins(self):
         """Backward kernels of nested scopes merge with the inner scope
@@ -1170,17 +1085,8 @@ class TestMarkKernels(TestCase):
             z = y.sum()
             _ = torch.autograd.grad(z, x)
 
-        fwd = bwd = 0
-        for anns in get_kernel_annotations().values():
-            for ann in anns:
-                if ann.get("tag") == "O":
-                    self.assertEqual(ann["name"], "inner")
-                    if ann.get("autograd_phase") == "backward":
-                        bwd += 1
-                    else:
-                        fwd += 1
-        self.assertEqual(fwd, 2)
-        self.assertGreaterEqual(bwd, 2)
+        merged = {"name": "inner", "tag": "O"}
+        self.assertAnnotations(merged, self._bwd(merged))
 
     def test_backward_outside_capture_is_noop(self):
         """Hooks registered by a captured forward are inert in eager backward."""
