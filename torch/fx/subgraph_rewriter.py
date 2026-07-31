@@ -1,19 +1,70 @@
 import copy
-from collections.abc import Callable
+import logging
+import operator
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
-from typing import Any, NamedTuple, TYPE_CHECKING
+from functools import cache
+from threading import RLock
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
+from torch._library.simple_registry import singleton as _simple_registry
+from torch.utils._python_dispatch import _disable_current_modes, TorchDispatchMode
 
 from ._compatibility import compatibility
 from ._symbolic_trace import symbolic_trace
 from .graph import Graph
 from .graph_module import GraphModule
-from .node import Node
+from .immutable_collections import immutable_dict, immutable_list
+from .node import map_arg, Node
+from .operator_schemas import get_signature_for_torch_op
 
 
 if TYPE_CHECKING:
+    from torch._subclasses.fake_tensor import FakeTensorConverter, FakeTensorMode
+
     from .passes.utils.matcher_with_name_node_map_utils import InternalMatch
+
+
+_SAFE_META_PROPAGATION_BUILTINS = (
+    operator.add,
+    operator.floordiv,
+    operator.getitem,
+    operator.matmul,
+    operator.mod,
+    operator.mul,
+    operator.neg,
+    operator.pos,
+    operator.pow,
+    operator.sub,
+    operator.truediv,
+)
+_TORCH_BUILTIN_TYPE = type(torch.sin)
+_META_PROPAGATION_OPERATOR_EXCEPTIONS = (
+    AssertionError,
+    ArithmeticError,
+    LookupError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+_SAFE_META_SCALAR_TYPES = (
+    bool,
+    bytes,
+    complex,
+    float,
+    int,
+    str,
+    type(None),
+    torch.device,
+    torch.dtype,
+    torch.layout,
+    torch.memory_format,
+)
+_MISSING = object()
+_META_EXECUTION_LOCK = RLock()
+log = logging.getLogger(__name__)
 
 __all__ = [
     "Match",
@@ -42,35 +93,62 @@ class ReplacedPatterns:
     replacements: list[Node]
 
 
+def _get_module_attr(module: torch.nn.Module | None, target: Any) -> Any:
+    if module is None or type(target) is not str:
+        return _MISSING
+    module_path, _, attr_name = target.rpartition(".")
+    try:
+        owner = module.get_submodule(module_path)
+    except AttributeError:
+        return _MISSING
+    attr = getattr(owner, attr_name, None)
+    return _MISSING if attr is None else attr
+
+
+def _get_module_attr_static(module: torch.nn.Module | None, target: Any) -> Any:
+    if module is None or type(target) is not str:
+        return _MISSING
+    module_path, _, attr_name = target.rpartition(".")
+    owner = module
+    if module_path:
+        for atom in module_path.split("."):
+            modules = object.__getattribute__(owner, "_modules")
+            if type(modules) is not dict or atom not in modules:
+                return _MISSING
+            owner = modules[atom]
+            if owner is None:
+                return _MISSING
+
+    for mapping_name in ("_parameters", "_buffers", "_modules"):
+        mapping = object.__getattribute__(owner, mapping_name)
+        if type(mapping) is dict and attr_name in mapping:
+            attr = mapping[attr_name]
+            return _MISSING if attr is None else attr
+    instance_attrs = object.__getattribute__(owner, "__dict__")
+    attr = instance_attrs.get(attr_name, _MISSING)
+    return _MISSING if attr is None else attr
+
+
 def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
     gm.delete_all_unused_submodules()
 
     if isinstance(replacement, GraphModule):
         replacement.graph.lint()
 
-    def try_get_attr(gm: torch.nn.Module, target: str) -> Any | None:
-        module_path, _, attr_name = target.rpartition(".")
-        try:
-            mod: torch.nn.Module = gm.get_submodule(module_path)
-        except AttributeError:
-            return None
-        attr = getattr(mod, attr_name, None)
-        return attr
-
     for node in gm.graph.nodes:
         if node.op == "call_module" or node.op == "get_attr":
-            gm_attr = try_get_attr(gm, node.target)
-            replacement_attr = try_get_attr(replacement, node.target)
+            gm_attr = _get_module_attr(gm, node.target)
+            replacement_attr = _get_module_attr(replacement, node.target)
 
             # CASE 1: This target already exists as an attribute in our
             # result GraphModule. Whether or not it exists in
             # `replacement`, the existing submodule takes precedence.
-            if gm_attr is not None:
+            if gm_attr is not _MISSING:
                 continue
 
             # CASE 2: The target exists as an attribute in `replacement`
             # only, so we need to copy it over.
-            elif replacement_attr is not None:
+            elif replacement_attr is not _MISSING:
                 new_attr = copy.deepcopy(replacement_attr)
                 if isinstance(replacement_attr, torch.nn.Module):
                     gm.add_submodule(node.target, new_attr)
@@ -90,6 +168,596 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
                 )
 
     gm.graph.lint()
+
+
+def _is_exact_type(value_type: type[Any], allowed_types: tuple[type[Any], ...]) -> bool:
+    return any(value_type is allowed_type for allowed_type in allowed_types)
+
+
+@cache
+def _torch_return_type_classes() -> tuple[type[Any], ...]:
+    return tuple(
+        candidate
+        for name in dir(torch.return_types)
+        if isinstance(candidate := getattr(torch.return_types, name), type)
+    )
+
+
+def _is_torch_return_type(value: Any) -> bool:
+    value_type = type(value)
+    return any(
+        value_type is return_type for return_type in _torch_return_type_classes()
+    )
+
+
+def _is_safe_tensor_meta_value(value: Any) -> bool:
+    FakeTensor, _, _, _, _ = _fake_tensor_meta_helpers()
+    return _is_exact_type(type(value), (torch.Tensor, torch.nn.Parameter, FakeTensor))
+
+
+class _MetaValueAnalysis(NamedTuple):
+    is_safe: bool
+    contains_tensor: bool
+
+
+class _UnsafeMetaPropagation(RuntimeError):
+    pass
+
+
+def _analyze_meta_value(value: Any) -> _MetaValueAnalysis:
+    active_container_ids: set[int] = set()
+    completed_container_analyses: dict[int, _MetaValueAnalysis] = {}
+
+    def visit(current: Any) -> _MetaValueAnalysis:
+        current_type = type(current)
+        if _is_safe_tensor_meta_value(current):
+            return _MetaValueAnalysis(True, True)
+        if _is_exact_type(current_type, (torch.SymBool, torch.SymFloat, torch.SymInt)):
+            _, _, _, _, SymNode = _fake_tensor_meta_helpers()
+            return _MetaValueAnalysis(type(current.node) is SymNode, False)
+        if (
+            _is_exact_type(current_type, _SAFE_META_SCALAR_TYPES)
+            or current_type is torch.Size
+        ):
+            return _MetaValueAnalysis(True, False)
+
+        children: list[Any]
+        if current_type is slice:
+            children = [current.start, current.stop, current.step]
+        elif current_type is not tuple and _is_torch_return_type(current):
+            children = list(current)
+        elif _is_exact_type(current_type, (list, tuple, immutable_list)):
+            children = list(current)
+        elif _is_exact_type(current_type, (dict, immutable_dict)):
+            children = [child for item in current.items() for child in item]
+        else:
+            return _MetaValueAnalysis(False, False)
+
+        current_id = id(current)
+        completed_analysis = completed_container_analyses.get(current_id)
+        if completed_analysis is not None:
+            return completed_analysis
+        if current_id in active_container_ids:
+            return _MetaValueAnalysis(False, False)
+        active_container_ids.add(current_id)
+        try:
+            contains_tensor = False
+            for child in children:
+                child_analysis = visit(child)
+                if not child_analysis.is_safe:
+                    analysis = _MetaValueAnalysis(False, False)
+                    break
+                contains_tensor = contains_tensor or child_analysis.contains_tensor
+            else:
+                analysis = _MetaValueAnalysis(True, contains_tensor)
+        finally:
+            active_container_ids.remove(current_id)
+        completed_container_analyses[current_id] = analysis
+        return analysis
+
+    try:
+        return visit(value)
+    except RecursionError:
+        return _MetaValueAnalysis(False, False)
+
+
+def _contains_tensor(value: Any) -> bool:
+    return _analyze_meta_value(value).contains_tensor
+
+
+def _is_safe_meta_value(value: Any) -> bool:
+    return _analyze_meta_value(value).is_safe
+
+
+@cache
+def _fake_tensor_meta_helpers() -> tuple[
+    type[Any], type[Any], type[Any], Callable[..., Any], type[Any]
+]:
+    from torch._subclasses.fake_tensor import (
+        FakeTensor,
+        FakeTensorConverter,
+        FakeTensorMode,
+    )
+    from torch.fx.experimental.proxy_tensor import snapshot_fake
+    from torch.fx.experimental.sym_node import SymNode
+
+    return FakeTensor, FakeTensorConverter, FakeTensorMode, snapshot_fake, SymNode
+
+
+def _copy_meta_val(
+    value: Any,
+    fake_mode: "FakeTensorMode | None" = None,
+    memo: dict[int, Any] | None = None,
+    tensor_converter: "FakeTensorConverter | None" = None,
+) -> Any:
+    if memo is None:
+        memo = {}
+    value_type = type(value)
+    value_id = id(value)
+    if value_id in memo:
+        return memo[value_id]
+    FakeTensor, _, FakeTensorMode, snapshot_fake, _ = _fake_tensor_meta_helpers()
+    if value_type is torch.Tensor or value_type is torch.nn.Parameter:
+        if fake_mode is None:
+            fake_mode = FakeTensorMode(allow_fallback_kernels=False)
+        if tensor_converter is None:
+            with fake_mode:
+                result = snapshot_fake(fake_mode.from_tensor(value, static_shapes=True))
+        else:
+            with _disable_current_modes():
+                result = tensor_converter.from_real_tensor(
+                    fake_mode, value, shape_env=None
+                )
+        memo[value_id] = result
+        return result
+    if value_type is FakeTensor:
+        if tensor_converter is None:
+            if fake_mode is None or fake_mode is value.fake_mode:
+                result = snapshot_fake(value)
+            else:
+                with _disable_current_modes():
+                    result = snapshot_fake(fake_mode.from_tensor(value))
+        else:
+            with _disable_current_modes():
+                result = tensor_converter.from_real_tensor(
+                    fake_mode or value.fake_mode, value, shape_env=None
+                )
+        memo[value_id] = result
+        return result
+    if value_type is slice:
+        result = slice(
+            *(
+                _copy_meta_val(v, fake_mode, memo, tensor_converter)
+                for v in (value.start, value.stop, value.step)
+            )
+        )
+        memo[value_id] = result
+        return result
+    if _is_exact_type(value_type, (list, immutable_list)):
+        values: list[Any] = []
+        if value_type is list:
+            memo[value_id] = values
+        values.extend(
+            _copy_meta_val(v, fake_mode, memo, tensor_converter) for v in value
+        )
+        result = immutable_list(values) if value_type is immutable_list else values
+        memo[value_id] = result
+        return result
+    if value_type is not torch.Size and (
+        value_type is tuple or _is_torch_return_type(value)
+    ):
+        if _is_torch_return_type(value):
+            result = type(value)(
+                *(_copy_meta_val(v, fake_mode, memo, tensor_converter) for v in value)
+            )
+        else:
+            result = tuple(
+                _copy_meta_val(v, fake_mode, memo, tensor_converter) for v in value
+            )
+        memo[value_id] = result
+        return result
+    if _is_exact_type(value_type, (dict, immutable_dict)):
+        values_dict: dict[Any, Any] = {}
+        if value_type is dict:
+            memo[value_id] = values_dict
+        for key, item in value.items():
+            values_dict[_copy_meta_val(key, fake_mode, memo, tensor_converter)] = (
+                _copy_meta_val(item, fake_mode, memo, tensor_converter)
+            )
+        result = (
+            immutable_dict(values_dict) if value_type is immutable_dict else values_dict
+        )
+        memo[value_id] = result
+        return result
+    return value
+
+
+def _try_copy_meta_val(
+    value: Any,
+    fake_mode: "FakeTensorMode | None",
+    memo: dict[int, Any] | None = None,
+    tensor_converter: "FakeTensorConverter | None" = None,
+) -> Any:
+    copy_memo = {} if memo is None else memo.copy()
+    try:
+        result = _copy_meta_val(value, fake_mode, copy_memo, tensor_converter)
+    except _META_PROPAGATION_OPERATOR_EXCEPTIONS:
+        return _MISSING
+    if memo is not None:
+        memo.update(copy_memo)
+    return result
+
+
+def _detect_fake_mode_from_values(
+    values: list[Any], fallback_fake_mode: "FakeTensorMode | None" = None
+) -> "FakeTensorMode | None":
+    FakeTensor, _, FakeTensorMode, _, _ = _fake_tensor_meta_helpers()
+    fake_modes = {
+        value.fake_mode
+        for value in torch.utils._pytree.tree_leaves(values)
+        if type(value) is FakeTensor
+    }
+    if len(fake_modes) > 1:
+        return None
+    fake_mode = next(iter(fake_modes), None)
+    if fake_mode is not None and type(fake_mode) is not FakeTensorMode:
+        return None
+    if fake_mode is None and any(_contains_tensor(value) for value in values):
+        fake_mode = fallback_fake_mode or FakeTensorMode(allow_fallback_kernels=False)
+    return fake_mode
+
+
+def _resolve_rewrite_attr(
+    destination_module: GraphModule,
+    replacement_module: torch.nn.Module | None,
+    target: Any,
+) -> tuple[Any, bool]:
+    destination_attr = _get_module_attr_static(destination_module, target)
+    replacement_attr = _get_module_attr_static(replacement_module, target)
+    if destination_attr is not _MISSING:
+        return (
+            destination_attr,
+            replacement_attr is _MISSING or destination_attr is not replacement_attr,
+        )
+    return replacement_attr, False
+
+
+def _meta_val_if_safe(node: Node) -> Any:
+    meta_val = node.meta.get("val")
+    if meta_val is None or not _is_safe_meta_value(meta_val):
+        return _MISSING
+    return meta_val
+
+
+@cache
+def _has_value_returning_torch_schema(target: Any) -> bool:
+    try:
+        _, schemas = get_signature_for_torch_op(target, return_schemas=True)
+    except (NameError, RuntimeError, TypeError):
+        return False
+    return schemas is not None and any(schema.returns for schema in schemas)
+
+
+def _is_trusted_torch_builtin(target: Any) -> bool:
+    if type(target) is not _TORCH_BUILTIN_TYPE:
+        return False
+    target_name = getattr(target, "__name__", None)
+    return (
+        target.__module__ == "torch"
+        and isinstance(target_name, str)
+        and getattr(torch, target_name, None) is target
+    )
+
+
+def _is_trusted_meta_overload(target: Any) -> bool:
+    if target.namespace in ("aten", "prim"):
+        registry_entry = _simple_registry.get(target.name())
+        return (
+            not target._defined_in_python
+            and torch.Tag.dynamic_output_shape not in target.tags
+            and torch.Tag.data_dependent_output not in target.tags
+            and (registry_entry is None or registry_entry.fake_impl.kernel is None)
+            and (
+                registry_entry is None or not registry_entry.torch_dispatch_rules._data
+            )
+            and (target.namespace != "aten" or _has_trusted_aten_meta_kernel(target))
+        )
+    if target.namespace != "prims":
+        return False
+
+    # Import lazily because FX is imported while torch itself is initializing.
+    from torch import _prims
+
+    name = target._schema.name.partition("::")[2]
+    return name in _prims.__all__ and getattr(_prims, name, None) is target
+
+
+def _has_trusted_aten_meta_kernel(target: Any) -> bool:
+    try:
+        kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+            target.name(), "Meta"
+        )
+    except RuntimeError:
+        return False
+    source = str(kernel).replace("\\", "/")
+    return any(
+        builtin_path in source
+        for builtin_path in ("torch/_meta_registrations.py:", "/aten/src/ATen/")
+    )
+
+
+class _TrustedMetaDispatchMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: torch._ops.OpOverload,
+        types: tuple[type[Any], ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        if (
+            type(func) is not torch._ops.OpOverload
+            or func._schema.is_mutable
+            or not _is_trusted_meta_overload(func)
+        ):
+            raise _UnsafeMetaPropagation(f"Unsafe metadata operator: {func}")
+        return func(*args, **(kwargs or {}))
+
+
+@contextmanager
+def _meta_execution_context(
+    fake_mode: "FakeTensorMode",
+) -> Generator[None, None, None]:
+    with _META_EXECUTION_LOCK:
+        old_allow_fallback_kernels = fake_mode.allow_fallback_kernels
+        fake_mode.allow_fallback_kernels = False
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(_disable_current_modes())
+                shape_env = fake_mode.shape_env
+                if shape_env is not None:
+                    # Reject results that need new guards or unbacked symbols.
+                    stack.enter_context(shape_env.error_on_new_guards())
+                    stack.enter_context(shape_env.ignore_fresh_unbacked_symbols())
+                stack.enter_context(fake_mode)
+                stack.enter_context(_TrustedMetaDispatchMode())
+                yield
+        finally:
+            fake_mode.allow_fallback_kernels = old_allow_fallback_kernels
+
+
+def _run_meta_overload(
+    target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
+    if type(target) is torch._ops.OpOverload and target.namespace == "prims":
+        return cast(Any, target).prim_meta_impl(*args, **kwargs)
+    return target(*args, **kwargs)
+
+
+def _is_safe_meta_propagation_target(target: Any, has_tensor_input: bool) -> bool:
+    if type(target) is torch._ops.OpOverload:
+        return (
+            _is_trusted_meta_overload(target)
+            and not target._schema.is_mutable
+            and bool(target._schema.returns)
+            and has_tensor_input
+        )
+    if type(target) is torch._ops.OpOverloadPacket:
+        overloads = [getattr(target, name) for name in target.overloads()]
+        return (
+            bool(overloads)
+            and any(
+                _is_trusted_meta_overload(overload) and overload._schema.returns
+                for overload in overloads
+            )
+            and has_tensor_input
+        )
+    return any(target is builtin for builtin in _SAFE_META_PROPAGATION_BUILTINS) or (
+        has_tensor_input
+        and _is_trusted_torch_builtin(target)
+        and _has_value_returning_torch_schema(target)
+    )
+
+
+def _is_safe_meta_propagation_method_name(target: str) -> bool:
+    tensor_method = getattr(torch.Tensor, target, None)
+    if (
+        type(tensor_method) is not type(torch.Tensor.add)
+        or tensor_method.__objclass__ is not torch._C.TensorBase
+    ):
+        return False
+    try:
+        packet = getattr(torch.ops.aten, target)
+    except AttributeError:
+        return False
+    return isinstance(
+        packet, torch._ops.OpOverloadPacket
+    ) and _has_value_returning_torch_schema(packet)
+
+
+def _propagate_replacement_meta(
+    destination_module: GraphModule,
+    replacement_graph: Graph,
+    replacement_module: torch.nn.Module | None,
+    val_map: dict[Node, Any],
+    replacement_nodes: list[Node],
+    fallback_fake_mode: "FakeTensorMode | None",
+) -> None:
+    # This intentionally does not use whole-graph FakeTensorProp. Only metadata
+    # for newly copied replacement nodes is filled, and only through built-in ops
+    # that are safe to interpret during rewriting. Retracing is not an equivalent
+    # alternative: Graph replacements have no callable to retrace, and invoking a
+    # callable replacement again could run arbitrary user code and side effects.
+    replacement_node_set = {
+        node for node in replacement_nodes if isinstance(node, Node)
+    }
+    resolved_attrs: dict[Node, Any] = {}
+    invalidated_nodes: set[Node] = set()
+    for node in replacement_graph.nodes:
+        if node.op in ("get_attr", "call_module"):
+            attr_value, invalidates_preannotation = _resolve_rewrite_attr(
+                destination_module, replacement_module, node.target
+            )
+            resolved_attrs[node] = attr_value
+            if node.op == "get_attr" or invalidates_preannotation:
+                invalidated_nodes.add(node)
+        if any(input_node in invalidated_nodes for input_node in node.all_input_nodes):
+            invalidated_nodes.add(node)
+
+    for node in invalidated_nodes:
+        copied_node = val_map.get(node)
+        if isinstance(copied_node, Node) and copied_node in replacement_node_set:
+            copied_node.meta.pop("val", None)
+
+    source_values: list[Any] = []
+    for replacement_node, copied_node in val_map.items():
+        if isinstance(copied_node, Node):
+            if copied_node in replacement_node_set and replacement_node.op in (
+                "get_attr",
+                "call_function",
+                "call_method",
+            ):
+                continue
+            meta_val = _meta_val_if_safe(copied_node)
+            if meta_val is not _MISSING:
+                source_values.append(meta_val)
+        elif _is_safe_meta_value(copied_node):
+            source_values.append(copied_node)
+    for node in replacement_graph.nodes:
+        if node.op == "get_attr":
+            attr_value = resolved_attrs[node]
+            if attr_value is not _MISSING and _is_safe_meta_value(attr_value):
+                source_values.append(attr_value)
+    fake_mode = _detect_fake_mode_from_values(source_values, fallback_fake_mode)
+
+    env: dict[Node, Any] = {}
+    source_copy_memo: dict[int, Any] = {}
+
+    def load_arg(arg_node: Node) -> Any:
+        if arg_node not in env:
+            raise KeyError(arg_node)
+        return env[arg_node]
+
+    for node in replacement_graph.nodes:
+        if node.op == "output":
+            continue
+
+        copied_node = val_map.get(node)
+        preannotated_meta_val = _MISSING
+        if isinstance(copied_node, Node):
+            infer_before_preannotation = (
+                copied_node in replacement_node_set
+                and node.op in ("get_attr", "call_function", "call_method")
+            )
+            if infer_before_preannotation:
+                if node not in invalidated_nodes:
+                    meta_val = _meta_val_if_safe(copied_node)
+                    if meta_val is not _MISSING:
+                        preannotated_meta_val = _try_copy_meta_val(
+                            meta_val,
+                            fake_mode,
+                            source_copy_memo,
+                        )
+                    elif copied_node.meta.get("val") is not None:
+                        continue
+            else:
+                meta_val = _meta_val_if_safe(copied_node)
+                if meta_val is not _MISSING:
+                    copied_meta_val = _try_copy_meta_val(
+                        meta_val, fake_mode, source_copy_memo
+                    )
+                    if copied_meta_val is _MISSING:
+                        continue
+                    env[node] = copied_meta_val
+                    continue
+                if copied_node.meta.get("val") is not None:
+                    continue
+
+        if preannotated_meta_val is not _MISSING:
+            env[node] = preannotated_meta_val
+            continue
+
+        if node.op == "get_attr":
+            attr_value = resolved_attrs[node]
+            if attr_value is _MISSING or not _is_safe_meta_value(attr_value):
+                continue
+            copied_attr_value = _try_copy_meta_val(
+                attr_value, fake_mode, source_copy_memo
+            )
+            if copied_attr_value is _MISSING:
+                continue
+            recorded_attr_value = _try_copy_meta_val(copied_attr_value, fake_mode)
+            if recorded_attr_value is _MISSING:
+                continue
+            env[node] = copied_attr_value
+            if isinstance(copied_node, Node) and copied_node in replacement_node_set:
+                copied_node.meta["val"] = recorded_attr_value
+            continue
+
+        if node.op == "placeholder":
+            if not isinstance(copied_node, Node) and _is_safe_meta_value(copied_node):
+                copied_meta_val = _try_copy_meta_val(
+                    copied_node, fake_mode, source_copy_memo
+                )
+                if copied_meta_val is not _MISSING:
+                    env[node] = copied_meta_val
+            continue
+
+        if node.op not in ("call_function", "call_method"):
+            continue
+
+        if not (isinstance(copied_node, Node) and copied_node in replacement_node_set):
+            continue
+
+        if fake_mode is None:
+            # Never execute operators without a detected or freshly created mode.
+            # None also covers metadata containing incompatible fake modes.
+            continue
+
+        try:
+            args = map_arg(node.args, load_arg)
+            kwargs = map_arg(node.kwargs, load_arg)
+        except KeyError:
+            # A predecessor could not be propagated, so its dependents cannot run.
+            continue
+        input_analysis = _analyze_meta_value((args, kwargs))
+        if not input_analysis.is_safe:
+            continue
+
+        try:
+            if node.op == "call_function":
+                if not _is_safe_meta_propagation_target(
+                    node.target, input_analysis.contains_tensor
+                ):
+                    continue
+                with _meta_execution_context(fake_mode):
+                    result = _run_meta_overload(node.target, args, kwargs)
+            else:
+                if not (
+                    type(node.target) is str
+                    and _is_safe_meta_propagation_method_name(node.target)
+                    and len(args) > 0
+                    and isinstance(args[0], torch.Tensor)
+                ):
+                    continue
+                with _meta_execution_context(fake_mode):
+                    result = getattr(args[0], node.target)(*args[1:], **kwargs)
+        except _META_PROPAGATION_OPERATOR_EXCEPTIONS:
+            # Invalid metadata inputs and unsupported fake implementations must
+            # not turn this best-effort inference into a rewrite failure.
+            log.debug(
+                "Could not propagate replacement metadata for %s", node, exc_info=True
+            )
+            continue
+        if not _is_safe_meta_value(result):
+            continue
+        copied_result = _try_copy_meta_val(result, fake_mode)
+        if copied_result is _MISSING:
+            continue
+        recorded_result = _try_copy_meta_val(copied_result, fake_mode)
+        if recorded_result is _MISSING:
+            continue
+        env[node] = copied_result
+        copied_node.meta["val"] = recorded_result
 
 
 @compatibility(is_backward_compatible=True)
@@ -121,6 +789,11 @@ def replace_pattern(
                 anchor: Node
                 # Maps nodes in the pattern subgraph to nodes in the larger graph
                 nodes_map: Dict[Node, Node]
+
+    Newly inserted nodes receive ``meta["val"]`` when it can be inferred by
+    safely interpreting built-in metadata operations. Existing annotations on
+    replacement nodes are preserved, except that ``get_attr`` nodes and their
+    dependents are recomputed from the module attributes resolved in ``gm``.
 
     Examples:
 
@@ -308,19 +981,27 @@ def _replace_pattern(
 
     if isinstance(replacement, GraphModule):
         common_replacement_graph = replacement.graph
+        common_replacement_module: torch.nn.Module | None = replacement
     elif isinstance(replacement, Graph):
         common_replacement_graph = replacement
+        common_replacement_module = None
     elif callable(replacement):
         common_replacement_graph = symbolic_trace(replacement).graph
+        common_replacement_module = (
+            replacement if isinstance(replacement, torch.nn.Module) else None
+        )
     else:
         if replacement_callback is None:
             raise AssertionError(
                 "Must provide either a replacement GraphModule or a replacement callback"
             )
         common_replacement_graph = None  # type: ignore[assignment]
+        common_replacement_module = None
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
     match_changed_node: dict[Node, Node] = {}
+    _, _, FakeTensorMode, _, _ = _fake_tensor_meta_helpers()
+    fallback_fake_mode = FakeTensorMode(allow_fallback_kernels=False)
 
     match_and_replacements = []
     for match in _matches:
@@ -328,12 +1009,14 @@ def _replace_pattern(
             replacement_graph = replacement_callback(
                 match, original_graph, pattern_graph
             )
+            replacement_module = None
         else:
             if common_replacement_graph is None:
                 raise AssertionError(
                     "Must provide either a replacement GraphModule or a replacement callback"
                 )
             replacement_graph = common_replacement_graph
+            replacement_module = common_replacement_module
         replacement_placeholders = [
             n for n in replacement_graph.nodes if n.op == "placeholder"
         ]
@@ -408,6 +1091,14 @@ def _replace_pattern(
         replacement_nodes: list[Node] = [
             v for v in val_map.values() if v not in match.placeholder_nodes
         ]
+        _propagate_replacement_meta(
+            gm,
+            replacement_graph,
+            replacement_module,
+            val_map,
+            replacement_nodes,
+            fallback_fake_mode,
+        )
 
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
