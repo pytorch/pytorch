@@ -1285,6 +1285,38 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    def test_needs_input_grad_setter_roundtrip(self):
+        # When backward is traced by Dynamo, a store to ctx.needs_input_grad
+        # must be honored on subsequent reads. Regression test for the read
+        # short-circuiting to the construction-time value and dropping the store.
+        sentinel = ([False, True],)
+        seen = {}
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y
+
+            @staticmethod
+            @torch.compile(backend="eager", fullgraph=True)
+            def backward(ctx, grad_output):
+                seen["original"] = ctx.needs_input_grad
+                ctx.needs_input_grad = sentinel
+                seen["after_set"] = ctx.needs_input_grad
+                ctx.needs_input_grad = None
+                seen["after_none"] = ctx.needs_input_grad
+                ctx.needs_input_grad = seen["original"]
+                seen["after_restore"] = ctx.needs_input_grad
+                return grad_output, None
+
+        x = torch.randn(3, requires_grad=True)
+        Foo.apply(x, torch.randn(3)).sum().backward()
+        self.assertEqual(seen["original"], (True, False))
+        self.assertIs(seen["after_set"], sentinel)
+        self.assertIsNone(seen["after_none"])
+        self.assertIs(seen["after_restore"], seen["original"])
+        self.assertEqual(x.grad, torch.ones_like(x))
+
     def test_repeated_save_for_backward_calls(self):
         from torch.autograd import Function
 
