@@ -46,6 +46,7 @@ Tensor stack(const at::TensorList tensors, const int64_t dim) {
 
   // Unsqueeze each tensor in the list
   std::vector<Tensor> unsqueezed_outputs;
+  unsqueezed_outputs.reserve(tensors.size());
   for (const auto& t : tensors) {
     unsqueezed_outputs.push_back(at::unsqueeze(t, dim));
   }

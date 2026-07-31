@@ -31,7 +31,6 @@ frontend_categories = [
     "dataloader",
     "sparse",
     "nested tensor",
-    "optimizer",
 ]
 
 pytorch_2_categories = [
@@ -49,7 +48,8 @@ quantization = CategoryGroup(
     ],
 )
 
-# Distributed has a number of release note labels we want to map to one
+# Distributed has a number of release note sub-area labels. Each sub-area
+# label is kept as its own category so it gets its own worksheet file.
 distributed = CategoryGroup(
     name="distributed",
     categories=[
@@ -58,8 +58,32 @@ distributed = CategoryGroup(
         "distributed (composable)",
         "distributed (ddp)",
         "distributed (fsdp)",
+        "distributed (fsdp2)",
+        "distributed (dtensor)",
+        "distributed (checkpoint)",
         "distributed (rpc)",
         "distributed (sharded)",
+        "distributed (pipeline)",
+        "distributed (torchelastic)",
+        "distributed (symm_mem)",
+    ],
+)
+
+# "optim" and "optimizer" are duplicate labels for the same area; map to one
+optimizer = CategoryGroup(
+    name="optim",
+    categories=[
+        "optim",
+        "optimizer",
+    ],
+)
+
+# "aot autograd" and "aotdispatcher" are the same subsystem; map to one
+aotdispatcher = CategoryGroup(
+    name="aotdispatcher",
+    categories=[
+        "aot autograd",
+        "aotdispatcher",
     ],
 )
 
@@ -101,7 +125,9 @@ categories = (
     + [f"{category}_frontend" for category in frontend_categories]
     + pytorch_2_categories
     + [quantization.name]
-    + [distributed.name]
+    + distributed.categories
+    + [optimizer.name]
+    + [aotdispatcher.name]
 )
 
 

@@ -319,7 +319,7 @@ class {schema.node_name} : public {self.node_base} {{
     std::stringstream ss;
     ss << {self.node_base}::ToString();
     {members_to_string_str}
-    return ss.str();
+    return std::move(ss).str();
   }}
 
   {self.create_function(schema, reuse_ctor_args)}
