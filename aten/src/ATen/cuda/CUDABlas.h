@@ -124,6 +124,25 @@ bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
 
+template <typename Dtype, typename C_Dtype = Dtype>
+bool gemm_with_distinct_c_and_d(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<Dtype> alpha_val,
+    const Dtype* mat1_ptr,
+    int64_t mat1_ld,
+    const Dtype* mat2_ptr,
+    int64_t mat2_ld,
+    at::opmath_type<Dtype> beta_val,
+    const C_Dtype* c_ptr,
+    int64_t c_ld,
+    C_Dtype* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+
 void int8_gemm(
     bool transpose_mat1,
     bool transpose_mat2,
