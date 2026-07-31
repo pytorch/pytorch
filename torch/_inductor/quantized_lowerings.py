@@ -4,10 +4,9 @@ from typing import Any
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
-from . import config, lowering
+from . import config
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
-from .lowering import expand, register_lowering
 from .mkldnn_ir import WeightInt4PackMatmul
 from .select_algorithm import (
     autotune_select_algorithm,
@@ -37,6 +36,8 @@ aten = torch.ops.aten
 
 
 def register_quantized_ops() -> None:
+    from . import lowering
+
     lowering.add_needs_realized_inputs(
         [
             quantized.max_pool2d,
@@ -50,6 +51,10 @@ def register_quantized_ops() -> None:
 
 
 def register_woq_mm_ops() -> None:
+    """Register weight-only quantized matmul lowerings."""
+    from . import lowering
+    from .lowering import expand, register_lowering
+
     @register_lowering(aten._weight_int8pack_mm, type_promotion_kind=None)  # type: ignore[misc]
     def int8pack_mm(
         input: torch.Tensor,
@@ -61,10 +66,14 @@ def register_woq_mm_ops() -> None:
         _, _, _, layout, mat1, mat2 = mm_args(
             input, weight, layout=layout, mat2_transposed=True
         )
-        assert (
+        if not (
             mat1.get_dtype() in [torch.bfloat16, torch.float16, torch.float]
             and mat2.get_dtype() == torch.int8
-        )
+        ):
+            raise AssertionError(
+                f"expected mat1 dtype in [bfloat16, float16, float] and mat2 dtype "
+                f"int8, got {mat1.get_dtype()} and {mat2.get_dtype()}"
+            )
         aten_layout = layout
 
         # options to tune from
@@ -107,10 +116,14 @@ def register_woq_mm_ops() -> None:
         _, _, _, layout, mat1, mat2 = mm_args(
             input, weight, layout=layout, use_4x2_dim=True, mat2_transposed=True
         )
-        assert (
+        if not (
             mat1.get_dtype() in [torch.bfloat16, torch.float16, torch.float]
             and mat2.get_dtype() == torch.uint8
-        )
+        ):
+            raise AssertionError(
+                f"expected mat1 dtype in [bfloat16, float16, float] and mat2 dtype "
+                f"uint8, got {mat1.get_dtype()} and {mat2.get_dtype()}"
+            )
         group_size = V.graph.add_tensor_constant(
             torch.tensor(qGroupSize, dtype=torch.int64), name=None
         )
@@ -148,7 +161,8 @@ def register_woq_mm_ops() -> None:
         # define functions to generate example inputs for weight and group size
         # otherwise, autotuner generates example inputs of all zeros for them
         def get_example_weight(x: torch._inductor.ir.IRNode) -> torch.Tensor:
-            assert x.get_layout().is_contiguous()
+            if not x.get_layout().is_contiguous():
+                raise AssertionError("expected x to have a contiguous layout")
             shape = x.get_size()
             device = x.get_device()
             return torch.randint(0, 255, shape, dtype=torch.uint8, device=device)

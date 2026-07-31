@@ -62,7 +62,7 @@ using CodeImpl = interpreter::CodeImpl;
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:
-// *  Computes whether a input to a node is the last use, so we can issue MOVE
+// *  Computes whether an input to a node is the last use, so we can issue MOVE
 //    rather than LOAD instructions.
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -934,7 +934,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (get_cpp_stacktraces_enabled()) {
         ss << e.what() << '\n';
       }
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(ss).str());
     }
   }
 
@@ -965,7 +965,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // interpreter. But this way we hold onto graph/node and Function and
   // we can create module hierarchy string for each event in autograd
   // profiler at the end, when consolidating events.
-  // At the moment overhead does not seem exhorbitantly large.
+  // At the moment overhead does not seem exorbitantly large.
   // Another option would be return vector of (string, InlinedCallstackPtrs)
   // string would contain function name and typename of self
   // Format of the returned vector of strings:

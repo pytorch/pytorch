@@ -207,7 +207,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType
     msg << "} has the single type " << types_[0]->repr_str()
          << ". Use the common supertype instead of creating a Union"
          << "type";
-    TORCH_INTERNAL_ASSERT(false, msg.str());
+    TORCH_INTERNAL_ASSERT(false, std::move(msg).str());
   }
 
   can_hold_none_ = false;
@@ -400,7 +400,7 @@ std::string UnionType::unionStr(const TypePrinter& printer, bool is_annotation_s
     }
   }
   ss << close_delimeter;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string UnionType::str() const {

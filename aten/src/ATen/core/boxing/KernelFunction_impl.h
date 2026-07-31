@@ -84,6 +84,11 @@ inline bool KernelFunction::isFallthrough() const {
   return boxed_kernel_func_.isFallthrough();
 }
 
+template <class KernelFunctor>
+inline const KernelFunctor* KernelFunction::boxedKernelFunctor() const {
+  return boxed_kernel_func_.getFunctor<KernelFunctor>();
+}
+
 inline void KernelFunction::callBoxed(
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
@@ -217,11 +222,6 @@ inline KernelFunction KernelFunction::makeFallthrough() {
 inline KernelFunction KernelFunction::makeAmbiguousAutogradOther() {
   return KernelFunction::makeFromBoxedKernel(
       BoxedKernel::makeAmbiguousAutogradOther());
-}
-
-inline KernelFunction KernelFunction::makeNamedNotSupported() {
-  return KernelFunction::makeFromBoxedKernel(
-      BoxedKernel::makeNamedNotSupported());
 }
 
 template <bool AllowLegacyTypes, class KernelFunctor>
