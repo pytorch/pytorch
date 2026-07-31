@@ -1653,14 +1653,17 @@ class TestSkipUnsupported(TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             with FlopCounterMode(skip_unsupported=True) as mode:
-                torch.mm(x, y)        # external: 4 * 6 * 2 * 5 = 240 FLOPs
-                _inner_mm_hop(z)      # skipped HOP with inner mm (5 * 5 * 2 * 5 = 250)
+                torch.mm(x, y)  # external: 4 * 6 * 2 * 5 = 240 FLOPs
+                _inner_mm_hop(z)  # skipped HOP with inner mm (5 * 5 * 2 * 5 = 250)
 
         # Only external mm counted; inner mm inside skipped HOP excluded
         self.assertEqual(mode.get_total_flops(), 240)
         self.assertEqual(mode.get_unsupported_ops()["mock_inner_mm_hop"], 1)
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "NotImplemented return raises under active TorchFunctionMode")
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF,
+        "NotImplemented return raises under active TorchFunctionMode",
+    )
     def test_unknown_hop_without_skip_returns_not_implemented(self):
         """With skip_unsupported=False (default), the mode returns NotImplemented
         for unknown HOPs (pre-existing dispatch behavior). This is the failure
