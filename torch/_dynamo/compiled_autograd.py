@@ -21,7 +21,7 @@ import operator
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -70,27 +70,28 @@ from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.schemas import SubclassMeta, ViewAndMutationMeta
     from torch.fx.proxy import Proxy
 
 
-def _saved_tensor_input_index(proxy: Any) -> int | None:
-    node = proxy.node
+def _placeholder_getitem_index(node: torch.fx.Node, target: str) -> int | None:
     if (
         node.op == "call_function"
         and node.target is operator.getitem
         and isinstance(node.args[0], torch.fx.Node)
         and node.args[0].op == "placeholder"
-        and node.args[0].target == "inputs"
+        and node.args[0].target == target
         and isinstance(node.args[1], int)
     ):
         return node.args[1]
     return None
 
 
-def _saved_tensor_unpack_hook_args(
-    proxy: Any,
-    fx_tracer: PythonKeyTracer,
-) -> tuple[Any, Any] | None:
+def _saved_tensor_input_index(proxy: Any) -> int | None:
+    return _placeholder_getitem_index(proxy.node, "inputs")
+
+
+def _saved_tensor_unpack_hook_indices(proxy: Any) -> tuple[int, int] | None:
     node = proxy.node
     if not (
         node.op == "call_function"
@@ -101,26 +102,23 @@ def _saved_tensor_unpack_hook_args(
         and isinstance(node.args[1], torch.fx.Node)
     ):
         return None
-    return (
-        torch.fx.Proxy(node.args[0], fx_tracer),
-        torch.fx.Proxy(node.args[1], fx_tracer),
-    )
+    hook_idx = _placeholder_getitem_index(node.args[0], "hooks")
+    packed_data_idx = _placeholder_getitem_index(node.args[1], "packed_data")
+    if hook_idx is None or packed_data_idx is None:
+        return None
+    return hook_idx, packed_data_idx
 
 
 def _collect_saved_tensor_sources(
     psaved_tensors: Sequence[Any],
-    fx_tracer: PythonKeyTracer,
-) -> (
-    tuple[
-        tuple[tuple[str, int | None], ...],
-        tuple[int, ...],
-        tuple[tuple[Any, Any], ...],
-        tuple[torch.fx.Node, ...],
-    ]
-    | None
-):
+) -> tuple[
+    tuple[tuple[str, int | None], ...],
+    tuple[int, ...],
+    tuple[tuple[int, int], ...],
+    tuple[torch.fx.Node, ...],
+]:
     saved_tensor_indices: list[int] = []
-    saved_tensor_unpack_hooks: list[tuple[Any, Any]] = []
+    saved_tensor_unpack_hook_indices: list[tuple[int, int]] = []
     saved_tensor_unpack_hook_nodes: list[torch.fx.Node] = []
     saved_tensor_sources: list[tuple[str, int | None]] = []
 
@@ -137,21 +135,24 @@ def _collect_saved_tensor_sources(
             saved_tensor_indices.append(input_idx)
             continue
 
-        unpack_hook_args = _saved_tensor_unpack_hook_args(proxy, fx_tracer)
-        if unpack_hook_args is not None:
+        unpack_hook_indices = _saved_tensor_unpack_hook_indices(proxy)
+        if unpack_hook_indices is not None:
             saved_tensor_sources.append(
-                (SAVED_TENSOR_SOURCE_UNPACK_HOOK, len(saved_tensor_unpack_hooks))
+                (
+                    SAVED_TENSOR_SOURCE_UNPACK_HOOK,
+                    len(saved_tensor_unpack_hook_indices),
+                )
             )
-            saved_tensor_unpack_hooks.append(unpack_hook_args)
+            saved_tensor_unpack_hook_indices.append(unpack_hook_indices)
             saved_tensor_unpack_hook_nodes.append(proxy.node)
             continue
 
-        return None
+        raise AssertionError(f"unexpected saved tensor proxy source: {proxy}")
 
     return (
         tuple(saved_tensor_sources),
         tuple(saved_tensor_indices),
-        tuple(saved_tensor_unpack_hooks),
+        tuple(saved_tensor_unpack_hook_indices),
         tuple(saved_tensor_unpack_hook_nodes),
     )
 
@@ -164,6 +165,17 @@ TURN_OFF_MSG = """You can turn off compiled autograd by either:
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
+
+# The kind of autograd hook being proxied. Threaded through proxy_call_hook into
+# the fx node's kwargs, where the graph post-processing passes read it back to
+# match nodes (e.g. node.kwargs["hook_type"] == "post_hook").
+HookType = Literal[
+    "unpack_hook",
+    "tensor_pre_hook",
+    "pre_hook",
+    "post_hook",
+    "post_acc_grad_hook",
+]
 
 
 def snapshot_verbose_logging_enabled() -> bool:
@@ -182,11 +194,27 @@ def maybe_clone(x: torch.Tensor | None) -> torch.Tensor | None:
     return x
 
 
-def extract_bw_module(CompiledFunction: Any) -> Callable[..., Any]:
+class _AOTCompiledFunction(Protocol):
+    """Structural type for the AOTAutograd autograd.Function subclass that
+    compiled autograd retraces. The concrete class is generated locally inside
+    AOTAutograd, so we describe only the private attributes consumed here.
+    """
+
+    _lazy_backward_info: (
+        AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
+    )
+    metadata: "ViewAndMutationMeta"
+    maybe_subclass_metadata: "SubclassMeta | None"
+    _aot_id: int
+    _bw_prologue_fn: Callable[..., Any]
+    _bw_epilogue_fn: Callable[..., Any]
+
+
+def extract_bw_module(CompiledFunction: _AOTCompiledFunction) -> GraphModule:
     if isinstance(
         CompiledFunction._lazy_backward_info, AutogradLazyBackwardCompileInfo
     ):
-        return CompiledFunction._lazy_backward_info.bw_module
+        return cast(GraphModule, CompiledFunction._lazy_backward_info.bw_module)
     elif isinstance(
         CompiledFunction._lazy_backward_info, CachedAutogradLazyBackwardCompileInfo
     ):
@@ -403,7 +431,9 @@ class AutogradCompilerInstance:
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.inputs_proxy: Proxy | None = None
         self.hooks_proxy: Proxy | None = None
-        self.saved_tensor_clear_nodes: dict[int, torch.fx.Node] = {}
+        self.packed_data_proxy: Proxy | None = None
+        self.saved_tensor_input_clear_nodes: dict[int, torch.fx.Node] = {}
+        self.saved_tensor_packed_data_clear_nodes: dict[int, torch.fx.Node] = {}
 
     def wrap_fake(self, x: torch.Tensor, source: Source | None) -> FakeTensor:
         if not isinstance(x, torch.Tensor):
@@ -451,7 +481,8 @@ class AutogradCompilerInstance:
             for name in _graph_placeholders
         )
         self.inputs_proxy = args_proxy
-        self.saved_tensor_clear_nodes = {}
+        self.saved_tensor_input_clear_nodes = {}
+        self.saved_tensor_packed_data_clear_nodes = {}
 
         self.stack.enter_context(preserve_node_meta())
         inputs_origins, sizes_origins, scalars_origins = origins
@@ -559,8 +590,8 @@ class AutogradCompilerInstance:
         pinputs: Sequence[Any],
         psaved_tensors: Sequence[torch.Tensor],
         saved_tensors: Sequence[torch.Tensor],
-        pctx: Any,
-        ctx: Any,
+        pctx: "Proxy",
+        ctx: torch.autograd.function.BackwardCFunction,
         maybe_backward_state_idx: int | None,
         opaque_object_indices: list[int],
     ) -> Sequence[Any]:
@@ -575,7 +606,10 @@ class AutogradCompilerInstance:
         # If Dynamo graph capture were better, then we could add a node for the prologue
         # into the CA graph and have Dynamo trace into it.
 
-        psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
+        psymints = [
+            self.to_proxy(e)
+            for e in ctx._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+        ]
 
         popaque_objects = [
             self.hooks_proxy[idx]  # type: ignore[index]
@@ -583,7 +617,7 @@ class AutogradCompilerInstance:
         ]
 
         # NOTE: we should only close over constants
-        CompiledFunction = ctx._forward_cls
+        CompiledFunction: _AOTCompiledFunction = ctx._forward_cls  # type: ignore[attr-defined]
         bw_module = extract_bw_module(CompiledFunction)
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
@@ -644,15 +678,15 @@ class AutogradCompilerInstance:
 
             # set up the proxy inputs to bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(bw_module.graph)  # type: ignore[attr-defined]
+            num_args = num_inputs(bw_module.graph)
             pall_args = [
                 pgrads[i] for i in range(num_args - int(pbackward_state is not None))
             ]
             # replace the symints with our symints
-            symints = ctx._get_compiled_autograd_symints()
-            if len(symints) != len(ctx.symints):
+            symints = ctx._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+            if len(symints) != len(ctx.symints):  # type: ignore[attr-defined]
                 raise AssertionError(
-                    f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"
+                    f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"  # type: ignore[attr-defined]
                 )
             psymints = [self.to_proxy(e) for e in symints]
             pall_args[: len(symints)] = psymints
@@ -678,7 +712,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in bw_module.graph.nodes:  # type: ignore[attr-defined]
+            for node in bw_module.graph.nodes:
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -781,21 +815,26 @@ class AutogradCompilerInstance:
     def _clear_saved_tensor_call_args(
         self,
         psaved_tensors: Sequence[Any],
-    ) -> tuple[Any, dict[str, Any], tuple[int, ...] | None, tuple[torch.fx.Node, ...]]:
+    ) -> tuple[
+        Any,
+        dict[str, Any],
+        tuple[int, ...],
+        tuple[int, ...],
+        tuple[torch.fx.Node, ...],
+    ]:
         call_backward_kwargs: dict[str, Any] = {
             "clear_saved_tensors_on_access": True,
         }
-        collected = _collect_saved_tensor_sources(psaved_tensors, self.fx_tracer)
-        if collected is None:
-            return list(psaved_tensors), call_backward_kwargs, None, ()
-
         (
             saved_tensor_sources,
             saved_tensor_indices,
-            saved_tensor_unpack_hooks,
+            saved_tensor_unpack_hook_indices,
             saved_tensor_unpack_hook_nodes,
-        ) = collected
-        saved_tensor_clear_indices = tuple(dict.fromkeys(saved_tensor_indices))
+        ) = _collect_saved_tensor_sources(psaved_tensors)
+        saved_tensor_input_clear_indices = tuple(dict.fromkeys(saved_tensor_indices))
+        saved_tensor_packed_data_clear_indices = tuple(
+            dict.fromkeys(data_idx for _, data_idx in saved_tensor_unpack_hook_indices)
+        )
 
         call_backward_kwargs["saved_tensor_sources"] = saved_tensor_sources
         if saved_tensor_indices:
@@ -806,16 +845,26 @@ class AutogradCompilerInstance:
             call_backward_kwargs["saved_tensor_inputs"] = self.inputs_proxy
             call_backward_kwargs["saved_tensor_indices"] = saved_tensor_indices
             call_backward_kwargs["saved_tensor_clear_indices"] = (
-                saved_tensor_clear_indices
+                saved_tensor_input_clear_indices
             )
-        if saved_tensor_unpack_hooks:
-            call_backward_kwargs["saved_tensor_unpack_hooks"] = (
-                saved_tensor_unpack_hooks
+        if saved_tensor_unpack_hook_indices:
+            if self.hooks_proxy is None or self.packed_data_proxy is None:
+                raise AssertionError(
+                    "hook and packed data proxies must be set before proxy_call_backward"
+                )
+            call_backward_kwargs["saved_tensor_hooks"] = self.hooks_proxy
+            call_backward_kwargs["saved_tensor_packed_data"] = self.packed_data_proxy
+            call_backward_kwargs["saved_tensor_unpack_hook_indices"] = (
+                saved_tensor_unpack_hook_indices
+            )
+            call_backward_kwargs["saved_tensor_packed_data_clear_indices"] = (
+                saved_tensor_packed_data_clear_indices
             )
         return (
             [],
             call_backward_kwargs,
-            saved_tensor_clear_indices,
+            saved_tensor_input_clear_indices,
+            saved_tensor_packed_data_clear_indices,
             saved_tensor_unpack_hook_nodes,
         )
 
@@ -823,20 +872,22 @@ class AutogradCompilerInstance:
         self,
         saved_tensor_clear_indices: tuple[int, ...],
         call_backward_node: torch.fx.Node,
+        clear_nodes: dict[int, torch.fx.Node],
+        clear_indices_kwarg: str,
     ) -> None:
         for idx in saved_tensor_clear_indices:
-            prev_node = self.saved_tensor_clear_nodes.get(idx)
+            prev_node = clear_nodes.get(idx)
             if prev_node is not None:
                 prev_kwargs = dict(prev_node.kwargs)
                 prev_clear_indices = cast(
                     tuple[int, ...],
-                    prev_kwargs["saved_tensor_clear_indices"],
+                    prev_kwargs[clear_indices_kwarg],
                 )
-                prev_kwargs["saved_tensor_clear_indices"] = tuple(
+                prev_kwargs[clear_indices_kwarg] = tuple(
                     i for i in prev_clear_indices if i != idx
                 )
                 prev_node.kwargs = prev_kwargs
-            self.saved_tensor_clear_nodes[idx] = call_backward_node
+            clear_nodes[idx] = call_backward_node
 
     def _erase_dead_saved_tensor_unpack_hooks(
         self,
@@ -881,21 +932,21 @@ class AutogradCompilerInstance:
                     f"boxed_grads_call=True on {ctx._forward_cls.__name__} "  # type: ignore[attr-defined]
                     "is not supported with compiled autograd. "
                 )
-            clear_saved_tensors_on_access = (
-                ctx._forward_cls.clear_saved_tensors_on_access  # type: ignore[attr-defined]
-            )
+            clear_saved_tensors_on_access = ctx._clear_saved_tensors_on_access
             saved_tensors_arg: Any = psaved_tensors
             call_backward_kwargs: dict[str, Any] = {}
-            saved_tensor_clear_indices: tuple[int, ...] | None = None
+            saved_tensor_input_clear_indices: tuple[int, ...] = ()
+            saved_tensor_packed_data_clear_indices: tuple[int, ...] = ()
             saved_tensor_unpack_hook_nodes: tuple[torch.fx.Node, ...] = ()
             if clear_saved_tensors_on_access:
                 # If we pass saved tensor proxies directly, generated Python keeps
-                # tensor locals live across call_backward. Source descriptors let
-                # call_backward materialize them immediately before user backward.
+                # tensor locals live across call_backward. Source descriptors defer
+                # materialization and container cleanup until the first ctx access.
                 (
                     saved_tensors_arg,
                     call_backward_kwargs,
-                    saved_tensor_clear_indices,
+                    saved_tensor_input_clear_indices,
+                    saved_tensor_packed_data_clear_indices,
                     saved_tensor_unpack_hook_nodes,
                 ) = self._clear_saved_tensor_call_args(psaved_tensors)
             proxies = self.fx_tracer.create_proxy(
@@ -908,10 +959,19 @@ class AutogradCompilerInstance:
                 ),
                 kwargs=call_backward_kwargs,
             )
-            if saved_tensor_clear_indices is not None:
+            if saved_tensor_input_clear_indices:
                 self._record_saved_tensor_clear_nodes(
-                    saved_tensor_clear_indices,
+                    saved_tensor_input_clear_indices,
                     proxies.node,
+                    self.saved_tensor_input_clear_nodes,
+                    "saved_tensor_clear_indices",
+                )
+            if saved_tensor_packed_data_clear_indices:
+                self._record_saved_tensor_clear_nodes(
+                    saved_tensor_packed_data_clear_indices,
+                    proxies.node,
+                    self.saved_tensor_packed_data_clear_nodes,
+                    "saved_tensor_packed_data_clear_indices",
                 )
             self._erase_dead_saved_tensor_unpack_hooks(saved_tensor_unpack_hook_nodes)
         if proxies is None:
@@ -970,6 +1030,10 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             # Weird quantity so it's easy to grep
             return torch.zeros([0, 123456789])
+
+    def allocate_dummy_like(self, x: torch.Tensor) -> torch.Tensor:
+        with disable_proxy_modes_tracing():
+            return torch.empty_like(x)
 
     def bind_function(
         self,
@@ -1031,21 +1095,40 @@ class AutogradCompilerInstance:
         return result
 
     def accumulate_grad(
-        self, variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool
-    ) -> None:
-        self.fx_tracer.create_proxy(
+        self,
+        variable: torch.Tensor,
+        variable_grad: torch.Tensor | None,
+        grad: torch.Tensor | bool,
+        has_post_hooks: bool | None = None,
+    ) -> torch.Tensor | None:
+        old_call = has_post_hooks is None
+        if has_post_hooks is None:
+            # Backward compatibility for extensions built before current grad
+            # became an explicit capture argument.
+            has_post_hooks = bool(grad)
+            grad = variable_grad  # type: ignore[assignment]
+            variable_grad = variable.grad
+
+        proxy_out = self.fx_tracer.create_proxy(
             "call_function",
             call_accumulate_grad,
             args=(
                 self.to_proxy(variable),
+                self.to_proxy(variable_grad),
                 self.to_proxy(grad),
                 has_post_hooks,
             ),
             kwargs={},
         )
+        result = self.allocate_dummy_like(variable)
+        self.bind_objects_to_proxies([result], [proxy_out])
+        variable.grad = result
+        if old_call:
+            return None
+        return result
 
     def proxy_call_hook(
-        self, hook: Callable[..., Any], *args: Any, **kwargs: Any
+        self, hook: Callable[..., Any], *args: Any, hook_type: HookType
     ) -> torch.fx.Proxy:
         return self.fx_tracer.create_proxy(
             "call_function",
@@ -1054,7 +1137,7 @@ class AutogradCompilerInstance:
                 hook,
                 *[self.to_proxy(x) for x in args],
             ),
-            kwargs,
+            {"hook_type": hook_type},
         )
 
     def unpack_hook(self, hook_id: int, data_id: int) -> torch.Tensor:
@@ -1154,7 +1237,7 @@ class AutogradCompilerInstance:
     # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
-    # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
+    # scalar tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
     def move_graph_nodes_to_cuda(self, graph: torch.fx.Graph) -> list[int]:
         to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
@@ -1400,12 +1483,25 @@ class AutogradCompilerInstance:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    out = compiled_fn(
-                        inputs, filtered_sizes, scalars, hooks, packed_inputs
-                    )
-                    if self.nan_checker:
-                        self.nan_checker.check(out)
-                    return out
+                    try:
+                        out = compiled_fn(
+                            inputs, filtered_sizes, scalars, hooks, packed_inputs
+                        )
+                        if self.nan_checker:
+                            self.nan_checker.check(out)
+                        return out
+                    finally:
+                        for hook in hooks:
+                            if (
+                                isinstance(
+                                    hook,
+                                    torch.autograd.function.BackwardCFunction,
+                                )
+                                and hook._clear_saved_tensors_on_access
+                                and hook._compiled_autograd_saved_tensors_state.item()
+                                and not hook._saved_tensors_accessed_and_cleared
+                            ):
+                                hook._compiled_autograd_clear_saved_tensors()
             finally:
                 in_compiled_autograd_region = False
 
@@ -1444,13 +1540,22 @@ class AutogradCompilerInstance:
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=call_accumulate_grad
         ):
-            param_node, grad_node = node.args[0], node.args[1]
+            param_node, variable_grad_node, grad_node = (
+                node.args[0],
+                node.args[1],
+                node.args[2],
+            )
             getitem_node = None
-            if grad_node.target is operator.getitem:
+            if (
+                isinstance(grad_node, torch.fx.Node)
+                and grad_node.target is operator.getitem
+            ):
                 getitem_node = grad_node
                 grad_node = getitem_node.args[0]
 
-            arg = max([param_node, grad_node])  # last arg
+            arg = max(
+                self.get_all_nodes([param_node, variable_grad_node, grad_node])
+            )  # last arg
             if arg is not node.prev and not self.is_placeholder(arg):
                 arg.append(node)
                 if getitem_node is not None:

@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -90,12 +89,13 @@ struct RuntimeState {
   }
 
   std::vector<std::function<at::TensorBase(const at::TensorBase&)>>
-      cpp_tensor_pre_hooks;
-  size_t next_id = 0;
+      cpp_tensor_pre_hooks{};
+  size_t next_id{0};
 };
 
 static RuntimeState* active_rstate;
 struct RuntimeStateGuard {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   RuntimeStateGuard() : _state(std::make_unique<RuntimeState>()) {
     active_rstate = _state.get();
   }
@@ -108,7 +108,7 @@ struct RuntimeStateGuard {
     active_rstate = nullptr;
   }
 
-  std::unique_ptr<RuntimeState> _state;
+  std::unique_ptr<RuntimeState> _state{};
 };
 
 static PyObject* call_cpp_tensor_pre_hooks(PyObject* dummy, PyObject* args) {
@@ -289,17 +289,20 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
     auto tmp = py::cast<std::optional<at::Tensor>>(std::move(proxy));
     TORCH_INTERNAL_ASSERT(tmp.has_value());
-    return tmp.value();
+    return std::move(tmp).value();
   }
-  void call_accumulate_grad(
+  at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const override {
     py::handle handle(py_compiler);
-    py::object stuff =
-        handle.attr("accumulate_grad")(variable, grad, has_post_hooks);
-    TORCH_INTERNAL_ASSERT(stuff.is_none());
+    py::object stuff = handle.attr("accumulate_grad")(
+        variable, variable_grad, grad, has_post_hooks);
+    auto tmp = py::cast<std::optional<at::Tensor>>(std::move(stuff));
+    TORCH_INTERNAL_ASSERT(tmp.has_value());
+    return std::move(tmp).value();
   }
 };
 
@@ -311,11 +314,19 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   return pyinput;
 }
 
-static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
+static PyObject* convert_pyobj_tuple(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
     PyTuple_SET_ITEM(pyinput, i, inputs[i].release());
+  }
+  return pyinput;
+}
+
+static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
+  PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
+  for (const auto i : c10::irange(inputs.size())) {
+    PyList_SET_ITEM(pyinput, i, inputs[i].release());
   }
   return pyinput;
 }
@@ -418,11 +429,12 @@ struct VerboseLogger : public PythonLogger {
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       const std::string& node_name) const {
-    auto matching_sizes = cached_keys |
-        std::views::filter([&](const CacheKey& k) {
-                            return k.node_type == node_type;
-                          }) |
-        std::views::transform(&CacheKey::key_size);
+    std::vector<size_t> matching_sizes;
+    for (const auto& k : cached_keys) {
+      if (k.node_type == node_type) {
+        matching_sizes.push_back(k.key_size);
+      }
+    }
     std::string compile_reason = fmt::format(
         "Cache miss due to new autograd node: {} with key size {}, previous key sizes=[{}]",
         node_name,
@@ -480,7 +492,7 @@ struct CacheNode {
     return next.empty() && !compiled_fn;
   }
 
-  CacheNode() : runtime_wrapper(nullptr), compiled_fn(nullptr) {}
+  CacheNode() = default;
   ~CacheNode() {
     if (!Py_IsInitialized()) {
       // leak on shutdown
@@ -504,7 +516,8 @@ struct CacheNode {
       2) Updates expected_sizes to track what is dynamic
       3) Populates call.dyn_size_inputs by filtering call.all_size_inputs
     */
-    bool cache_hit = compiled_fn.get() != nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    bool cache_hit{compiled_fn.get() != nullptr};
     auto len = call.all_size_inputs.size();
     const SizeInput* data = call.all_size_inputs.data();
     if (expected_sizes.empty()) {
@@ -602,13 +615,13 @@ struct CacheNode {
     return result;
   }
 
-  std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
-  std::vector<CacheKeyBuffer> key_storage;
-  std::vector<SizeInput> expected_sizes;
-  std::vector<std::string> compile_reasons;
+  std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next{};
+  std::vector<CacheKeyBuffer> key_storage{};
+  std::vector<SizeInput> expected_sizes{};
+  std::vector<std::string> compile_reasons{};
 
-  THPObjectPtr runtime_wrapper;
-  THPObjectPtr compiled_fn;
+  THPObjectPtr runtime_wrapper{};
+  THPObjectPtr compiled_fn{};
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
@@ -784,7 +797,7 @@ static TraceState call_begin_capture(
     CacheNode& cache,
     AutogradCompilerCall& compiler_call,
     size_t num_outputs,
-    std::optional<std::string>&& maybe_compile_reason,
+    std::optional<std::string> maybe_compile_reason,
     bool accumulate_grad,
     bool check_nans) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
@@ -1157,7 +1170,7 @@ static CacheNode* _compiled_autograd_impl(
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
   *graph_arg_ivalue_args =
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
-  *graph_arg_hooks = convert_pyobj_list(compiler_call.hooks);
+  *graph_arg_hooks = convert_pyobj_tuple(compiler_call.hooks);
   *graph_arg_packed_inputs = convert_pyobj_list(compiler_call.packed_inputs);
   rstate->cpp_tensor_pre_hooks = std::move(compiler_call.cpp_tensor_pre_hooks);
   return cache;

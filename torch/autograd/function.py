@@ -5,12 +5,11 @@ import itertools
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Any, Concatenate, TypeVar
+from typing import Any, Concatenate, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._C as _C
-import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
 from torch._functorch.autograd_function import custom_function_call
@@ -298,6 +297,15 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
     r"""
     This class is used for internal autograd work. Do not use.
     """
+
+    _saved_tensors_accessed_and_cleared: bool
+    _compiled_autograd_saved_tensors_state: torch.Tensor
+    _clear_saved_tensors_on_access: bool
+    _forward_cls: Any
+
+    if TYPE_CHECKING:
+
+        def _compiled_autograd_clear_saved_tensors(self) -> None: ...
 
     def _get_user_fn(self):
         backward_fn = self._forward_cls.backward  # type: ignore[attr-defined]
@@ -606,37 +614,28 @@ class Function(_SingleLevelFunction):
             "vmap staticmethod or set generate_vmap_rule=True."
         )
 
-    @classmethod
-    def apply(cls, *args, **kwargs):
-        def bind_default_args(func, *args, **kwargs):
-            signature = inspect.signature(func)
-            bound_args = signature.bind(*args, **kwargs)
-            bound_args.apply_defaults()
-
-            return bound_args.args, bound_args.kwargs
-
-        is_setup_ctx_defined = _is_setup_context_defined(cls.setup_context)
-        if is_setup_ctx_defined:
-            args, kwargs = bind_default_args(cls.forward, *args, **kwargs)
-
-        if not torch._C._are_functorch_transforms_active():
-            # See NOTE: [functorch vjp and autograd interaction]
-            args = _functorch.utils.unwrap_dead_wrappers(args)
-            return super().apply(*args, **kwargs)  # type: ignore[misc]
-
-        if not is_setup_ctx_defined:
-            raise RuntimeError(
-                "In order to use an autograd.Function with functorch transforms "
-                "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
-                "staticmethod. For more details, please see "
-                "https://pytorch.org/docs/main/notes/extending.func.html"
-            )
-
-        return custom_function_call(cls, *args, **kwargs)
+    apply = _C._FunctionBase.__dict__["apply"]
 
     @staticmethod
     def _compiled_autograd_key(ctx):
         return (ctx._autograd_function_id,)
+
+
+def _bind_default_args(
+    func: Callable[_P, Any],
+    args: _P.args,  # type: ignore[valid-type]
+    kwargs: _P.kwargs,  # type: ignore[valid-type]
+) -> tuple[_P.args, _P.kwargs]:  # type: ignore[valid-type]
+    signature = inspect.signature(func)
+    bound_args = signature.bind(*args, **({} if kwargs is None else kwargs))
+    bound_args.apply_defaults()
+    return bound_args.args, bound_args.kwargs
+
+
+def _call_custom_function_call(cls, args, kwargs):
+    if kwargs is None:
+        return custom_function_call(cls, *args)
+    return custom_function_call(cls, *args, **kwargs)
 
 
 def _is_setup_context_defined(fn):
