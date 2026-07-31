@@ -455,7 +455,9 @@ class SubgraphTemplate(KernelTemplate):
                 from ..decomposition import select_decomp_table
 
                 decomposition_table = select_decomp_table()
-                shape_env = V.fake_mode.shape_env
+                from torch._inductor.fx_utils import _get_shape_env
+
+                shape_env = _get_shape_env()
 
                 # Use error_on_new_guards to detect impls that add guards during tracing
                 guard_ctx = (

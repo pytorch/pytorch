@@ -19,17 +19,6 @@ void FakeTensorModeTLS::create_state(std::shared_ptr<FakeTensorMode> state) {
   fakeTensorModeState = std::move(state);
 }
 
-void FakeTensorModeTLS::activate() {
-  TORCH_INTERNAL_ASSERT(
-      fakeTensorModeState, "activate() called with no FakeTensorMode state");
-  tls_set_dispatch_key_included(DispatchKey::Fake, true);
-}
-
-void FakeTensorModeTLS::deactivate() {
-  TORCH_INTERNAL_ASSERT(
-      fakeTensorModeState, "deactivate() called with no FakeTensorMode state");
-  tls_set_dispatch_key_included(DispatchKey::Fake, false);
-}
 
 std::shared_ptr<FakeTensorMode> FakeTensorModeTLS::get_state() {
   return fakeTensorModeState;

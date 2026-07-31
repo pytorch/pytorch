@@ -22,7 +22,7 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.fx_passes.control_dependencies import control_deps
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._inductor.utils import create_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     rebind_unbacked,
@@ -36,6 +36,12 @@ from torch.utils._typing_utils import not_none
 from torch.utils.flop_counter import flop_registry
 
 from .virtualized import V
+
+
+def _get_shape_env():
+    from torch._inductor.virtualized import V
+
+    return V.fake_mode.shape_env
 
 
 # Check the pattern: (nn.module, F.function/torch.Tensor.method) matched.
@@ -883,7 +889,7 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 def count_flops_fx(node: torch.fx.Node) -> int | None:
     if not countable_fx(node) or isinstance(node.target, str):
         return None
-    with FakeTensorMode(allow_non_fake_inputs=True):
+    with create_fake_mode(allow_non_fake_inputs=True):
         success, args, kwargs = get_fake_args_kwargs(node)
 
         if success:

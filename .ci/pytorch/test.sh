@@ -436,6 +436,14 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_cpp_faketensor() {
+  # shellcheck disable=SC2086
+  time CPP_FAKETENSOR=1 python test/run_test.py --include \
+    test_fake_tensor \
+    --verbose $PYTHON_TEST_EXTRA_OPTION
+  assert_git_not_dirty
+}
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
@@ -2383,6 +2391,8 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   setup_torch_trace
   test_inductor_shard "${SHARD_NUMBER}"
   collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == *cpp_faketensor* ]]; then
+  test_cpp_faketensor
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then

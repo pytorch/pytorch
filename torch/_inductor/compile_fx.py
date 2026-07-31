@@ -91,6 +91,7 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
+    create_fake_mode,
     fresh_cache,
     get_all_devices,
     get_static_bw_input_idxs,
@@ -793,7 +794,7 @@ def fake_tensor_prop(
     with enable_python_dispatcher():
         fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
-            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+            fake_mode = create_fake_mode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         else:
             ctx = (

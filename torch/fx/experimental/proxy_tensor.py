@@ -697,10 +697,13 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
-    if is_fake_tensor(val):
+    if isinstance(val, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return fast_detach(maybe_get_fake_mode(val), val, include_real)
     else:
-        return val.detach()
+        fake_mode = maybe_get_fake_mode(val)
+        if fake_mode is None:
+            return val.detach()
+        return fast_detach(fake_mode, val, include_real)
 
 
 _ExtractValType: TypeAlias = (
@@ -736,6 +739,13 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
+            if torch._C._dispatch_tls_is_dispatch_key_included(
+                torch._C.DispatchKey.Fake
+            ):
+                return torch.empty_strided(  # revist this
+                    val.shape, val.stride(), device=val.device, dtype=val.dtype
+                )
+
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
             # TODO: This doesn't properly track storages.  A more robust
@@ -3497,6 +3507,11 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
         "FakeTensorMode | None",
         torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
     )
+    if fake_mode is None:
+        # The cpp mode currently dispatching (detect_fake_mode is intentionally
+        # avoided here, see above; `out` may be a bare SymInt that carries no
+        # mode, so recover from the active scope rather than the output).
+        fake_mode = torch._C._current_cpp_fake_tensor_mode()
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             # `symbol_to_path` is keyed by the fresh unbacked symbol; each path

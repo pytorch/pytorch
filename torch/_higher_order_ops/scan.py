@@ -1001,6 +1001,26 @@ def scan_fake_tensor_mode(
         return out
 
 
+@scan_op.py_impl(DispatchKey.Fake)
+def scan_cpp_fake_tensor_mode(
+    combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+):
+    scan_length = xs[0].shape[0]
+    carry, outputs = _extract_carry_and_out(
+        combine_fn(
+            *init,
+            *[first_slice_copy(inp) for inp in xs],
+            *additional_inputs,
+        ),
+        len(init),
+    )
+    out = (
+        *carry,
+        *(stack_y(t, scan_length) for t in outputs),
+    )
+    return out
+
+
 @scan_op.py_functionalize_impl
 def scan_functionalize(
     ctx, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""

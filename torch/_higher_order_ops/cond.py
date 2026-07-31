@@ -30,7 +30,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -415,6 +415,29 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
+@cond_op.py_impl(DispatchKey.Fake)
+def cond_cpp_fake_tensor_mode(pred, true_fn, false_fn, operands):
+    from torch._higher_order_ops.utils import _find_or_create_fake_mode
+
+    mode = _find_or_create_fake_mode()
+    ignore_fresh_unbacked = contextlib.nullcontext()
+    if mode.shape_env:
+        ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
+    with ignore_fresh_unbacked:
+        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+    if true_out_spec != false_out_spec:
+        raise RuntimeError(
+            "Unmatched output spec from torch.cond branches: "
+            f"true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
+        )
+
+    merged_outs = []
+    for true_out, false_out in zip(flat_true_outs, flat_false_outs):
+        merged_outs.append(_merge_output(true_out, false_out, mode))
+    return pytree.tree_unflatten(merged_outs, true_out_spec)
+
+
 def check_tensor_meta_match(
     t1: torch.Tensor, t2: torch.Tensor, attr_names: tuple[str, ...], msg_prefix: str
 ) -> None:
@@ -481,9 +504,9 @@ def _merge_output(
     if type(a) is int and type(b) is int:
         return _merge_ints_to_symint([a, b], mode)
 
-    if not (type(a) is FakeTensor and type(b) is FakeTensor):
+    if not (is_fake_tensor(a) and is_fake_tensor(b)):
         raise AssertionError(
-            f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
+            f"expected both a and b to be fake tensors, got a={type(a)}, b={type(b)}"
         )
 
     # Note: we don't check size, stride because

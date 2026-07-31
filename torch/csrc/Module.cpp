@@ -29,6 +29,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -55,6 +56,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
@@ -2492,6 +2494,37 @@ void _initCrashHandler() {
   *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
 }
 
+// The C++ FakeTensorMode is owned by its Python CppFakeTensorMode via an opaque
+// capsule handle (no persistent global TLS registration). These helpers wrap /
+// unwrap the shared_ptr so `_push`/`_pop`/`_from_meta_and_device` can operate on
+// an explicitly-passed mode rather than the ambient TLS state.
+py::capsule make_fake_mode_capsule(std::shared_ptr<c10::FakeTensorMode> mode) {
+  auto* holder = new std::shared_ptr<c10::FakeTensorMode>(std::move(mode));
+  return py::capsule(holder, [](void* p) {
+    delete static_cast<std::shared_ptr<c10::FakeTensorMode>*>(p);
+  });
+}
+
+std::shared_ptr<c10::FakeTensorMode> fake_mode_from_capsule(
+    const py::object& handle) {
+  if (handle.is_none()) {
+    return nullptr;
+  }
+  auto cap = py::cast<py::capsule>(handle);
+  return *static_cast<std::shared_ptr<c10::FakeTensorMode>*>(cap.get_pointer());
+}
+
+// Saved (prev mode, prev Fake-key) states for nested `with cpp_mode:` scopes,
+// so _pop restores exactly what _push displaced (the same mode on a nested
+// enter, or none at the outermost). Thread-local to match FakeTensorModeTLS.
+std::vector<std::pair<std::shared_ptr<c10::FakeTensorMode>, bool>>&
+cpp_fake_mode_save_stack() {
+  static thread_local std::
+      vector<std::pair<std::shared_ptr<c10::FakeTensorMode>, bool>>
+          stack;
+  return stack;
+}
+
 } // anonymous namespace
 
 extern "C" TORCH_PYTHON_API PyObject* initModule();
@@ -3289,6 +3322,207 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
+
+  py_module.def("_fake_tensor_device", [](const at::Tensor& t) -> c10::Device {
+    auto fd = t.unsafeGetTensorImpl()->fake_device();
+    TORCH_CHECK(fd.has_value(), "Tensor does not have a fake device");
+    return *fd;
+  });
+
+  // Update an existing C++ fake tensor's fake device (e.g. restoring the
+  // original device after deserializing under a fake mode).
+  py_module.def(
+      "_set_fake_device",
+      [](const at::Tensor& t, c10::Device device) {
+        t.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
+      },
+      py::arg("t"),
+      py::arg("device"));
+
+  // Make a C++ fake report the mkldnn layout (see TensorImpl::set_fake_mkldnn).
+  py_module.def(
+      "_set_fake_mkldnn",
+      [](const at::Tensor& fake, bool value) {
+        fake.unsafeGetTensorImpl()->set_fake_mkldnn(value);
+      },
+      py::arg("fake"),
+      py::arg("value"));
+
+  // The real tensor a C++ fake shadows under propagate_real_tensors.
+  py_module.def(
+      "_set_fake_real_tensor",
+      [](const at::Tensor& fake, const at::Tensor& real) {
+        fake.unsafeGetTensorImpl()->set_real_tensor(
+            std::make_shared<at::Tensor>(real));
+      },
+      py::arg("fake"),
+      py::arg("real"));
+
+  py_module.def(
+      "_get_fake_real_tensor", [](const at::Tensor& fake) -> py::object {
+        auto real = fake.unsafeGetTensorImpl()->real_tensor();
+        if (!real) {
+          return py::none();
+        }
+        return py::cast(*real);
+      });
+
+  py_module.def(
+      "_from_meta_and_device",
+      [](const at::Tensor& meta,
+         c10::Device device,
+         const py::object& handle) -> at::Tensor {
+        auto mode = fake_mode_from_capsule(handle);
+        TORCH_CHECK(mode != nullptr, "No C++ FakeTensorMode handle provided");
+        meta.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
+        meta.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+        return meta;
+      },
+      py::arg("meta"),
+      py::arg("device"),
+      py::arg("handle"));
+
+  py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
+    if (!t.defined() || !t.is_fake()) {
+      return py::none();
+    }
+    return getFakeModePyObj(t.unsafeGetTensorImpl()->fake_tensor_mode().get());
+  });
+
+  py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
+    if (!t.defined() || !t.is_fake()) {
+      return py::none();
+    }
+    auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
+    if (mode == nullptr) {
+      return py::none();
+    }
+    auto constant = mode->get_constant(t.unsafeGetTensorImpl());
+    if (!constant) {
+      return py::none();
+    }
+    return py::cast(at::Tensor(std::move(constant)));
+  });
+
+  py_module.def(
+      "_set_fake_constant",
+      [](const at::Tensor& fake,
+         const at::Tensor& constant,
+         const py::object& handle) {
+        auto mode = fake_mode_from_capsule(handle);
+        TORCH_CHECK(mode != nullptr, "No C++ FakeTensorMode handle provided");
+        c10::StorageImpl* constant_storage = constant.has_storage()
+            ? constant.storage().unsafeGetStorageImpl()
+            : nullptr;
+        mode->set_constant(
+            fake.getIntrusivePtr(),
+            constant.getIntrusivePtr(),
+            constant_storage);
+      },
+      py::arg("fake"),
+      py::arg("constant"),
+      py::arg("handle"));
+
+  py_module.def(
+      "_create_cpp_fake_tensor_mode",
+      [](const py::object& converter,
+         const py::object& shape_env,
+         py::object mode_pyobj) {
+        Py_INCREF(shape_env.ptr());
+        Py_INCREF(converter.ptr());
+        auto mode = std::make_shared<c10::FakeTensorMode>(
+            std::make_shared<c10::SafePyObject>(
+                shape_env.ptr(), getPyInterpreter()),
+            std::make_shared<c10::SafePyObject>(
+                converter.ptr(), getPyInterpreter()));
+
+        auto functorch_config = py::module::import("torch._functorch.config");
+        mode->allow_meta_ =
+            functorch_config.attr("fake_tensor_allow_meta").cast<bool>();
+        mode->propagate_real_tensors_ =
+            functorch_config.attr("fake_tensor_propagate_real_tensors")
+                .cast<bool>();
+        if (auto prefer = functorch_config.attr("fake_tensor_prefer_device_type");
+            !prefer.is_none()) {
+          mode->prefer_device_type =
+              c10::Device(prefer.cast<std::string>()).type();
+        }
+
+        // Store a *weak* reference to the Python CppFakeTensorMode so op_impl
+        // handlers (PyInterpreter.cpp) observe the same single identity. It must
+        // be weak: the Python object owns this C++ mode via the returned
+        // capsule, so a strong back-reference would form an uncollectable cycle.
+        // The mode is NOT registered in TLS here; the Python object installs it
+        // only for the duration of a `with cpp_mode:` scope (see _push/_pop).
+        if (!mode_pyobj.is_none()) {
+          PyObject* weakref = PyWeakref_NewRef(mode_pyobj.ptr(), nullptr);
+          TORCH_CHECK(weakref != nullptr, "failed to weakref CppFakeTensorMode");
+          mode->fake_mode_pyobj_ = std::make_shared<c10::SafePyObject>(
+              weakref, getPyInterpreter());
+        }
+
+        return make_fake_mode_capsule(mode);
+      },
+      py::arg("converter"),
+      py::arg("shape_env") = py::none(),
+      py::arg("mode_pyobj") = py::none());
+
+  using at::impl::FakeDispatchCategory;
+  auto register_fake_dispatch = [](FakeDispatchCategory category) {
+    return [category](const std::string& name, const std::string& overload) {
+      at::impl::fakeDispatchTableAdd(category, c10::OperatorName(name, overload));
+    };
+  };
+  py_module.def(
+      "_fake_dispatch_register_decomp",
+      register_fake_dispatch(FakeDispatchCategory::Decomp));
+  py_module.def(
+      "_fake_dispatch_register_meta",
+      register_fake_dispatch(FakeDispatchCategory::Meta));
+  py_module.def(
+      "_fake_dispatch_register_op_impl",
+      register_fake_dispatch(FakeDispatchCategory::OpImpl));
+  py_module.def(
+      "_fake_dispatch_register_prim_meta",
+      register_fake_dispatch(FakeDispatchCategory::PrimMeta));
+  py_module.def(
+      "_fake_dispatch_deregister_op_impl",
+      [](const std::string& name, const std::string& overload) {
+        at::impl::fakeDispatchTableRemove(
+            FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+      });
+
+  py_module.def("_exit_fake_tensor_mode", []() {
+    c10::impl::FakeTensorModeTLS::reset_state();
+  });
+
+  // Scoped `with cpp_mode:` registration. _push installs the mode (from its
+  // capsule handle) into TLS with the Fake dispatch key on, saving the prior
+  // (mode, Fake-key) state; _pop restores it. The save-stack lives here (not in
+  // a Python-side token) so nested scopes just call _push/_pop.
+  py_module.def(
+      "_push_cpp_fake_tensor_mode",
+      [](const py::object& handle) {
+        cpp_fake_mode_save_stack().emplace_back(
+            c10::impl::FakeTensorModeTLS::get_state(),
+            c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake));
+        c10::impl::FakeTensorModeTLS::set_state(fake_mode_from_capsule(handle));
+      },
+      py::arg("handle"));
+
+  py_module.def("_pop_cpp_fake_tensor_mode", []() {
+    auto& stack = cpp_fake_mode_save_stack();
+    TORCH_CHECK(!stack.empty(), "_pop_cpp_fake_tensor_mode with empty stack");
+    auto [prev_mode, prev_key] = std::move(stack.back());
+    stack.pop_back();
+    c10::impl::FakeTensorModeTLS::create_state(std::move(prev_mode));
+    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Fake, prev_key);
+  });
+
+  // The cpp mode currently installed in TLS.
+  py_module.def("_current_cpp_fake_tensor_mode", []() -> py::object {
+    return getFakeModePyObj(c10::impl::FakeTensorModeTLS::get_state().get());
+  });
 
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
