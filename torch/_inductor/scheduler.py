@@ -625,7 +625,8 @@ class NestedReduction:
     @dataclasses.dataclass(frozen=True)
     class SubParentEpiloguePlan:
         epilogue_nodes: tuple[SchedulerNode, ...]
-        reduction_nodes: tuple[BaseSchedulerNode, ...]
+        epilogue_node_output_lanes: tuple[int, ...]
+        parent_nodes: tuple[BaseSchedulerNode, ...]
         sub_parent_factor: int
         parent_rnumel: int
         source_layouts: tuple[tuple[str, NestedReduction.SubParentSourceLayout], ...]
@@ -654,6 +655,7 @@ class NestedReduction:
         reduction_buffer_names = OrderedSet[str]()
         fused_buffer_names = OrderedSet[str]()
         reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
+        source_writes: dict[str, list[MemoryDep]] = collections.defaultdict(list)
         for node in nodes:
             fused_buffer_names |= node.get_buffer_names()
             if node.is_reduction():
@@ -662,6 +664,9 @@ class NestedReduction:
                 for dep in node.read_writes.reads:
                     if isinstance(dep, MemoryDep):
                         reduction_reads[dep.name].append(dep)
+            for dep in node.read_writes.writes:
+                if isinstance(dep, MemoryDep):
+                    source_writes[dep.name].append(dep)
         if not reduction_names:
             return None
 
@@ -677,19 +682,31 @@ class NestedReduction:
         )
         if candidate is None:
             return None
-        epilogue_nodes, sub_parent_factor = candidate
+        epilogue_nodes, sub_parent_factor, epilogue_node_output_lanes = candidate
+        if not cls._sub_parent_epilogue_internal_reads_match(
+            epilogue_nodes,
+            source_writes,
+        ):
+            return None
         source_deps = cls._sub_parent_epilogue_source_deps(
             epilogue_nodes,
             fused_buffer_names,
             full_numel,
             reduction_reads,
-            {},
+            source_writes,
             sub_parent_factor,
             parent_rnumel=parent_rnumel,
         )
         if not source_deps:
             return None
         planned_source_deps = tuple(dep for dep, _layout in source_deps)
+        # Plans must support looped codegen, which cannot retain an internally
+        # produced source across a downstream reduction loop.
+        if any(
+            dep.name in source_writes and dep.name in reduction_reads
+            for dep in planned_source_deps
+        ):
+            return None
         epilogue_node_set = OrderedSet(epilogue_nodes)
         if check_leaves and not cls._sub_parent_epilogue_source_loads_are_unambiguous(
             nodes,
@@ -705,11 +722,12 @@ class NestedReduction:
             nodes,
             epilogue_node_set,
             numel,
-            OrderedSet(reduction_reads),
+            OrderedSet(dep.name for dep in planned_source_deps),
         ):
             return None
         return cls.SubParentEpiloguePlan(
             tuple(epilogue_nodes),
+            epilogue_node_output_lanes,
             tuple(node for node in nodes if node not in epilogue_node_set),
             sub_parent_factor,
             parent_rnumel,
@@ -727,10 +745,10 @@ class NestedReduction:
         parent_rnumel: int,
         reduction_names: OrderedSet[str],
         reduction_buffer_names: OrderedSet[str],
-    ) -> tuple[tuple[SchedulerNode, ...], int] | None:
+    ) -> tuple[tuple[SchedulerNode, ...], int, tuple[int, ...]] | None:
         from .codegen.simd import SIMDKernel
 
-        candidates: list[tuple[SchedulerNode, int]] = []
+        candidates: list[tuple[SchedulerNode, int, int]] = []
         for node in nodes:
             if node.is_reduction():
                 continue
@@ -739,31 +757,35 @@ class NestedReduction:
             _, (node_numel, node_rnumel) = node.group
             if not V.graph.sizevars.statically_known_equals(node_rnumel, 1):
                 continue
-            node_factor = cls._sub_parent_epilogue_factor(
+            rate = cls._sub_parent_epilogue_rate(
                 node_numel,
                 full_numel,
                 parent_rnumel,
             )
-            if node_factor is None:
+            if rate is None:
                 continue
+            node_factor, output_lanes = rate
             if not SIMDKernel.is_compatible(
-                (numel, FloorDiv(rnumel, node_factor)), node.get_ranges()
+                (numel, FloorDiv(rnumel, node_factor) * output_lanes),
+                node.get_ranges(),
             ):
                 continue
             reads_reduction_output = any(
                 dep.name in reduction_buffer_names for dep in node.read_writes.reads
             )
             if reduction_names & node.ancestors or reads_reduction_output:
-                candidates.append((node, node_factor))
+                candidates.append((node, node_factor, output_lanes))
         if not candidates:
             return None
-        sub_parent_factor = min(factor for _node, factor in candidates)
-        epilogue_nodes = [
-            node for node, factor in candidates if factor == sub_parent_factor
+        sub_parent_factor = min(factor for _node, factor, _lanes in candidates)
+        epilogue_nodes_and_lanes = [
+            (node, lanes)
+            for node, factor, lanes in candidates
+            if factor == sub_parent_factor
         ]
         omitted_nodes = [
             node.get_name()
-            for node, factor in candidates
+            for node, factor, _lanes in candidates
             if factor != sub_parent_factor
         ]
         if omitted_nodes:
@@ -772,7 +794,14 @@ class NestedReduction:
                 sub_parent_factor,
                 omitted_nodes,
             )
-        return tuple(epilogue_nodes), sub_parent_factor
+        output_lanes = tuple(lanes for _node, lanes in epilogue_nodes_and_lanes)
+        if output_lanes != tuple(sorted(output_lanes)):
+            return None
+        return (
+            tuple(node for node, _lanes in epilogue_nodes_and_lanes),
+            sub_parent_factor,
+            output_lanes,
+        )
 
     @staticmethod
     def _sub_parent_epilogue_parent_rnumel(rnumel: sympy.Expr) -> int | None:
@@ -785,28 +814,52 @@ class NestedReduction:
         return parent_rnumel
 
     @classmethod
-    def _sub_parent_epilogue_factor(
+    def _sub_parent_epilogue_rate(
         cls,
         node_numel: sympy.Expr,
         full_numel: sympy.Expr,
         parent_rnumel: int,
-    ) -> int | None:
+    ) -> tuple[int, int] | None:
         if V.graph.sizevars.statically_known_equals(node_numel, 0):
             return None
         factor_expr = V.graph.sizevars.simplify(FloorDiv(full_numel, node_numel))
-        if not isinstance(factor_expr, (int, sympy.Integer)):
-            return None
-        factor = int(factor_expr)
-        if factor < 2 or factor > min(cls.MAX_SUB_PARENT_FACTOR, parent_rnumel):
-            return None
-        if not is_power_of_2(factor):
-            return None
-        if not V.graph.sizevars.statically_known_equals(
-            factor * node_numel,
-            full_numel,
-        ):
-            return None
-        return factor
+        if isinstance(factor_expr, (int, sympy.Integer)):
+            factor = int(factor_expr)
+            if (
+                2 <= factor <= min(cls.MAX_SUB_PARENT_FACTOR, parent_rnumel)
+                and is_power_of_2(factor)
+                and V.graph.sizevars.statically_known_equals(
+                    factor * node_numel, full_numel
+                )
+            ):
+                return factor, 1
+
+        if parent_rnumel >= 4:
+            group_numel = FloorDiv(full_numel, 4)
+            if V.graph.sizevars.statically_known_equals(
+                4 * group_numel, full_numel
+            ) and V.graph.sizevars.statically_known_equals(3 * group_numel, node_numel):
+                return 4, 3
+        return None
+
+    @staticmethod
+    def _sub_parent_epilogue_internal_reads_match(
+        epilogue_nodes: tuple[SchedulerNode, ...],
+        source_writes: dict[str, list[MemoryDep]],
+    ) -> bool:
+        epilogue_output_names = OrderedSet(
+            [name for node in epilogue_nodes for name in node.get_buffer_names()]
+        )
+        for node in epilogue_nodes:
+            for dep in node.read_writes.reads:
+                if dep.name not in epilogue_output_names:
+                    continue
+                writes = source_writes.get(dep.name, [])
+                if not isinstance(dep, MemoryDep) or len(writes) != 1:
+                    return False
+                if dep.normalize() != writes[0].normalize():
+                    return False
+        return True
 
     @classmethod
     def _sub_parent_epilogue_source_deps(
@@ -857,15 +910,16 @@ class NestedReduction:
                 source_deps_for_name = reduction_reads.get(
                     dep.name, source_writes.get(dep.name, [])
                 )
-                reduction_deps = [
+                full_resolution_source_deps = [
                     source_dep
                     for source_dep in source_deps_for_name
                     if V.graph.sizevars.statically_known_equals(
                         sympy_product(source_dep.ranges.values()), full_numel
                     )
                 ]
-                if dep.name in fused_buffer_names and not reduction_deps:
+                if dep.name in fused_buffer_names and not full_resolution_source_deps:
                     continue
+                reduction_deps = full_resolution_source_deps
                 if not reduction_deps:
                     if dep.name in V.graph.removed_buffers:
                         return None
@@ -877,7 +931,7 @@ class NestedReduction:
                     sympy.Mod(dep.index, sub_parent_factor)
                 )
                 if (
-                    sub_parent_factor == 2
+                    sub_parent_factor in (cls.PARENT_HALF_FACTOR, 4)
                     and any(
                         V.graph.sizevars.statically_known_equals(lane, value)
                         for value in range(sub_parent_factor)
@@ -1063,11 +1117,17 @@ class NestedReduction:
         lane: sympy.Expr,
         sub_parent_factor: int,
     ) -> bool:
+        if len(dep.var_names) != len(reduction_dep.var_names):
+            return NestedReduction._interleaved_sub_parent_epilogue_read_matches_flat_reduction_read(
+                dep, reduction_dep, lane, sub_parent_factor
+            )
         lane_dim = NestedReduction._unique_trailing_sub_parent_dim(
             dep, reduction_dep, sub_parent_factor
         )
         if lane_dim is None:
-            return False
+            return NestedReduction._interleaved_sub_parent_epilogue_read_matches_flat_reduction_read(
+                dep, reduction_dep, lane, sub_parent_factor
+            )
         lane_expr = sub_parent_factor * dep.var_names[lane_dim] + lane
         substitutions_by_lane = NestedReduction._sub_parent_lane_substitutions(
             dep, reduction_dep, lane_dim, [lane_expr]
@@ -1075,6 +1135,49 @@ class NestedReduction:
         if substitutions_by_lane is None:
             return False
         expected = reduction_dep.index.subs(substitutions_by_lane[0])
+        return V.graph.sizevars.statically_known_equals(dep.index, expected)
+
+    @staticmethod
+    def _interleaved_sub_parent_epilogue_read_matches_flat_reduction_read(
+        dep: MemoryDep,
+        reduction_dep: MemoryDep,
+        lane: sympy.Expr,
+        sub_parent_factor: int,
+    ) -> bool:
+        if dep.num_vars == 0 or reduction_dep.num_vars == 0:
+            return False
+        child_index = sympy.S.Zero
+        stride = sympy.S.One
+        for var, size in reversed(tuple(zip(dep.var_names, dep.size))):
+            child_index += var * stride
+            stride *= size
+        if not V.graph.sizevars.statically_known_equals(
+            sub_parent_factor * stride,
+            sympy_product(reduction_dep.size),
+        ):
+            return False
+
+        parent_index = sub_parent_factor * child_index + lane
+        reduction_flat_index = sympy.S.Zero
+        stride = sympy.S.One
+        for var, size in reversed(
+            tuple(zip(reduction_dep.var_names, reduction_dep.size))
+        ):
+            reduction_flat_index += var * stride
+            stride *= size
+        if V.graph.sizevars.statically_known_equals(
+            reduction_dep.index, reduction_flat_index
+        ):
+            return V.graph.sizevars.statically_known_equals(dep.index, parent_index)
+
+        substitutions: dict[sympy.Symbol, sympy.Expr] = {}
+        stride = sympy.S.One
+        for var, size in reversed(
+            tuple(zip(reduction_dep.var_names, reduction_dep.size))
+        ):
+            substitutions[var] = FloorDiv(parent_index, stride) % size
+            stride *= size
+        expected = reduction_dep.index.subs(substitutions)
         return V.graph.sizevars.statically_known_equals(dep.index, expected)
 
     @staticmethod
@@ -8582,17 +8685,148 @@ class Scheduler:
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
     ) -> OrderedSet[str] | None:
-        if not NestedReduction.is_candidate(node1, node2):
+        if NestedReduction.is_candidate(node1, node2):
+            # These names feed both the score bridge and relaxed vertical dep
+            # matching. The score bridge exists only so V.choices.can_fuse does not
+            # reject legal equivalent-index deps before vertical legality runs, so it
+            # must use the same fully legal nested relation as can_fuse_vertical.
+            # TODO: split cheap score prefiltering from legality if this shows up in
+            # compile-time profiles, without letting score-only names relax legality.
+            if NestedReduction.can_fuse(node1, node2):
+                return self._producer_output_names_read_by_consumer(node1, node2)
+
+        # _is_enabled_for, not the config flag alone: only a GPU Triton backend
+        # without cpp_wrapper can emit a sub-parent epilogue, and planning one
+        # elsewhere costs a full plan per reduction/pointwise pair for a fusion
+        # that can never be codegen'd.
+        if (
+            not NestedReduction._is_enabled_for(node1, node2)
+            or not node1.is_reduction()
+            or node2.is_reduction()
+        ):
             return None
-        # These names feed both the score bridge and relaxed vertical dep
-        # matching. The score bridge exists only so V.choices.can_fuse does not
-        # reject legal equivalent-index deps before vertical legality runs, so it
-        # must use the same fully legal nested relation as can_fuse_vertical.
-        # TODO: split cheap score prefiltering from legality if this shows up in
-        # compile-time profiles, without letting score-only names relax legality.
-        if not NestedReduction.can_fuse(node1, node2):
+        _, (numel, rnumel) = node1.group
+        plan = NestedReduction.sub_parent_epilogue_plan(
+            [*node1.get_nodes(), *node2.get_nodes()], numel, rnumel
+        )
+        if plan is None and isinstance(node2, SchedulerNode):
+            existing_plan = NestedReduction.sub_parent_epilogue_plan(
+                node1.get_nodes(), numel, rnumel
+            )
+            if existing_plan is not None:
+                original_state = node2.snapshot_loop_state()
+                keep_reindex = False
+                try:
+                    if self._reindex_sub_parent_consumer(existing_plan, node2):
+                        plan = NestedReduction.sub_parent_epilogue_plan(
+                            [*node1.get_nodes(), *node2.get_nodes()], numel, rnumel
+                        )
+                        keep_reindex = plan is not None and all(
+                            node in plan.epilogue_nodes for node in node2.get_nodes()
+                        )
+                finally:
+                    if not keep_reindex:
+                        node2.restore_loop_state(original_state)
+        if plan is None or not all(
+            node in plan.epilogue_nodes for node in node2.get_nodes()
+        ):
             return None
         return self._producer_output_names_read_by_consumer(node1, node2)
+
+    def _reindex_sub_parent_consumer(
+        self,
+        plan: NestedReduction.SubParentEpiloguePlan,
+        consumer: BaseSchedulerNode,
+    ) -> bool:
+        if not isinstance(consumer, SchedulerNode) or consumer._sizes[1]:
+            return False
+
+        candidates: list[tuple[SchedulerNode, MemoryDep, MemoryDep]] = []
+        for producer, output_lanes in zip(
+            plan.epilogue_nodes, plan.epilogue_node_output_lanes, strict=True
+        ):
+            if output_lanes == 1:
+                continue
+            for write in producer.read_writes.writes:
+                if not isinstance(write, MemoryDep):
+                    continue
+                candidates.extend(
+                    (producer, read, write)
+                    for read in consumer.read_writes.reads
+                    if isinstance(read, MemoryDep) and read.name == write.name
+                )
+        if len(candidates) != 1:
+            return False
+        producer, read, write = candidates[0]
+        order = self._reindexed_dep_order(read, write)
+        if order is None:
+            return False
+
+        try:
+            if order != tuple(range(len(order))):
+                consumer.apply_new_loop_order(order)
+            consumer.apply_loop_reindexing(producer._sizes[0])
+        except (AssertionError, NotImplementedError):
+            return False
+        if any(
+            isinstance(dep, MemoryDep)
+            and dep.name == write.name
+            and self.fusable_read_and_write(dep, write)
+            for dep in consumer.read_writes.reads
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _reindexed_dep_order(
+        read: MemoryDep,
+        write: MemoryDep,
+    ) -> tuple[int, ...] | None:
+        """Order a dense read so it can be reshaped to the write's loop domain."""
+        normalized_read = read.normalize_with_stride_order()
+        normalized_write = write.normalize_with_stride_order()
+        if (
+            read.mode != write.mode
+            or not V.graph.sizevars.statically_known_equals(
+                read.get_offset(), write.get_offset()
+            )
+            or normalized_read != normalized_write
+            or not normalized_write.is_contiguous()
+        ):
+            return None
+
+        read_strides = V.graph.sizevars.stride_hints(read.index, read.var_names)
+        write_strides = V.graph.sizevars.stride_hints(write.index, write.var_names)
+        if any(stride <= 0 for stride in (*read_strides, *write_strides)):
+            return None
+        if not all(
+            isinstance(size, (int, sympy.Integer)) and size > 1
+            for size in (*read.size, *write.size)
+        ):
+            return None
+
+        # Partition read dimensions by the physical interval covered by each
+        # write dimension, ordering each partition from outermost to innermost.
+        order: list[int] = []
+        for write_stride, write_size in zip(write_strides, write.size):
+            upper_bound = write_stride * int(write_size)
+            dims = [
+                i
+                for i, (read_stride, read_size) in enumerate(
+                    zip(read_strides, read.size)
+                )
+                if write_stride <= read_stride
+                and read_stride * int(read_size) <= upper_bound
+            ]
+            dims.sort(key=read_strides.__getitem__, reverse=True)
+            if math.prod(int(read.size[i]) for i in dims) != write_size:
+                return None
+            order.extend(dims)
+        if len(order) != len(read.size) or OrderedSet(order) != OrderedSet(
+            range(len(read.size))
+        ):
+            return None
+        return tuple(order)
 
     def _can_fuse_nested_reduction_append(
         self,
@@ -8647,14 +8881,17 @@ class Scheduler:
         rolled back if the fusion decision ultimately fails.
         """
         tracker = _LoopMutationTracker.create((node1, node2))
-        can_fuse = self._can_fuse_impl(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            allow_mix_order_reduction=allow_mix_order_reduction,
-        )
-        tracker.finish(rollback=not can_fuse)
-        return can_fuse
+        can_fuse = False
+        try:
+            can_fuse = self._can_fuse_impl(
+                node1,
+                node2,
+                can_reorder=can_reorder,
+                allow_mix_order_reduction=allow_mix_order_reduction,
+            )
+            return can_fuse
+        finally:
+            tracker.finish(rollback=not can_fuse)
 
     def _can_fuse_impl(
         self,
@@ -9056,14 +9293,15 @@ class Scheduler:
             write_name = self.mutation_renames.get(cd.name, cd.name)
             remaining = remaining_deps_by_name.get(write_name)
             if remaining:
+                if (
+                    index_equivalent_dep_names is not None
+                    and write_name in index_equivalent_dep_names
+                ):
+                    remaining.clear()
+                    continue
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
-                        rd.rename(self.mutation_renames),
-                        cd,
-                        allow_index_equivalence=(
-                            index_equivalent_dep_names is not None
-                            and write_name in index_equivalent_dep_names
-                        ),
+                        rd.rename(self.mutation_renames), cd
                     ):
                         remaining.remove(rd)  # noqa: B909
                     elif isinstance(cd, StarDep) and (
@@ -9167,18 +9405,8 @@ class Scheduler:
         )
 
     # StarDep doesn't match MemoryDep, and indirect indexing is not fusible.
-    def fusable_read_and_write(
-        self, read: Dep, write: MemoryDep, *, allow_index_equivalence: bool = False
-    ) -> bool:
-        """Return whether a producer write can satisfy a consumer read.
-
-        The default path accepts exact matches, plus the existing
-        loop-ordering-normalized exact match when that config is enabled.
-        ``allow_index_equivalence`` only runs after those checks fail. It keeps
-        the producer write dense and injective, then accepts conservative
-        consumer-side equivalent reads such as broadcasts or normalized
-        loop-order changes.
-        """
+    def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:
+        """Return whether a producer write can satisfy a consumer read."""
         if isinstance(read, MemoryDep):
             if (
                 read.name != write.name
@@ -9187,19 +9415,16 @@ class Scheduler:
             ):
                 return False
 
-            original_read = read
-            original_write = write
-
             # Operations like index_add_, scatter_add_, etc. require global
             # synchronization - all threads must complete writes before any reads.
             # These cannot be safely fused into the same kernel. Atomic modes
             # and TMA stores require synchronization barriers.
-            if self.mode_requires_synchronization(original_write.mode):
+            if self.mode_requires_synchronization(write.mode):
                 return False
 
-            # Preserve the normal exact-dependency path before any optional
-            # normalization or relaxed equivalence checks.
-            if self._same_index_with_prefix_size(original_read, original_write):
+            # Preserve exact dependencies, including gapped layouts, before
+            # optional loop normalization.
+            if self._same_index_with_prefix_size(read, write):
                 return True
 
             if config.loop_ordering_after_fusion and read.num_vars != write.num_vars:
@@ -9209,18 +9434,9 @@ class Scheduler:
                 read = read.normalize()
                 write = write.normalize()
 
-            # Re-check after optional loop normalization. The first exact
-            # match preserves original deps, including gapped layouts; this
-            # path only covers deps that become exact after loop vars merge.
+            # Re-check dependencies that become exact after loop vars merge.
             if self._same_index_with_prefix_size(read, write):
                 return True
-
-            if not allow_index_equivalence:
-                return False
-
-            return self._fusable_read_after_index_equivalence(
-                original_read, original_write
-            )
         elif isinstance(read, StarDep):
             if (
                 read.mode == write.mode
@@ -9229,109 +9445,6 @@ class Scheduler:
             ):
                 return True
         return False
-
-    def _fusable_read_after_index_equivalence(
-        self, read: MemoryDep, write: MemoryDep
-    ) -> bool:
-        # Relaxed matching is only for consumer-side reshapes/broadcasts.
-        # If a write var is absent from the write index, the producer itself
-        # broadcasts multiple loop iterations to the same address.
-        if not OrderedSet(write.var_names) <= write.index.free_symbols:
-            return False
-        # Once read/write indices differ, require the producer to write a
-        # dense logical region. Otherwise gaps or aliases in the producer
-        # could be hidden by a consumer-side broadcast.
-        if not (
-            write.normalize().is_contiguous()
-            or write.normalize_with_stride_order().is_contiguous()
-        ):
-            return False
-
-        return self.deps_match_normalized(
-            read, write
-        ) or self._fusable_read_after_broadcast(read, write)
-
-    @staticmethod
-    def _fusable_read_after_broadcast(read: MemoryDep, write: MemoryDep) -> bool:
-        """Match conservative broadcasted read forms.
-
-        This handles two nested-reduction dependency shapes:
-
-        - Pure broadcast dims absent from the read index:
-
-              read:  d1, {d0: 1024, d1: 16}
-              write: d0, {d0: 16}
-
-        - Same-rank expanded dims used through a quotient:
-
-              read:  32*d0 + FloorDiv(d1, 128), {d0: 128, d1: 4096}
-              write: 32*d0 + d1,                {d0: 128, d1: 32}
-
-        Producer-side broadcast and non-dense writes are rejected before this
-        helper, so these cases only relax consumer-side broadcasts.
-        """
-        # Strategy 1: remove read loop vars that do not affect the address,
-        # then compare the normalized access against the producer write.
-        read_vars = tuple(
-            var for var in read.var_names if var in read.index.free_symbols
-        )
-        if len(read_vars) != read.num_vars:
-            read_ranges = {var: read.ranges[var] for var in read_vars}
-            read = MemoryDep(
-                read.name,
-                read.index,
-                tuple(read_ranges),
-                tuple(read_ranges.values()),
-                read.mode,
-            )
-            if read.normalize() == write.normalize():
-                return True
-
-        if read.num_vars != write.num_vars:
-            return False
-
-        # Strategy 2: split a larger read axis into (write axis, tail), then
-        # simplify with the tail range. This only matches if the tail
-        # disappears from the final index.
-        sizevars = V.graph.sizevars
-        write_vars = tuple(
-            sympy.Symbol(f"_fusable_broadcast_{i}", integer=True, nonnegative=True)
-            for i in range(read.num_vars)
-        )
-        replacements: dict[sympy.Expr, sympy.Expr] = {}
-        tail_ranges: dict[sympy.Symbol, sympy.Expr] = {}
-        for read_var, read_size, write_var, write_size in zip(
-            read.var_names, read.size, write_vars, write.size
-        ):
-            if sizevars.statically_known_equals(read_size, write_size):
-                replacements[read_var] = write_var
-                continue
-
-            if not sizevars.statically_known_equals(
-                sympy.Mod(read_size, write_size), 0
-            ):
-                return False
-            factor = sizevars.simplify(FloorDiv(read_size, write_size))
-            if not sizevars.statically_known_gt(factor, 1):
-                return False
-
-            tail_var = sympy.Symbol(
-                f"_fusable_broadcast_tail_{len(tail_ranges)}",
-                integer=True,
-                nonnegative=True,
-            )
-            replacements[read_var] = write_var * factor + tail_var
-            tail_ranges[tail_var] = factor
-
-        if not tail_ranges:
-            return False
-
-        read_index = sizevars.simplify_with_ranges(
-            sympy_subs(read.index, replacements),
-            {**dict(zip(write_vars, write.size)), **tail_ranges},
-        )
-        write_index = sympy_subs(write.index, dict(zip(write.var_names, write_vars)))
-        return sizevars.statically_known_equals(read_index, write_index)
 
     # on tensors that are "empty" (i.e. with undefined values),
     # we relax the conditions for fusion and additionally allow matching a writing StarDep with any read dep.
@@ -9396,13 +9509,13 @@ class Scheduler:
             for i, read in enumerate(reads):
                 if i in matched_reads:
                     continue
-                if self.fusable_read_and_write(
-                    read.rename(self.mutation_renames),
-                    write,
-                    allow_index_equivalence=(
-                        index_equivalent_dep_names is not None
-                        and write_name in index_equivalent_dep_names
-                    ),
+                index_equivalent = (
+                    index_equivalent_dep_names is not None
+                    and write_name in index_equivalent_dep_names
+                    and self.mutation_renames.get(read.name, read.name) == write_name
+                )
+                if index_equivalent or self.fusable_read_and_write(
+                    read.rename(self.mutation_renames), write
                 ):
                     matched_reads.add(i)
                     score += max(
