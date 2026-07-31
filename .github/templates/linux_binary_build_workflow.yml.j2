@@ -190,7 +190,7 @@ jobs:
           set -euo pipefail
           suffix=""
           registry_host=""
-          if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries/* ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries* ]]; then
             # PR test run: the content-addressed image lives in ECR.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
             registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
@@ -205,11 +205,11 @@ jobs:
       # on the same PR. Log in (read-only) and wait for the content-addressed
       # tags to appear before the build/test jobs try to pull them.
       - name: Login to ECR
-        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
         uses: pytorch/pytorch/.github/actions/ecr-login@main
 {%- if ns.groups %}
       - name: Wait for content-addressed builder image in ECR
-        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
         env:
           DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
         shell: bash
@@ -360,10 +360,8 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      # ROCm/XPU are excluded from the content-addressed ECR path: their test
-      # runners have no ECR pull credentials, so they stay on the Docker Hub
-      # image (this matrix only carries rocm/xpu; cpu/cuda build inline above).
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: "!{{ docker_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "!{{ runner_prefix }}"
       runs_on: !{{ build_runs_on }}
