@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 from unittest import skipIf
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -19,6 +19,7 @@ from torch._inductor.scheduler import (
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
+    FusedNestedReductions,
     NestedReduction,
     Scheduler,
 )
@@ -166,6 +167,29 @@ class TestScheduler(TestCase):
         self.assertIn(node3, fused_nodes)
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
+
+    def test_nested_reduction_fuse_with_registers_mempool(self):
+        """fuse_with must register the rebuilt grouped stage's mempool."""
+        scheduler = object.__new__(Scheduler)
+        device = torch.device("cuda", 0)
+        node1 = self._mock_base_snode("node1", device)
+        node2 = self._mock_base_snode("node2", device)
+        other = self._mock_base_snode("other", device)
+        new_node2 = self._mock_base_snode("new_node2", device)
+        backend = Mock()
+        backend.fuse.return_value = new_node2
+        scheduler.get_backend = Mock(return_value=backend)
+        scheduler.node_to_mempool = {node1: (7, 0), node2: (7, 0), other: (7, 0)}
+
+        fnr = object.__new__(FusedNestedReductions)
+        fnr.scheduler = scheduler
+        fnr.node1 = node1
+        fnr.node2 = node2
+        with patch.object(FusedNestedReductions, "__init__", return_value=None):
+            FusedNestedReductions.fuse_with(fnr, other)
+
+        backend.fuse.assert_called_once_with(node2, other)
+        self.assertEqual(scheduler.node_to_mempool[new_node2], (7, 0))
 
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):

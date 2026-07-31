@@ -3217,9 +3217,7 @@ class SIMDScheduling(BaseScheduling):
             )
             local_reduction_source: _IterationSpace = (
                 self._local_reduction_iteration_values(
-                    grouped_reduction_body,
-                    group_reduction_vars.iter_remapped,
-                    group_reduction_vars.reduce_remapped,
+                    grouped_reduction_body, group_reduction_vars
                 )
             )
             parent_full_source: _IterationSpace = layout.parent_full_iteration_values(
@@ -3251,8 +3249,7 @@ class SIMDScheduling(BaseScheduling):
                 grouped_schedule,
                 grouped_reduction,
                 layout,
-                group_reduction_vars.iter_remapped,
-                group_reduction_vars.reduce_remapped,
+                group_reduction_vars,
                 local_reduction_source,
                 parent_full_source,
                 pointwise_domain_by_node,
@@ -3324,8 +3321,7 @@ class SIMDScheduling(BaseScheduling):
         grouped_schedule,
         grouped_reduction: scheduler.SchedulerNode,
         layout: _GroupedReductionLayout,
-        iter_remapped,
-        reduce_remapped,
+        group_reduction_vars: _GroupedReductionVars,
         local_reduction_source: _IterationSpace,
         parent_full_source: _IterationSpace,
         pointwise_domain_by_node: dict[
@@ -3351,7 +3347,7 @@ class SIMDScheduling(BaseScheduling):
                 grouped_reduction_body.var_ranges[v]
                 for v in grouped_reduction_body.iter_vars
             ],
-            iter_remapped,
+            group_reduction_vars.iter_remapped,
         )
         parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
         for sn in grouped_schedule:
@@ -3537,12 +3533,15 @@ class SIMDScheduling(BaseScheduling):
     def _local_reduction_iteration_values(
         self,
         body,
-        iter_remapped,
-        reduce_remapped,
+        group_reduction_vars: _GroupedReductionVars,
     ) -> _IterationSpace:
         body_vars = [*body.iter_vars, *body.reduce_vars]
         groups = [body.var_ranges[v] for v in body_vars]
-        return _IterationSpace(groups, [*iter_remapped, *reduce_remapped])
+        remapped = [
+            *group_reduction_vars.iter_remapped,
+            *group_reduction_vars.reduce_remapped,
+        ]
+        return _IterationSpace(groups, remapped)
 
     def _codegen_remapped_pointwise(
         self,

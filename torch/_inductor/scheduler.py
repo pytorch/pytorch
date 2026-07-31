@@ -3889,6 +3889,11 @@ class FusedNestedReductions(FusedSchedulerNode):
         device = self.node2.get_device()
         backend = self.scheduler.get_backend(device)
         new_node2 = backend.fuse(self.node2, other)
+        # The rebuilt grouped stage is a new node; register its mempool so the
+        # next round's _can_fuse gate does not reject a legal same-pool fusion.
+        self.scheduler.node_to_mempool[new_node2] = self.scheduler.node_to_mempool.get(
+            self.node2
+        )
         return FusedNestedReductions(self.node1, new_node2)
 
 
