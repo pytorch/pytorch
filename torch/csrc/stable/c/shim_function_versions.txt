@@ -136,3 +136,5 @@ aoti_torch_cuda__sparse_semi_structured_mm: TORCH_VERSION_2_14_0
 aoti_torch_cuda_bmm_dtype_out: TORCH_VERSION_2_14_0
 aoti_torch_xpu_bmm_dtype_out: TORCH_VERSION_2_14_0
 torch_has_storage: TORCH_VERSION_2_14_0
+torch_tensor_from_pyobject: TORCH_VERSION_2_14_0
+torch_tensor_to_pyobject: TORCH_VERSION_2_14_0

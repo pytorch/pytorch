@@ -26,7 +26,6 @@ import contextlib
 import dataclasses
 import logging
 import os
-import sys
 from functools import partial
 from typing import Any, cast, Protocol, TYPE_CHECKING, TypeAlias
 
@@ -827,9 +826,6 @@ class CompiledFxGraph(OutputCode):
                             return self.current_callable(inputs)
                     else:
                         return self.current_callable(inputs)
-                except:
-                    print(self.source_code, file=sys.stderr)
-                    raise
                 finally:
                     get_runtime_metrics_context().finish()
                     if has_active_autotune_cache_bundler:
