@@ -22,10 +22,12 @@ def get_graph_hash(tensors: Sequence[torch.Tensor]) -> str:
     return torch._C._lazy._get_graph_hash(list(tensors))
 
 
-def run_cached_graph(hash_str: str, graph_inputs: list[object]) -> list[torch.Tensor]:
+def run_cached_graph(
+    hash_str: str, graph_inputs: Sequence[object]
+) -> list[torch.Tensor]:
     """Running the cached computation graph with the given inputs
 
     TODO: This API is currently ts backend specific. We are working on
     generalizing it to all backends including XLA.
     """
-    return torch._C._lazy_ts_backend._run_cached_graph(hash_str, graph_inputs)
+    return torch._C._lazy_ts_backend._run_cached_graph(hash_str, list(graph_inputs))

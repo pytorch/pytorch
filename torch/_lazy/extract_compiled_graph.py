@@ -2,8 +2,8 @@ import copy
 import dataclasses
 import itertools
 import os
-from collections.abc import Callable, Iterable, Sequence
-from typing import cast
+from collections.abc import Iterable, Mapping, Sequence
+from typing import cast, Protocol, TypeAlias, TypeVar
 
 import torch
 import torch._lazy as lazy
@@ -11,9 +11,20 @@ import torch._lazy.metrics as metrics
 from torch import fx
 from torch._lazy import computation, debug as lazy_debug
 from torch._lazy.tensor_factory_functions import tensor_factory_functions
+from torch.fx.node import Argument
 
 
 debug = os.environ.get("debug_extract_compiled_graph") is not None
+
+_T = TypeVar("_T")
+
+# A TorchScript graph-input IValue: concretely a const tensor, a device-data
+# node, or a runtime argument, none of which share a useful static type here.
+_IValue: TypeAlias = object
+
+
+class _CompiledFn(Protocol):
+    def __call__(self, *args: torch.Tensor) -> Sequence[torch.Tensor]: ...
 
 
 @dataclasses.dataclass
@@ -35,11 +46,11 @@ class GraphInputMatcher:
     # most likely const tensors and we can get its content from graph_input_tensors
     # Category 2: those whose id are found in tensor_id_to_arg_idx. We should get
     #  the tensor from method arguments
-    graph_input_ivalues: list[object]
+    graph_input_ivalues: list[_IValue]
 
     # get the real graph input tensors
-    def __call__(self, args: Sequence[object]) -> list[object]:
-        real_input = []
+    def __call__(self, args: Sequence[object]) -> list[_IValue]:
+        real_input: list[_IValue] = []
         for tensor_id, traced_ivalue in zip(
             self.graph_input_tensor_ids, self.graph_input_ivalues
         ):
@@ -70,7 +81,7 @@ class ReturnValueHandler:
     to duplicate the eager tensors later.
     """
 
-    def __init__(self, lazy_out_list: Sequence[torch.Tensor]) -> None:
+    def __init__(self, lazy_out_list: Sequence[object]) -> None:
         self.index: list[list[int]] = []
         self.total_count = len(lazy_out_list)
 
@@ -84,10 +95,8 @@ class ReturnValueHandler:
                 self.index.append([dup_idx])
                 tensor_id_to_idx[id(lazy_tensor)] = uniq_idx
 
-    def duplicate_eager_tensors(
-        self, eager_tensor_list: Sequence[torch.Tensor]
-    ) -> list[torch.Tensor]:
-        duplicated_list: list[torch.Tensor | None] = [None] * self.total_count
+    def duplicate_eager_tensors(self, eager_tensor_list: Sequence[_T]) -> list[_T]:
+        duplicated_list: list[_T | None] = [None] * self.total_count
         if len(eager_tensor_list) != len(self.index):
             raise AssertionError(
                 f"eager_tensor_list length {len(eager_tensor_list)} != index length {len(self.index)}"
@@ -96,7 +105,8 @@ class ReturnValueHandler:
         for uniq_idx, eager_tensor in enumerate(eager_tensor_list):
             for dup_idx in self.index[uniq_idx]:
                 duplicated_list[dup_idx] = eager_tensor
-        return cast(list[torch.Tensor], duplicated_list)
+        # every slot is filled: self.index partitions range(total_count).
+        return cast(list[_T], duplicated_list)
 
 
 def force_lazy_device(model: fx.GraphModule) -> None:
@@ -106,12 +116,12 @@ def force_lazy_device(model: fx.GraphModule) -> None:
     cause crash. This method overwrite those eager device to lazy device.
     """
 
-    def tolazydevice(dev: object) -> object:
+    def tolazydevice(dev: _T) -> _T:
         if isinstance(dev, torch.device):
-            return torch.device("lazy", index=dev.index)
+            return cast(_T, torch.device("lazy", index=dev.index))
         return dev
 
-    def hasDeviceArg(args: Iterable[object], kwargs: dict[str, object]) -> bool:
+    def hasDeviceArg(args: Iterable[Argument], kwargs: Mapping[str, Argument]) -> bool:
         return any(
             isinstance(arg, torch.device)
             for arg in itertools.chain(args, kwargs.values())
@@ -156,7 +166,7 @@ def get_fallback_ops() -> list[str]:
 
 def extract_compiled_graph(
     model: fx.GraphModule, example_inputs: Sequence[torch.Tensor]
-) -> Callable[..., Sequence[torch.Tensor]]:
+) -> _CompiledFn:
     """
     Optimize an eager model with LTC and returns a wrapper to execute the
     compiled graph directly without retracing. It depends on other mechanisms

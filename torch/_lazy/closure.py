@@ -2,8 +2,13 @@ import os
 import threading
 from collections.abc import Callable, Iterable
 from queue import Empty as EmptyQueue, Queue
+from typing import overload
+from typing_extensions import TypeVarTuple, Unpack
 
 from torch._lazy.device_context import DeviceContext, get_device_context
+
+
+_Ts = TypeVarTuple("_Ts")
 
 
 class ClosureHandler:
@@ -83,6 +88,18 @@ class AsyncClosureHandler(ClosureHandler):
                     self.start_event_loop()
 
 
+@overload
+def add_step_closure(
+    closure: Callable[[], object],
+    args: tuple[()] = (),
+    run_async: bool = False,
+) -> None: ...
+@overload
+def add_step_closure(
+    closure: Callable[[Unpack[_Ts]], object],
+    args: tuple[Unpack[_Ts]],
+    run_async: bool = False,
+) -> None: ...
 def add_step_closure(
     closure: Callable[..., object],
     args: tuple[object, ...] = (),
