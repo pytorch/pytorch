@@ -586,6 +586,20 @@ def try_get_name(x):
     return x.get_name() if isinstance(x, Buffer) else None
 
 
+# Note [Data-independent CSE signatures]
+# Post-grad CSE analysis assigns DATA_INDEPENDENT_CSE_TOKEN only to FX nodes
+# that do not depend on tensor data. CSE-equivalent FX nodes share a token and
+# post-grad sets HAS_DATA_INDEPENDENT_CSE on the GraphModule. GraphLowering
+# copies that bit to has_data_independent_cse. StorageBox.realize uses it to
+# convert the producer tokens into the
+# DATA_INDEPENDENT_CSE_SIGNATURE annotation only when the IR operation has no
+# data reads. The scheduler consumes only that buffer annotation; tokens are
+# graph-local and must never be compared across GraphModules.
+DATA_INDEPENDENT_CSE_TOKEN = "inductor_data_independent_cse_token"
+DATA_INDEPENDENT_CSE_SIGNATURE = "inductor_data_independent_cse_signature"
+HAS_DATA_INDEPENDENT_CSE = "inductor_has_data_independent_cse"
+
+
 class IRNode:
     """Base class for all intermediate representation (IR) nodes in TorchInductor.
 
@@ -10611,6 +10625,16 @@ class StorageBox(MutableBox):
 
         if not isinstance(self.data, (Pointwise, Reduction, Scan, Sort)):
             raise AssertionError(type(self.data))
+        cse_signature = None
+        if V.graph.has_data_independent_cse and self.data.num_reads() == 0:
+            cse_tokens = OrderedSet(
+                origin.meta[DATA_INDEPENDENT_CSE_TOKEN]
+                for origin in self.origins
+                if isinstance(origin, torch.fx.Node)
+                and DATA_INDEPENDENT_CSE_TOKEN in origin.meta
+            )
+            if cse_tokens:
+                cse_signature = tuple(sorted(cse_tokens))
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         device = self.data.get_device()
@@ -10629,6 +10653,8 @@ class StorageBox(MutableBox):
         )
         self.data.name = V.graph.register_buffer(self.data)
         V.graph.register_operation(self.data)
+        if cse_signature is not None:
+            self.data.annotations[DATA_INDEPENDENT_CSE_SIGNATURE] = cse_signature
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback
