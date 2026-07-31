@@ -20,7 +20,7 @@ from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import FakeTensorMode, make_fake_mode
 from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
@@ -278,7 +278,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                 boxed_forward_device_index=BoxedDeviceIndex(0),
             )
 
-            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+            context = torch._guards.TracingContext(make_fake_mode(shape_env=ShapeEnv()))
             with torch._guards.tracing(context):
                 compiled_fn = entry.wrap_post_compile(
                     [], entry.sanitized_aot_config, fx_config
@@ -455,7 +455,7 @@ def _resolve_fake_mode(
                     'when `dynamic_shapes="from_example_inputs"`.'
                 )
             return fake_mode
-        return FakeTensorMode(shape_env=ShapeEnv())
+        return make_fake_mode(shape_env=ShapeEnv())
     elif fake_mode is not None:
         raise ValueError(
             "standalone_compile only supports passing `fake_mode` when "
@@ -501,7 +501,7 @@ def _resolve_fake_mode(
                 if maybe_fake_mode is not None:
                     return maybe_fake_mode
 
-        return FakeTensorMode(shape_env=ShapeEnv())
+        return make_fake_mode(shape_env=ShapeEnv())
     else:
         raise ValueError(
             f"standalone_compile got unsupported `dynamic_shapes` value: dynamic_shapes={dynamic_shapes}."

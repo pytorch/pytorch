@@ -78,7 +78,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensor, FakeTensorMode
+from .._subclasses import FakeTensor, FakeTensorMode, make_fake_mode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
@@ -2950,7 +2950,7 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
         if "get_decomp_fn" in _fn_params:
             kwargs["get_decomp_fn"] = get_decomp_fn
 
-        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
+        with torch._guards.tracing(None), unset_fake_temporarily(), make_fake_mode():
             result = fn(**kwargs)
 
         # clear view matches encountered during tracing
