@@ -1161,9 +1161,16 @@ class TestCuptiRecords(TestCase):
                 "host_fn_addr": i64(0x1234),
             },
         }
-        deps = {gnid_e: [gnid_a], gnid_h: [gnid_e]}  # event waits on A; host waits on event
-        event_id, corr_to_eids, wait_off, wait_ids = _assign_render_event_ids(columns, deps)
-        result = _build_render_stages(columns, 1, {}, [], event_id, (wait_off, wait_ids))
+        deps = {
+            gnid_e: [gnid_a],
+            gnid_h: [gnid_e],
+        }  # event waits on A; host waits on event
+        event_id, corr_to_eids, wait_off, wait_ids = _assign_render_event_ids(
+            columns, deps
+        )
+        result = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
         self.assertIsNotNone(result)
         specs, _gfx, stage_cols, _extra, _launch, _tables, _panel, meta = result
         name_by_iid = {iid: name for iid, name, _cat in specs}
@@ -1181,7 +1188,9 @@ class TestCuptiRecords(TestCase):
 
         self.assertEqual(waits(0), [])  # kernel A is the root
         self.assertEqual(waits(1), [1])  # event node waits on A (event_id 1)
-        self.assertEqual(waits(2), [2])  # host node waits on the event node (event_id 2)
+        self.assertEqual(
+            waits(2), [2]
+        )  # host node waits on the event node (event_id 2)
         # Host callback name/address ride the per-row spread blob (row 2).
         meta_off, meta_bytes = meta
         blob = bytes(meta_bytes[meta_off[2] : meta_off[3]])
