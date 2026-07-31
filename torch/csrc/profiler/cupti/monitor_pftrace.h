@@ -244,6 +244,9 @@ struct PftraceGpuCounter {
 // baseTimeNanoseconds): the packet timestamps are already absolute (base_ns +
 // offset), and a ClockSnapshot anchors them to REALTIME at base_ns so the wall-
 // clock base is recoverable -- the native counterpart of baseTimeNanoseconds.
+//
+// compression_level is the gzip level applied to the serialized trace (0-9;
+// 1 = fast, the default). Invalid levels fall back to uncompressed bytes.
 TORCH_API std::string cuptiMonitorEncodePftrace(
     int64_t base_ns,
     const std::vector<PftraceTrack>& tracks,
@@ -253,6 +256,7 @@ TORCH_API std::string cuptiMonitorEncodePftrace(
     const std::vector<PftraceGpuSpec>& gpu_specs,
     const std::vector<PftraceGfxContext>& gfx_contexts,
     const PftraceRenderStages& stages,
-    const PftraceGpuCounter& counters);
+    const PftraceGpuCounter& counters,
+    int compression_level);
 
 } // namespace torch::profiler::impl

@@ -281,7 +281,8 @@ void initCuptiMonitorBindings(py::module& m) {
          const py::list& category_table,
          const py::list& groups,
          const py::object& render,
-         const py::object& counters) -> py::bytes {
+         const py::object& counters,
+         int compression_level) -> py::bytes {
         using torch::profiler::impl::PftraceGfxContext;
         using torch::profiler::impl::PftraceGpuCounter;
         using torch::profiler::impl::PftraceGpuSpec;
@@ -555,7 +556,8 @@ void initCuptiMonitorBindings(py::module& m) {
               spec_vec,
               ctx_vec,
               stages,
-              gpu_counters);
+              gpu_counters,
+              compression_level);
         }
         return py::bytes(out);
       },
@@ -565,7 +567,8 @@ void initCuptiMonitorBindings(py::module& m) {
       py::arg("category_table"),
       py::arg("groups"),
       py::arg("render") = py::none(),
-      py::arg("counters") = py::none());
+      py::arg("counters") = py::none(),
+      py::arg("compression_level") = 1);
 }
 
 } // namespace torch::profiler::impl
