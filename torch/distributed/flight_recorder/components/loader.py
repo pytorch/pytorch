@@ -11,6 +11,8 @@ import pickle
 import re
 import time
 from collections import defaultdict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
@@ -72,10 +74,19 @@ def _determine_prefix(files: list[str]) -> str:
         )
 
 
-def read_dir(args: argparse.Namespace) -> tuple[dict[str, dict[str, Any]], str]:
-    was_gc_enabled = gc.isenabled()
+@contextmanager
+def _disable_gc() -> Iterator[None]:
+    was_enabled = gc.isenabled()
     gc.disable()
     try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def read_dir(args: argparse.Namespace) -> tuple[dict[str, dict[str, Any]], str]:
+    with _disable_gc():
         prefix = args.prefix
         details = {}
         t0 = time.time()
@@ -100,6 +111,3 @@ def read_dir(args: argparse.Namespace) -> tuple[dict[str, dict[str, Any]], str]:
             )
         logger.debug("loaded %s files in %ss", filecount, tb - t0)
         return details, version
-    finally:
-        if was_gc_enabled:
-            gc.enable()
