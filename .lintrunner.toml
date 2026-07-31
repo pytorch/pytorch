@@ -303,7 +303,7 @@ init_command = [
 command = [
     'bash',
     '-lc',
-    'shopt -s failglob; python3 tools/linter/adapters/clangtidy_linter.py --binary=.lintbin/clangtidy --build_dir=./build --check-unused-parameter -- build/aten/src/ATen/Register*.cpp'
+    'shopt -s failglob; python3 tools/linter/adapters/clangtidy_linter.py --binary=.lintbin/clang-tidy --build_dir=./build --check-unused-parameter -- build/aten/src/ATen/Register*.cpp'
 ]
 
 [[linter]]
