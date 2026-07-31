@@ -49,7 +49,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties, InductorMeta
+from ..runtime.hints import DeviceProperties, InductorMeta, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -512,6 +512,64 @@ class NodeInfo(NamedTuple):
     rnumel: Any
     features: SIMDKernelFeatures
     is_persistent_reduction: bool
+
+
+_COMBO_PRECOMPILE_LAUNCH_CREDIT_US = 8.0
+_COMBO_PRECOMPILE_MIN_GAIN = 0.03
+
+
+def _combo_kernel_min_waves(
+    numel_hints: dict[str, int], device_props: DeviceProperties
+) -> int | None:
+    max_threads = device_props.max_threads_per_multi_processor
+    warp_size = device_props.warp_size
+    if (
+        not numel_hints
+        or not device_props.multi_processor_count
+        or not max_threads
+        or not warp_size
+    ):
+        return None
+
+    max_blocks_per_mp = max_threads // warp_size
+    if not max_blocks_per_mp:
+        return None
+
+    min_blocks = 1
+    for prefix, numel in numel_hints.items():
+        max_block = TRITON_MAX_BLOCK.get(prefix.upper())
+        if not max_block or numel <= 0:
+            return None
+        min_blocks *= (numel + max_block - 1) // max_block
+
+    max_resident_blocks = device_props.multi_processor_count * max_blocks_per_mp
+    return (min_blocks + max_resident_blocks - 1) // max_resident_blocks
+
+
+def _combo_kernel_may_exceed_precompile_threshold(
+    member_costs: list[tuple[float, int]],
+) -> bool:
+    """Return whether the modeled gain may reach the precompile threshold.
+
+    For estimated runtime ``E`` and minimum wave count ``W``, the model credits
+    fusion with at most ``E / W`` for the member's final wave. It also credits
+    one launch for every removed kernel. The comparison below is the rearranged
+    form of ``launches + sum(E / W) < min_gain * sum(E)``.
+    """
+    if len(member_costs) < 2:
+        return True
+
+    margin_us = 0.0
+    for estimated_us, min_waves in member_costs:
+        if estimated_us <= 0 or not math.isfinite(estimated_us) or min_waves <= 0:
+            return True
+        tail_fraction = 1 / min_waves
+        if tail_fraction >= _COMBO_PRECOMPILE_MIN_GAIN:
+            return True
+        margin_us += (_COMBO_PRECOMPILE_MIN_GAIN - tail_fraction) * estimated_us
+
+    launch_credit_us = (len(member_costs) - 1) * _COMBO_PRECOMPILE_LAUNCH_CREDIT_US
+    return margin_us <= launch_credit_us
 
 
 class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
@@ -3671,6 +3729,43 @@ class SIMDScheduling(BaseScheduling):
             num_stages=int(winner_cfg.num_stages),
         )
 
+    def _precompile_combo_has_potential(
+        self, group: list[Any], node_schedule_map: dict[Any, NodeInfo]
+    ) -> bool:
+        if not config.combo_kernel_precompile_screen:
+            return True
+
+        device_props = DeviceProperties.create(V.graph.get_current_device_or_throw())
+        if device_props.type != "cuda":
+            return True
+        member_costs: list[tuple[float, int]] = []
+        for pn in group:
+            numel_hints: dict[str, int] = {}
+            for prefix, numel in node_schedule_map[pn].tiling.items():
+                if prefix_is_reduction(prefix):
+                    continue
+                numel_hint = V.graph.sizevars.optimization_hint(numel, fallback=0)
+                if not numel_hint or not V.graph.sizevars.statically_known_equals(
+                    numel, numel_hint
+                ):
+                    return True
+                numel_hints[prefix] = int(numel_hint)
+
+            min_waves = _combo_kernel_min_waves(numel_hints, device_props)
+            if min_waves is None:
+                return True
+            member_costs.append((pn.get_estimated_runtime() * 1e3, min_waves))
+
+        may_exceed = _combo_kernel_may_exceed_precompile_threshold(member_costs)
+        if not may_exceed:
+            counters["inductor"]["combo_precompile_screened"] += len(group)
+            log.debug(
+                "ComboKernels: precompile screen rejected %d sub-kernels with costs %s",
+                len(group),
+                member_costs,
+            )
+        return may_exceed
+
     def _autotune_subkernels_compile_time(
         self, group: list[Any], node_schedule_map: dict[Any, NodeInfo]
     ) -> list[Any | None]:
@@ -3996,13 +4091,19 @@ class SIMDScheduling(BaseScheduling):
                     # Deterministic mode falls through to no_bench_mode below: it bans timing-based
                     # benchmarking, so we pick block sizes from heuristics instead of autotuning.
                     group = list(node_group)
-                    tuned = self._autotune_subkernels_compile_time(
-                        group, node_schedule_map
-                    )
-                    # A None winner means its compile/benchmark failed; carve it out to
-                    # run standalone rather than stitch a bogus config or fail compile.
-                    fusable = [(pn, w) for pn, w in zip(group, tuned) if w is not None]
-                    carve_out = [pn for pn, w in zip(group, tuned) if w is None]
+                    if self._precompile_combo_has_potential(group, node_schedule_map):
+                        tuned = self._autotune_subkernels_compile_time(
+                            group, node_schedule_map
+                        )
+                        # A None winner means its compile/benchmark failed; carve it out to
+                        # run standalone rather than stitch a bogus config or fail compile.
+                        fusable = [
+                            (pn, w) for pn, w in zip(group, tuned) if w is not None
+                        ]
+                        carve_out = [pn for pn, w in zip(group, tuned) if w is None]
+                    else:
+                        fusable = []
+                        carve_out = group
                     if len(fusable) >= 2:
                         fusable_pns = [pn for pn, _ in fusable]
                         winners = [w for _, w in fusable]

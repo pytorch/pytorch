@@ -2450,6 +2450,89 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         torch._inductor.metrics.reset()
         super().tearDown()
 
+    def test_precompile_screen_cost_model(self):
+        from torch._inductor.codegen.simd import (
+            _combo_kernel_may_exceed_precompile_threshold,
+            _combo_kernel_min_waves,
+        )
+        from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
+
+        props = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            max_threads_per_multi_processor=32,
+            warp_size=32,
+        )
+        numels = {
+            "x": TRITON_MAX_BLOCK["X"] + 1,
+            "y": TRITON_MAX_BLOCK["Y"] + 1,
+        }
+        self.assertEqual(_combo_kernel_min_waves(numels, props), 4)
+        self.assertIsNone(
+            _combo_kernel_min_waves(
+                numels, props._replace(max_threads_per_multi_processor=None)
+            )
+        )
+
+        # The model credits one average final wave per member.
+        self.assertFalse(
+            _combo_kernel_may_exceed_precompile_threshold([(1000.0, 64)] * 2)
+        )
+        self.assertTrue(
+            _combo_kernel_may_exceed_precompile_threshold([(1000.0, 32)] * 2)
+        )
+        self.assertTrue(
+            _combo_kernel_may_exceed_precompile_threshold([(1000.0, 100), (0.0, 100)])
+        )
+
+    @requires_cuda_and_triton
+    @skipIfRocm
+    @parametrize("estimated_ms, expected_screened", [(1.0, 2), (0.1, 0)])
+    def test_precompile_screen(self, estimated_ms, expected_screened):
+        from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
+        from torch._inductor.scheduler import BaseSchedulerNode
+
+        def fn(a, b):
+            return a + 1, b * 2
+
+        numel = TRITON_MAX_BLOCK["X"] * 64
+        inputs = [torch.randn(numel, device=GPU_TYPE) for _ in range(2)]
+        real_props = DeviceProperties.create(torch.device(GPU_TYPE))
+        warp_size = real_props.warp_size_or_default
+        test_props = real_props._replace(
+            multi_processor_count=1,
+            max_threads_per_multi_processor=warp_size,
+            warp_size=warp_size,
+        )
+        counters.clear()
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(combo_kernel_precompile_screen=True),
+            patch.object(
+                BaseSchedulerNode,
+                "get_estimated_runtime",
+                return_value=estimated_ms,
+            ),
+            patch.object(DeviceProperties, "create", return_value=test_props),
+        ):
+            out, (code,) = run_and_get_code(torch.compile(fn), *inputs)
+
+        self.assertEqual(out, fn(*inputs))
+        self.assertEqual(
+            counters["inductor"]["combo_precompile_screened"], expected_screened
+        )
+        processed = (
+            counters["inductor"]["combo_subkernel_autotune"]
+            + counters["inductor"]["combo_subkernel_autotune_cached"]
+        )
+        self.assertEqual(processed, 0 if expected_screened else 2)
+        if expected_screened:
+            FileCheck().check_not("'num_kernels': 2").run(code)
+        else:
+            FileCheck().check("'num_kernels': 2").run(code)
+
     @requires_gpu_and_triton
     @parametrize("mode", ["default", "cdt"])
     def test_compile_time_autotune(self, mode):
@@ -2560,23 +2643,49 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_dynamic_shapes(self):
+        from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
+        from torch._inductor.scheduler import BaseSchedulerNode
+
         def f(a, b):
             return a + 1.0, b * 2.0
 
-        a = torch.randn(4096, device=GPU_TYPE)
-        b = torch.randn(6144, device=GPU_TYPE)
+        block = TRITON_MAX_BLOCK["X"]
+        a = torch.randn(block * 64, device=GPU_TYPE)
+        b = torch.randn(block * 80, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 0)
+        real_props = DeviceProperties.create(torch.device(GPU_TYPE))
+        warp_size = real_props.warp_size_or_default
+        test_props = real_props._replace(
+            multi_processor_count=1,
+            max_threads_per_multi_processor=warp_size,
+            warp_size=warp_size,
+        )
         counters.clear()
-        with fresh_cache():
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(combo_kernel_precompile_screen=True),
+            patch.object(
+                BaseSchedulerNode,
+                "get_estimated_runtime",
+                return_value=1.0,
+            ),
+            patch.object(DeviceProperties, "create", return_value=test_props),
+        ):
             fn_c = torch.compile(f, dynamic=True)
             out = fn_c(a, b)
         self.assertEqual(out, f(a, b))
         # recompile-free on new dynamic sizes
-        a2 = torch.randn(5000, device=GPU_TYPE)
-        b2 = torch.randn(7000, device=GPU_TYPE)
+        a2 = torch.randn(block * 64 + 17, device=GPU_TYPE)
+        b2 = torch.randn(block * 80 + 33, device=GPU_TYPE)
         self.assertEqual(fn_c(a2, b2), f(a2, b2))
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+        self.assertEqual(counters["inductor"]["combo_precompile_screened"], 0)
+        processed = (
+            counters["inductor"]["combo_subkernel_autotune"]
+            + counters["inductor"]["combo_subkernel_autotune_cached"]
+        )
+        self.assertEqual(processed, 2)
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_sort_forces_persistent(self):
