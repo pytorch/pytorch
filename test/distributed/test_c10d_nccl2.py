@@ -57,6 +57,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
 
+
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
 
