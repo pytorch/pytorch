@@ -679,7 +679,7 @@ def _attach_event_node_ids(columns: dict[str, dict[str, Any]], recorder: Any) ->
     ce = columns.get("cuda_event")
     if ce is None or not len(ce["event_id"]):
         return
-    from torch.profiler._cupti._event_nodes import learn_and_resolve_window
+    from torch.profiler._cupti._event_nodes import resolve_window
 
     corr_exec_pairs: list[tuple[int, int]] = []
     for kind_str in ("kernel", "gpu_memcpy", "gpu_memset"):
@@ -689,13 +689,9 @@ def _attach_event_node_ids(columns: dict[str, dict[str, Any]], recorder: Any) ->
                 zip(c["correlation_id"].tolist(), c["graph_node_id"].tolist())
             )
     event_rows = list(
-        zip(
-            ce["correlation_id"].tolist(),
-            ce["cuda_event_sync_id"].tolist(),
-            ce["event_id"].tolist(),
-        )
+        zip(ce["correlation_id"].tolist(), ce["cuda_event_sync_id"].tolist())
     )
-    resolved = learn_and_resolve_window(recorder, corr_exec_pairs, event_rows)
+    resolved = resolve_window(recorder, corr_exec_pairs, event_rows)
     try:
         from torch.cuda._graph_annotations import get_kernel_annotations
 

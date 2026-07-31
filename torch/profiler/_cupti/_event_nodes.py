@@ -4,25 +4,26 @@
 CUPTI emits a ``CUDA_EVENT`` activity record for each event-record node executed in a
 graph (e.g. the nodes NCCL inserts under ``NCCL_GRAPH_MIXING_SUPPORT=1``), but the record
 carries only an ``event_id`` (keyed to the CUDA event object) -- never a ``graph_node_id``,
-so it cannot be joined to the graph node the way kernel/memcpy/memset records are.
+so it cannot be joined to the graph node the way kernel/memcpy/memset records are. There is
+also no API to query a CUevent's ``event_id``, and the events are owned by whoever built the
+graph (NCCL), so eagerly re-recording them to learn a mapping is unsafe.
 
-There is no API to query a CUevent's ``event_id``, and the events are owned by whoever built
-the graph (NCCL), so eagerly re-recording them to learn the mapping is unsafe. Instead this
-learns the ``{event_id -> graph_node_id}`` map PASSIVELY from records that already flow:
+The join is instead POSITIONAL, per launch, from records that already flow:
 
   * A graph launch's graphed kernel/memset records share the launch's ``correlation_id`` and
     carry the exec graph id in the upper 32 bits of their ``graph_node_id``. So per launch,
     ``correlation_id -> exec_graph_id``.
   * The same launch's ``CUDA_EVENT`` records share that ``correlation_id`` and appear in
     execution order (increasing ``cuda_event_sync_id``).
-  * :func:`arm_event_node_recording` records, at graph instantiate, each graph's ordered
-    ``event_record`` node ids (from ``get_graph_data()``).
+  * :func:`arm_event_node_recording` records, at graph instantiate, each graph's ``event_record``
+    node ids in execution order (from ``get_graph_data()``).
 
-Matching the k-th ``CUDA_EVENT`` record of a launch to the k-th ordered event node yields
-``event_id -> graph_node_id``. ``event_id`` is object-keyed and stable, so one unambiguous
-launch teaches it for the whole run. Learning is conservative: it fires only when a launch's
-event-record count matches the graph's and the graph's event nodes are totally ordered by
-dependency depth -- otherwise the launch is skipped, never guessed.
+The k-th ``CUDA_EVENT`` record of a launch (by sync id) is the k-th ordered event node of that
+launch's graph. Resolution keys on POSITION, never on ``event_id``: a producer like NCCL/FSDP
+recycles one ``cudaEvent_t`` across many event-record nodes, so ``event_id`` is stable but not
+unique to a node -- keying on it would collapse every recycled record onto a single node. A
+launch is resolved only when its event-record count matches the graph's ordered node count and
+that graph is totally ordered; otherwise its records resolve to ``None``, never guessed.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from typing import Any
 
 def order_event_nodes(nodes: list[dict[str, Any]]) -> list[int] | None:
     """Return one graph's ``event_record`` node ``tools_id``s in execution order, or ``None``
-    when they are not totally ordered (so the caller must not learn from that graph).
+    when they are not totally ordered (so the caller must not resolve against that graph).
 
     ``nodes`` is ``get_graph_data()["nodes"]``. Order is by longest-dependency-path depth over
     the whole DAG; distinct depths for every event node is the (conservative) proxy for "these
@@ -55,22 +56,21 @@ def order_event_nodes(nodes: list[dict[str, Any]]) -> list[int] | None:
         return []
     depths = [node_depth(i) for i in event_idx]
     if len(set(depths)) != len(event_idx):
-        return None  # not totally ordered -> ambiguous, refuse to learn
+        return None  # not totally ordered -> ambiguous, refuse to resolve
     return [nodes[i]["tools_id"] for i in sorted(event_idx, key=lambda i: depth[i])]
 
 
 class _EventNodeRecorder:
-    """Process-global recorder + learned map for CUDA-graph event-record nodes.
+    """Process-global record of each CUDA graph's ordered event-record nodes.
 
     Armed once via :meth:`arm` (before graphs are captured), like the graph-dependency
     recorder. :attr:`graph_event_nodes` maps ``exec_graph_id -> ordered event-node tools_ids``
-    (``None`` for graphs whose event nodes are not totally ordered). :attr:`event_id_to_node`
-    is the learned ``event_id -> graph_node_id`` map, filled lazily from launches.
+    (``None`` for graphs whose event nodes are not totally ordered). Resolution is positional
+    against this map (see :func:`resolve_window`); there is no learned ``event_id`` map.
     """
 
     def __init__(self) -> None:
         self.graph_event_nodes: dict[int, list[int] | None] = {}
-        self.event_id_to_node: dict[int, int] = {}
         self._handle: Any = None
 
     def arm(self) -> None:
@@ -93,62 +93,54 @@ class _EventNodeRecorder:
         ordered = order_event_nodes(nodes)
         if ordered == []:  # no event nodes -> nothing to track
             return
-        # ordered is a list (learnable) or None (event nodes present but not totally ordered,
-        # so we refuse to learn from this graph). Track the exec id for destroy-time purge.
+        # ordered is a list (resolvable) or None (event nodes present but not totally ordered,
+        # so we refuse to resolve against this graph). Track the exec id for destroy-time purge.
         self.graph_event_nodes[exec_graph_id] = ordered
         torch_cuda_graph._recorded_exec_ids.add(exec_graph_id)
 
     def purge_exec_ids(self, exec_ids: set[int]) -> None:
-        """Drop learned state for destroyed graphs (called from the graph-destroy hook)."""
+        """Drop recorded state for destroyed graphs (called from the graph-destroy hook)."""
         for eid in exec_ids:
-            ordered = self.graph_event_nodes.pop(eid, None)
-            if ordered:
-                stale = set(ordered)
-                for k in [k for k, v in self.event_id_to_node.items() if v in stale]:
-                    del self.event_id_to_node[k]
-
-    def learn(self, exec_graph_id: int, event_ids_in_order: list[int]) -> None:
-        """Learn ``event_id -> graph_node_id`` from one launch's ordered event records.
-
-        Fires only when the launch's event-record count matches the graph's ordered event
-        nodes; otherwise the launch is dropped rather than mislearned.
-        """
-        ordered = self.graph_event_nodes.get(exec_graph_id)
-        if not ordered or len(ordered) != len(event_ids_in_order):
-            return
-        for event_id, tools_id in zip(event_ids_in_order, ordered):
-            self.event_id_to_node.setdefault(event_id, tools_id)
-
-    def resolve(self, event_id: int) -> int | None:
-        """The learned ``graph_node_id`` for a CUDA_EVENT record's ``event_id`` (or None)."""
-        return self.event_id_to_node.get(event_id)
+            self.graph_event_nodes.pop(eid, None)
 
 
-def learn_and_resolve_window(
+def resolve_window(
     recorder: _EventNodeRecorder,
     corr_exec_pairs: Any,
-    event_rows: list[tuple[int, int, int]],
+    event_rows: list[tuple[int, int]],
 ) -> list[int | None]:
-    """Learn from one export window's records and resolve its CUDA_EVENT records to nodes.
+    """Resolve one export window's CUDA_EVENT records to graph event-record nodes.
 
     ``corr_exec_pairs`` is ``(correlation_id, graph_node_id)`` for the window's graphed work
-    records (kernels/memsets); ``event_rows`` is ``(correlation_id, cuda_event_sync_id,
-    event_id)`` per CUDA_EVENT record. Returns the resolved ``graph_node_id`` (or None) aligned
-    to ``event_rows``. Pure: the numpy marshalling stays in the observer.
+    records (kernels/memsets); ``event_rows`` is ``(correlation_id, cuda_event_sync_id)`` per
+    CUDA_EVENT record. Returns the resolved ``graph_node_id`` (or ``None``) aligned to
+    ``event_rows``. Pure: the numpy marshalling stays in the observer.
+
+    Resolution is positional per launch: within a launch (one ``correlation_id``) the records
+    are sorted by sync id (== execution order) and the k-th record is assigned the k-th ordered
+    event node of that launch's exec graph. A launch resolves only when its record count matches
+    the graph's ordered node count; otherwise its records stay ``None``. This never keys on the
+    CUDA event object, so it is correct when a producer recycles one ``cudaEvent_t`` across nodes.
     """
     corr_to_exec: dict[int, int] = {}
     for corr, gnid in corr_exec_pairs:
         if gnid:
             corr_to_exec.setdefault(corr, gnid >> 32)
     by_corr: dict[int, list[tuple[int, int]]] = {}
-    for corr, sid, eid in event_rows:
-        by_corr.setdefault(corr, []).append((sid, eid))
+    for i, (corr, sid) in enumerate(event_rows):
+        by_corr.setdefault(corr, []).append((sid, i))
+    resolved: list[int | None] = [None] * len(event_rows)
     for corr, rows in by_corr.items():
         exec_id = corr_to_exec.get(corr)
-        if exec_id is not None:
-            rows.sort()  # by sync id == execution order within the launch
-            recorder.learn(exec_id, [eid for _, eid in rows])
-    return [recorder.resolve(eid) for _, _, eid in event_rows]
+        if exec_id is None:
+            continue
+        ordered = recorder.graph_event_nodes.get(exec_id)
+        if not ordered or len(ordered) != len(rows):
+            continue
+        rows.sort()  # by sync id == execution order within the launch
+        for pos, (_sid, i) in enumerate(rows):
+            resolved[i] = ordered[pos]
+    return resolved
 
 
 _recorder = _EventNodeRecorder()
@@ -160,5 +152,5 @@ def arm_event_node_recording() -> None:
 
 
 def event_node_recorder() -> _EventNodeRecorder:
-    """The shared recorder (its ``event_id_to_node`` map is read by the observer)."""
+    """The shared recorder (its ``graph_event_nodes`` map is read by the observer)."""
     return _recorder
