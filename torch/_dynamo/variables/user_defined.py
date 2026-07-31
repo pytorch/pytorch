@@ -300,6 +300,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
 
+    def get_value_for_setattr(self) -> object | None:
+        mod = getattr(self.value, "__module__", None) or ""
+        if mod == "torch" or mod.startswith(("torch.", "torch_")):
+            return None
+        return self.value
+
     def get_id_guard_type(self) -> Callable[..., Any] | None:
         if self.source:
             return GuardBuilder.CLASS_MATCH
@@ -1601,6 +1607,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
         if self.source:
             install_guard(
                 self.source.make_guard(
@@ -2130,6 +2139,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         f"and Dynamo has no model for it."
                     ),
                     hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if isinstance(type_attr, types.WrapperDescriptorType):
+                # WrapperDescriptor.tp_descr_get -> MethodWrapper
+                return variables.MethodWrapperVariable(
+                    type_attr, self._base_vt, source=source
+                )
+            elif isinstance(type_attr, types.MethodDescriptorType):
+                # MethodDescriptor.tp_descr_get -> BuiltinMethod
+                return variables.BoundBuiltinMethodVariable(
+                    type_attr, self._base_vt, source=source
                 )
 
         if is_cython_function(type_attr):
@@ -2721,8 +2740,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 self._base_vt is not None
                 and self._base_methods is not None
                 and method in self._base_methods
-                # TODO(dynamo-team): This is a temporary workaround to avoid
-                # routing slotdefs to the base class.
                 and name not in self._slotdefs
             ):
                 return self._base_vt.call_method(tx, name, args, kwargs)
@@ -4221,25 +4238,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             raise AssertionError("_base_vt must not be None for exception repr")
         return cast(variables.ExceptionVariable, self._base_vt)
 
-    # Unblocked by UDOV.lookup_tp_method: declare specials as tp_methods and
-    # inherit UDOV's object-backed resolution for everything else. No call_method.
-    def _init(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        method = self._maybe_get_baseclass_method("__init__")
-        if method and inspect.ismethoddescriptor(method) and len(kwargs) == 0:
-            return variables.ConstantVariable.create(None)
-        return None
-
-    def _setattr(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        if len(args) == 2 and args[0].is_constant_match(
-            "__cause__", "__context__", "__suppress_context__", "__traceback__"
-        ):
-            return self._base_vt.call_method(tx, "__setattr__", args, kwargs)  # type: ignore[missing-attribute]
-        return None
-
     def _with_traceback(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
     ) -> "VariableTracker":
@@ -4257,10 +4255,14 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         # writes of __cause__/__context__/__suppress_context__/__traceback__ to
         # the wrapped base exception VT. Without this, `raise X from Y` never
         # records X.__cause__ (issue: contextlib exception-chaining repro).
-        if name == "__setattr__":
-            result = self._setattr(tx, args, kwargs)
-            if result is not None:
-                return result
+        if (
+            name == "__setattr__"
+            and len(args) == 2
+            and args[0].is_constant_match(
+                "__cause__", "__context__", "__suppress_context__", "__traceback__"
+            )
+        ):
+            return self._base_vt.call_method(tx, "__setattr__", args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
 
     def tp_init_impl(
@@ -4575,26 +4577,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 else:
                     raise
         return super().mp_subscript_impl(tx, key)
-
-    def _getitem(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        # Dict subclasses can override __missing__ to provide fallback
-        # behavior instead of raising a KeyError. This is used, for example,
-        # by collections.Counter.
-        if self._maybe_get_baseclass_method(
-            "__getitem__"
-        ) in self._base_methods and self._maybe_get_baseclass_method("__missing__"):
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in call_method")
-            try:
-                return self._base_vt.call_method(tx, "__getitem__", args, kwargs)
-            except ObservedKeyError:
-                handle_observed_exception(tx)
-                return self.call_method(tx, "__missing__", args, kwargs)
-        return None
-
-    tp_methods = {"__getitem__": Method(_getitem)}
 
     def tp_init_impl(
         self,
@@ -4931,23 +4913,6 @@ class DefaultDictVariable(UserDefinedDictVariable):
         )
         return new_dd
 
-    def _setattr(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker | None":
-        from .constant import ConstantVariable
-
-        if len(args) != 2:
-            raise_args_mismatch(tx, "__setattr__", "2 args", f"{len(args)} args")
-        if (
-            istype(args[0], ConstantVariable) and args[0].value == "default_factory"
-        ) and self.is_supported_factory(args[1]):
-            self.default_factory = args[1]
-            tx.output.side_effects.store_attr(
-                self, "default_factory", self.default_factory
-            )
-            return ConstantVariable.create(None)
-        return None
-
     # __ior__ and __setattr__ are C-level slots (nb_inplace_or, tp_setattro),
     # so they are handled in call_method rather than declared in tp_methods.
     def call_method(
@@ -4957,19 +4922,19 @@ class DefaultDictVariable(UserDefinedDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__ior__":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    "__ior__",
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return self.nb_inplace_or_impl(tx, args[0])
+        from .constant import ConstantVariable
+
         if name == "__setattr__":
-            result = self._setattr(tx, args, kwargs)
-            if result is not None:
-                return result
+            if len(args) != 2:
+                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
+            if (
+                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+            ) and self.is_supported_factory(args[1]):
+                self.default_factory = args[1]
+                tx.output.side_effects.store_attr(
+                    self, "default_factory", self.default_factory
+                )
+                return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     tp_methods = {
