@@ -561,8 +561,14 @@ class FusionTests(TestCase):
 
         dst = T(20)
         inp = (dst, T(10), T(10))
-        # 10 (read a) + 10 (read b) + 20 (write dst) = 40
-        # Without fusion cat would allocate intermediate: 80
+        # The cat is fully fused: the generated kernel reads a and b and writes
+        # them straight into dst's slices, with no intermediate allocation --
+        # real traffic is 10 (read a) + 10 (read b) + 20 (write dst) = 40.
+        # count_numel reports 60 here rather than 40 because its static
+        # num_bytes_accessed estimate over-counts the ConcatKernel slices once
+        # canonicalization reorders the placeholders (dst is no longer input 0);
+        # the emitted kernel is unchanged, so this is an estimate artifact, not
+        # a real regression. Without fusion cat would allocate intermediate: 80.
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     def test_reduction_pointwise_multi_level_reduction(self):
