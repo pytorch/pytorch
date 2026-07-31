@@ -554,7 +554,7 @@ def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
 def compute_elementwise_output_logical_to_physical_perm(
-    *tensors, _skip_checks=False, ambiguity_check=False
+    *tensors, _skip_checks=False, _skip_fast_path=False, ambiguity_check=False
 ) -> tuple[list[int], bool]:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -600,11 +600,12 @@ def compute_elementwise_output_logical_to_physical_perm(
             )
         )
 
-    if is_contiguous and not is_channels_last:
-        return list(range(ndim)), False
+    if not _skip_fast_path:
+        if is_contiguous and not is_channels_last:
+            return list(range(ndim)), False
 
-    if is_channels_last and not is_contiguous:
-        return [0, *list(range(2, ndim)), 1], False
+        if is_channels_last and not is_contiguous:
+            return [0, *list(range(2, ndim)), 1], False
 
     shape = tensors[0].shape
 
@@ -672,6 +673,20 @@ def compute_elementwise_output_logical_to_physical_perm(
 
 
 def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
+    return _compute_elementwise_output_strides(
+        *tensors, preserve_single_tensor_strides=True
+    )
+
+
+def compute_tensoriterator_output_strides(*tensors) -> tuple[int, ...]:
+    return _compute_elementwise_output_strides(
+        *tensors, preserve_single_tensor_strides=False
+    )
+
+
+def _compute_elementwise_output_strides(
+    *tensors, preserve_single_tensor_strides: bool
+) -> tuple[int, ...]:
     """
     Computes the output strides for elementwise operations.
     """
@@ -682,6 +697,7 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
     # Filters the tensors to actual tensors
+    num_args = len(tensors)
     tensors = tuple(
         a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
     )
@@ -693,20 +709,60 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     ndim = tensors[0].ndim
     shape = tensors[0].shape
 
+    if not preserve_single_tensor_strides and any(
+        isinstance(dim, IntWithoutSymInt) and dim == 0 for dim in shape
+    ):
+        raise ValueError("TensorIterator zero-size stride inference is unsupported")
+
     if ndim == 0:
         return ()
     if ndim == 1:
         return (1,)
 
-    if len(tensors) == 1:
+    if preserve_single_tensor_strides and len(tensors) == 1 and num_args == 1:
         if torch._prims_common.is_non_overlapping_and_dense_or_false(tensors[0]):
             return tensors[0].stride()
         else:
             empty_like_tensor = torch.empty_like(tensors[0])
             return empty_like_tensor.stride()
 
+    if num_args == len(tensors) and all(
+        is_contiguous_for_memory_format_or_false(
+            tensor, memory_format=torch.contiguous_format
+        )
+        for tensor in tensors
+    ):
+        return make_contiguous_strides_for(shape)
+
+    # TensorIterator preserves a shared non-overlapping dense layout after its
+    # contiguous and channels-last fast paths. This also preserves arbitrary
+    # strides on singleton dimensions.
+    first = tensors[0]
+    shared_dense_layout = num_args == len(tensors) and all(
+        tensor.stride() == first.stride()
+        and is_non_overlapping_and_dense_or_false(tensor)
+        for tensor in tensors
+    )
+    if shared_dense_layout:
+        all_contiguous = all(
+            is_contiguous_for_memory_format_or_false(
+                tensor, memory_format=torch.contiguous_format
+            )
+            for tensor in tensors
+        )
+        all_channels_last = all(
+            is_contiguous_for_memory_format_or_false(
+                tensor, memory_format=torch.channels_last
+            )
+            for tensor in tensors
+        )
+        if not all_contiguous and not all_channels_last:
+            return first.stride()
+
     logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
-        *tensors, _skip_checks=True
+        *tensors,
+        _skip_checks=True,
+        _skip_fast_path=num_args != len(tensors),
     )
     permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
 
@@ -893,6 +949,24 @@ def is_same_shape(a: Sequence, b: Sequence) -> BoolLikeType:
 
 def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
     return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
+
+
+def get_tensoriterator_common_device(*args: object) -> torch.device | None:
+    # Keep this import local because fake_tensor imports torch._prims_common.
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    device = None
+    for arg in args:
+        if not isinstance(arg, TensorLike):
+            continue
+
+        arg_device = maybe_get_fake_device(arg) or arg.device
+        if arg.ndim == 0 and arg_device.type == "cpu":
+            if device is None:
+                device = arg_device
+            continue
+        return arg_device
+    return device
 
 
 def check_same_device(*args, allow_cpu_scalar_tensors):
