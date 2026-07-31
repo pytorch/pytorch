@@ -185,9 +185,11 @@ inline std::string retrieveDesyncReport(
     const std::string& pgName,
     int myRank,
     int worldSize) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string report;
 
   uint64_t thisSeq = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string thisCol;
 
   std::vector<int> missingRanks;
