@@ -781,7 +781,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
-                        # output atindex size(out)+i.
+                        # output at index size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
                         # if it was needed for inplaceable_triton_ops?
                         if user.target is operator.getitem and user.args[1] == arg:
