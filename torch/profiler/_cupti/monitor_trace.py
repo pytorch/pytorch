@@ -214,6 +214,22 @@ _GRAPH_DEP_FLOW_ID_BASE = (
 )  # keep node->node arrow flow ids clear of correlation ids
 
 
+def _nearest_replay_corr(windows: dict[int, list[int]], start_ns: int) -> int:
+    """The correlationId whose replay time window [min_start, max_end] contains ``start_ns``, else
+    the one with the closest window start. Used to re-bucket correlationId-0 CUDA-graph host-node
+    records (which lose their per-replay correlationId after the first replay) into their actual
+    replay so their dependency arrows connect."""
+    best_corr = 0
+    best_dist: int | None = None
+    for corr, (lo, hi) in windows.items():
+        if lo <= start_ns <= hi:
+            return corr
+        dist = abs(start_ns - lo)
+        if best_dist is None or dist < best_dist:
+            best_dist, best_corr = dist, corr
+    return best_corr
+
+
 def _graph_dependency_flow_events(
     node_rows: list[tuple[int, int, int, int, int, int]],
     graph_deps: dict[int, list[int]],
@@ -227,6 +243,12 @@ def _graph_dependency_flow_events(
     cross replays; each edge is one flow from the predecessor's end to the successor's start.
     Empty without deps.
 
+    Host-node records carry correlationId 0 on every replay after the first (a CUPTI limitation),
+    which would collapse all their replays into one bucket and orphan them from their per-replay
+    neighbors. Each correlationId-0 row is re-bucketed (before grouping, since the inner map is
+    keyed by graph_node_id) into the replay whose time window contains it, so its arrows connect
+    on every replay.
+
     NOTE: under cross-stream clock skew the recorded predecessor end can land after the successor
     start, and chrome/Perfetto JSON flows cannot render backwards in time, so such an arrow may
     misrender (or bind to the wrong slice when spans overlap on one lane). The .pftrace export
@@ -234,8 +256,21 @@ def _graph_dependency_flow_events(
     renders them correctly regardless -- prefer it when dependency arrows matter."""
     if not graph_deps:
         return []
+    # Replay time windows from the correlated rows (device ops get a fresh launch correlationId
+    # per replay); correlationId-0 rows are reassigned to the replay whose window contains them.
+    windows: dict[int, list[int]] = {}
+    if any(not corr for corr, *_ in node_rows):
+        for corr, _gnid, _dev, _tid, start_ns, end_ns in node_rows:
+            if corr:
+                w = windows.get(corr)
+                if w is None:
+                    windows[corr] = [start_ns, end_ns]
+                else:
+                    w[0], w[1] = min(w[0], start_ns), max(w[1], end_ns)
     by_corr: dict[int, dict[int, tuple[int, int, int, int]]] = {}
     for corr, gnid, dev, tid, start_ns, end_ns in node_rows:
+        if not corr and windows:
+            corr = _nearest_replay_corr(windows, start_ns)
         by_corr.setdefault(corr, {})[gnid] = (dev, tid, start_ns, end_ns)
     events: list[dict[str, object]] = []
     fid = _GRAPH_DEP_FLOW_ID_BASE
@@ -357,13 +392,24 @@ def _trace_window_entries(
     # CUDA-graph node->node dependency arrows (drawn as flows below). Collect each graphed op as
     # displayed so the arrows land on the resolver lanes, then emit after all GPU kinds.
     graph_deps = cast("dict[int, list[int]]", trace_window.get("graph_deps") or {})
+    # event-record node graph_node_id -> cudaEvent_t handle, to tag EventRecord spans with the
+    # event they record (the CUDA_EVENT record carries no handle); empty for eager/other runs.
+    event_record_events = cast(
+        "dict[int, int]", trace_window.get("graph_event_record_events") or {}
+    )
     dep_node_rows: list[tuple[int, int, int, int, int, int]] = []
 
     # --- GPU ops (kernel / memcpy / memset): one X event + a terminating ac2g flow ---
     # Each kind builds X events from one dict literal per row over the bulk-converted
     # columns; graph-id/node and annotation keys (absent for eager kernels) are patched on
     # only when the column carries them.
-    for ks in ("kernel", "gpu_memcpy", "gpu_memset", "graph_host_node"):
+    for ks in (
+        "kernel",
+        "gpu_memcpy",
+        "gpu_memset",
+        "graph_event_node",
+        "graph_host_node",
+    ):
         c = _col(ks)
         if c is None:
             continue
@@ -488,10 +534,34 @@ def _trace_window_entries(
                 }
                 for i in range(n)
             ]
+        elif ks == "graph_event_node":
+            # A CUDA-graph event-record node (e.g. the nodes NCCL inserts under
+            # NCCL_GRAPH_MIXING_SUPPORT), rendered as a point span on its stream lane so it is a
+            # visible dependency-arrow endpoint. graph id / node / annotation are patched on
+            # below; its device timestamp gives ts and dur is ~0.
+            events = [
+                {
+                    "ph": "X",
+                    "cat": "graph_event_node",
+                    "name": "EventRecord",
+                    "pid": dev_l[i],
+                    "tid": tid_l[i],
+                    "ts": ts_l[i],
+                    "dur": dur_l[i],
+                    "args": {
+                        "device": dev_l[i],
+                        "context": ctx_l[i],
+                        "stream": str_l[i],
+                        "correlation": corr_l[i],
+                    },
+                }
+                for i in range(n)
+            ]
         else:
             # graph_host_node: a CPU callback run as a CUDA-graph node. Rendered on the
             # waiting stream's lane like the other graphed ops; graph id / node / annotation
-            # are patched on below (host nodes always carry a graph_node_id).
+            # and the recorded callback name/address are patched on below (host nodes always
+            # carry a graph_node_id).
             pid_l = c["process_id"].tolist()
             htid_l = c["thread_id"].tolist()
             events = [
@@ -522,6 +592,12 @@ def _trace_window_entries(
         ann_l = c["annotation"].tolist()
         meta_col = c.get("metadata")
         meta_l = meta_col.tolist() if meta_col is not None else None
+        # Host-node callback name/address (resolved at graph instantiate; the CUPTI record
+        # carries no fn field). Present only on the graph_host_node column group.
+        fn_col = c.get("host_fn")
+        fn_l = fn_col.tolist() if fn_col is not None else None
+        addr_col = c.get("host_fn_addr")
+        addr_l = addr_col.tolist() if addr_col is not None else None
         # Pluggable lane assignment: a graph lane resolver (if installed) supplies per-op
         # (logical_lane, lane_name) columns; a graphed op whose logical lane differs from
         # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops on
@@ -536,6 +612,9 @@ def _trace_window_entries(
         lane_name_col = c.get("lane_name")
         lane_l = lane_col.tolist() if lane_col is not None else None
         lane_name_l = lane_name_col.tolist() if lane_name_col is not None else None
+        # Event-record node -> cudaEvent handle it records (topology, not in the CUPTI record),
+        # used to tag EventRecord spans; the dependency arrows then show what waits on the event.
+        ev_events = event_record_events if ks == "graph_event_node" else None
         display_tid_l = tid_l
         if (
             gid.any()
@@ -543,6 +622,7 @@ def _trace_window_entries(
             or any(ann_l)  # any non-empty annotation (None / empty skip)
             or meta_l is not None
             or lane_l is not None
+            or fn_l is not None
         ):
             gid_l = gid.tolist()
             gnid_l = gnid.tolist()
@@ -558,6 +638,13 @@ def _trace_window_entries(
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
+                if ev_events is not None and gnid_l[i] in ev_events:
+                    a["cuda event"] = hex(ev_events[gnid_l[i]])
+                if fn_l is not None and fn_l[i]:
+                    a["host fn"] = fn_l[i]
+                    ev["name"] = f"HostNode: {fn_l[i]}"
+                if addr_l is not None and addr_l[i]:
+                    a["host fn addr"] = hex(addr_l[i])
                 if gnid_l[i] and lane_l is not None and lane_l[i] != str_l[i]:
                     lane_id = lane_l[i]
                     lane = _export_tid(lane_id)
