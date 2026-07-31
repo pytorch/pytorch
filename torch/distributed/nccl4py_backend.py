@@ -11,7 +11,7 @@ Or use
     dist.init_process_group("nccl4py", ...)
 """
 
-import nccl.core as nccl
+import nccl.core as nccl  # pyrefly: ignore [missing-import]
 
 import torch
 import torch.distributed as dist
@@ -96,16 +96,17 @@ class NCCL4PyBackend(C10DBackend):
         The caller must close custom_op after the NCCL call is enqueued.
         """
         op_type = reduce_op.op
-        if op_type == ReduceOp.RedOpType.SUM:
+        if op_type == ReduceOp.RedOpType.SUM:  # pyrefly: ignore [missing-attribute]
             return nccl.SUM, None
-        if op_type == ReduceOp.RedOpType.PRODUCT:
+        if op_type == ReduceOp.RedOpType.PRODUCT:  # pyrefly: ignore [missing-attribute]
             return nccl.PROD, None
-        if op_type == ReduceOp.RedOpType.MIN:
+        if op_type == ReduceOp.RedOpType.MIN:  # pyrefly: ignore [missing-attribute]
             return nccl.MIN, None
-        if op_type == ReduceOp.RedOpType.MAX:
+        if op_type == ReduceOp.RedOpType.MAX:  # pyrefly: ignore [missing-attribute]
             return nccl.MAX, None
-        if op_type == ReduceOp.RedOpType.AVG:
+        if op_type == ReduceOp.RedOpType.AVG:  # pyrefly: ignore [missing-attribute]
             return nccl.AVG, None
+        # pyrefly: ignore [missing-attribute]
         if op_type == ReduceOp.RedOpType.PREMUL_SUM:
             factor = reduce_op.factor
             if isinstance(factor, torch.Tensor):
