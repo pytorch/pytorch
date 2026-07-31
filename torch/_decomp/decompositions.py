@@ -761,7 +761,31 @@ def slice_forward(
     end: int | None = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_and
+
+    def clamp_wrap_index(index, size):
+        if statically_known_true(sym_and(index >= 0, index <= size)):
+            return index
+        if statically_known_true(sym_and(index < 0, index >= -size)):
+            return index + size
+        if statically_known_true(index < -size):
+            return 0
+        if statically_known_true(index > size):
+            return size
+        if not isinstance(index, torch.SymInt) and index >= 0:
+            return torch.sym_min(index, size)
+        if not isinstance(index, torch.SymInt) and index < 0:
+            return torch.sym_max(index + size, 0)
+
+        if index < 0:
+            index += size
+
+        if index < 0:
+            index = 0
+        elif index > size:
+            index = size
+
+        return index
 
     ndim = self.dim()
     if ndim == 0:
@@ -773,29 +797,20 @@ def slice_forward(
     if step <= 0:
         raise RuntimeError("slice step must be positive")
 
-    start_val = start if start is not None else 0
+    start_val = 0 if start is None else clamp_wrap_index(start, sizes[dim])
+
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
-
-    if start_val < 0:
-        start_val += sizes[dim]
-
-    if end_val < 0:
-        end_val += sizes[dim]
-
-    if start_val < 0:
-        start_val = 0
-    elif start_val > sizes[dim]:
-        start_val = sizes[dim]
-
     if statically_known_true(end_val == sys.maxsize):
         end_val = sizes[dim]
-    elif end_val < start_val:
-        end_val = start_val
-    elif end_val > sizes[dim]:
-        end_val = sizes[dim]
+    else:
+        end_val = clamp_wrap_index(end_val, sizes[dim])
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
     len = end_val - start_val
+    if statically_known_true(len < 0):
+        len = 0
+    elif not statically_known_true(len >= 0):
+        len = torch.sym_max(len, 0)
     sizes[dim] = (len + step - 1) // step
     strides[dim] *= step
 
