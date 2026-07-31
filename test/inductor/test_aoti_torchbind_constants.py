@@ -3,12 +3,14 @@
 import torch
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.inductor_utils import ensure_triton
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 class TestTorchbindAOTI(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     """Verify that torchbind constants embedded in an AOTI .pt2 are reachable
     via AOTIModelPackageLoader.get_custom_objs() after load.
 
