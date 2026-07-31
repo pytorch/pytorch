@@ -157,17 +157,18 @@ class MetricTable:
             return
 
         row_dict = row_fn()
-        assert len(self.column_names) == len(row_dict), (
-            f"{len(self.column_names)} v.s. {len(row_dict)}"
-        )
-        assert OrderedSet(self.column_names) == OrderedSet(row_dict.keys()), (
-            f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
-        )
+        if len(self.column_names) != len(row_dict):
+            raise AssertionError(f"{len(self.column_names)} v.s. {len(row_dict)}")
+        if OrderedSet(self.column_names) != OrderedSet(row_dict.keys()):
+            raise AssertionError(
+                f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
+            )
 
         bn = get_benchmark_name()
         # assert bn is not None
         row = [bn] + [row_dict[column_name] for column_name in self.column_names]
-        assert all(isinstance(i, (str, float, type(None))) for i in row)
+        if not all(isinstance(i, (str, float, type(None))) for i in row):
+            raise AssertionError("expected all row values to be str, float, or None")
         self._write_row(row)
 
     def output_filename(self) -> str:
@@ -317,7 +318,8 @@ def _parse_size_hints(kernel_module_code: str, kernel_category: str) -> str | No
         # foreach kernel does not have size_hints
         return None
     m = re.search(r"size_hints=(\[[0-9, ]*\]),", kernel_module_code)
-    assert m, "size_hints missing!"
+    if not m:
+        raise AssertionError("size_hints missing!")
     return m.group(1)
 
 
@@ -325,7 +327,8 @@ def _parse_reduction_hint(kernel_category: str, kernel_module_code: str) -> str 
     if kernel_category not in ("reduction", "persistent_reduction"):
         return None
     m = re.search(r"reduction_hint=ReductionHint\.(\w*),", kernel_module_code)
-    assert m, "reduction_hint not found in kernel source code!"
+    if not m:
+        raise AssertionError("reduction_hint not found in kernel source code!")
     return m.group(1)
 
 
@@ -335,7 +338,10 @@ def _count_pattern(proper_kernel_fn_code: str, pattern: str) -> int:
 
 def _count_args(proper_kernel_fn_code: str) -> int:
     def_line = proper_kernel_fn_code.splitlines()[0]
-    assert def_line.startswith("def ")
+    if not def_line.startswith("def "):
+        raise AssertionError(
+            f"expected def line to start with 'def ', got {def_line!r}"
+        )
     start_idx = def_line.index("(")
     end_idx = def_line.index("):")
     decl_csv = def_line[start_idx + 1 : end_idx]
@@ -384,7 +390,7 @@ def log_kernel_metadata(
     kernel_name: str, kernel_path: str, kernel_module_code: str
 ) -> None:
     """
-    An utility to log kernel metadata. We may parse metadata from kernel source code here.
+    A utility to log kernel metadata. We may parse metadata from kernel source code here.
 
     It's fine to parse the generated kernel code here since the logging is
     disabled by default. It would hurt compilation time.
@@ -450,9 +456,8 @@ def enabled_metric_tables_impl(config_str: str) -> OrderedSet[str]:
         name = name.strip()
         if not name:
             continue
-        assert name in REGISTERED_METRIC_TABLES, (
-            f"Metric table name {name} is not registered"
-        )
+        if name not in REGISTERED_METRIC_TABLES:
+            raise AssertionError(f"Metric table name {name} is not registered")
         enabled.add(name)
     return enabled
 
@@ -462,7 +467,8 @@ def is_metric_table_enabled(name: str) -> bool:
 
 
 def get_metric_table(name: str) -> MetricTable:
-    assert name in REGISTERED_METRIC_TABLES, f"Metric table {name} is not defined"
+    if name not in REGISTERED_METRIC_TABLES:
+        raise AssertionError(f"Metric table {name} is not defined")
     return REGISTERED_METRIC_TABLES[name]
 
 

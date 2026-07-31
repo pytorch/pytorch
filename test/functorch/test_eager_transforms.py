@@ -94,6 +94,43 @@ except ImportError:
         UserWarning,
     )
 
+
+def _assert_functorch_wrapper_repr(test_case, actual, op_list):
+    expected_grad_wrappers = sum(op is grad for op in op_list)
+    expected_batched_wrappers = sum(op is vmap for op in op_list)
+
+    test_case.assertEqual(actual.count("GradTrackingTensor("), expected_grad_wrappers)
+    test_case.assertEqual(actual.count("BatchedTensor("), expected_batched_wrappers)
+    test_case.assertNotIn("FunctionalTensor(", actual)
+    test_case.assertTrue("Tensor(" in actual or "tensor(" in actual, actual)
+
+    wrapper_tokens = []
+    bdim = expected_batched_wrappers
+    for level, op in enumerate(op_list):
+        if op is grad:
+            wrapper_tokens.append(f"GradTrackingTensor(lvl={level + 1}, value=")
+        elif op is vmap:
+            bdim -= 1
+            wrapper_tokens.append(f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value=")
+
+    if not wrapper_tokens:
+        return
+
+    test_case.assertTrue(actual.startswith(wrapper_tokens[-1]), actual)
+    search_from = 0
+    for token in reversed(wrapper_tokens):
+        pos = actual.find(token, search_from)
+        test_case.assertNotEqual(pos, -1, actual)
+        search_from = pos + len(token)
+
+
+def _assert_leaf_tensor_repr(test_case, actual):
+    test_case.assertNotIn("GradTrackingTensor(", actual)
+    test_case.assertNotIn("BatchedTensor(", actual)
+    test_case.assertNotIn("FunctionalTensor(", actual)
+    test_case.assertTrue(actual.startswith(("Tensor(", "tensor(")), actual)
+
+
 # TestCase for _slice_argnums, an important helper function
 
 
@@ -995,20 +1032,9 @@ class TestGradTransform(TestCase):
                     else:
                         fn = op(fn)
 
-                expected = f"{repr(x)}"
-                for level, op in enumerate(op_list):
-                    if op is grad:
-                        expected = (
-                            f"GradTrackingTensor(lvl={level + 1}, value={expected})"
-                        )
-                    elif op is vmap:
-                        bdim -= 1
-                        expected = f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value={expected})"
-
                 fn(x)
-                buf = buf.replace("\n", "").replace("  ", "")
-                expected = expected.replace("\n", "").replace("  ", "")
-                self.assertEqual(expected, buf)
+                self.assertIsNotNone(buf)
+                _assert_functorch_wrapper_repr(self, buf, op_list)
 
     def test_print_captured_tensor_inside_transform(self, device):
         x = torch.tensor([1.0, 2.0, 3.0], device=device)
@@ -1020,7 +1046,11 @@ class TestGradTransform(TestCase):
             return y
 
         vjp(f, torch.randn(4, device=device))
-        self.assertEqual(out, repr(x))
+        self.assertIsNotNone(out)
+        if TEST_WITH_TORCHDYNAMO:
+            _assert_leaf_tensor_repr(self, out)
+        else:
+            self.assertEqual(out, repr(x))
 
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)
@@ -1253,6 +1283,47 @@ class TestGradTransform(TestCase):
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):
+    @skipIfTorchDynamo("internal API test")
+    def test_unwrap_dead_wrappers(self, device):
+        ft = torch._C._functorch
+        unwrap_dead_wrappers = torch._functorch.utils.unwrap_dead_wrappers
+
+        def make_dead_wrapper(tensor):
+            level = ft._grad_increment_nesting()
+            try:
+                wrapped = ft._wrap_for_grad(tensor, level)
+            finally:
+                ft._grad_decrement_nesting()
+            self.assertTrue(ft.is_dead_tensor_wrapper(wrapped))
+            return wrapped
+
+        empty = ()
+        self.assertIs(unwrap_dead_wrappers(empty), empty)
+
+        non_tensors = (None, 1, "arg")
+        self.assertIs(unwrap_dead_wrappers(non_tensors), non_tensors)
+
+        live_tensor = torch.randn(2, device=device)
+        mixed_live = ("arg", live_tensor, None)
+        self.assertIs(unwrap_dead_wrappers(mixed_live), mixed_live)
+
+        for dead_idx in range(3):
+            live_before = torch.randn(2, device=device)
+            live_after = torch.randn(2, device=device)
+            base = torch.randn(2, device=device)
+            dead = make_dead_wrapper(base)
+            args = [live_before, "arg", live_after]
+            args[dead_idx] = dead
+            args = tuple(args)
+
+            result = unwrap_dead_wrappers(args)
+            self.assertIsNot(result, args)
+            self.assertEqual(result[dead_idx], base)
+            self.assertFalse(ft.is_dead_tensor_wrapper(result[dead_idx]))
+            for idx in range(3):
+                if idx != dead_idx:
+                    self.assertIs(result[idx], args[idx])
+
     def test_set_materialize_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -2636,6 +2707,10 @@ class TestHessian(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 14),
+        "Frame Handling Difference between Python versions",
+    )
     def test_jacfwd_different_levels(self, device):
         # Test case from:
         # https://github.com/pytorch/functorch/issues/597
@@ -3560,6 +3635,7 @@ class TestComposability(TestCase):
         y = grad(grad(torch.sin))(x)
         self.assertEqual(y, -x.sin())
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/179877")
     def test_grad_vmap(self, device):
         def foo(x):
             y = vmap(torch.sin)(x)
@@ -3569,6 +3645,7 @@ class TestComposability(TestCase):
         y = grad(foo)(x)
         self.assertEqual(y, x.cos())
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180894")
     def test_grad_vjp(self, device):
         x = torch.randn(3, device=device)
 
@@ -3635,6 +3712,7 @@ class TestComposability(TestCase):
         y = vjp_fn(x)[0]
         # Honestly IDK what the result here is... but at least it runs
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180300")
     def test_make_fx_vmap(self, device):
         def f(x):
             return torch.sin(x)
@@ -3645,6 +3723,7 @@ class TestComposability(TestCase):
         new_inp = torch.randn(5, 3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/179895")
     def test_make_fx_jacrev(self, device):
         def f(x):
             return x.sin().sum()
@@ -3736,6 +3815,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
             grad(f)(x)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/179876")
     def test_autograd_functional_jvp_inside_transform(self, device):
         def f(x):
             t = torch.ones_like(x)
@@ -3765,6 +3845,7 @@ class TestComposability(TestCase):
         ):
             vmap(f)(x)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180591")
     @parametrize(
         "transform",
         [
@@ -3859,6 +3940,7 @@ class TestComposability(TestCase):
         # smoke tests
         jvp(g, (x,), (t,))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184862")
     def test_can_use_functionalize_when_key_is_excluded(self, device):
         def f(x):
             y = x.clone()
@@ -3876,6 +3958,7 @@ class TestComposability(TestCase):
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.Functionalize))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180592")
     def test_can_use_vmap_when_key_is_excluded(self, device):
         def f(x):
             return x.sum(0)
@@ -3889,6 +3972,7 @@ class TestComposability(TestCase):
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.FuncTorchBatched))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/181155")
     def test_can_use_grad_when_key_is_excluded(self, device):
         def f(x):
             return x.sin()
@@ -4683,6 +4767,8 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180336")
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180320")
     @parametrize(
         "dropout_layer",
         [
@@ -5423,6 +5509,94 @@ class TestCompileTransforms(TestCase):
         result = compiled(x)
         self.assertEqual(result, expected)
 
+    def test_compile_dynamic_grad_vjp_index_select_pytree(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171537
+        from torch.utils import _pytree as pytree
+
+        class Input:
+            def __init__(self, positions):
+                self.positions = positions
+
+        def flatten(inp):
+            return [inp.positions], None
+
+        def unflatten(children, context):
+            return Input(children[0])
+
+        pytree.register_pytree_node(
+            Input,
+            flatten,
+            unflatten,
+            serialized_type_name="test_compile_dynamic_grad_vjp_index_select_pytree.Input",
+        )
+        try:
+
+            def loss(weight, inp):
+                def energy(input_pc):
+                    idx = torch.arange(5, device=input_pc.positions.device)
+                    vals = input_pc.positions.index_select(0, idx) * weight
+                    return vals.sum(dim=[1], keepdim=True)
+
+                y, vjp_fn = torch.func.vjp(energy, inp)
+                (input_grads,) = vjp_fn(torch.ones_like(y))
+                return y.square().sum() + input_grads.positions.square().sum()
+
+            fn = torch.func.grad_and_value(loss, argnums=0)
+            weight = torch.randn(3, device=device, requires_grad=True)
+            inp = Input(torch.randn(7, 3, device=device, requires_grad=True))
+
+            expected = fn(weight, inp)
+
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True, backend="eager")
+            result = compiled(weight, inp)
+            self.assertEqual(result, expected)
+        finally:
+            pytree._deregister_pytree_node(Input)
+
+    def test_compile_dynamic_grad_vjp_trace_pytree(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171537
+        from torch.utils import _pytree as pytree
+
+        class Input:
+            def __init__(self, matrix):
+                self.matrix = matrix
+
+        def flatten(inp):
+            return [inp.matrix], None
+
+        def unflatten(children, context):
+            return Input(children[0])
+
+        pytree.register_pytree_node(
+            Input,
+            flatten,
+            unflatten,
+            serialized_type_name="test_compile_dynamic_grad_vjp_trace_pytree.Input",
+        )
+        try:
+
+            def loss(weight, inp):
+                def energy(input_pc):
+                    return torch.trace(input_pc.matrix * weight)
+
+                y, vjp_fn = torch.func.vjp(energy, inp)
+                (input_grads,) = vjp_fn(torch.ones_like(y))
+                return y.square() + input_grads.matrix.square().sum()
+
+            fn = torch.func.grad_and_value(loss, argnums=0)
+            weight = torch.randn(4, 4, device=device, requires_grad=True)
+            inp = Input(torch.randn(4, 4, device=device, requires_grad=True))
+
+            expected = fn(weight, inp)
+
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True, backend="eager")
+            result = compiled(weight, inp)
+            self.assertEqual(result, expected)
+        finally:
+            pytree._deregister_pytree_node(Input)
+
     @onlyCPU
     def test_compile_grad_cpu_sdpa_higher_order(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/181177
@@ -5444,10 +5618,224 @@ class TestCompileTransforms(TestCase):
 
     @onlyCPU
     def test_cpu_flash_sdpa_backward_higher_order(self, device):
+        cases = (
+            ("default", False, None, 2, 2, None),
+            ("causal_scale", True, 0.37, 2, 2, None),
+            ("fully_masked_row", False, None, 2, 2, "masked_row"),
+            ("causal_with_mask", True, None, 2, 2, "masked_row"),
+            ("empty_2d_mask", False, None, 2, 2, "empty_2d"),
+            ("empty_4d_mask", False, None, 2, 2, "empty_4d"),
+            ("grouped_query_attention", False, None, 4, 2, None),
+        )
+        for (
+            name,
+            is_causal,
+            scale,
+            query_heads,
+            key_value_heads,
+            mask_kind,
+        ) in cases:
+            with self.subTest(name=name):
+                torch.manual_seed(0)
+                query = torch.randn(
+                    1,
+                    query_heads,
+                    3,
+                    4,
+                    device=device,
+                    dtype=torch.double,
+                    requires_grad=True,
+                )
+                key = torch.randn(
+                    1,
+                    key_value_heads,
+                    4,
+                    4,
+                    device=device,
+                    dtype=torch.double,
+                    requires_grad=True,
+                )
+                value = torch.randn_like(key, requires_grad=True)
+                attn_mask = None
+                if mask_kind == "masked_row":
+                    attn_mask = torch.zeros(
+                        1, 1, 3, 4, device=device, dtype=torch.double
+                    )
+                    attn_mask[..., 1, :] = float("-inf")
+                elif mask_kind == "empty_2d":
+                    attn_mask = torch.empty(0, 0, device=device, dtype=torch.double)
+                elif mask_kind == "empty_4d":
+                    attn_mask = torch.empty(
+                        1, 1, 0, 0, device=device, dtype=torch.double
+                    )
+
+                out, logsumexp = (
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                        query,
+                        key,
+                        value,
+                        is_causal=is_causal,
+                        attn_mask=attn_mask,
+                        scale=scale,
+                    )
+                )
+                grad_out = torch.randn_like(out, requires_grad=True)
+
+                with enable_python_dispatcher():
+                    actual_grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                        grad_out,
+                        query,
+                        key,
+                        value,
+                        out,
+                        logsumexp,
+                        0.0,
+                        is_causal,
+                        attn_mask=attn_mask,
+                        scale=scale,
+                    )
+
+                tangents = tuple(torch.randn_like(grad) for grad in actual_grads)
+                actual_hvp = torch.autograd.grad(
+                    sum(
+                        (grad * tangent).sum()
+                        for grad, tangent in zip(actual_grads, tangents)
+                    ),
+                    (grad_out, query, key, value),
+                )
+                self.assertTrue(all(not grad.requires_grad for grad in actual_hvp))
+
+                reference_attn_mask = (
+                    attn_mask
+                    if attn_mask is not None and attn_mask.numel() != 0
+                    else None
+                )
+                if is_causal:
+                    causal_mask = torch.ones(
+                        query.size(-2),
+                        key.size(-2),
+                        device=device,
+                        dtype=torch.bool,
+                    ).tril()
+                    causal_bias = torch.zeros_like(
+                        causal_mask, dtype=query.dtype
+                    ).masked_fill(~causal_mask, float("-inf"))
+                    reference_attn_mask = (
+                        causal_bias
+                        if reference_attn_mask is None
+                        else causal_bias + reference_attn_mask
+                    )
+
+                with torch.nn.attention.sdpa_kernel(
+                    backends=[torch.nn.attention.SDPBackend.MATH]
+                ):
+                    reference_out = F.scaled_dot_product_attention(
+                        query,
+                        key,
+                        value,
+                        attn_mask=reference_attn_mask,
+                        scale=scale,
+                        enable_gqa=query_heads != key_value_heads,
+                    )
+                reference_grads = torch.autograd.grad(
+                    reference_out,
+                    (query, key, value),
+                    grad_out,
+                    create_graph=True,
+                )
+                reference_hvp = torch.autograd.grad(
+                    sum(
+                        (grad * tangent).sum()
+                        for grad, tangent in zip(reference_grads, tangents)
+                    ),
+                    (grad_out, query, key, value),
+                )
+
+                self.assertEqual(actual_hvp, reference_hvp, atol=1e-8, rtol=1e-6)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_nested_grad(self, device):
+        def model(x):
+            return F.scaled_dot_product_attention(x, x, x).sum()
+
+        nested_grad = torch.func.grad(lambda x: torch.func.grad(model)(x).sum())
         torch.manual_seed(0)
-        query = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
-        key = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
-        value = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
+        x = torch.randn(1, 2, 3, 4, device=device)
+
+        with torch.nn.attention.sdpa_kernel(
+            backends=[torch.nn.attention.SDPBackend.MATH]
+        ):
+            expected = nested_grad(x)
+        with enable_python_dispatcher():
+            eager_actual = nested_grad(x)
+        self.assertEqual(eager_actual, expected)
+
+        torch._dynamo.reset()
+        compiled_actual = torch.compile(
+            nested_grad, backend="inductor", fullgraph=True
+        )(x)
+        self.assertEqual(compiled_actual, expected)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_preserves_nonfinite_native_grads(self, device):
+        torch.manual_seed(0)
+        query = torch.zeros(
+            1, 2, 3, 4, device=device, dtype=torch.float16, requires_grad=True
+        )
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+        grad_out = torch.randn_like(query, requires_grad=True)
+        scale = 1e5
+
+        with torch._C._AutoDispatchBelowAutograd():
+            out, logsumexp = (
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, key, value, scale=scale
+                )
+            )
+            native_grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out, query, key, value, out, logsumexp, 0.0, False, scale=scale
+            )
+
+        with enable_python_dispatcher():
+            actual_grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out, query, key, value, out, logsumexp, 0.0, False, scale=scale
+            )
+
+        self.assertTrue(torch.isinf(native_grads[0]).any())
+        self.assertFalse(torch.isnan(native_grads[0]).any())
+        self.assertEqual(actual_grads, native_grads)
+
+        tangents = [torch.zeros_like(grad) for grad in actual_grads]
+        inf_index = torch.isinf(actual_grads[0]).nonzero()[0]
+        tangents[0][tuple(inf_index)] = 1.0
+        actual_hvp = torch.autograd.grad(
+            actual_grads, (grad_out, query, key, value), tangents
+        )
+
+        with torch.nn.attention.sdpa_kernel(
+            backends=[torch.nn.attention.SDPBackend.MATH]
+        ):
+            reference_out = F.scaled_dot_product_attention(
+                query, key, value, scale=scale
+            )
+        reference_grads = torch.autograd.grad(
+            reference_out,
+            (query, key, value),
+            grad_out,
+            create_graph=True,
+        )
+        reference_hvp = torch.autograd.grad(
+            reference_grads, (grad_out, query, key, value), tangents
+        )
+        self.assertEqual(actual_hvp, reference_hvp)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_first_order_stays_fused(self, device):
+        torch.manual_seed(0)
+        query = torch.randn(1, 2, 8, 4, device=device, requires_grad=True)
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
         out, logsumexp = (
             torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
                 query, key, value
@@ -5455,82 +5843,90 @@ class TestCompileTransforms(TestCase):
         )
         grad_out = torch.randn_like(out, requires_grad=True)
 
+        def backward(grad_out, query, key, value, out, logsumexp):
+            with enable_python_dispatcher():
+                return torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                    grad_out, query, key, value, out, logsumexp, 0.0, False
+                )
+
+        graph = make_fx(backward)(grad_out, query, key, value, out, logsumexp)
+        targets = [
+            node.target for node in graph.graph.nodes if node.op == "call_function"
+        ]
+        self.assertEqual(
+            targets.count(
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default
+            ),
+            1,
+        )
+        self.assertNotIn(torch.ops.aten.bmm.default, targets)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_undefined_grad_out(self, device):
+        observed = []
+
+        def model(query):
+            out, logsumexp = (
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, query, query
+                )
+            )
+            observed.append(
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                    None, query, query, query, out, logsumexp, 0.0, False
+                )
+            )
+            return query.sum()
+
+        query = torch.randn(1, 2, 3, 4, device=device)
+        torch.func.grad(model)(query)
+        self.assertEqual(observed, [(None, None, None)])
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_backward_subset_requires_grad(self, device):
+        torch.manual_seed(0)
+        query = torch.randn(1, 2, 3, 4, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn_like(query, requires_grad=True)
+        grad_out = torch.randn_like(query)
+        with torch._C._AutoDispatchBelowAutograd():
+            out, logsumexp = (
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, key, value
+                )
+            )
+
         with enable_python_dispatcher():
             grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
                 grad_out, query, key, value, out, logsumexp, 0.0, False
             )
+        tangents = tuple(torch.randn_like(grad) for grad in grads)
+        (value_hvp,) = torch.autograd.grad(grads, value, tangents)
+        self.assertNotEqual(value_hvp.abs().max().item(), 0.0)
 
-        self.assertTrue(all(grad.requires_grad for grad in grads))
-        gradgrad = torch.autograd.grad(
-            sum(grad.square().sum() for grad in grads),
-            (grad_out, query, key, value),
+        out = out.detach().requires_grad_()
+        logsumexp = logsumexp.detach().requires_grad_()
+        with enable_python_dispatcher():
+            grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out,
+                query,
+                key,
+                value.detach(),
+                out,
+                logsumexp,
+                0.0,
+                False,
+            )
+        out_grads = torch.autograd.grad(
+            sum(grad.sum() for grad in grads),
+            (out, logsumexp),
             allow_unused=True,
         )
-        self.assertTrue(all(grad is not None for grad in gradgrad))
-
-    @onlyCPU
-    def test_cpu_flash_sdpa_autograd_aux_output_contract(self, device):
-        query = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
-        detached_query = query.detach()
-        additive_mask = torch.zeros(1, 1, 4, 4, device=device)
-        additive_mask[..., 1, :] = float("-inf")
-
-        for attn_mask in (None, additive_mask):
-            _, expected_logsumexp = (
-                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
-                    detached_query, detached_query, detached_query, attn_mask=attn_mask
-                )
-            )
-
-            with enable_python_dispatcher():
-                _, logsumexp = (
-                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
-                        query, query, query, attn_mask=attn_mask
-                    )
-                )
-
-            self.assertEqual(logsumexp.shape, expected_logsumexp.shape)
-            self.assertEqual(logsumexp.dtype, expected_logsumexp.dtype)
-            self.assertEqual(logsumexp.stride(), expected_logsumexp.stride())
-            self.assertFalse(logsumexp.requires_grad)
-            self.assertEqual(logsumexp, expected_logsumexp)
-
-        self.assertEqual(logsumexp[:, :, 1], torch.zeros_like(logsumexp[:, :, 1]))
-
-    @onlyCPU
-    def test_cpu_flash_sdpa_autograd_attn_mask_errors(self, device):
-        query = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
-        bool_mask = torch.ones(1, 1, 4, 4, device=device, dtype=torch.bool)
-        grad_mask = torch.zeros(1, 1, 4, 4, device=device, requires_grad=True)
-        dim_mask = torch.zeros(1, 4, 4, device=device)
-
-        cases = (
-            (
-                bool_mask,
-                "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query",
-            ),
-            (
-                grad_mask,
-                "not differentiable with respect to argument 'attn_mask'",
-            ),
-            (
-                dim_mask,
-                "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}",
-            ),
-        )
-        for attn_mask, error in cases:
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
-                    query, query, query, attn_mask=attn_mask
-                )
-
-            with (
-                enable_python_dispatcher(),
-                self.assertRaisesRegex(RuntimeError, error),
-            ):
-                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
-                    query, query, query, attn_mask=attn_mask
-                )
+        # This registration defines the generated forward's double-backward
+        # convention, not the standalone native backward kernel's numerical
+        # Jacobian. derivatives.yaml marks logsumexp non-differentiable, so
+        # following these saved-tensor partials would produce a wrong Hessian.
+        self.assertEqual(out_grads, (None, None))
 
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)
