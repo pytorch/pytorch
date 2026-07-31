@@ -147,6 +147,15 @@ def is_bound_tensor_method(value: object) -> bool:
 # are common keys.
 all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
+# Tensor attributes that are plain views of the tensor. Each maps to the aten op
+# that the C++ getter dispatches to, see native_functions.yaml.
+_VIEW_ATTR_TO_ATEN_OP = {
+    "T": torch.ops.aten.numpy_T,
+    "mT": torch.ops.aten.mT,
+    "H": torch.ops.aten.matrix_H,
+    "mH": torch.ops.aten.mH,
+}
+
 
 def _is_sym_arith_operand(vt: VariableTracker) -> bool:
     """True if vt can be the other operand of a SymNode arithmetic op
@@ -698,6 +707,18 @@ class TensorVariable(VariableTracker):
                     f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
+        if name in _VIEW_ATTR_TO_ATEN_OP:
+            # Desugar view attributes into the aten op that the C++ getter calls
+            # (e.g. Tensor.T -> aten::numpy_T). The result is a derived tensor,
+            # not a captured value, so it is deliberately left sourceless: giving
+            # it an AttrSource makes it look like something the graph can take as
+            # an input, which breaks freevar lifting inside higher order ops.
+            from .torch import TorchInGraphFunctionVariable
+
+            return TorchInGraphFunctionVariable(
+                _VIEW_ATTR_TO_ATEN_OP[name]
+            ).call_function(tx, [self], {})
+
         if name == "__class__":
             # Carry provenance on the class, mirroring BuiltinVariable.call_type.
             # A sourced class self-guards when observed downstream (e.g.
@@ -754,7 +775,6 @@ class TensorVariable(VariableTracker):
 
             def try_generic_attr_handling() -> VariableTracker | None:
                 from .builder import wrap_fx_proxy
-                from .misc import GetAttrVariable
 
                 static_attr = all_tensor_attrs.get(name, None)
                 if static_attr is None:
@@ -769,7 +789,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) is not types.GetSetDescriptorType:
                     return None
 
-                proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
+                # Create the node on the current tracer, not on the tracer that
+                # owns the base proxy. Otherwise, inside a higher order op, the
+                # node lands in the parent graph and has to be lifted back in as
+                # a subgraph input.
+                proxy = tx.output.current_tracer.create_proxy(
+                    "call_function", getattr, (self.as_proxy(), name), {}
+                )
                 if self.source is not None:
                     return wrap_fx_proxy(
                         tx=tx, proxy=proxy, source=AttrSource(self.source, name)
