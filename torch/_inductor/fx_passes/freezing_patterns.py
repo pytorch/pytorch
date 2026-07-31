@@ -34,6 +34,75 @@ pass_patterns = [
 binary_folding_pass = PatternMatcherPass()
 
 
+def _foldable_computation_root(node) -> torch.fx.Node | None:
+    from .binary_folding import (
+        _binary_ops,
+        _check_computation_and_broadcast_op,
+        _computation_ops,
+        _is_foldable_computation,
+    )
+
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if len(node.users) != 1:
+        return None
+    if node.target in _computation_ops:
+        return node if _is_foldable_computation(node) else None
+    if node.target not in _binary_ops:
+        return None
+
+    lhs, rhs = node.args[0], node.args[1]
+    computation_root = _foldable_computation_root(lhs)
+    if computation_root is not None and _check_computation_and_broadcast_op(
+        computation_root, rhs
+    ):
+        return computation_root
+
+    return None
+
+
+def _decompose_foldable_addcmul(graph: torch.fx.Graph) -> None:
+    """Expose foldable BatchNorm addcmul to binary folding without changing live kernels."""
+
+    from .binary_folding import _check_computation_and_broadcast_op
+
+    changed = False
+    for node in graph.find_nodes(op="call_function", target=aten.addcmul.default):
+        value = node.kwargs.get("value", 1)
+        if value != 1:
+            continue
+
+        self_arg, t1, t2 = node.args
+        t1_root = _foldable_computation_root(t1)
+        if t1_root is not None:
+            computation_root = t1_root
+            other = t2
+            lhs, rhs = t1, t2
+        elif (t2_root := _foldable_computation_root(t2)) is not None:
+            computation_root = t2_root
+            other = t1
+            lhs, rhs = t2, t1
+        else:
+            continue
+
+        if not _check_computation_and_broadcast_op(
+            computation_root, other
+        ) or not _check_computation_and_broadcast_op(computation_root, self_arg):
+            continue
+
+        with graph.inserting_before(node):
+            prod = graph.call_function(aten.mul.Tensor, (lhs, rhs))
+            prod.meta.update(node.meta)
+            result = graph.call_function(aten.add.Tensor, (prod, self_arg))
+            result.meta.update(node.meta)
+        node.replace_all_uses_with(result)
+        graph.erase_node(node)
+        changed = True
+
+    if changed:
+        stable_topological_sort(graph)
+
+
 def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     """
     Passes that are applied to the graph to freeze pass.
@@ -51,6 +120,14 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_computation_ops(
         gm
     )
+
+    if gm.graph.find_nodes(op="call_function", target=aten.addcmul.default):
+        # Fold BN parameter reshapes so addcmul foldability checks can use the same
+        # get_attr constants that binary folding consumes.
+        constant_fold(gm)
+        fake_tensor_prop(gm, aot_example_inputs, True)
+        _decompose_foldable_addcmul(gm.graph)
+
     for _ in range(4):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
