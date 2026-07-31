@@ -6,6 +6,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/python_context.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -70,8 +71,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 
   PyObject* tuple = PyTuple_New(1);
   if (!tuple)
-    // NOLINTNEXTLINE(hicpp-exception-baseclass)
-    throw python_error();
+    throw_persisted_python_error();
   PyTuple_SET_ITEM(tuple, 0, obj.release());
   obj = tuple;
   return true;

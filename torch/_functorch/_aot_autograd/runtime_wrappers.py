@@ -3271,7 +3271,7 @@ def _codegen_compiled_backward(
         " _rng_add_, _impl_, _epilogue_, _double_bw_",
         artifact_name="compiled_function_backward",
     )
-    buf.bind(torch=torch, functools=functools)
+    buf.bind(torch=torch)
 
     with buf.indent():
         buf.writeline(
@@ -3308,13 +3308,6 @@ def _codegen_compiled_backward(
         with buf.indent():
             buf.writeline("out = _impl_(_ctx_, all_args)")
             buf.writeline("return _epilogue_(out)")
-
-        buf.writeline(
-            "if (torch._C._is_key_in_tls('context')"
-            " and (_cc := torch._C._get_obj_in_tls('context')) is not None):"
-        )
-        with buf.indent():
-            buf.writeline("impl_fn = functools.partial(_cc.copy().run, impl_fn)")
 
         if inputs_require_grad:
             buf.writeline("if torch.is_grad_enabled():")
