@@ -39,7 +39,7 @@ import time
 import types
 import typing
 import weakref
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, ItemsView, KeysView, MutableMapping, ValuesView
 from types import ModuleType
 from typing import Any, cast, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
 
@@ -61,6 +61,7 @@ from torch._dynamo.utils import (
     normalize_count_iter,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -163,6 +164,7 @@ from ..source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -347,6 +349,22 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+_LIVE_MAPPING_ALIAS_TYPES = (types.MappingProxyType, KeysView, ValuesView, ItemsView)
+
+
+def _get_live_mapping_alias_target(value: object) -> object | None:
+    seen: set[int] = set()
+    while isinstance(value, _LIVE_MAPPING_ALIAS_TYPES):
+        if id(value) in seen:
+            return None
+        seen.add(id(value))
+        referents = gc.get_referents(value)
+        if len(referents) != 1:
+            return None
+        value = referents[0]
+    return value
 
 
 log = logging.getLogger(__name__)
@@ -822,6 +840,24 @@ class VariableBuilder:
 
     def _call_impl(self, value: object) -> VariableTracker:
         self.tx.output.current_tracer.traced_sources.add(self.source)
+        if isinstance(value, _LIVE_MAPPING_ALIAS_TYPES):
+            mapping = _get_live_mapping_alias_target(value)
+            if mapping is not None:
+                if self.tx.output.side_effects.is_pending_module_hook_state_object(
+                    mapping
+                ):
+                    unimplemented(
+                        gb_type="pending module hook state alias read",
+                        context=f"source={self.source}",
+                        explanation=(
+                            "Dynamo cannot access an alias of nn.Module hook state "
+                            "after deferring a hook registration in the same forward."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                self.tx.output.side_effects.accessed_module_hook_state_ids.add(
+                    id(mapping)
+                )
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -997,15 +1033,11 @@ class VariableBuilder:
         )
 
     def wrap_mapping_proxy(self, value: Any) -> VariableTracker:
-        mapping_referents = gc.get_referents(value)
-        handle_dict_referents = gc.get_referents(
+        mapping = _get_live_mapping_alias_target(value)
+        handle_dict = _get_live_mapping_alias_target(
             torch.utils.hooks.RemovableHandle.__dict__
         )
-        if (
-            len(mapping_referents) == 1
-            and len(handle_dict_referents) == 1
-            and mapping_referents[0] is handle_dict_referents[0]
-        ):
+        if mapping is not None and mapping is handle_dict:
             self.tx.output.side_effects.observe_removable_handle_state(
                 f"mappingproxy source={self.source}"
             )
@@ -3122,7 +3154,28 @@ class VariableBuilder:
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
         )
-        if not is_dtensor:
+
+        # An AsyncCollectiveTensor (ACT) flattens to a single inner tensor whose
+        # metadata mirrors the wrapper, and the AOTAutograd runtime wrapper
+        # unwraps ACT inputs before the compiled graph. So a graph traced on an
+        # ACT is equivalent to one traced on its resolved plain Tensor. Guard on
+        # the unwrapped inner tensor (via UnwrapCollectiveTensorSource) instead
+        # of the ACT-locked type/metadata guards, so the ACT class no longer
+        # forces a recompile when the runtime value alternates between an
+        # un-awaited ACT and an awaited Tensor. Type-introspecting code stays
+        # sound because observation sites reinstall the class guard on demand
+        # (see BuiltinVariable.call_isinstance and TensorVariable.var_getattr).
+        # Caveat: ACT-only member access (e.g. w.wait()) is not a class-observation
+        # channel and does not reinstall the guard, so such code reuses the
+        # ACT-traced graph for a resolved plain Tensor. It stays numerically
+        # correct (ACT desugars ops to the inner tensor), but a compiled region
+        # can succeed where eager would raise AttributeError on the plain Tensor;
+        # that only bites user code already broken in eager on the resolved input.
+        is_polymorphic_act = not is_dtensor and is_async_collective_tensor_type(
+            type(value)
+        )
+
+        if not is_dtensor and not is_polymorphic_act:
             # We guard on the _local_tensor and the _spec, and therefore we don't
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -3174,6 +3227,11 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+            elif is_polymorphic_act:
+                # Guard only on the unwrapped inner tensor (inner_source below).
+                # Installing no type/metadata guard on the ACT wrapper is what
+                # lets the resolved plain Tensor reuse this cache entry.
+                pass
             else:
                 self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
                 self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -3182,6 +3240,16 @@ class VariableBuilder:
                 )
 
             attrs, _ = value.__tensor_flatten__()
+            if is_polymorphic_act and attrs != ["elem"]:
+                # The unwrap accessor below assumes ACT's single inner tensor.
+                # Unreachable today (ACT always flattens to ["elem"]); if that
+                # ever changes we fail hard rather than misguard -- the wrapper's
+                # type/metadata guards were already skipped above, so there is no
+                # safe fallback left at this point.
+                raise RuntimeError(
+                    f"Expected AsyncCollectiveTensor to flatten to ['elem'], "
+                    f"got {attrs}"
+                )
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 # FakeScriptObject wraps the real opaque object during
@@ -3201,7 +3269,13 @@ class VariableBuilder:
                         "Only tensors and reference-type opaques are allowed "
                         "in tensor attrs."
                     )
-                inner_source = AttrSource(self.source, attr)
+                if is_polymorphic_act:
+                    # ACT flattens to the single attr "elem"; guard it through
+                    # an unwrap accessor so a plain Tensor at runtime (the
+                    # resolved collective) matches the same guard.
+                    inner_source = UnwrapCollectiveTensorSource(self.source)
+                else:
+                    inner_source = AttrSource(self.source, attr)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )

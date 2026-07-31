@@ -241,6 +241,39 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             mod._forward_hooks.clear()
             RemovableHandle.next_id = start_next_id
 
+    def test_register_forward_hook_call_forms_fullgraph(self):
+        for call_form in ("unbound", "unbound_kwargs", "super"):
+            with self.subTest(call_form=call_form):
+
+                class Mod(torch.nn.Module):
+                    def forward(self, x):
+                        if call_form == "unbound":
+                            torch.nn.Module.register_forward_hook(
+                                self, lambda module, inputs, output: output
+                            )
+                        elif call_form == "unbound_kwargs":
+                            torch.nn.Module.register_forward_hook(
+                                self=self,
+                                hook=lambda module, inputs, output: output,
+                            )
+                        else:
+                            super().register_forward_hook(
+                                lambda module, inputs, output: output
+                            )
+                        return x + 1
+
+                start_next_id = RemovableHandle.next_id
+                mod = Mod()
+                try:
+                    x = torch.randn(2)
+                    result = torch.compile(mod, backend="eager", fullgraph=True)(x)
+                    self.assertEqual(result, x + 1)
+                    self.assertEqual(len(mod._forward_hooks), 1)
+                    self.assertEqual(RemovableHandle.next_id, start_next_id + 1)
+                finally:
+                    mod._forward_hooks.clear()
+                    RemovableHandle.next_id = start_next_id
+
     def _assert_deferred_forward_hook_graph_breaks(self, mod, error):
         start_next_id = RemovableHandle.next_id
         try:
@@ -363,6 +396,61 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             Mod(), "pending module hook state alias read"
         )
 
+    def test_deferred_forward_hook_live_mapping_alias_graph_breaks(self):
+        alias_factories = {
+            "mappingproxy": types.MappingProxyType,
+            "nested_mappingproxy": lambda hooks: types.MappingProxyType(
+                types.MappingProxyType(hooks)
+            ),
+            "keys": lambda hooks: hooks.keys(),
+            "values": lambda hooks: hooks.values(),
+        }
+        for alias_name, alias_factory in alias_factories.items():
+            with self.subTest(alias=alias_name):
+
+                class Mod(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.hooks_alias = alias_factory(self._forward_hooks)
+
+                    def forward(self, x):
+                        self.register_forward_hook(
+                            lambda module, inputs, output: output
+                        )
+                        return x + len(self.hooks_alias)
+
+                self._assert_deferred_forward_hook_graph_breaks(
+                    Mod(), "pending module hook state alias read"
+                )
+
+    def test_deferred_forward_hook_prior_live_mapping_alias_graph_breaks(self):
+        alias_factories = {
+            "mappingproxy": types.MappingProxyType,
+            "nested_mappingproxy": lambda hooks: types.MappingProxyType(
+                types.MappingProxyType(hooks)
+            ),
+            "keys": lambda hooks: hooks.keys(),
+            "values": lambda hooks: hooks.values(),
+        }
+        for alias_name, alias_factory in alias_factories.items():
+            with self.subTest(alias=alias_name):
+
+                class Mod(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.hooks_alias = alias_factory(self._forward_hooks)
+
+                    def forward(self, x):
+                        alias_length = len(self.hooks_alias)
+                        self.register_forward_hook(
+                            lambda module, inputs, output: output
+                        )
+                        return x + alias_length
+
+                self._assert_deferred_forward_hook_graph_breaks(
+                    Mod(), "module hook registration after hook state access"
+                )
+
     def test_deferred_forward_hook_state_alias_mutation_graph_breaks(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -379,29 +467,41 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_deferred_forward_hook_handle_state_alias_graph_breaks(self):
-        handle_state = RemovableHandle.__dict__
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                handle_state = RemovableHandle.__dict__
+                if nested:
+                    handle_state = types.MappingProxyType(handle_state)
 
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                self.register_forward_hook(lambda module, inputs, output: output)
-                return x + handle_state["next_id"]
+                class Mod(torch.nn.Module):
+                    def forward(self, x):
+                        self.register_forward_hook(
+                            lambda module, inputs, output: output
+                        )
+                        return x + handle_state["next_id"]
 
-        self._assert_deferred_forward_hook_graph_breaks(
-            Mod(), "RemovableHandle state read after module hook registration"
-        )
+                self._assert_deferred_forward_hook_graph_breaks(
+                    Mod(), "RemovableHandle state read after module hook registration"
+                )
 
     def test_deferred_forward_hook_prior_handle_state_alias_graph_breaks(self):
-        handle_state = RemovableHandle.__dict__
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                handle_state = RemovableHandle.__dict__
+                if nested:
+                    handle_state = types.MappingProxyType(handle_state)
 
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                previous_id = handle_state["next_id"]
-                self.register_forward_hook(lambda module, inputs, output: output)
-                return x + previous_id
+                class Mod(torch.nn.Module):
+                    def forward(self, x):
+                        previous_id = handle_state["next_id"]
+                        self.register_forward_hook(
+                            lambda module, inputs, output: output
+                        )
+                        return x + previous_id
 
-        self._assert_deferred_forward_hook_graph_breaks(
-            Mod(), "module hook registration after handle state access"
-        )
+                self._assert_deferred_forward_hook_graph_breaks(
+                    Mod(), "module hook registration after handle state access"
+                )
 
     def test_deferred_forward_hook_independent_handle_state_snapshot(self):
         handle_state = types.MappingProxyType(dict(RemovableHandle.__dict__))
