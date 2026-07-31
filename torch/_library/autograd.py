@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
+import contextlib
 import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from torch import _C, _ops, autograd, Tensor
+from torch._functorch.utils import enable_single_level_autograd_function
+from torch.autograd.forward_ad import _set_fwd_grad_enabled
 from torch.utils import _pytree
 
 from . import utils
@@ -47,10 +50,26 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         metadata = args[-1]
         args = args[:-1]
 
+        # _SingleLevelFunction disables both AD modes while running forward. Restore
+        # them while transforms remain so redispatch participates in inner levels.
+        transforms_active = _C._are_functorch_transforms_active()
+        grad_mode = (
+            autograd.grad_mode.enable_grad()
+            if transforms_active
+            else contextlib.nullcontext()
+        )
+        fwd_grad_mode = (
+            _set_fwd_grad_enabled(True)
+            if transforms_active
+            else contextlib.nullcontext()
+        )
         with _C._AutoDispatchBelowAutograd():
             keyset = metadata.keyset
             kwargs = metadata.keyword_only_args
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
+            with grad_mode, fwd_grad_mode:
+                result = op.redispatch(
+                    keyset & _C._after_autograd_keyset, *args, **kwargs
+                )
             if info._setup_context_fn:
                 # The Dispatcher will remove args that are equal to their default
                 # values from (args, kwargs). We're going to add it back so that
@@ -115,12 +134,16 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             f"Please use register_autograd to add one."
         )
 
+    def compiled_autograd_key(ctx):
+        return (ctx._autograd_function_id,)
+
     Generated = type(
         name,
-        (autograd.Function,),
+        (autograd.function._SingleLevelFunction,),
         {
             "forward": staticmethod(forward),
             "backward": staticmethod(backward),
+            "_compiled_autograd_key": staticmethod(compiled_autograd_key),
         },
     )
 
@@ -142,7 +165,10 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             return redispatch_no_grad(keyset, args, keyword_only_args)
 
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
-            result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
+            with enable_single_level_autograd_function():
+                result = Generated.apply(  # type: ignore[attr-defined]
+                    *args, Metadata(keyset, keyword_only_args)
+                )
         else:
             result = redispatch_no_grad(keyset, args, keyword_only_args)
         return result
