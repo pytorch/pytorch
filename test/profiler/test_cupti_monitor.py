@@ -607,7 +607,13 @@ class TestCuptiRecords(TestCase):
                 "annotation": np.array([None], dtype=object),
             },
         }
-        window = {"columns": columns, "graph_deps": {EN: [KA]}}
+        # The event-record node records cudaEvent 0xABC (from graph topology); the EventRecord
+        # span is tagged with it so, together with the arrow, the awaited event is visible.
+        window = {
+            "columns": columns,
+            "graph_deps": {EN: [KA]},
+            "graph_event_record_events": {EN: 0xABC},
+        }
         _, events = _trace_window_entries(window, base_ns=0)
         en = [e for e in events if e.get("cat") == "graph_event_node"]
         self.assertEqual(len(en), 1)
@@ -615,6 +621,7 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(en[0]["pid"], 0)  # device lane
         self.assertEqual(en[0]["args"]["stream"], 7)
         self.assertEqual(en[0]["args"]["graph node id"], 102)
+        self.assertEqual(en[0]["args"]["cuda event"], hex(0xABC))
         # A dependency arrow terminates ON the event node: some flow-finish endpoint lands at
         # the event node's start (kernel -> event_node). _FLOW_CATEGORY is shared by the
         # CPU-launch and graph-dep flows, so match on the event node's timestamp.

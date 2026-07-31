@@ -173,9 +173,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
 }
 
 
-# CUDA sync + event fields, selected only under enable_cuda_sync_events (matching kineto).
-# SYNCHRONIZATION carries the sync spans; CUDA_EVENT records are the wait_on join inputs
-# (which cudaEventRecord a wait refers to) resolved in monitor_trace.
+# SYNCHRONIZATION carries kineto's cuda_sync spans; selected only under enable_cuda_sync_events.
+# The CUDA_EVENT records these spans join against (the wait_on inputs) live in EVENT_FIELDS.
 SYNC_FIELDS: dict[ActivityKind, set[Field]] = {
     ActivityKind.SYNCHRONIZATION: {
         Sync.TYPE,
@@ -187,6 +186,15 @@ SYNC_FIELDS: dict[ActivityKind, set[Field]] = {
         Sync.CUDA_EVENT_ID,
         Sync.CUDA_EVENT_SYNC_ID,
     },
+}
+
+
+# CUDA_EVENT records are the wait_on join inputs for cuda_sync spans and the device-timestamp
+# source for graph event-record node spans. CUPTI emits them for graph event-record nodes via
+# the graph-replay trace path without SYNCHRONIZATION co-enabled, so they are selected for both
+# enable_cuda_sync_events and enable_event_node_ids. (Eager cudaEventRecord records do require
+# SYNCHRONIZATION co-enabled, but those only matter under enable_cuda_sync_events, where it is.)
+EVENT_FIELDS: dict[ActivityKind, set[Field]] = {
     ActivityKind.CUDA_EVENT: {
         CudaEvent.CORRELATION_ID,
         CudaEvent.CONTEXT_ID,
@@ -249,10 +257,12 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # written + dropped once built AND paths are present.
         self._windows: dict[int, dict[str, Any]] = {}
         selection = {k: set(v) for k, v in PROFILER_FIELDS.items()}
-        # The event-node bridge needs CUDA_EVENT records (and SYNCHRONIZATION, which CUPTI
-        # requires for CUDA_EVENT to be emitted -- coupled by the monitor's field union), the
-        # same kinds enable_cuda_sync selects.
+        # CUDA_EVENT records place graph event-record node spans and are the wait_on join inputs
+        # for cuda_sync spans, so either feature selects them. SYNCHRONIZATION carries the
+        # cuda_sync spans themselves and is selected only under enable_cuda_sync.
         if enable_cuda_sync or enable_event_node_ids:
+            selection.update({k: set(v) for k, v in EVENT_FIELDS.items()})
+        if enable_cuda_sync:
             selection.update({k: set(v) for k, v in SYNC_FIELDS.items()})
         # Graph naming on via the default registry resolver (the profiler always wants graph
         # captures named -- it's free when there are none and a no-op for eager-only runs).
@@ -550,6 +560,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 "thread_resource_map": w["thread_map"],
                 "start_ns": start,
                 "graph_deps": graph_deps,
+                # event-record node graph_node_id -> cudaEvent_t handle, to tag EventRecord
+                # spans at render (the CUDA_EVENT record has no event field). Snapshot the
+                # shared recorder map so a later graph-destroy purge can't race the merge.
+                "graph_event_record_events": dict(self._graph_event_record_events),
             }
 
     def _maybe_write(self, window_id: int) -> None:

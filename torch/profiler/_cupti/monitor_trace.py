@@ -357,6 +357,11 @@ def _trace_window_entries(
     # CUDA-graph node->node dependency arrows (drawn as flows below). Collect each graphed op as
     # displayed so the arrows land on the resolver lanes, then emit after all GPU kinds.
     graph_deps = cast("dict[int, list[int]]", trace_window.get("graph_deps") or {})
+    # event-record node graph_node_id -> cudaEvent_t handle, to tag EventRecord spans with the
+    # event they record (the CUDA_EVENT record carries no handle); empty for eager/other runs.
+    event_record_events = cast(
+        "dict[int, int]", trace_window.get("graph_event_record_events") or {}
+    )
     dep_node_rows: list[tuple[int, int, int, int, int, int]] = []
 
     # --- GPU ops (kernel / memcpy / memset): one X event + a terminating ac2g flow ---
@@ -533,6 +538,9 @@ def _trace_window_entries(
         lane_name_col = c.get("lane_name")
         lane_l = lane_col.tolist() if lane_col is not None else None
         lane_name_l = lane_name_col.tolist() if lane_name_col is not None else None
+        # Event-record node -> cudaEvent handle it records (topology, not in the CUPTI record),
+        # used to tag EventRecord spans; the dependency arrows then show what waits on the event.
+        ev_events = event_record_events if ks == "graph_event_node" else None
         display_tid_l = tid_l
         if (
             gid.any()
@@ -555,6 +563,8 @@ def _trace_window_entries(
                 _annotation_to_args(a, ann_l[i])
                 if meta_l is not None and meta_l[i] is not None:
                     _annotation_to_args(a, meta_l[i])
+                if ev_events is not None and gnid_l[i] in ev_events:
+                    a["cuda event"] = hex(ev_events[gnid_l[i]])
                 if gnid_l[i] and lane_l is not None and lane_l[i] != str_l[i]:
                     lane_id = lane_l[i]
                     lane = _export_tid(lane_id)
