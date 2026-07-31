@@ -61,6 +61,7 @@ from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._higher_order_ops.utils import _in_hop_compile
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
@@ -906,6 +907,19 @@ def trace_frame(
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
+    if (
+        torch.cuda.is_available()
+        and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
+        and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
+        and torch.cuda.is_current_stream_capturing()
+        and not _in_hop_compile()
+    ):
+        raise exc.TorchRuntimeError(
+            "torch.compile cannot JIT compile during CUDA graph capture. "
+            "Execute warmup iterations outside of CUDA graph capture to trigger "
+            "compilation, then capture the graph after compilation has completed."
+        )
+
     speculation_log.restart()  # type: ignore[has-type]
     exn_vt_stack = ExceptionStack()
     tracer = InstructionTranslator(
@@ -1669,6 +1683,14 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
+            # Hold _is_compiling_flag True for the duration of compilation so
+            # torch.compiler.is_compiling() is observable in code that runs
+            # during the compile session but is not directly Dynamo-traced
+            # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
+            # make_fx invoked from a custom backend, etc.). Export sets the
+            # flag itself via _compiling_state_context, so skip there.
+            if not export:
+                stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(
                 torch._dynamo.callback_handler.install_callbacks(
                     CallbackTrigger.DYNAMO, str(CompileContext.current_compile_id())
@@ -2143,6 +2165,7 @@ def _compile(
                     TorchRuntimeError,
                     BackendCompilerFailed,
                     AssertionError,
+                    IndexError,  # dim out-of-range from canonicalize_dim/maybe_wrap_dim
                     ConstraintViolationError,
                     GuardOnDataDependentSymNode,
                     ValidationException,
@@ -2547,6 +2570,7 @@ class CatchErrorsWrapper:
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
+            apply_to_code = True
             if has_started_execution:
                 skip_reason = "frame has already started executing"
             elif is_skipfile:
@@ -2558,7 +2582,13 @@ class CatchErrorsWrapper:
                     "non-infra torch dispatch mode present, this is not"
                     " supported today in torch.compile"
                 )
-            return self._handle_skip(ConvertFrameReturn(skip_reason=skip_reason), frame)
+                apply_to_code = False
+            return self._handle_skip(
+                ConvertFrameReturn(
+                    apply_to_code=apply_to_code, skip_reason=skip_reason
+                ),
+                frame,
+            )
 
         if (
             frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
