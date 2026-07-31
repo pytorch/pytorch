@@ -65,9 +65,11 @@ from ..source import (
     WeakRefCallSource,
 )
 from ..utils import (
+    check_positional,
     check_unspec_or_constant_args,
     identity,
     istype,
+    no_keywords,
     proxy_args_kwargs,
     raise_args_mismatch,
     unpack_iterable,
@@ -550,30 +552,6 @@ class TracebackVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            attr = args[0].as_python_constant()
-            # Writable attributes route through their tp_getset setter.
-            getset = self.tp_getset.get(attr)
-            if getset is not None and getset.setter is not None:
-                result = getset.setter(self, tx, args[1])
-                if result is not None:
-                    return result
-            unimplemented(
-                gb_type="Unsupported attribute assignment on traceback object",
-                context=f"call_setattr {self} {attr}",
-                explanation="Dynamo does not support setting the attribute "
-                f"'{attr}' on tracked traceback objects. Only `tb_next` is supported.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return super().call_method(tx, name, args, kwargs)
 
 
 class ExceptionVariable(VariableTracker):
@@ -2302,6 +2280,23 @@ class ObjectVariable(VariableTracker):
         return object_richcompare(self, tx, other, op)
 
 
+if sys.version_info >= (3, 15):
+
+    class SentinelVariable(VariableTracker):
+        # Use builtins.sentinel to avoid ruff errors
+        _cpython_type = builtins.sentinel
+
+        def __init__(self, value: builtins.sentinel, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.value = value
+
+        def get_real_python_backed_value(self) -> builtins.sentinel:
+            return self.value
+
+        def python_type(self) -> type[builtins.sentinel]:
+            return self._cpython_type
+
+
 class DebuggingVariable(VariableTracker):
     """
     Represents a call to a debugging function like print(), or something
@@ -2853,13 +2848,8 @@ class RandomVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = "shuffle"
-        if len(args) != 1 or kwargs:
-            raise_args_mismatch(
-                tx,
-                name,
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        check_positional(tx, name, len(args), 1, 1)
+        no_keywords(tx, name, kwargs)
         seq = args[0].realize()
         tx.output.side_effects.mutation(self)
         # shuffle's permutation depends only on the sequence length and the
@@ -2880,13 +2870,8 @@ class RandomVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = "sample"
-        if kwargs or len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                name,
-                "2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        check_positional(tx, name, len(args), 2, 2)
+        no_keywords(tx, name, kwargs)
         elems = unpack_iterable(tx, args[0])
         k = args[1].as_python_constant()
         if not isinstance(k, int) or k < 0 or k > len(elems):
