@@ -574,8 +574,8 @@ if HAS_CPU:
         def test_assert_dynamic_dims_preserves_keyword_input_order(self):
             def fn(*, z, a):
                 if z.size(0) == 3:
-                    return z + a
-                return z - a
+                    return z.sum() + a
+                return z.sum() - a
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.BackendCompilerFailed,
@@ -584,7 +584,7 @@ if HAS_CPU:
                 self.common(
                     fn,
                     (),
-                    kwargs={"z": torch.randn(3, 4), "a": torch.randn(3, 4)},
+                    kwargs={"z": torch.randn(3, 4), "a": torch.randn(5, 4)},
                     assert_dynamic_dims={0: (0,)},
                 )
 
