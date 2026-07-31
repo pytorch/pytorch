@@ -122,7 +122,25 @@ class Bernoulli(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        return -binary_cross_entropy_with_logits(logits, value, reduction="none")
+        result = -binary_cross_entropy_with_logits(logits, value, reduction="none")
+        # `probs_to_logits` clamps probs into (eps, 1 - eps), so for exact
+        # boundary parameters p=0 / p=1 the BCE path above returns log(eps)
+        # (dtype-dependent) for impossible events and log1p(-eps) for certain
+        # events instead of -inf and 0. Mirror Geometric's boundary handling
+        # so those values are exact. The correction only runs when the
+        # distribution was constructed with `probs`: finite logits can never
+        # hit the exact boundary, and this keeps `probs` lazy for
+        # logits-constructed instances. See gh-186825.
+        if "probs" in self.__dict__:
+            probs, value = broadcast_all(self.probs, value)
+            boundary = (probs == 0) | (probs == 1)
+            impossible = boundary & (probs != value)
+            certain = boundary & (probs == value)
+            result = torch.where(
+                impossible, torch.full_like(result, -torch.inf), result
+            )
+            result = torch.where(certain, torch.zeros_like(result), result)
+        return result
 
     def entropy(self):
         return binary_cross_entropy_with_logits(
