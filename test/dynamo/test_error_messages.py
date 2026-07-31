@@ -164,13 +164,13 @@ from user code:
                 zip(range(5), range(10))
             ),
             """\
-missing tp_iter
-  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(zip)`.
+C-implemented special method without VariableTracker model
+  Explanation: 'zip' implements '__iter__' in C and Dynamo has no model for it.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: tp_iter_impl not implemented for zip
+  Developer debug context: name=__iter__, type=zip, attr=<slot wrapper '__iter__' of 'zip' objects>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb9493.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -189,13 +189,13 @@ from user code:
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, dct.items()),
             """\
-missing tp_iter
-  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(dict_items)`.
+C-implemented special method without VariableTracker model
+  Explanation: 'dict_items' implements '__iter__' in C and Dynamo has no model for it.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: tp_iter_impl not implemented for dict_items
+  Developer debug context: name=__iter__, type=dict_items, attr=<slot wrapper '__iter__' of 'dict_items' objects>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb9493.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
