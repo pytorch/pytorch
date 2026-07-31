@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import functools
 from collections import namedtuple
-from threading import Lock
+from threading import Lock, RLock
 
 
 CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "currsize"])
@@ -36,6 +36,7 @@ class _JitCacheWrapper:
         self._fn = fn
         self._cache = {}
         self._lock = Lock()
+        self._key_locks = {}
         self._hits = 0
         self._misses = 0
 
@@ -49,13 +50,23 @@ class _JitCacheWrapper:
             if cached is not _MISSING:
                 self._hits += 1
                 return cached
+            key_lock = self._key_locks.setdefault(cache_key, RLock())
 
-            self._misses += 1
+        with key_lock:
+            with self._lock:
+                cached = self._cache.get(cache_key, _MISSING)
+                if cached is not _MISSING:
+                    self._hits += 1
+                    return cached
+                self._misses += 1
+
             if compile_args is _MISSING:
                 compiled = self._fn(*args, **kwargs)
             else:
                 compiled = self._fn(*args, compile_args=compile_args, **kwargs)
-            self._cache[cache_key] = compiled
+
+            with self._lock:
+                self._cache[cache_key] = compiled
             return compiled
 
     @property

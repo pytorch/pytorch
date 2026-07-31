@@ -29,10 +29,10 @@ log = logging.getLogger(__name__)
 
 _FLYDSL_DSL_NAME = "flydsl"
 
-# The vendored kernels are validated against the FlyDSL 0.3.x API. 0.3.0
-# removed flydsl.expr.vector, which the RMSNorm kernel imported from, so
-# earlier versions cannot load it at all. They fall back to ATen unless a
-# developer explicitly sets TORCH_NATIVE_SKIP_VERSION_CHECK=1.
+# The RMSNorm kernel depends on the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor
+# interface.
+# Other versions fall back to ATen unless a developer explicitly sets
+# TORCH_NATIVE_SKIP_VERSION_CHECK=1.
 _FLYDSL_SUPPORTED_RELEASE = (0, 3)
 
 
@@ -100,27 +100,9 @@ def _version_is_ok() -> bool:
     return False
 
 
-def _arch_from_hsa_override(value: str) -> str | None:
-    """Parse HSA_OVERRIDE_GFX_VERSION, which is either a gfx name or M.m.s.
-
-    The stepping is hexadecimal: 9.0.10 is gfx90a, not gfx9010.
-    """
-    if value.startswith("gfx"):
-        return value.split(":", 1)[0]
-    parts = value.split(".")
-    if len(parts) != 3:
-        return None
-    major, minor, stepping = parts
-    try:
-        return f"gfx{major}{minor}{int(stepping):x}"
-    except ValueError:
-        log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", value)
-        return None
-
-
 @functools.lru_cache
 def _resolve_rocm_arch(device_index: int) -> str | None:
-    """Return the gfx name FlyDSL should compile for on ``device_index``.
+    """Return the FlyDSL arch string for ``device_index``.
 
     Shared so the eager overrides and the Inductor FlyDSL templates cannot
     disagree about what they are compiling for -- they run in different
@@ -134,21 +116,26 @@ def _resolve_rocm_arch(device_index: int) -> str | None:
 
     hsa = _environ.get("HSA_OVERRIDE_GFX_VERSION")
     if hsa:
-        arch = _arch_from_hsa_override(hsa)
-        if arch is not None:
-            return arch
+        if hsa.startswith("gfx"):
+            return hsa
+        if hsa.count(".") == 2:
+            major, minor, stepping = hsa.split(".")
+            try:
+                return f"gfx{major}{minor}{int(stepping):x}"
+            except ValueError:
+                log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", hsa)
 
-    import torch
-
-    # gcnArchName carries feature flags, e.g. "gfx950:sramecc+:xnack-".
-    if not torch.cuda.is_available():
-        return None
     try:
-        props = torch.cuda.get_device_properties(device_index)
-        return props.gcnArchName.split(":", 1)[0]
+        import torch
+
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(device_index)
+            arch = getattr(props, "gcnArchName", None)
+            if arch:
+                return str(arch).split(":", 1)[0]
     except Exception:
         log.debug("Could not determine FlyDSL GPU arch", exc_info=True)
-        return None
+    return None
 
 
 def deregister_op_overrides() -> None:
