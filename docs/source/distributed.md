@@ -661,7 +661,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: gather_single
+.. autofunction:: gather_into_tensor
 ```
 
 ```{eval-rst}
