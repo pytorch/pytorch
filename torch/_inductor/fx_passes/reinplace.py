@@ -240,6 +240,33 @@ def scatter_has_uninitialized_factory_base(node: torch.fx.Node) -> bool:
     return node.op == "call_function" and node.target in _UNINITIALIZED_FACTORY_OPS
 
 
+def scatter_base_has_no_functional_scatter(node: torch.fx.Node) -> bool:
+    node = _get_view_base(node)
+    while node.op == "call_function" and node.target in (
+        _generalized_scatter,
+        _inplace_generalized_scatter,
+    ):
+        if node.target is _generalized_scatter:
+            return False
+        inp = node.args[0]
+        if not isinstance(inp, torch.fx.Node):
+            return False
+        node = _get_view_base(inp)
+
+    return True
+
+
+def scatter_has_smaller_realized_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
+    inp_val = inp.meta.get("val", None)
+    src_val = src.meta.get("val", None)
+    if not isinstance(inp_val, torch.Tensor) or not isinstance(src_val, torch.Tensor):
+        return False
+
+    return statically_known_true(
+        src_val.numel() < inp_val.numel()
+    ) and is_node_realized(_get_view_base(src))
+
+
 def scatter_src_may_alias_input(node: torch.fx.Node) -> bool:
     inp, src, _view_ops = node.args
     inp_val = inp.meta.get("val") if isinstance(inp, torch.fx.Node) else inp
@@ -261,7 +288,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _src, _view_ops = node.args
+    inp, src, _view_ops = node.args
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
@@ -272,17 +299,45 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
         and scatter_has_uninitialized_factory_base(inp)
         and not scatter_src_may_alias_input(node)
     ):
-        # Fresh empty accumulators can be updated in place without materializing
-        # full-size functional scatter outputs.
+        # Example:
+        #   out = torch.empty_like(x)
+        #   for start, end in chunks:
+        #       chunk = x[start:end] @ w
+        #       out = aten.slice_scatter.default(out, chunk, 0, start, end)
+        # The accumulator starts from a fresh uninitialized factory, so update it
+        # in place instead of materializing full-size functional scatter outputs.
         return True
 
-    if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
+    if (
+        isinstance(inp, torch.fx.Node)
+        and isinstance(src, torch.fx.Node)
+        and scatter_base_has_no_functional_scatter(inp)
+        and scatter_has_smaller_realized_src(inp, src)
+        and not scatter_src_may_alias_input(node)
+    ):
+        # Example:
+        #   out = torch.zeros((x.shape[0], width), device=x.device, dtype=x.dtype)
+        #   src = x[start:end]  # view of a realized placeholder
+        #   out = aten.slice_scatter.default(out, src, 0, start, end)
+        # The source is smaller and its view base is already realized, so copy it
+        # into the destination slice instead of materializing a full-size output.
+        return True
+
+    src_is_realized = isinstance(src, torch.fx.Node) and is_node_realized(src)
+
+    if src_is_realized and is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
 
     # If the output is copied back into the input, this forces both to be
     # realized as the output is a user of the input
-    if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
-        user.target is aten.copy_.default and user.args[0] is inp for user in node.users
+    if (
+        src_is_realized
+        and isinstance(inp, torch.fx.Node)
+        and inp.op in ("placeholder", "get_attr")
+        and any(
+            user.target is aten.copy_.default and user.args[0] is inp
+            for user in node.users
+        )
     ):
         return True
 
