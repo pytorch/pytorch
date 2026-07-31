@@ -3780,14 +3780,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             with self.subTest(body=body.__name__):
                 graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 16))
-                shape_env = None
-                if expected_transform is None:
-                    shape_env = ShapeEnv()
-                    symbol = shape_env.create_symbol(8, ConstantSource("split_size"))
-                    split_size = shape_env.create_symintnode(symbol, hint=8)
-                    for node in graph_module.graph.nodes:
-                        if node.target is torch.ops.aten.split.Tensor:
-                            node.args = (node.args[0], split_size, node.args[2])
+                shape_env = ShapeEnv()
+                symbol = shape_env.create_symbol(
+                    8, ConstantSource(f"{body.__name__}_split_size")
+                )
+                split_size = shape_env.create_symintnode(symbol, hint=8)
+                for node in graph_module.graph.nodes:
+                    if node.target is torch.ops.aten.split.Tensor:
+                        node.args = (node.args[0], split_size, node.args[2])
                 analysis = analyze_flex_gemm_epilogue(
                     graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
                 )
@@ -3804,8 +3804,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     if node in analysis.local_reduce.grouped_layouts
                 ]
                 self.assertEqual(registered, split_nodes if expected_transform else [])
-                if shape_env is not None:
-                    self.assertEqual(shape_env.guards, [])
+                self.assertEqual(len(shape_env.guards), 1 if expected_transform else 0)
 
     def test_rejected_grouped_select_does_not_install_index_guard(self):
         from torch._dynamo.source import ConstantSource
@@ -4254,13 +4253,19 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_n_main_output_partial_n_tile(self):
+    @parametrize("chunked", (False, True))
+    def test_mm_grouped_n_main_output_partial_n_tile(self, chunked):
         m = k = 64
         n = 80
 
         def epilogue(acc):
-            lanes = acc.float().view(m, n, 2)
-            return (lanes[..., 0] - lanes[..., 1]).to(acc.dtype)
+            value = acc.float()
+            if chunked:
+                lhs, rhs = value.chunk(2, dim=-1)
+            else:
+                lanes = value.view(m, n, 2)
+                lhs, rhs = lanes[..., 0], lanes[..., 1]
+            return (lhs - rhs).to(acc.dtype)
 
         def fn(a, b):
             return flex_gemm(
@@ -4274,7 +4279,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
 
         a = torch.randn(m, k, device="cuda", dtype=torch.float16)
-        b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
+        b = (
+            torch.randn(2 * n, k, device="cuda", dtype=torch.float16).t()
+            if chunked
+            else torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
+        )
         actual, (code,) = run_and_get_code(
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
