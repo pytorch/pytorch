@@ -222,7 +222,9 @@ def rocm_lib_kernels(
     return files
 
 
-def rocm_bundle(rocm_home: Path) -> tuple[list[BundledLib], list[AuxFile]]:
+def rocm_bundle(
+    rocm_home: Path, gpu_arch_version: str
+) -> tuple[list[BundledLib], list[AuxFile]]:
     """Build the ROCm bundle spec: shared libs and auxiliary kernel/db files.
 
     Versioned ROCm sonames (libfoo.so.6) get renamed to bare .so to match the
@@ -231,7 +233,11 @@ def rocm_bundle(rocm_home: Path) -> tuple[list[BundledLib], list[AuxFile]]:
     rewritten to the renamed copies via patchelf in repair_wheel().
     """
     libs: list[BundledLib] = []
-    for stem in ROCM_SO_FILES:
+    so_files = list(ROCM_SO_FILES)
+    # librocm_smi64.so is only needed for ROCm7.2 and earlier
+    if gpu_arch_version and tuple(map(int, gpu_arch_version.split(".")[:2])) <= (7, 2):
+        so_files.append("librocm_smi64.so")
+    for stem in so_files:
         path = find_rocm_lib(rocm_home, stem)
         if path is None:
             sys.exit(f"Required ROCm library not found: {stem}")
@@ -408,7 +414,7 @@ def main() -> None:
         force_rpath = True
     elif is_rocm:
         rocm_home = Path(os.environ.get("ROCM_HOME", "/opt/rocm"))
-        bundled_libs, aux_files = rocm_bundle(rocm_home)
+        bundled_libs, aux_files = rocm_bundle(rocm_home, gpu_arch_version)
         c_so_rpath = "$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = "$ORIGIN"
         force_rpath = True
