@@ -422,6 +422,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         pre_dispatch: bool = False,
         export: bool = False,
         _allow_token_discovery: bool = False,
+        _keep_input_mutations: bool = True,
     ) -> None:
         super().__init__()
         self.export = export
@@ -448,6 +449,8 @@ class FunctionalTensorMode(TorchDispatchMode):
         # side-effectful ops. In the second stage there should be no token
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
+        # Controls whether invoke_subgraph keeps input mutations in its graph.
+        self._keep_input_mutations = _keep_input_mutations
 
         self._storage_to_base: weakref.WeakKeyDictionary[
             torch.storage.UntypedStorage, FunctionalTensor | None
