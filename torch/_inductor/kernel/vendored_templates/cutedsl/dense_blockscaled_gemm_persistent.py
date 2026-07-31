@@ -28,6 +28,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+import dataclasses
 from typing import Tuple, Type, Union
 
 import cuda.bindings.driver as cuda
@@ -44,11 +45,29 @@ from cutlass.cute.runtime import from_dlpack
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 import torch
-from torch._inductor.kernel.gemm_epilogue import GemmReductionExpression
+from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class EpilogueInput:
+    tensor: cute.Tensor
+    kind: cutlass.Constexpr
+
+
+@dataclasses.dataclass(frozen=True)
+class EpilogueInputPack:
+    values: tuple
+
+
+@dataclasses.dataclass(frozen=True)
+class EpilogueOutputPack:
+    tensors: tuple
+    count: cutlass.Constexpr
+    primary: cutlass.Constexpr
 
 
 """
@@ -424,31 +443,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_op: cutlass.Constexpr = lambda x: x,
         epilogue_input_dtype: cutlass.Constexpr = cutlass.Float32,
         alpha_tensor: cute.Tensor = None,
-        epilogue_tensor0: cute.Tensor = None,
-        epilogue_tensor1: cute.Tensor = None,
-        epilogue_tensor2: cute.Tensor = None,
-        epilogue_tensor3: cute.Tensor = None,
-        epilogue_tensor_kind0: cutlass.Constexpr = 0,
-        epilogue_tensor_kind1: cutlass.Constexpr = 0,
-        epilogue_tensor_kind2: cutlass.Constexpr = 0,
-        epilogue_tensor_kind3: cutlass.Constexpr = 0,
-        epilogue_output0: cute.Tensor = None,
-        epilogue_output1: cute.Tensor = None,
-        epilogue_output2: cute.Tensor = None,
-        epilogue_output_count: cutlass.Constexpr = 1,
-        primary_epilogue_output: cutlass.Constexpr = 0,
+        epilogue_inputs: EpilogueInputPack = EpilogueInputPack(()),
+        epilogue_outputs: EpilogueOutputPack = EpilogueOutputPack((), 1, 0),
         local_reduce_tensor: cute.Tensor = None,
         local_reduce_feed_tensor: cute.Tensor = None,
-        local_reduce_group: cutlass.Constexpr = 0,
-        local_reduce_axis: cutlass.Constexpr = 1,
-        local_reduce_type: cutlass.Constexpr = "sum",
-        local_reduce_source: cutlass.Constexpr = "identity",
-        local_reduce_feeds_main: cutlass.Constexpr = False,
-        local_reduce_op: cutlass.Constexpr = cute.ReductionOp.ADD,
-        local_reduce_init: cutlass.Constexpr = 0.0,
-        local_reduce_combine: cutlass.Constexpr = lambda lhs, rhs: lhs + rhs,
-        local_reduce_source_op: cutlass.Constexpr = lambda value: value,
-        local_reduce_finalize: cutlass.Constexpr = lambda value, group: value,
+        local_reduce_config: cutlass.Constexpr = None,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -476,6 +475,31 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         :raises TypeError: If input data types are incompatible with the MMA instruction.
         """
 
+        if cutlass.const_expr(local_reduce_config is None):
+            local_reduce_group = 0
+            local_reduce_axis = 1
+            local_reduce_type = "sum"
+            local_reduce_source = "identity"
+            local_reduce_feeds_main = False
+            local_reduce_op = cute.ReductionOp.ADD
+            local_reduce_init = 0.0
+            local_reduce_combine = lambda lhs, rhs: lhs + rhs
+            local_reduce_source_op = lambda value: value
+            local_reduce_finalize = lambda value, group: value
+        else:
+            (
+                local_reduce_group,
+                local_reduce_axis,
+                local_reduce_type,
+                local_reduce_source,
+                local_reduce_feeds_main,
+                local_reduce_op,
+                local_reduce_init,
+                local_reduce_combine,
+                local_reduce_source_op,
+                local_reduce_finalize,
+            ) = local_reduce_config
+
         # Convert from torch convention to CuTe convention.
         # CUTLASS API passes tensors as A:(L,M,K) B:(L,K,N) C:(L,M,N)
         # but CuTe DSL kernels expect A:(M,K,L) B:(N,K,L) C:(M,N,L).
@@ -500,7 +524,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_affine_bias = 0.0
         self.local_reduce_denominator_scale = 1.0
         self.local_reduce_denominator_bias = 0.0
-        reduction_expression = GemmReductionExpression.parse(local_reduce_type)
+        reduction_expression = GemmReductionDescriptor.parse(local_reduce_type)
         local_reduce_type = reduction_expression.kind
         if cutlass.const_expr(local_reduce_type == "mean_linear"):
             input_coefficient, result_coefficient, bias = (
@@ -563,25 +587,24 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 tensor.iterator, cute.select(tensor.layout, [1, 2, 0])
             )
 
-        if cutlass.const_expr(epilogue_tensor0 is not None):
-            epilogue_tensor0 = epilogue_tensor_to_mnl(epilogue_tensor0)
-        if cutlass.const_expr(epilogue_tensor1 is not None):
-            epilogue_tensor1 = epilogue_tensor_to_mnl(epilogue_tensor1)
-        if cutlass.const_expr(epilogue_tensor2 is not None):
-            epilogue_tensor2 = epilogue_tensor_to_mnl(epilogue_tensor2)
-        if cutlass.const_expr(epilogue_tensor3 is not None):
-            epilogue_tensor3 = epilogue_tensor_to_mnl(epilogue_tensor3)
-        if cutlass.const_expr(epilogue_output0 is not None):
-            epilogue_output0 = epilogue_tensor_to_mnl(epilogue_output0)
-        if cutlass.const_expr(epilogue_output1 is not None):
-            epilogue_output1 = epilogue_tensor_to_mnl(epilogue_output1)
-        if cutlass.const_expr(epilogue_output2 is not None):
-            epilogue_output2 = epilogue_tensor_to_mnl(epilogue_output2)
+        epilogue_inputs = EpilogueInputPack(
+            tuple(
+                EpilogueInput(epilogue_tensor_to_mnl(value.tensor), value.kind)
+                for value in epilogue_inputs.values
+            )
+        )
+        epilogue_outputs = EpilogueOutputPack(
+            tuple(
+                epilogue_tensor_to_mnl(tensor) for tensor in epilogue_outputs.tensors
+            ),
+            epilogue_outputs.count,
+            epilogue_outputs.primary,
+        )
         if cutlass.const_expr(local_reduce_feed_tensor is not None):
             local_reduce_feed_tensor = epilogue_tensor_to_mnl(local_reduce_feed_tensor)
 
-        self.epilogue_output_count = epilogue_output_count
-        self.primary_epilogue_output = primary_epilogue_output
+        self.epilogue_output_count = epilogue_outputs.count
+        self.primary_epilogue_output = epilogue_outputs.primary
 
         # Setup static attributes before smem/grid/tma computation
         self.a_dtype: Type[cutlass.Numeric] = a_tensor.element_type
@@ -826,17 +849,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             epilogue_op,
             epilogue_input_dtype,
             alpha_tensor,
-            epilogue_tensor0,
-            epilogue_tensor1,
-            epilogue_tensor2,
-            epilogue_tensor3,
-            epilogue_tensor_kind0,
-            epilogue_tensor_kind1,
-            epilogue_tensor_kind2,
-            epilogue_tensor_kind3,
-            epilogue_output0,
-            epilogue_output1,
-            epilogue_output2,
+            epilogue_inputs,
+            epilogue_outputs,
             local_reduce_tensor,
             local_reduce_feed_tensor,
         ).launch(
@@ -876,17 +890,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_op: cutlass.Constexpr,
         epilogue_input_dtype: cutlass.Constexpr,
         alpha_tensor: cute.Tensor,
-        epilogue_tensor0: cute.Tensor,
-        epilogue_tensor1: cute.Tensor,
-        epilogue_tensor2: cute.Tensor,
-        epilogue_tensor3: cute.Tensor,
-        epilogue_tensor_kind0: cutlass.Constexpr,
-        epilogue_tensor_kind1: cutlass.Constexpr,
-        epilogue_tensor_kind2: cutlass.Constexpr,
-        epilogue_tensor_kind3: cutlass.Constexpr,
-        epilogue_output0: cute.Tensor,
-        epilogue_output1: cute.Tensor,
-        epilogue_output2: cute.Tensor,
+        epilogue_inputs: EpilogueInputPack,
+        epilogue_outputs: EpilogueOutputPack,
         local_reduce_tensor: cute.Tensor,
         local_reduce_feed_tensor: cute.Tensor,
     ):
@@ -1708,10 +1713,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     if cutlass.const_expr(alpha_tensor is not None):
                         acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
                     has_epilogue_tensors = cutlass.const_expr(
-                        epilogue_tensor0 is not None
-                        or epilogue_tensor1 is not None
-                        or epilogue_tensor2 is not None
-                        or epilogue_tensor3 is not None
+                        len(epilogue_inputs.values) > 0
                     )
                     has_epilogue_outputs = cutlass.const_expr(
                         self.epilogue_output_count > 1
@@ -1742,45 +1744,39 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         output_m = cute.size(mC_mnl, mode=[0])
                         output_n = cute.size(mC_mnl, mode=[1])
                     if cutlass.const_expr(has_epilogue_tensors):
-                        for tensor, kind in (
-                            (epilogue_tensor0, epilogue_tensor_kind0),
-                            (epilogue_tensor1, epilogue_tensor_kind1),
-                            (epilogue_tensor2, epilogue_tensor_kind2),
-                            (epilogue_tensor3, epilogue_tensor_kind3),
-                        ):
-                            if cutlass.const_expr(tensor is not None):
-                                fragment = cute.make_rmem_tensor_like(
-                                    acc_vec, tensor.element_type
+                        for value in epilogue_inputs.values:
+                            tensor = value.tensor
+                            kind = value.kind
+                            fragment = cute.make_rmem_tensor_like(
+                                acc_vec, tensor.element_type
+                            )
+                            for i in cutlass.range(
+                                cute.size(fragment), unroll_full=True
+                            ):
+                                row_idx = coord_flt[i][0]
+                                col_idx = coord_flt[i][1]
+                                global_m = (
+                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                    + row_idx
                                 )
-                                for i in cutlass.range(
-                                    cute.size(fragment), unroll_full=True
-                                ):
-                                    row_idx = coord_flt[i][0]
-                                    col_idx = coord_flt[i][1]
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + row_idx
-                                    )
-                                    global_n = (
-                                        mma_tile_coord_mnl[1]
-                                        * self.cta_tile_shape_mnk[1]
-                                        + col_idx
-                                    )
-                                    tensor_m = (
-                                        0 if cutlass.const_expr(kind == 2) else global_m
-                                    )
-                                    tensor_n = (
-                                        0 if cutlass.const_expr(kind == 3) else global_n
-                                    )
-                                    fragment[i] = tensor[0, 0, 0]
-                                    if global_m < output_m and global_n < output_n:
-                                        fragment[i] = tensor[
-                                            tensor_m,
-                                            tensor_n,
-                                            mma_tile_coord_mnl[2],
-                                        ]
-                                epilogue_values.append(fragment.load())
+                                global_n = (
+                                    mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
+                                    + col_idx
+                                )
+                                tensor_m = (
+                                    0 if cutlass.const_expr(kind == 2) else global_m
+                                )
+                                tensor_n = (
+                                    0 if cutlass.const_expr(kind == 3) else global_n
+                                )
+                                fragment[i] = tensor[0, 0, 0]
+                                if global_m < output_m and global_n < output_n:
+                                    fragment[i] = tensor[
+                                        tensor_m,
+                                        tensor_n,
+                                        mma_tile_coord_mnl[2],
+                                    ]
+                            epilogue_values.append(fragment.load())
                     if cutlass.const_expr(
                         local_reduce_tensor is not None or self.local_reduce_feeds_main
                     ):
@@ -1917,44 +1913,39 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     mma_tile_coord_mnl[2],
                                 ] = feed_fragment_flt[i]
                     if cutlass.const_expr(has_epilogue_outputs):
-                        for output_index, tensor in enumerate(
-                            (epilogue_output0, epilogue_output1, epilogue_output2)
-                        ):
-                            if cutlass.const_expr(tensor is not None):
-                                result_index = cutlass.const_expr(
-                                    output_index
-                                    if output_index < self.primary_epilogue_output
-                                    else output_index + 1
+                        for output_index, tensor in enumerate(epilogue_outputs.tensors):
+                            result_index = cutlass.const_expr(
+                                output_index
+                                if output_index < self.primary_epilogue_output
+                                else output_index + 1
+                            )
+                            output_vec = epilogue_result[result_index].to(
+                                tensor.element_type
+                            )
+                            fragment = cute.make_rmem_tensor_like(
+                                output_vec, tensor.element_type
+                            )
+                            fragment.store(output_vec)
+                            fragment_flt = cute.filter_zeros(fragment)
+                            for i in cutlass.range(
+                                cute.size(fragment_flt), unroll_full=True
+                            ):
+                                row_idx = coord_flt[i][0]
+                                col_idx = coord_flt[i][1]
+                                global_m = (
+                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                    + row_idx
                                 )
-                                output_vec = epilogue_result[result_index].to(
-                                    tensor.element_type
+                                global_n = (
+                                    mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
+                                    + col_idx
                                 )
-                                fragment = cute.make_rmem_tensor_like(
-                                    output_vec, tensor.element_type
-                                )
-                                fragment.store(output_vec)
-                                fragment_flt = cute.filter_zeros(fragment)
-                                for i in cutlass.range(
-                                    cute.size(fragment_flt), unroll_full=True
-                                ):
-                                    row_idx = coord_flt[i][0]
-                                    col_idx = coord_flt[i][1]
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + row_idx
-                                    )
-                                    global_n = (
-                                        mma_tile_coord_mnl[1]
-                                        * self.cta_tile_shape_mnk[1]
-                                        + col_idx
-                                    )
-                                    if global_m < output_m and global_n < output_n:
-                                        tensor[
-                                            global_m,
-                                            global_n,
-                                            mma_tile_coord_mnl[2],
-                                        ] = fragment_flt[i]
+                                if global_m < output_m and global_n < output_n:
+                                    tensor[
+                                        global_m,
+                                        global_n,
+                                        mma_tile_coord_mnl[2],
+                                    ] = fragment_flt[i]
                         acc_vec = epilogue_result[self.primary_epilogue_output].to(
                             self.c_dtype
                         )
