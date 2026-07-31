@@ -984,8 +984,7 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool trigger_free_memory_callbacks(AllocParams& p) {
-    (void)p;
+  bool trigger_free_memory_callbacks() {
     bool freed_memory = false;
     for (const auto& name : FreeXPUMemoryCallbacksRegistry()->Keys()) {
       freed_memory |=
@@ -1476,7 +1475,7 @@ class DeviceCachingAllocator {
     // First, try to get a block from the existing pool.
     bool block_found =
       get_free_block(params) ||
-      (trigger_free_memory_callbacks(params) && get_free_block(params));
+      (trigger_free_memory_callbacks() && get_free_block(params));
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
       block_found = alloc_block(params, false, context) ||
@@ -1985,18 +1984,31 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
     const auto ptracer_status = tryEnablePtracerAnyForIpcImport();
 
     if (ptracer_status.state == PtracerAnyState::Enabled) {
-      try {
-        return open_once();
-      } catch (const std::exception& second_error) {
-        TORCH_CHECK(
-            false,
-            "XPU IPC open failed: ",
-            first_error.what(),
-            ". Retry after enabling PR_SET_PTRACER_ANY also failed: ",
-            second_error.what());
-      }
+      return retryAfterEnablingPtracer(open_once, first_error);
     }
 
+    throwPtracerUnavailable(ptracer_status, first_error);
+  }
+
+  template <typename OpenOnceFn>
+  static void* retryAfterEnablingPtracer(
+      OpenOnceFn&& open_once,
+      const std::exception& first_error) {
+    try {
+      return open_once();
+    } catch (const std::exception& second_error) {
+      TORCH_CHECK(
+          false,
+          "XPU IPC open failed: ",
+          first_error.what(),
+          ". Retry after enabling PR_SET_PTRACER_ANY also failed: ",
+          second_error.what());
+    }
+  }
+
+  [[noreturn]] static void throwPtracerUnavailable(
+      const PtracerAnyStatus& ptracer_status,
+      const std::exception& first_error) {
     if (ptracer_status.state == PtracerAnyState::EnableFailed) {
       TORCH_CHECK(
           false,

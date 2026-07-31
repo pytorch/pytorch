@@ -667,7 +667,9 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
     THPObjectPtr ref_counter(
         shared.ref_counter_handle.empty()
             ? Py_NewRef(Py_None)
-            : PyBytes_FromString(shared.ref_counter_handle.c_str()));
+            : PyBytes_FromStringAndSize(
+                  shared.ref_counter_handle.c_str(),
+                  static_cast<Py_ssize_t>(shared.ref_counter_handle.size())));
     THPObjectPtr ref_counter_offset(
         THPUtils_packUInt64(shared.ref_counter_offset));
     THPObjectPtr size_bytes(THPUtils_packUInt64(shared.size_bytes));
@@ -686,7 +688,7 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
     PyTuple_SET_ITEM(tuple.get(), 5, size_bytes.release());
     PyTuple_SET_ITEM(tuple.get(), 6, offset_bytes.release());
     return tuple.release();
-  } catch (const c10::Error& e) {
+  } catch (const std::exception& e) {
     TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
   }
   END_HANDLE_TH_ERRORS
