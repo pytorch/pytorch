@@ -34,6 +34,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -442,6 +443,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
 
   args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
+  args.collect(f->clear_saved_tensors_on_access);
   args.collect(f->is_variable_input);
   THPObjectPtr needs_input_grad(materialize_needs_input_grad(f));
   if (!needs_input_grad) {
@@ -608,6 +610,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   self->input_info.~vector();
   self->saved_variables.~vector();
   self->is_variable_input.~vector();
+  self->compiled_autograd_saved_tensors_state.~Tensor();
   std::destroy_at(&self->needs_input_grad_bits);
   if (self->cdata) {
     auto* slot = self->cdata->pyobj_slot();
@@ -634,6 +637,7 @@ static PyObject* THPFunction_new(
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
+  new (&self->compiled_autograd_saved_tensors_state) at::Tensor();
   new (&self->needs_input_grad_bits)
       std::optional<c10::SmallVector<bool, 24>>();
   self->materialize_grads = true;
@@ -1114,7 +1118,7 @@ torch::jit::Node* _trace_pre_record(
   // Save scalar args and the calling convention
   auto num_args = PyTuple_GET_SIZE(input_objects);
   pyobj_list scalar_args;
-  std::string arg_types;
+  std::string arg_types{};
   arg_types.reserve(num_args);
   scalar_args.reserve(num_args);
   for (const auto i : c10::irange(num_args)) {
@@ -1776,6 +1780,11 @@ PyObject* THPFunction_apply(
       "clear_saved_tensors_on_access must be a bool, got ",
       Py_TYPE(clear_attr.get())->tp_name);
   ctx->clear_saved_tensors_on_access = Py_IsTrue(clear_attr.get());
+  if (ctx->clear_saved_tensors_on_access) {
+    torch::DisableTorchDispatch guard;
+    ctx->compiled_autograd_saved_tensors_state =
+        at::zeros({}, at::TensorOptions().dtype(at::ScalarType::Bool));
+  }
 
   // Get boxed_grads_call from the Function class
   THPObjectPtr boxed_attr(PyObject_GetAttr(cls, boxed_grads_call_name));
@@ -1929,14 +1938,25 @@ int THPFunction_set_materialize_non_diff_grads(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
-  HANDLE_TH_ERRORS
+static void check_saved_tensors_not_cleared(const THPFunction* self) {
   TORCH_CHECK(
       !self->saved_tensors_accessed_and_cleared,
       "saved_tensors can only be accessed once when "
       "clear_saved_tensors_on_access=True is set on the autograd.Function. "
       "Either access saved_tensors only once, or set "
       "clear_saved_tensors_on_access=False.");
+}
+
+static void clear_saved_tensors_after_access(THPFunction* self) {
+  self->saved_variables.clear();
+  torch::DisableTorchDispatch guard;
+  self->compiled_autograd_saved_tensors_state.fill_(true);
+  self->saved_tensors_accessed_and_cleared = true;
+}
+
+PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
+  HANDLE_TH_ERRORS
+  check_saved_tensors_not_cleared(self);
   if (self->saved_for_forward) {
     return Py_NewRef(self->saved_for_forward);
   } else {
@@ -1947,8 +1967,7 @@ PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
     }
 
     if (self->clear_saved_tensors_on_access) {
-      self->saved_variables.clear();
-      self->saved_tensors_accessed_and_cleared = true;
+      clear_saved_tensors_after_access(self);
     }
 
     return result;
@@ -1964,12 +1983,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
       0);
   if (r != 0)
     throw_python_error();
-  TORCH_CHECK(
-      !self->saved_tensors_accessed_and_cleared,
-      "saved_tensors can only be accessed once when "
-      "clear_saved_tensors_on_access=True is set on the autograd.Function. "
-      "Either access saved_tensors only once, or set "
-      "clear_saved_tensors_on_access=False.");
+  check_saved_tensors_not_cleared(self);
   PyObject* result = unpack_saved_variables(
       self, [](const Variable& var) { return THPVariable_Wrap(var); });
   if (!result) {
@@ -1977,11 +1991,45 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   }
 
   if (self->clear_saved_tensors_on_access) {
-    self->saved_variables.clear();
-    self->saved_tensors_accessed_and_cleared = true;
+    clear_saved_tensors_after_access(self);
   }
 
   return result;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_get_saved_tensors_accessed_and_cleared(
+    THPFunction* self,
+    void* _unused) {
+  if (self->saved_tensors_accessed_and_cleared) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPFunction_get_clear_saved_tensors_on_access(
+    THPFunction* self,
+    void* _unused) {
+  if (self->clear_saved_tensors_on_access) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPFunction_get_compiled_autograd_saved_tensors_state(
+    THPFunction* self,
+    void* _unused) {
+  return THPVariable_Wrap(self->compiled_autograd_saved_tensors_state);
+}
+
+PyObject* THPFunction_compiled_autograd_clear_saved_tensors(
+    PyObject* self,
+    PyObject* _unused) {
+  HANDLE_TH_ERRORS
+  auto* function = reinterpret_cast<THPFunction*>(self);
+  check_saved_tensors_not_cleared(function);
+  clear_saved_tensors_after_access(function);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -2179,6 +2227,21 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr,
      nullptr},
+    {"_saved_tensors_accessed_and_cleared",
+     (getter)THPFunction_get_saved_tensors_accessed_and_cleared,
+     nullptr,
+     nullptr,
+     nullptr},
+    {"_clear_saved_tensors_on_access",
+     (getter)THPFunction_get_clear_saved_tensors_on_access,
+     nullptr,
+     nullptr,
+     nullptr},
+    {"_compiled_autograd_saved_tensors_state",
+     (getter)THPFunction_get_compiled_autograd_saved_tensors_state,
+     nullptr,
+     nullptr,
+     nullptr},
     {"next_functions",
      (getter)THPFunction_next_functions,
      nullptr,
@@ -2245,6 +2308,10 @@ static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
+     METH_NOARGS,
+     nullptr},
+    {(char*)"_compiled_autograd_clear_saved_tensors",
+     THPFunction_compiled_autograd_clear_saved_tensors,
      METH_NOARGS,
      nullptr},
     {(char*)"apply",
