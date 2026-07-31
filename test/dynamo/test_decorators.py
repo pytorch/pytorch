@@ -2286,6 +2286,28 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         # and a full frame skip on others.
         self.assertLessEqual(cnt.frame_count, 1)
 
+    def test_grad_fn_none_recompiles_for_non_leaf(self):
+        # grad_fn constant-folds to None for a leaf tensor.  TENSOR_MATCH does
+        # not guard grad_fn presence and requires_grad does not distinguish a
+        # leaf from a non-leaf, so without a NONE_MATCH guard on grad_fn the
+        # leaf-specialized branch is silently reused for a non-leaf input.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            if x.grad_fn is None:
+                return x + 1
+            return x * 100
+
+        leaf = torch.randn(3, requires_grad=True)
+        non_leaf = torch.randn(3, requires_grad=True) * 2
+
+        self.assertEqual(fn(leaf), leaf + 1)
+        frames_after_leaf = cnt.frame_count
+        self.assertEqual(fn(non_leaf), non_leaf * 100)
+        # The non-leaf input must not reuse the leaf-specialized code.
+        self.assertGreater(cnt.frame_count, frames_after_leaf)
+
         # test export with error_on_graph_break(False) still errors
 
     def test_error_on_graph_break_export(self):

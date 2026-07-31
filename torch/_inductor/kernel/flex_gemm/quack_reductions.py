@@ -35,8 +35,12 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
-    statically_known_equal,
 )
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionGeometry,
+    iter_fx_node_inputs,
+)
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
@@ -48,25 +52,13 @@ def normalize_shape(shape: Any) -> Any:
 
 
 @dataclasses.dataclass(frozen=True)
-class GroupedTensorSSALayout:
+class GroupedTensorSSALayout(GemmReductionGeometry):
     """Describe a grouped M/N TensorSSA view inside the generated epilogue.
 
     Attributes:
         axis: GEMM output dimension being grouped: 0 for M, 1 for N.
         group_size: Number of contiguous output elements reduced as one group.
     """
-
-    axis: int
-    group_size: int
-
-    @property
-    def reduce_dims(self) -> tuple[int, ...]:
-        return (-1, 2) if self.axis == 1 else (-2, 1)
-
-    def matches_reduction_dim(self, dim: Any) -> bool:
-        """Return whether an FX reduction selects this layout's grouped dimension."""
-        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
-        return len(dims) == 1 and dims[0] in self.reduce_dims
 
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the local group size available in this epilogue fragment."""
@@ -110,9 +102,9 @@ def _syntactic_grouped_tensor_layout(
     if len(shape) not in (3, 4):
         return None
     if isinstance(shape[-1], int) and shape[-1] > 0 and shape[-2] == -1:
-        return GroupedTensorSSALayout(axis=1, group_size=shape[-1])
+        return GroupedTensorSSALayout(group=shape[-1], axis=1)
     if shape[-3] == -1 and isinstance(shape[-2], int) and shape[-2] > 0:
-        return GroupedTensorSSALayout(axis=0, group_size=shape[-2])
+        return GroupedTensorSSALayout(group=shape[-2], axis=0)
     return None
 
 
@@ -166,10 +158,10 @@ def grouped_tensor_layout(
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=1, group_size=group))
+                    candidates.append(GroupedTensorSSALayout(group=group, axis=1))
             match shape:
                 case (*_, int(group), _) if group > 0:
-                    candidates.append(GroupedTensorSSALayout(axis=0, group_size=group))
+                    candidates.append(GroupedTensorSSALayout(group=group, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
                     return layout
@@ -332,13 +324,6 @@ def is_pointwise_node(node: torch.fx.Node) -> bool:
 
 def is_shape_preserving_pointwise_node(node: torch.fx.Node) -> bool:
     return is_pointwise_node(node) and node_preserves_tensor_shapes(node)
-
-
-def iter_fx_node_inputs(value: Any):
-    """Yield FX node inputs nested in args/kwargs-style containers."""
-    result: list[torch.fx.Node] = []
-    torch.fx.map_arg(value, lambda node: result.append(node))
-    yield from result
 
 
 def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | None:
