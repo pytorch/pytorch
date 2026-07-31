@@ -46,7 +46,7 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
         .set_check_mem_overlap(false)
         .resize_outputs(false)
         .add_output(out)
-        .add_input(src_view)
+        .add_const_input(src_view)
         .build();
   };
 
