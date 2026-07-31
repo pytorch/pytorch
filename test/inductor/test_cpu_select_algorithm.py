@@ -2972,11 +2972,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(torch.float32, torch.bfloat16, torch.half)
     def test_bmm_with_template_buffer_other_users(self, dtype):
         # https://github.com/pytorch/pytorch/issues/185405
-        # The BMM output is returned raw *and* consumed by an epilogue, so the
-        # GEMM output buffer has users outside of the fused epilogue. That makes
-        # the template emit an extra local-to-global copy epilogue, which works on
-        # the 3D ranges of the GEMM output buffer while the template stores 2D
-        # tiles, so it needs the batch reindexer.
+        # The BMM output is returned raw *and* consumed by an epilogue, so the GEMM
+        # output buffer gets an extra local-to-global copy epilogue whose ranges are
+        # 3D while the template stores 2D tiles, hence it needs the batch reindexer.
         class M(torch.nn.Module):
             def forward(self, q, k):
                 matmul = torch.matmul(q, k.transpose(-2, -1))
@@ -2989,6 +2987,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (q, k), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        # The bug requires the mul to actually be fused into the template, since
+        # template_buffer_has_other_users is False when there are no epilogue nodes.
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
     @torch.no_grad

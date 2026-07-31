@@ -1449,8 +1449,8 @@ class CppGemmTemplate(CppTemplate):
             W = W.as_strided(W.shape, new_stride)
             return W
 
-    def get_default_reindexers(self, epilogue_nodes):
-        return [None] * len(epilogue_nodes)
+    def get_default_reindexers(self, epilogues):
+        return [None] * len(epilogues)
 
     def get_options(
         self,
@@ -1601,11 +1601,10 @@ class CppGemmTemplate(CppTemplate):
                 layout=template_buffer.layout,
             )
             current_input_buffer = gemm_output_buffer
-            # The in-template epilogues are created over the ranges of the GEMM output
-            # buffer, whose rank may be higher than the 2D tiles the template stores into
-            # (e.g. for the BMM template the GEMM output buffer keeps a leading batch dim).
-            # Ask the template for the reindexers that map the 2D template indices onto the
-            # ranges of these epilogues.
+            # In-template epilogues are built over the GEMM output buffer's ranges,
+            # whose rank can exceed that of the 2D tiles the template stores into
+            # (the BMM template keeps a leading batch dim). Let the template supply
+            # the reindexers mapping the 2D tile indices onto those ranges.
             creator_reindexers = self.get_default_reindexers(epilogue_creators)
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
