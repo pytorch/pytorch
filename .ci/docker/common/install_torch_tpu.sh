@@ -195,7 +195,14 @@ export TORCH_SOURCE=$(python -c "import torch; import os; print(os.path.dirname(
 # and locate the local torch install's ATen headers. Bazel sanitizes the
 # ambient environment for hermeticity, so a plain `env TORCH_SOURCE=...` is not
 # visible to repository rules (only --define TORCH_SOURCE=local is not enough).
-as_jenkins env TORCH_SOURCE="${TORCH_SOURCE}" bazel build //ci/wheel:torch_tpu_wheel --config=local --define WHEEL_VERSION=0.1.0 --define TORCH_SOURCE=local --repo_env=TORCH_SOURCE="${TORCH_SOURCE}" --action_env=JAX_PLATFORMS=cpu
+#
+# --config=wheel_common sets --//:wheel_build=True, which factors the XLA/MLIR
+# backend into one shared library instead of a copy per PyTorch-version glue;
+# without it the wheel aborts on import with duplicate static registrations
+# ("New registration for AllocatorFactory with name=DefaultCPUAllocator").
+# --config=no_rbe strips the RBE remote cache/executor that wheel_common pulls
+# in, which we have no credentials for, and subsumes --config=local.
+as_jenkins env TORCH_SOURCE="${TORCH_SOURCE}" bazel build //ci/wheel:torch_tpu_wheel --config=wheel_common --config=no_rbe --define WHEEL_VERSION=0.1.0 --define TORCH_SOURCE=local --repo_env=TORCH_SOURCE="${TORCH_SOURCE}" --action_env=JAX_PLATFORMS=cpu
 
 # 11. Install
 pip_install bazel-bin/ci/wheel/*.whl
