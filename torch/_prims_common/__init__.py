@@ -1243,6 +1243,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     if dtype in _integer_dtypes:
         return sym_int
     if dtype.is_floating_point:
+        # pyrefly: ignore [bad-return]
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
@@ -1839,7 +1840,7 @@ def make_contiguous_strides_for(
         if len(shape) < 2:
             return result
         # Use sym_max to handle unbacked symbolic dimensions
-        return result[:-2] + (1, sym_max(shape[-2], 1))
+        return result[:-2] + (1, sym_max(shape[-2], 1))  # type: ignore[return-value]
 
 
 def make_channels_last_1d_strides_for(
@@ -1853,7 +1854,7 @@ def make_channels_last_1d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 3
     for idx in (1, -1, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1873,7 +1874,7 @@ def make_channels_last_2d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 4
     for idx in (1, -1, -2, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1892,7 +1893,7 @@ def make_channels_last_3d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1958,6 +1959,7 @@ def set_correction(
     # NB: we don't actually support symint here, but it's harmless to accept
     if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
+    # pyrefly: ignore [bad-return]
     return sym_float(correction)
 
 

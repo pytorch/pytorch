@@ -7,9 +7,10 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable
 from enum import auto, Enum
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, NoReturn, TYPE_CHECKING, Union
 
 import torch
+from torch._prims_common import clone_preserve_strides
 from torch.utils._pytree import (
     _get_node_type,
     BUILTIN_TYPES,
@@ -118,7 +119,7 @@ class Dim:
     ``Dim("name", min=1, max=2)``).
 
     Dim hints provide the lowest barrier to exportability, with the user only
-    needing to specify if a dimension if dynamic, static, or left for the
+    needing to specify if a dimension is dynamic, static, or left for the
     compiler to decide (``Dim.AUTO``). The export process will automatically
     infer the remaining constraints on min/max ranges and relationships between
     dimensions.
@@ -724,25 +725,240 @@ def _tree_map_with_path(
         raise
 
 
-def _combine_args(f, args, kwargs) -> dict[str, Any]:
-    # combine args and kwargs following the signature of f, as it happens
-    # in the body of f when called with *args, **kwargs
+_DynamicShapesSpec = dict[str, Any] | tuple[Any, ...] | list[Any]
+
+
+def _signature(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+) -> inspect.Signature:
     if isinstance(f, ExportedProgram):
         f = f.module()
-
-    signature = (
+    return (
         inspect.signature(f.forward)
         if isinstance(f, torch.nn.Module)
         else inspect.signature(f)
     )
+
+
+def _combine_args_from_signature(
+    signature: inspect.Signature,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
     kwargs = kwargs if kwargs is not None else {}
     return signature.bind(*args, **kwargs).arguments
+
+
+def _combine_args(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
+    # combine args and kwargs following the signature of f, as it happens
+    # in the body of f when called with *args, **kwargs
+    return _combine_args_from_signature(_signature(f), args, kwargs)
+
+
+_MISSING = object()
+
+
+def _var_keyword_param_name(signature: inspect.Signature) -> str | None:
+    for name, param in signature.parameters.items():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return name
+    return None
+
+
+def _variadic_kwargs_info(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> tuple[inspect.Signature, dict[str, Any], str | None, dict[str, Any]]:
+    signature = _signature(f)
+    combined_args = _combine_args_from_signature(signature, args, kwargs)
+    var_keyword_name = _var_keyword_param_name(signature)
+    if var_keyword_name is None or var_keyword_name not in combined_args:
+        return signature, combined_args, var_keyword_name, {}
+
+    var_kwargs = combined_args[var_keyword_name]
+    if not isinstance(var_kwargs, dict):
+        return signature, combined_args, var_keyword_name, {}
+    return signature, combined_args, var_keyword_name, var_kwargs
+
+
+def _colliding_variadic_kwarg_names(
+    signature: inspect.Signature,
+    args: tuple[Any, ...],
+    var_kwargs: dict[str, Any],
+) -> list[str]:
+    positional_names = set()
+    arg_i = 0
+    for param in signature.parameters.values():
+        if arg_i == len(args):
+            break
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            positional_names.update(
+                f"{param.name}_{i}" for i in range(len(args) - arg_i)
+            )
+            break
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }:
+            positional_names.add(param.name)
+            arg_i += 1
+        elif param.kind == inspect.Parameter.KEYWORD_ONLY:
+            break
+    return sorted(set(var_kwargs) & positional_names)
+
+
+def _normalize_dynamic_shapes(
+    dynamic_shapes: _DynamicShapesSpec | None,
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> _DynamicShapesSpec | None:
+    """
+    Normalize call-like dynamic shape specs for **kwargs to the signature-shaped
+    structure used by the rest of dynamic shapes processing.
+    """
+    if not dynamic_shapes:
+        return dynamic_shapes
+
+    signature, combined_args, var_keyword_name, var_kwargs = _variadic_kwargs_info(
+        f, args, kwargs
+    )
+    if var_keyword_name is None or not var_kwargs:
+        return dynamic_shapes
+
+    from torch._dynamo.exc import UserError, UserErrorType
+
+    collisions = _colliding_variadic_kwarg_names(signature, args, var_kwargs)
+    if collisions:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Cannot represent dynamic shapes for variadic keyword argument(s) "
+            f"{collisions} because they collide with another input name used "
+            "for positional inputs.",
+            case_name="dynamic_shapes_validation",
+        )
+
+    if not isinstance(dynamic_shapes, dict):
+        return dynamic_shapes
+
+    result = dict(dynamic_shapes)
+    nested = result.get(var_keyword_name, _MISSING)
+    nested_shapes = dict(nested) if isinstance(nested, dict) else nested
+    fixed_arg_names = set(combined_args) - {var_keyword_name}
+
+    for key in var_kwargs:
+        has_nested_shape = isinstance(nested_shapes, dict) and key in nested_shapes
+        if key in fixed_arg_names or key == var_keyword_name:
+            if key in result and not has_nested_shape:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Cannot represent dynamic shape for variadic keyword argument "
+                    f"'{key}' as a top-level key because it collides with another "
+                    f"input name. Specify it under the variadic keyword parameter "
+                    f"instead, e.g. `dynamic_shapes['{var_keyword_name}']['{key}']`.",
+                    case_name="dynamic_shapes_validation",
+                )
+            continue
+
+        if key in result:
+            if nested is not _MISSING and not isinstance(nested_shapes, dict):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Cannot merge dynamic shape for variadic keyword argument "
+                    f"'{key}' into `dynamic_shapes['{var_keyword_name}']` because "
+                    "that entry is not a dict.",
+                    case_name="dynamic_shapes_validation",
+                )
+            if has_nested_shape:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Found dynamic shape for variadic keyword argument '{key}' "
+                    f"both as a top-level key and under "
+                    f"`dynamic_shapes['{var_keyword_name}']`.",
+                    case_name="dynamic_shapes_validation",
+                )
+            if not isinstance(nested_shapes, dict):
+                nested_shapes = {}
+            nested_shapes[key] = result.pop(key)
+
+    if isinstance(nested_shapes, dict):
+        result[var_keyword_name] = nested_shapes
+    return result
+
+
+def _combine_args_for_tracing(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+    dynamic_shapes: Any,
+) -> tuple[dict[Any, Any], Any]:
+    if not dynamic_shapes:
+        return _combine_args(f, args, kwargs), dynamic_shapes
+
+    kwargs = kwargs if kwargs is not None else {}
+    signature, combined_args, var_keyword_name, var_kwargs = _variadic_kwargs_info(
+        f, args, kwargs
+    )
+    if isinstance(dynamic_shapes, (tuple, list)):
+        dynamic_shapes_by_name = dict(zip(combined_args, dynamic_shapes))
+    else:
+        dynamic_shapes_by_name = dynamic_shapes
+
+    if not isinstance(dynamic_shapes_by_name, dict):
+        return combined_args, dynamic_shapes
+
+    traced_args = []
+    traced_dynamic_shapes = []
+    traced_names = []
+    arg_i = 0
+    for param in signature.parameters.values():
+        if arg_i == len(args):
+            break
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            var_args = combined_args[param.name]
+            var_arg_dynamic_shapes = dynamic_shapes_by_name[param.name]
+            for i, arg in enumerate(var_args):
+                traced_args.append(arg)
+                traced_dynamic_shapes.append(var_arg_dynamic_shapes[i])
+                traced_names.append(f"{param.name}_{i}")
+            arg_i = len(args)
+            break
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }:
+            traced_args.append(combined_args[param.name])
+            traced_dynamic_shapes.append(dynamic_shapes_by_name[param.name])
+            traced_names.append(param.name)
+            arg_i += 1
+
+    for key, arg in kwargs.items():
+        traced_args.append(arg)
+        traced_names.append(key)
+        if var_keyword_name is not None and key in var_kwargs:
+            traced_dynamic_shapes.append(dynamic_shapes_by_name[var_keyword_name][key])
+        else:
+            traced_dynamic_shapes.append(dynamic_shapes_by_name[key])
+
+    if isinstance(dynamic_shapes, dict) and len(set(traced_names)) == len(traced_names):
+        return dict(zip(traced_names, traced_args)), dict(
+            zip(traced_names, traced_dynamic_shapes)
+        )
+    return dict(enumerate(traced_args)), tuple(traced_dynamic_shapes)
 
 
 class ShapesCollection:
     """
     Builder for dynamic_shapes.
     Used to assign dynamic shape specifications to tensors that appear in inputs.
+
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
 
     This is useful particularly when :func:`args` is a nested input structure, and it's
     easier to index the input tensors, than to replicate the structure of :func:`args` in
@@ -840,6 +1056,9 @@ class AdditionalInputs:
     """
     Infers dynamic_shapes based on additional inputs.
 
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
+
     This is useful particularly for deployment engineers who, on the one hand, may
     have access to ample testing or profiling data that can provide a fair sense of
     representative inputs for a model, but on the other hand, may not know enough
@@ -849,6 +1068,8 @@ class AdditionalInputs:
     those that are the same as the original are considered static. Moreover, we verify
     that the additional inputs are valid for the exported program. This guarantees that
     tracing with them instead of the original would have generated the same graph.
+    Verification raises an error if copying a Tensor example cannot preserve its layout
+    and aliasing without mutating the original.
 
     Example::
 
@@ -931,14 +1152,149 @@ class AdditionalInputs:
             torch.export._unlift._check_input_constraints_for_module(
                 epm, args, kwargs or {}
             )
+            examples = (args, kwargs or {})
+
+            def fail_copy() -> NoReturn:
+                raise RuntimeError(
+                    "AdditionalInputs verification cannot copy Tensor examples "
+                    "while preserving their layout and aliasing."
+                )
+
+            deepcopy_memo = {}
+            for example in tree_iter(examples):
+                if not isinstance(example, torch.Tensor) or example.is_leaf:
+                    continue
+                if (
+                    example.layout is not torch.strided
+                    or example._is_view()
+                    and example._base is not None
+                    and example._base.is_leaf
+                    and example._base.requires_grad
+                ):
+                    fail_copy()
+                detached = example.detach().requires_grad_(example.requires_grad)
+                deepcopy_memo[id(example)] = clone_preserve_strides(detached)
+
+            args_copy, kwargs_copy = copy.deepcopy(examples, memo=deepcopy_memo)
+
+            original_tensors = [
+                x for x in tree_iter(examples) if isinstance(x, torch.Tensor)
+            ]
+            copied_tensors = [
+                x
+                for x in tree_iter((args_copy, kwargs_copy))
+                if isinstance(x, torch.Tensor)
+            ]
+            original_to_copy_tensor = {}
+            copy_to_original_tensor = {}
+            original_to_copy_storage = {}
+            copy_to_original_storage = {}
+
+            def record_tensor_copy(
+                original: torch.Tensor,
+                duplicate: torch.Tensor,
+                storage_less: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
+            ) -> None:
+                metadata_matches = (
+                    type(original) is type(duplicate)
+                    and original.device == duplicate.device
+                    and original.dtype == duplicate.dtype
+                    and original.layout == duplicate.layout
+                    and original.size() == duplicate.size()
+                    and original.requires_grad == duplicate.requires_grad
+                    and original.is_leaf == duplicate.is_leaf
+                )
+                if original.layout is torch.strided:
+                    metadata_matches = metadata_matches and (
+                        original.stride() == duplicate.stride()
+                        and original.storage_offset() == duplicate.storage_offset()
+                    )
+
+                original_has_storage = torch._C._has_storage(original)
+                duplicate_has_storage = torch._C._has_storage(duplicate)
+                if (
+                    not metadata_matches
+                    or original_has_storage != duplicate_has_storage
+                ):
+                    fail_copy()
+
+                original_tensor = id(original)
+                copied_tensor = id(duplicate)
+                if (
+                    original_tensor == copied_tensor
+                    or original_to_copy_tensor.setdefault(
+                        original_tensor, copied_tensor
+                    )
+                    != copied_tensor
+                    or copy_to_original_tensor.setdefault(
+                        copied_tensor, original_tensor
+                    )
+                    != original_tensor
+                ):
+                    fail_copy()
+
+                if not original_has_storage:
+                    if storage_less is None:
+                        fail_copy()
+                    storage_less.append((original, duplicate))
+                    return
+
+                original_storage = original.untyped_storage()._cdata
+                copied_storage = duplicate.untyped_storage()._cdata
+                if (
+                    original_storage == copied_storage
+                    or original_to_copy_storage.setdefault(
+                        original_storage, copied_storage
+                    )
+                    != copied_storage
+                    or copy_to_original_storage.setdefault(
+                        copied_storage, original_storage
+                    )
+                    != original_storage
+                ):
+                    fail_copy()
+
+            storage_less = []
+            for original, duplicate in zip(
+                original_tensors, copied_tensors, strict=True
+            ):
+                record_tensor_copy(original, duplicate, storage_less)
+
+            if storage_less and len(original_tensors) > 1:
+                for original, duplicate in storage_less:
+                    if original.layout is torch.sparse_coo:
+                        original_components = (original._indices(), original._values())
+                        copied_components = (duplicate._indices(), duplicate._values())
+                    elif original.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                        original_components = (
+                            original.crow_indices(),
+                            original.col_indices(),
+                            original.values(),
+                        )
+                        copied_components = (
+                            duplicate.crow_indices(),
+                            duplicate.col_indices(),
+                            duplicate.values(),
+                        )
+                    elif original.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                        original_components = (
+                            original.ccol_indices(),
+                            original.row_indices(),
+                            original.values(),
+                        )
+                        copied_components = (
+                            duplicate.ccol_indices(),
+                            duplicate.row_indices(),
+                            duplicate.values(),
+                        )
+                    else:
+                        fail_copy()
+
+                    for original_component, copied_component in zip(
+                        original_components, copied_components, strict=True
+                    ):
+                        record_tensor_copy(original_component, copied_component)
             epm_copy = copy.deepcopy(epm)
-            args_copy = tree_map(
-                lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args
-            )
-            kwargs_copy = tree_map(
-                lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
-                kwargs or {},
-            )
             try:
                 epm_copy(*args_copy, **kwargs_copy)
             except AssertionError as e:
