@@ -10341,10 +10341,11 @@ class TestMPS(TestCaseMPS):
     # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
     # the nonzero OpInfo; only the large-tensor paths are MPS-specific and can't
     # be reached through OpInfo, so they live here.
-    # ~11 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
-    # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
+    # ~3 GiB unified memory needed: the input bool tensor is ~2.2 GiB; the
+    # intra-block prefixes are recomputed in the scatter kernel rather than
+    # stored, so there is no per-element scratch buffer.
     @serialTest()
-    @largeTensorTest("11GB", device="mps")
+    @largeTensorTest("3GB", device="mps")
     def test_nonzero_multichunk_above_int32(self):
         # (1<<31)+1024 elements: above INT_MAX, and above the 2^31 per-dispatch
         # chunk size, so it exercises the multi-chunk count/scatter path and the
@@ -10356,10 +10357,10 @@ class TestMPS(TestCaseMPS):
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
 
-    # ~22 GiB unified memory needed (input bool ~4 GiB + int32 prefix ~16 GiB);
+    # ~5 GiB unified memory needed (input bool ~4 GiB; no per-element scratch);
     # skips on machines/CI without enough memory.
     @serialTest()
-    @largeTensorTest("22GB", device="mps")
+    @largeTensorTest("5GB", device="mps")
     def test_nonzero_above_uint32(self):
         # More than 2^32 elements: the flat index and the count/scatter dispatch
         # both exceed Metal's 32-bit thread_position_in_grid, so this exercises
@@ -13068,6 +13069,19 @@ class TestSDPA(TestCaseMPS):
             attn_mask.masked_fill_(causal_mask.logical_not(), float("-inf"))
             attn_mask[..., 0, 0] = float("-inf")
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [80, 128])
+    @parametrize("scale", [1.0, 3.7, 0.1234567, 1e-3], name_fn=lambda s: str(s).replace(".", "p"))
+    def test_prefill_attention_scale(self, dtype, head_dim, scale):
+        # Max relative error rather than the mean _run_prefill_test uses: rounding
+        # the scale into Q in the input dtype moves a few rows a lot, and a mean
+        # washes that out well below these tolerances.
+        q, k, v = self._prefill_qkv(1, 2, 2, 128, 128, head_dim, "contiguous", dtype)
+        ref = F.scaled_dot_product_attention(q.cpu().float(), k.cpu().float(), v.cpu().float(), scale=scale)
+        got = F.scaled_dot_product_attention(q, k, v, scale=scale).cpu().float()
+        tol = {torch.float32: 5e-5, torch.float16: 2e-3, torch.bfloat16: 8e-3}[dtype]
+        self.assertLess(((got - ref).abs().max() / ref.abs().max()).item(), tol)
 
     def test_caching_scale(self):
         # TODO remove this test once sdpa_general becomes a metal kernel
