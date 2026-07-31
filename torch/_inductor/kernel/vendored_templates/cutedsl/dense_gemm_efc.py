@@ -1624,9 +1624,6 @@ class PersistentDenseGemmEFCKernel:
                                     reduced_flt[i], other
                                 )
                                 rows //= 2
-                            reduced_flt[i] = self.local_reduce_finalize(
-                                reduced_flt[i], group
-                            )
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[0] // group
                         )
@@ -1714,6 +1711,7 @@ class PersistentDenseGemmEFCKernel:
                                         group_value = self.local_reduce_combine(
                                             group_value, other
                                         )
+                            group_value = self.local_reduce_finalize(group_value, group)
                             if cutlass.const_expr(self.local_reduce_feeds_main):
                                 if row_idx % group == 0 and (
                                     group <= lanes_in_m
@@ -2141,7 +2139,9 @@ class PersistentDenseGemmEFCKernel:
                                         + sum_row_idx * limit_groups,
                                         cute.make_layout(1),
                                     )
-                                    output_element[0] = shared_element[0]
+                                    output_element[0] = self.local_reduce_finalize(
+                                        shared_element[0], group
+                                    )
                         if cutlass.const_expr(
                             group > fragment_n and self.local_reduce_type != "sum"
                         ):

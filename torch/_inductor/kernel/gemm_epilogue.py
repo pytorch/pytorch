@@ -208,6 +208,7 @@ class GemmReductionArguments:
     reduction_type: str = "sum"
     source_type: str = "identity"
     feeds_main: bool = False
+    finalizer_fn: str | None = None
 
     SPECIALIZATION_FIELDS: ClassVar[tuple[str, ...]] = (
         "group",
@@ -216,6 +217,7 @@ class GemmReductionArguments:
         "source_type",
         "feeds_main",
         "secondary_feed_type",
+        "finalizer_fn",
     )
 
     @property

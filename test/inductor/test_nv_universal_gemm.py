@@ -911,7 +911,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
     def test_grouped_reduction_conversion_contract(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import (
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
             GemmEpilogueIRStore,
             grouped_reduction_ir,
@@ -935,8 +935,25 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
+    def test_grouped_reduction_ir_normalizes_loop_representation(self):
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRAnalysis,
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+        reduction = Expr("reduction", (torch.float32, torch.float32, "sum", load))
+        analysis = GemmEpilogueIRAnalysis({"out": GemmEpilogueIRStore(0, reduction)})
+
+        self.assertEqual(
+            analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
+            GemmReductionConfig("out", 4, 1, "sum", "identity"),
+        )
+
     def test_grouped_reduction_checks_all_reductions(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import (
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
             GemmEpilogueIRStore,
             grouped_reduction_ir,
@@ -957,7 +974,9 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
 
     def test_epilogue_ir_preserves_empty_tuple_argument(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import GemmEpilogueIRExpression
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression,
+        )
 
         expression = GemmEpilogueIRExpression("reshape", ("value", ()))
         self.assertEqual(expression.args, ("value", ()))
@@ -1029,7 +1048,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertEqual(expression.serialize(), "custom_reduction:1:2")
 
     def test_reduction_pattern_near_misses(self):
-        from torch._inductor.kernel.gemm_epilogue_ir import (
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
             GemmEpilogueIRStore,
             is_absmax_normalize_ir,
@@ -1055,6 +1074,34 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertFalse(
             is_logsumexp_ir(GemmEpilogueIRStore(0, near_logsumexp), "gemm", 4)
         )
+
+    def test_epilogue_pattern_registry_is_declarative(self):
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            FEED_MAIN_PATTERN_REGISTRY,
+            FEED_MAIN_PATTERNS,
+            FINALIZER_PATTERNS,
+            LOCAL_REDUCTION_PATTERNS,
+        )
+
+        feed_patterns = tuple(
+            (pattern.kind, pattern.variant) for pattern in FEED_MAIN_PATTERNS
+        )
+        feed_kinds = tuple(pattern.kind for pattern in FEED_MAIN_PATTERNS)
+        local_kinds = tuple(kind for kind, _ in LOCAL_REDUCTION_PATTERNS)
+        finalizer_kinds = tuple(pattern.kind for pattern in FINALIZER_PATTERNS)
+        self.assertEqual(len(feed_patterns), len(set(feed_patterns)))
+        self.assertEqual(len(local_kinds), len(set(local_kinds)))
+        self.assertEqual(len(finalizer_kinds), len(set(finalizer_kinds)))
+        self.assertEqual(set(FEED_MAIN_PATTERN_REGISTRY), set(feed_kinds))
+        self.assertEqual(
+            set(FEED_MAIN_PATTERNS),
+            {
+                pattern
+                for patterns in FEED_MAIN_PATTERN_REGISTRY.values()
+                for pattern in patterns
+            },
+        )
+        self.assertTrue(all(pattern.constraints for pattern in FEED_MAIN_PATTERNS))
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""

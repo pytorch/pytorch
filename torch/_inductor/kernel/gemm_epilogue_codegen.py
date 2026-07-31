@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 """Shared CuTeDSL emission primitives for GEMM epilogues."""
 
+import ast
+import dataclasses
 from typing import Any
 
 import torch
@@ -33,6 +35,19 @@ def gemm_epilogue_op_scope(cute: Any) -> dict[str, Any]:
         "silu": lambda x: x * sigmoid(x),
         "tanh": cute.math.tanh,
     }
+
+
+def with_reduction_finalizer(reduction: Any, source: str | None, cute: Any) -> Any:
+    if source is None:
+        return reduction
+    fn_name = next(
+        node.name
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef)
+    )
+    scope = gemm_epilogue_op_scope(cute)
+    exec(source, scope)
+    return dataclasses.replace(reduction, finalize=scope[fn_name])
 
 
 class GemmEpilogueCuteDSLBody:

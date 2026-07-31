@@ -15,7 +15,7 @@ from .gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
 )
-from .gemm_epilogue_ir import GemmEpilogueIRAnalysis, GemmEpilogueIRExpression
+from .loop_ir_epilogue_lowering import GemmEpilogueIRAnalysis, GemmEpilogueIRExpression
 
 
 class LoopIRCuteDSLCodegen:
@@ -109,3 +109,29 @@ class LoopIRCuteDSLCodegen:
             V.set_ops_handler(GemmEpilogueCuteDSLOpOverrides()),
         ):
             return codegen.render(buffers, fn_name)
+
+    @classmethod
+    def finalizer_from_buffer(
+        cls, source_name: str, buffer: ComputedBuffer, fn_name: str
+    ) -> str:
+        codegen = cls(source_name, OrderedSet((source_name,)))
+        codegen.accumulator_value = CuteDSLCSEVariable(
+            "value", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
+        )
+        codegen.accumulator_value.is_scalar_expr = True
+        analysis = GemmEpilogueIRAnalysis.from_buffers((buffer,))
+        store = analysis.store(buffer.get_name())
+        if store is None:
+            raise NotImplementedError("CuTeDSL reduction finalizer has no output")
+        with (
+            V.set_kernel_handler(codegen.kernel),
+            V.set_ops_handler(GemmEpilogueCuteDSLOpOverrides()),
+        ):
+            result = codegen.lower(store.value)
+        if codegen.reads:
+            raise NotImplementedError(
+                "CuTeDSL reduction finalizer cannot capture tensor inputs"
+            )
+        body = [*(f"    {line}" for line in codegen.kernel.body.lines)]
+        body.append(f"    return {result}")
+        return f"def {fn_name}(value, group):\n" + "\n".join(body)

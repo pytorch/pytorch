@@ -1189,6 +1189,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
         local_reduce: GemmReductionPlan | None = None,
+        local_reduce_finalizer_fn_code: str | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
     ) -> None:
@@ -1210,6 +1211,7 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue_writes = epilogue_writes or []
         self.epilogue_var_renames = epilogue_var_renames or {}
         self.local_reduce = local_reduce
+        self.local_reduce_finalizer_fn_code = local_reduce_finalizer_fn_code
         self.swap_ab = swap_ab
 
         # An addmm bias baked into the choice becomes a bias-add epilogue. With
@@ -1310,6 +1312,10 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline(
                 "from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments"
             )
+            if self.local_reduce_finalizer_fn_code is not None:
+                code.writeline(
+                    f"_LOCAL_REDUCE_FINALIZER_FN_SRC = {self.local_reduce_finalizer_fn_code!r}"
+                )
         if has_epilogue:
             if self.epilogue_is_cutedsl:
                 code.writeline(
@@ -1420,6 +1426,11 @@ class NVUniversalGemmKernel(Kernel):
 
                 feed_ptr = feed_output_ptr(reduction.feed_output)
                 secondary_feed_ptr = feed_output_ptr(reduction.secondary_feed_output)
+                finalizer_arg = (
+                    ""
+                    if self.local_reduce_finalizer_fn_code is None
+                    else ", finalizer_fn=_LOCAL_REDUCE_FINALIZER_FN_SRC"
+                )
                 run_variant_kwargs = (
                     "(_VARIANT_KWARGS or {}) | {"
                     "'local_reduce': GemmReductionArguments("
@@ -1431,7 +1442,7 @@ class NVUniversalGemmKernel(Kernel):
                     f"axis={reduction.axis}, "
                     f"reduction_type={reduction.reduction_type!r}, "
                     f"source_type={reduction.source_type!r}, "
-                    f"feeds_main={feed_main!r})"
+                    f"feeds_main={feed_main!r}{finalizer_arg})"
                     "}"
                 )
                 aux_tensors.extend(
