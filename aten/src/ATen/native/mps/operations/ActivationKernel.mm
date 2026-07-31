@@ -41,7 +41,7 @@ Tensor relu_mps(const Tensor& self) {
   auto output = at::empty_like(self);
   if (output.numel() == 0)
     return output;
-  auto iter = at::TensorIteratorConfig().add_output(output).add_input(self).build();
+  auto iter = at::TensorIteratorConfig().add_output(output).add_const_input(self).build();
   lib.exec_unary_kernel(iter, "relu");
   return output;
 }
@@ -50,7 +50,7 @@ Tensor& relu_mps_(Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
   if (self.numel() == 0)
     return self;
-  auto iter = at::TensorIteratorConfig().add_output(self).add_input(self).set_check_mem_overlap(false).build();
+  auto iter = at::TensorIteratorConfig().add_output(self).add_const_input(self).set_check_mem_overlap(false).build();
   lib.exec_unary_kernel(iter, "relu");
   return self;
 }

@@ -619,10 +619,10 @@ def _intern_param_buffers(
     user-supplied modules, so the dense list lines up with the compiled graph.
 
     INVARIANT: the all-modules' params then all-modules' buffers, dedup-by-id ordering
-    here is load-bearing and is reproduced VERBATIM by the embedded
-    ``_extract_param_buffers`` in both _DRIVER_SOURCE and _EAGER_DRIVER_SOURCE (the
-    inlined/eager load paths). The cached load path uses this function directly, so all
-    three must stay in sync; ``test_cached_and_inlined_paths_agree`` cross-checks them.
+    here is load-bearing and is reproduced VERBATIM by
+    ``torch._precompile_driver._extract_param_buffers`` (emitted into the inlined/eager
+    load paths). The cached load path uses this function directly, so both must stay
+    in sync; ``test_cached_and_inlined_paths_agree`` cross-checks them.
     """
     if len(mods) > 1:
 
@@ -724,7 +724,7 @@ def _capture(
     real_flat = list(flat_args)
     # Record the example user inputs' dense shapes/dtypes/devices so the drivers can
     # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
-    # the inlined _DRIVER_SOURCE / _EAGER_DRIVER_SOURCE checks. Stride is NOT recorded --
+    # the inlined driver checks (torch._precompile_driver). Stride is NOT recorded --
     # memory-format mismatches are enforced by inductor's own (pinned-on)
     # assert_size_stride. Subclasses -> None.
     # Widened element type (a marked-dynamic dim becomes None within the tuple in the
@@ -1121,9 +1121,11 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if target.id in wanted:
             found[target.id] = ast.literal_eval(node.value)
         else:
-            # Not a metadata name we consume (e.g. a driver-internal top-level like
-            # _MODULE_POSITIONS_SET). Skipped by design, but log it at debug so a
-            # malformed / renamed artifact is diagnosable rather than silently dropped.
+            # Not a metadata name we consume (the driver section emits only
+            # function defs today, but a future artifact revision could add a
+            # driver-internal top-level assignment). Skipped by design, but log
+            # it at debug so a malformed / renamed artifact is diagnosable
+            # rather than silently dropped.
             log.debug(
                 "precompile: ignoring unrecognized top-level assignment %r while "
                 "parsing artifact calling-convention metadata",
@@ -1157,7 +1159,7 @@ def _build_python_source(
         "# 3. Driver: module params/buffers + grad scatter + calling convention"
     )
     parts.append("# " + "=" * 70)
-    parts.append(_DRIVER_SOURCE)
+    parts.append(_emit_driver_source("_inductor_forward"))
     return "\n".join(parts)
 
 
@@ -1219,402 +1221,41 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     parts.append("# " + "=" * 70)
     parts.append("# 3. Driver: run the inlined captured graph eagerly")
     parts.append("# " + "=" * 70)
-    parts.append(_EAGER_DRIVER_SOURCE)
+    parts.append(_emit_driver_source("_eager_forward"))
     return "\n".join(parts)
 
 
-_EAGER_DRIVER_SOURCE = '''
-def _extract_param_buffers(mods):
-    """Lift the runtime modules' params then buffers, interning by identity, in the
-    same order as capture, so the list lines up with the captured graph. Returns
-    (pb, names) where names mirrors PARAM_NAMES + BUFFER_NAMES. This ordering AND the
-    naming must match torch._precompile._intern_param_buffers verbatim (its INVARIANT)."""
-    multi = len(mods) > 1
-    seen = set()
-    pb = []
-    names = []
-    def intern(mi, n, t):
-        if id(t) not in seen:
-            seen.add(id(t))
-            pb.append(t)
-            names.append(("m%d.%s" % (mi, n)) if multi else n)
-    for mi, m in enumerate(mods):
-        for n, p in m.named_parameters(remove_duplicate=False):
-            intern(mi, n, p)
-    for mi, m in enumerate(mods):
-        for n, b in m.named_buffers(remove_duplicate=False):
-            intern(mi, n, b)
-    return pb, names
-
-
-def _fail(msg):
-    # Imported lazily (only when a guard fails) so a normal run does not couple the
-    # standalone artifact to torch._precompile's import surface.
-    from torch._precompile import PrecompileError as _PrecompileError
-
-    raise _PrecompileError(msg)
-
-
-def _check_structure(pb, names):
-    # Verify the runtime model's extracted param/buffer NAMES match the baked
-    # PARAM_NAMES + BUFFER_NAMES (count AND order/identity), so a reordered or
-    # structurally-drifted same-count model is caught precisely (invariant 2) rather
-    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE, DTYPE and
-    # DEVICE against the baked example: the graph is specialized to the example shapes and
-    # can bake a device literal, so a same-named but differently shaped/typed/placed
-    # runtime tensor would silently miscompute or fail deep in a kernel.
-    expected = list(PARAM_NAMES) + list(BUFFER_NAMES)  # noqa: F821
-    if names != expected:
-        _fail(
-            "precompile: the runtime model's param/buffer names %r do not match the "
-            "traced model's %r; the runtime model must be structurally identical to the "
-            "traced model (invariant 2)." % (names, expected)
-        )
-    expected_shapes = list(PARAM_SHAPES) + list(BUFFER_SHAPES)  # noqa: F821
-    expected_dtypes = list(PARAM_DTYPES) + list(BUFFER_DTYPES)  # noqa: F821
-    expected_devices = list(PARAM_DEVICES) + list(BUFFER_DEVICES)  # noqa: F821
-    for _nm, _t, _shp, _dt, _dev in zip(
-        names, pb, expected_shapes, expected_dtypes, expected_devices
-    ):
-        if tuple(_t.shape) != tuple(_shp):
-            _fail(
-                "precompile: the runtime param/buffer %r has shape %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, tuple(_t.shape), tuple(_shp))
-            )
-        if str(_t.dtype) != _dt:
-            _fail(
-                "precompile: the runtime param/buffer %r has dtype %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.dtype), _dt)
-            )
-        if str(_t.device) != _dev:
-            _fail(
-                "precompile: the runtime param/buffer %r is on device %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.device), _dev)
-            )
-
-
-_MODULE_POSITIONS_SET = set(MODULE_POSITIONS)  # noqa: F821
-
-
-def forward(*args):
-    """Run the captured ATen graph eagerly. Pass the same args the traced fn took --
-    the module(s) in the same positions plus the runtime inputs. The module(s) must
-    be structurally identical to the ones precompile traced (same param/buffer order
-    and tying); only the weight values may differ.
-
-    The eager backend runs the graph as captured: inputs (including tensor
-    subclasses) are passed through unchanged (no dense flatten/unflatten), and the
-    graph's flat outputs are reassembled into fn's output structure. If fn ran a
-    backward, the trailing grad outputs (one per GRAD_PARAM_INDICES entry) are
-    parameter grads, scattered (accumulated) onto the params that received one like
-    eager .backward() -- frozen / non-contributing params keep .grad = None."""
-    if len(args) != NUM_POSITIONAL_ARGS:  # noqa: F821
-        _fail(
-            "precompile: expected %d positional args (the same as the traced fn), got "
-            "%d (invariant 2)." % (NUM_POSITIONAL_ARGS, len(args))  # noqa: F821
-        )
-    mods = []
-    for _i in MODULE_POSITIONS:  # noqa: F821
-        if not isinstance(args[_i], _torch.nn.Module):
-            _fail(
-                "precompile: argument at position %d must be the nn.Module the traced "
-                "fn took (invariant 2), got %s." % (_i, type(args[_i]).__name__)
-            )
-        mods.append(args[_i])
-    user_inputs = [a for i, a in enumerate(args) if i not in _MODULE_POSITIONS_SET]  # noqa: F821
-    user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
-    if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
-        )
-    # Reject a SHAPE / DTYPE / DEVICE / BOUNDS mismatch (invariants 3 and 6) up front.
-    # Mirrors the inductor _DRIVER_SOURCE checks (keep the two inlined drivers in sync). The
-    # eager backend has no assert_size_stride, so only these are checked (layout-flexible).
-    if len(user_flat) != len(USER_INPUT_SHAPES):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs flattened to a different number of leaves than "
-            "the traced example (invariant 3); they must match the traced structure."
-        )
-    # The eager backend rejects mark_unbacked up front (eager + unbacked is unsupported),
-    # so every dim here is static and USER_INPUT_BOUNDS is always all-None; there is no
-    # bounds branch (it would be dead code). USER_INPUT_BOUNDS is still emitted in the
-    # metadata for the inductor driver, so it is intentionally not consumed here.
-    for _t, _shp, _dt, _dev in zip(
-        user_flat, USER_INPUT_SHAPES, USER_INPUT_DTYPES, USER_INPUT_DEVICES  # noqa: F821
-    ):
-        if _shp is None or not isinstance(_t, _torch.Tensor):
-            continue
-        _act = tuple(_t.shape)
-        if len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp)):
-            _fail(
-                "precompile: a runtime input has shape %s but the artifact was traced "
-                "with shape %s; the graph is specialized to the static dims (invariant "
-                "3). Retrace for this shape, or use backend='eager'." % (_act, tuple(_shp))
-            )
-        if _dt is not None and str(_t.dtype) != _dt:
-            _fail(
-                "precompile: a runtime input has dtype %s but the artifact was traced "
-                "with dtype %s; the graph is specialized to the example dtype "
-                "(invariant 6). Cast the input to the traced dtype, or retrace."
-                % (str(_t.dtype), _dt)
-            )
-        if _dev is not None and str(_t.device) != _dev:
-            _fail(
-                "precompile: a runtime input is on device %s but the artifact was traced "
-                "on device %s; the graph is specialized to the example device "
-                "(invariant 6). Move the input to the traced device, or retrace."
-                % (str(_t.device), _dev)
-            )
-    pb, _names = _extract_param_buffers(mods)
-    _check_structure(pb, _names)
-    with _torch.no_grad():
-        out = list(call([*pb, *user_flat]))  # noqa: F821
-    if GRAD_PARAM_INDICES:  # noqa: F821
-        n = len(GRAD_PARAM_INDICES)  # noqa: F821
-        grads = out[len(out) - n:]
-        out = out[:len(out) - n]
-        for idx, g in zip(GRAD_PARAM_INDICES, grads):  # noqa: F821
-            p = pb[idx]
-            if p.grad is None:
-                p.grad = g
-            else:
-                p.grad.add_(g)
-    return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))  # noqa: F821
-
-
+_DRIVER_MAIN = """\
 if __name__ == "__main__":
     print("forward() is ready; call it with the model(s) and inputs the traced")
     print("fn took, e.g. forward(model, x).")
-'''
+"""
 
 
-_DRIVER_SOURCE = '''
-def _extract_param_buffers(mods):
-    """Lift the runtime modules' params then buffers, interning by identity, in the
-    same order as capture, so the dense list lines up with the compiled graph. Returns
-    (pb, names) where names mirrors PARAM_NAMES + BUFFER_NAMES. This ordering AND the
-    naming must match torch._precompile._intern_param_buffers verbatim (its INVARIANT)."""
-    multi = len(mods) > 1
-    seen = set()
-    pb = []
-    names = []
-    def intern(mi, n, t):
-        if id(t) not in seen:
-            seen.add(id(t))
-            pb.append(t)
-            names.append(("m%d.%s" % (mi, n)) if multi else n)
-    for mi, m in enumerate(mods):
-        for n, p in m.named_parameters(remove_duplicate=False):
-            intern(mi, n, p)
-    for mi, m in enumerate(mods):
-        for n, b in m.named_buffers(remove_duplicate=False):
-            intern(mi, n, b)
-    return pb, names
+def _emit_driver_source(forward_fn_name: str) -> str:
+    """Emit the runtime driver as text for inlining into python_code.
 
+    The driver lives as real, type-checked code in torch._precompile_driver; here we read
+    it back with inspect.getsource (LAZILY -- only on this emit path; load() never runs
+    it, so a stripped-source environment only affects capture, not reload) and rename the
+    selected forward variant to the public ``forward``. Emitting the TEXT (rather than
+    importing the module from the artifact) keeps python_code self-contained and
+    version-frozen (Note [precompile programming model], invariant 7)."""
+    import inspect
 
-def _fail(msg):
-    # Imported lazily (only when a guard fails) so a normal run does not couple the
-    # standalone artifact to torch._precompile's import surface.
-    from torch._precompile import PrecompileError as _PrecompileError
+    from torch import _precompile_driver as driver
 
-    raise _PrecompileError(msg)
-
-
-def _check_structure(pb, names):
-    # Verify the runtime model's extracted param/buffer NAMES match the baked
-    # PARAM_NAMES + BUFFER_NAMES (count AND order/identity), so a reordered or
-    # structurally-drifted same-count model is caught precisely (invariant 2) rather
-    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE, DTYPE and
-    # DEVICE against the baked example: the graph is specialized to the example shapes and
-    # can bake a device literal, so a same-named but differently shaped/typed/placed
-    # runtime tensor would silently miscompute or fail deep in a kernel.
-    expected = list(PARAM_NAMES) + list(BUFFER_NAMES)  # noqa: F821
-    if names != expected:
-        _fail(
-            "precompile: the runtime model's param/buffer names %r do not match the "
-            "traced model's %r; the runtime model must be structurally identical to the "
-            "traced model (invariant 2)." % (names, expected)
-        )
-    expected_shapes = list(PARAM_SHAPES) + list(BUFFER_SHAPES)  # noqa: F821
-    expected_dtypes = list(PARAM_DTYPES) + list(BUFFER_DTYPES)  # noqa: F821
-    expected_devices = list(PARAM_DEVICES) + list(BUFFER_DEVICES)  # noqa: F821
-    for _nm, _t, _shp, _dt, _dev in zip(
-        names, pb, expected_shapes, expected_dtypes, expected_devices
-    ):
-        if tuple(_t.shape) != tuple(_shp):
-            _fail(
-                "precompile: the runtime param/buffer %r has shape %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, tuple(_t.shape), tuple(_shp))
-            )
-        if str(_t.dtype) != _dt:
-            _fail(
-                "precompile: the runtime param/buffer %r has dtype %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.dtype), _dt)
-            )
-        if str(_t.device) != _dev:
-            _fail(
-                "precompile: the runtime param/buffer %r is on device %s but the traced "
-                "model's was %s; the runtime model must be structurally identical to the "
-                "traced model (invariant 2)." % (_nm, str(_t.device), _dev)
-            )
-
-
-_MODULE_POSITIONS_SET = set(MODULE_POSITIONS)  # noqa: F821
-
-
-def forward(*args):
-    """Run the compiled computation. Pass the same args the traced fn took -- the
-    module(s) in the same positions plus the runtime inputs. The module(s) must be
-    structurally identical to the ones precompile traced (same param/buffer order
-    and tying); only the weight values may differ.
-
-    Module params/buffers are extracted (no weights are baked into the artifact) and,
-    together with the runtime inputs, passed to the composed ``call`` -- which is the
-    AOTAutograd+Inductor graph with its own prelude/epilogue, so it handles tensor-
-    subclass wrap/unwrap and input mutation (e.g. BatchNorm running stats) internally
-    and disables grad itself. If fn ran a backward, the trailing grad outputs (one per
-    GRAD_PARAM_INDICES entry) are parameter grads: they are scattered (accumulated)
-    onto the params that received one, mirroring eager .backward() (frozen /
-    non-contributing params keep .grad = None), and the artifact returns fn's own
-    result. Nothing here reads an external cache: the kernels JIT-compile from the
-    inlined source on first call. A runtime input whose shape, dtype, or device differs
-    from the traced example is rejected up front (invariants 3 and 6), and a differing
-    stride / memory format is rejected via the inlined assert_size_stride (invariant 6);
-    use backend="eager" for layout-flexible execution."""
-    if len(args) != NUM_POSITIONAL_ARGS:  # noqa: F821
-        _fail(
-            "precompile: expected %d positional args (the same as the traced fn), got "
-            "%d (invariant 2)." % (NUM_POSITIONAL_ARGS, len(args))  # noqa: F821
-        )
-    mods = []
-    for _i in MODULE_POSITIONS:  # noqa: F821
-        if not isinstance(args[_i], _torch.nn.Module):
-            _fail(
-                "precompile: argument at position %d must be the nn.Module the traced "
-                "fn took (invariant 2), got %s." % (_i, type(args[_i]).__name__)
-            )
-        mods.append(args[_i])
-    user_inputs = [a for i, a in enumerate(args) if i not in _MODULE_POSITIONS_SET]  # noqa: F821
-    user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
-    if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
-        )
-    # Reject a SHAPE / DTYPE / DEVICE / BOUNDS mismatch (invariants 3 and 6) up front.
-    # Mirrors the eager _EAGER_DRIVER_SOURCE checks (keep the two inlined drivers in sync).
-    # Stride/memory-format is enforced by the inlined assert_size_stride (pinned at capture).
-    if len(user_flat) != len(USER_INPUT_SHAPES):  # noqa: F821
-        _fail(
-            "precompile: runtime inputs flattened to a different number of leaves than "
-            "the traced example (invariant 3); they must match the traced structure."
-        )
-    for _t, _shp, _dt, _dev, _bnd in zip(
-        user_flat, USER_INPUT_SHAPES, USER_INPUT_DTYPES, USER_INPUT_DEVICES, USER_INPUT_BOUNDS  # noqa: F821
-    ):
-        if _shp is None or not isinstance(_t, _torch.Tensor):
-            continue
-        # A dim recorded as None was captured dynamic (unbacked); any size is valid.
-        _act = tuple(_t.shape)
-        if len(_act) != len(_shp) or any(
-            e is not None and a != e for a, e in zip(_act, _shp)
-        ):
-            _fail(
-                "precompile: a runtime input has shape %s but the artifact was traced "
-                "with shape %s (None = a dynamic dim, any size); the graph is specialized "
-                "to the static dims (invariant 3). Retrace, mark the dim dynamic via "
-                "mark_unbacked, or use backend='eager'." % (_act, tuple(_shp))
-            )
-        if _dt is not None and str(_t.dtype) != _dt:
-            _fail(
-                "precompile: a runtime input has dtype %s but the artifact was traced "
-                "with dtype %s; the graph is specialized to the example dtype "
-                "(invariant 6). Cast the input to the traced dtype, or retrace."
-                % (str(_t.dtype), _dt)
-            )
-        if _dev is not None and str(_t.device) != _dev:
-            _fail(
-                "precompile: a runtime input is on device %r but the artifact was traced "
-                "on device %r; the graph is specialized to the example device "
-                "(invariant 6). Move the input to the traced device, or retrace."
-                % (str(_t.device), _dev)
-            )
-        if _bnd is not None:
-            for _d, (_lo, _hi) in _bnd.items():
-                _sz = _t.shape[_d]
-                if _lo is not None and _sz < _lo:
-                    _fail(
-                        "precompile: runtime input dim %d has size %d but mark_unbacked "
-                        "declared min=%d (invariant 3)." % (_d, _sz, _lo)
-                    )
-                if _hi is not None and _sz > _hi:
-                    _fail(
-                        "precompile: runtime input dim %d has size %d but mark_unbacked "
-                        "declared max=%d (invariant 3)." % (_d, _sz, _hi)
-                    )
-    pb, _names = _extract_param_buffers(mods)
-    _check_structure(pb, _names)
-    try:
-        out = list(call([*pb, *user_flat]))  # noqa: F821 (inlined composed entry point)
-    except AssertionError as _e:
-        # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
-        # mismatch, or a size mismatch on an unbacked dim the static check above cannot
-        # pre-validate; invariants 3 and 6). assert_size_stride raises one of two messages
-        # -- "expected size A==B, stride C==D at dim=N" or "wrong number of dimensions" --
-        # so match those. Any OTHER AssertionError (a user torch._assert, an internal
-        # inductor invariant) is re-raised unchanged so its real message is not mislabeled.
-        _m = str(_e)
-        if not (("expected size" in _m and "stride" in _m) or "wrong number of dimensions" in _m):  # noqa: B950
-            raise
-        # When the artifact has dynamic (None) user-input dims, an "expected size"
-        # assert_size_stride failure on a dynamic dim most likely means two inputs that
-        # share a mark_unbacked shape_id (bound to ONE symbol, hence equal by
-        # construction) were called with mismatched sizes. Call that out so the message
-        # is not misleadingly only about memory format.
-        _has_dynamic = any(
-            _s is not None and any(_d is None for _d in _s)
-            for _s in USER_INPUT_SHAPES  # noqa: F821
-        )
-        _shape_id_note = ""
-        if _has_dynamic and "expected size" in _m:
-            _shape_id_note = (
-                " If two inputs share a mark_unbacked shape_id, their marked dims are "
-                "bound to one symbol and so MUST have equal sizes at runtime; this can "
-                "also be a shape_id equality violation."
-            )
-        _fail(
-            "precompile: a runtime tensor's shape or memory format differs from the "
-            "traced example; the inductor backend specializes on input shape and memory "
-            "format (invariants 3 and 6). The mismatch can be a user INPUT or a model "
-            "PARAMETER/BUFFER whose layout (memory format) differs from the example "
-            "weight, since the inductor backend also bakes each param/buffer's layout. "
-            "Pass the model/inputs in the example's shape and layout (.contiguous() to "
-            "match a contiguous example, or match the example weight's layout), or use "
-            "backend='eager'.%s Underlying: %s" % (_shape_id_note, str(_e))
-        )
-    if GRAD_PARAM_INDICES:  # noqa: F821
-        n = len(GRAD_PARAM_INDICES)  # noqa: F821
-        grads = out[len(out) - n:]
-        out = out[:len(out) - n]
-        for idx, g in zip(GRAD_PARAM_INDICES, grads):  # noqa: F821
-            p = pb[idx]
-            if p.grad is None:
-                p.grad = g
-            else:
-                p.grad.add_(g)
-    return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))  # noqa: F821
-
-
-if __name__ == "__main__":
-    print("forward() is ready; call it with the model(s) and inputs the traced")
-    print("fn took, e.g. forward(model, x).")
-'''
+    forward_fn = getattr(driver, forward_fn_name)
+    blocks = [
+        inspect.getsource(driver._extract_param_buffers),
+        inspect.getsource(driver._fail),
+        inspect.getsource(driver._check_structure),
+        inspect.getsource(forward_fn).replace(
+            f"def {forward_fn_name}(", "def forward(", 1
+        ),
+    ]
+    body = "\n\n".join(block.rstrip() for block in blocks)
+    return "\n" + body + "\n\n\n" + _DRIVER_MAIN
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
@@ -2130,7 +1771,7 @@ class _PrecompileApi:
 
         # The whole calling convention (MODULE_POSITIONS, OUT_SPEC, USER_INPUT_*, PARAM_*,
         # BUFFER_*, IN_SPEC, ...) is consumed by the driver INLINED in python_code
-        # (_DRIVER_SOURCE / _EAGER_DRIVER_SOURCE), so the loaded object needs none of it.
+        # (emitted from torch._precompile_driver), so the loaded object needs none of it.
         # _parse_artifact_metadata still runs to validate python_code is a precompile
         # artifact and to read BACKEND for the cache-pairing check below.
         meta = _parse_artifact_metadata(python_code)
