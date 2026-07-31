@@ -1576,7 +1576,7 @@ class ReplacementPatternEntry(PatternEntry):
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
-                    for tag_name in ["recompute", "ac_graph_id"]:
+                    for tag_name in ["recompute", "ac_graph_id", "custom"]:
                         if tag_name in old.meta:
                             percolate_tags(
                                 new, tag_name, old.meta[tag_name], OrderedSet(args_set)

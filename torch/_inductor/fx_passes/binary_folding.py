@@ -82,6 +82,7 @@ def recover_original_precision_folded_computation_ops(gm):
 
 _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
 _binary_ops_and_addcmul = [*_binary_ops, aten.addcmul.default]
+_computation_ops = [aten.convolution.default, aten.addmm.default, aten.mm.default]
 
 
 def _op_not_broadcasting_with_conv(weight_tensor, other_tensor):
@@ -107,14 +108,50 @@ def _op_not_broadcasting_with_conv(weight_tensor, other_tensor):
     return True
 
 
-def _check_conv_and_broadcast_op(conv_node, other):
-    # According to checkConvAndBroadcastingOpPreConditions of frozen_conv_folding.cpp.
-    # conv.weight
-    if conv_node.args[1].op != "get_attr":
+def _op_not_broadcasting_with_linear(weight_tensor, other_tensor, has_reshape):
+    weight_shape = weight_tensor.shape
+    other_shape = other_tensor.shape
+    other_shapes = [
+        torch.Size([weight_shape[1]]),
+        torch.Size([1, weight_shape[1]]),
+        torch.Size([1]),
+        torch.Size([1, 1]),
+    ]
+    if has_reshape:
+        other_shapes.extend(
+            [
+                torch.Size([1, 1, weight_shape[1]]),
+                torch.Size([1, 1, 1]),
+            ]
+        )
+    return other_shape in other_shapes
+
+
+def _get_weight_and_bias_nodes(computation_node):
+    if computation_node.target is aten.convolution.default:
+        return computation_node.args[1], computation_node.args[2]
+    if computation_node.target is aten.addmm.default:
+        return computation_node.args[2], computation_node.args[0]
+    if computation_node.target is aten.mm.default:
+        return computation_node.args[1], None
+    raise AssertionError(f"unexpected computation op {computation_node.target}")
+
+
+def _is_foldable_computation(computation_node):
+    weight_node, bias_node = _get_weight_and_bias_nodes(computation_node)
+    if weight_node.op != "get_attr":
         return False
-    # conv.bias
-    bias_node = conv_node.args[2]
     if bias_node is not None and bias_node.op != "get_attr":
+        return False
+    if len(weight_node.users) != 1:
+        return False
+
+    weight_meta_value = weight_node.meta.get("val")
+    return weight_meta_value is not None and weight_meta_value.is_floating_point()
+
+
+def _check_computation_and_broadcast_op(computation_node, other, has_reshape=False):
+    if not _is_foldable_computation(computation_node):
         return False
     if (
         not isinstance(other, int)
@@ -123,16 +160,8 @@ def _check_conv_and_broadcast_op(conv_node, other):
     ):
         return False
 
-    if len(conv_node.args[1].users) != 1:
-        return False
-
-    weight_meta_value = conv_node.args[1].meta.get("val")
-    if weight_meta_value is None:
-        return False
-    # Avoid fusing op that causes type promotion
-    # restricting to float avoids int/float difficulties with scalar overload
-    if not weight_meta_value.is_floating_point():
-        return False
+    weight_node, _ = _get_weight_and_bias_nodes(computation_node)
+    weight_meta_value = weight_node.meta["val"]
     if isinstance(other, torch.fx.Node) and other.op == "get_attr":
         other_meta_value = other.meta.get("val")
         if not other_meta_value.is_floating_point():  # type: ignore[union-attr]
@@ -141,7 +170,7 @@ def _check_conv_and_broadcast_op(conv_node, other):
             torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)  # type: ignore[union-attr]
             != weight_meta_value.dtype
         ):
-            if not conv_node.meta.get("_allow_mixed_dtype_folding", False):
+            if not computation_node.meta.get("_allow_mixed_dtype_folding", False):
                 return False
 
             if (
@@ -150,12 +179,23 @@ def _check_conv_and_broadcast_op(conv_node, other):
             ):
                 return False
 
-        if not _op_not_broadcasting_with_conv(weight_meta_value, other_meta_value):
+        if computation_node.target is aten.convolution.default:
+            shapes_match = _op_not_broadcasting_with_conv(
+                weight_meta_value, other_meta_value
+            )
+        else:
+            shapes_match = _op_not_broadcasting_with_linear(
+                weight_meta_value, other_meta_value, has_reshape
+            )
+        if not shapes_match:
             return False
     elif not isinstance(other, float):
         return False
 
-    return True
+    return computation_node.target is aten.convolution.default or (
+        config.enable_linear_binary_folding
+        and computation_node.target in (aten.addmm.default, aten.mm.default)
+    )
 
 
 @functools.cache
@@ -163,7 +203,6 @@ def binary_folding_init():
     _conv_args = [Arg() for _ in range(9)]
     _addmm_args = [Arg() for _ in range(3)]
     _mm_args = [Arg() for _ in range(2)]
-    _computation_ops = [aten.convolution.default, aten.addmm.default, aten.mm.default]
     _computation_calls = [
         CallFunction(aten.convolution.default, *_conv_args, _users=1),
         CallFunction(aten.addmm.default, *_addmm_args, _users=1),
@@ -200,88 +239,6 @@ def binary_folding_init():
     value == channels-out, but all the other dimensions have to be 1
     """
 
-    def _op_not_broadcasting_with_linear(weight_tensor, other_tensor, has_reshape):
-        weight_shape = weight_tensor.shape
-        other_shape = other_tensor.shape
-        other_shapes = [
-            torch.Size(
-                [
-                    weight_shape[1],
-                ]
-            ),
-            torch.Size([1, weight_shape[1]]),
-            torch.Size(
-                [
-                    1,
-                ]
-            ),
-            torch.Size([1, 1]),
-        ]
-        if has_reshape:
-            other_shapes.extend(
-                [
-                    torch.Size([1, 1, weight_shape[1]]),
-                    torch.Size([1, 1, 1]),
-                ]
-            )
-        return other_shape in other_shapes
-
-    def _check_linear_and_broadcast_op(linear_node, other, has_reshape):
-        weight_node = (
-            linear_node.args[2]
-            if linear_node.target is aten.addmm.default
-            else linear_node.args[1]
-        )
-        bias_node = (
-            linear_node.args[0] if linear_node.target is aten.addmm.default else None
-        )
-        if weight_node.op != "get_attr":
-            return False
-        if bias_node is not None and bias_node.op != "get_attr":
-            return False
-        if (
-            not isinstance(other, int)
-            and not isinstance(other, float)
-            and other.op != "get_attr"
-        ):
-            return False
-
-        if len(weight_node.users) != 1:
-            return False
-
-        weight_meta_value = weight_node.meta.get("val")
-        if weight_meta_value is None:
-            return False
-        # Avoid fusing op that causes type promotion
-        # restricting to float avoids int/float difficulties with scalar overload
-        if not weight_meta_value.is_floating_point():
-            return False
-        if isinstance(other, torch.fx.Node) and other.op == "get_attr":
-            other_meta_value = other.meta.get("val")
-            if not other_meta_value.is_floating_point():  # type: ignore[union-attr]
-                return False
-            if (
-                torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)  # type: ignore[union-attr]
-                != weight_meta_value.dtype
-            ):
-                if not linear_node.meta.get("_allow_mixed_dtype_folding", False):
-                    return False
-
-                if (
-                    other_meta_value.dtype != torch.float  # type: ignore[union-attr]
-                    and weight_meta_value.dtype not in (torch.float16, torch.bfloat16)
-                ):
-                    return False
-
-            if not _op_not_broadcasting_with_linear(
-                weight_meta_value, other_meta_value, has_reshape
-            ):
-                return False
-        elif not isinstance(other, float):
-            return False
-
-        return True
-
     def _is_foldable_pattern(match):
         binary_node = match.output_node()
         has_reshape = False
@@ -299,15 +256,7 @@ def binary_folding_init():
             computation_node = binary_node.args[1].args[0]
             other = binary_node.args[0]
             has_reshape = False
-        if computation_node.target is aten.convolution.default:
-            return _check_conv_and_broadcast_op(computation_node, other)
-        elif computation_node.target in [aten.addmm.default, aten.mm.default]:
-            return (
-                config.enable_linear_binary_folding
-                and _check_linear_and_broadcast_op(computation_node, other, has_reshape)
-            )
-
-        return False
+        return _check_computation_and_broadcast_op(computation_node, other, has_reshape)
 
     def resize_scalar_or_tensor_to_shape(graph, other, shape, weight):
         if isinstance(other, float):

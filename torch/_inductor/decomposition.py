@@ -240,7 +240,7 @@ def _native_batch_norm_legit_no_training(
     momentum: float,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if input.device.type != "cuda":
+    if input.device.type != "cuda" or torch.version.hip is not None:
         output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
             input,
             weight,
