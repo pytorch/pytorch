@@ -504,6 +504,16 @@
       ]
     }
   ],
+  "GB2444": [
+    {
+      "Gb_type": "MAKE_CELL on a free variable name",
+      "Context": "MAKE_CELL {inst.argval}",
+      "Explanation": "An inlined comprehension creates a cell whose name `{inst.argval}` is also a free variable of the enclosing function.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
   "GB0037": [
     {
       "Gb_type": "Dynamic shape operator (no meta kernel)",
@@ -1014,6 +1024,16 @@
       "Context": "",
       "Explanation": "This is not supported.",
       "Hints": []
+    }
+  ],
+  "GB9493": [
+    {
+      "Gb_type": "C-implemented special method without VariableTracker model",
+      "Context": "name={name}, type={self.python_type_name()}, attr={type_attr}",
+      "Explanation": "'{self.python_type_name()}' implements '{name}' in C and Dynamo has no model for it.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0068": [
