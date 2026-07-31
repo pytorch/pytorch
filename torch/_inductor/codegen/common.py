@@ -12,6 +12,7 @@ import operator
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
@@ -380,6 +381,8 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
 
+# Thread-safe lazy initialization for device op overrides
+device_op_overrides_lock = threading.RLock()
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 _device_op_overrides_initialized = False
 custom_backend_passes: dict[str, CustomGraphModulePass | None] = {}
@@ -488,7 +491,17 @@ def get_wrapper_codegen_for_device(
         if fx_wrapper:
             return wrapper_codegen_obj.fx_wrapper_codegen
         elif cpp_wrapper:
-            return wrapper_codegen_obj.cpp_wrapper_codegen
+            cpp_wrapper_codegen = wrapper_codegen_obj.cpp_wrapper_codegen
+            # allow_stack_allocation is a per-compile config, so the arrayref CPU
+            # wrapper must follow the current config value rather than whatever it
+            # happened to be at first registration (see init_backend_registration).
+            if device == "cpu" and config.aot_inductor.allow_stack_allocation:
+                from .cpp_wrapper_cpu import CppWrapperCpu
+                from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
+
+                if cpp_wrapper_codegen is CppWrapperCpu:
+                    return CppWrapperCpuArrayRef
+            return cpp_wrapper_codegen
         else:
             return wrapper_codegen_obj.wrapper_codegen
     return None
@@ -510,7 +523,6 @@ def init_backend_registration() -> None:
     """
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
@@ -534,9 +546,11 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef
-            if config.aot_inductor.allow_stack_allocation
-            else CppWrapperCpu,
+            # allow_stack_allocation selects CppWrapperCpuArrayRef, but that is a
+            # per-compile config; the choice is made dynamically in
+            # get_wrapper_codegen_for_device rather than frozen here at the
+            # process's first registration.
+            CppWrapperCpu,
             WrapperFxCodegen,
         )
 
@@ -639,7 +653,8 @@ def index_prevent_reordering(
 def register_device_op_overrides(
     device: str, device_op_overrides: DeviceOpOverrides
 ) -> None:
-    device_op_overrides_dict[device] = device_op_overrides
+    with device_op_overrides_lock:
+        device_op_overrides_dict[device] = device_op_overrides
 
 
 def _initialize_device_op_overrides():
@@ -649,16 +664,20 @@ def _initialize_device_op_overrides():
     if _device_op_overrides_initialized:
         return
 
-    from . import mps_device_op_overrides  # noqa: F401
-    from .cpu_device_op_overrides import CpuDeviceOpOverrides
-    from .cuda import device_op_overrides  # noqa: F401
-    from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-    from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+    with device_op_overrides_lock:
+        if _device_op_overrides_initialized:
+            return
 
-    # TPU uses Pallas for codegen and only needs no-op overrides
-    register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+        from . import mps_device_op_overrides  # noqa: F401
+        from .cpu_device_op_overrides import CpuDeviceOpOverrides
+        from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    _device_op_overrides_initialized = True
+        # TPU uses Pallas for codegen and only needs no-op overrides
+        register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+
+        _device_op_overrides_initialized = True
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
@@ -1731,7 +1750,7 @@ class KernelArgs:
         Returns:
             Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - "workspace_{i}": agraph level unique identifier for
+                - "workspace_{i}": a graph level unique identifier for
                     the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """
@@ -2179,7 +2198,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        )
         self.varname_map[var_name] = var
         return var
 
@@ -2193,7 +2214,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
-        var = V.kernel.create_cse_var(name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(name, bounds, dtype, shape)
+        )
         self.varname_map[name] = var
         return var
 
@@ -2316,7 +2339,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        """A load the depends on an index we have read"""
+        """A load that depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
@@ -2798,6 +2821,7 @@ class CSEProxy(DefaultHandler):
                 V.kernel.compute,
                 v,
                 bounds=bounds,
+                # pyrefly: ignore[bad-argument-type]
                 dtype=output_dtype,
                 shape=output_shape,
             )

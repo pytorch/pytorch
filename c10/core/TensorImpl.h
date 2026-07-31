@@ -238,7 +238,8 @@ struct C10_API ExtraMeta;
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // the Python CppFakeTensorMode object backing this mode (used by callbacks)
+  // weak reference to the Python CppFakeTensorMode object backing this mode
+  // (used by callbacks)
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // when false, disallow a fake tensor from having a 'meta' device
