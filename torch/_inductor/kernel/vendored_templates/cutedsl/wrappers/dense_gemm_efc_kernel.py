@@ -29,7 +29,10 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     materialize_tensorssa_reduction,
 )
 from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
-from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_op_scope
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    gemm_epilogue_op_scope,
+    with_reduction_finalizer,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
@@ -264,6 +267,9 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             canonical_tensorssa_reduction_type(reduction_args.reduction_type),
             reduction_args.source_type,
             reduction_args.reduction_type,
+        )
+        reduction = with_reduction_finalizer(
+            reduction, reduction_args.finalizer_fn, cutlass.cute
         )
         return self.cute_compile(
             self.impl,

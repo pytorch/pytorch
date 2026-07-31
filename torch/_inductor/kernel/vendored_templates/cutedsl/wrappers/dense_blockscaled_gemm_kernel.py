@@ -34,7 +34,10 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     canonical_tensorssa_reduction_type,
     materialize_tensorssa_reduction,
 )
-from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_op_scope
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    gemm_epilogue_op_scope,
+    with_reduction_finalizer,
+)
 
 
 log = logging.getLogger(__name__)
@@ -340,6 +343,9 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 reduction_args.source_type,
                 reduction_args.reduction_type,
             )
+            reduction = with_reduction_finalizer(
+                reduction, reduction_args.finalizer_fn, cute
+            )
             reduction_config = _ReductionKernelConfig(
                 reduction_args.group,
                 reduction_args.axis,
@@ -403,6 +409,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         stream,
         workspace=None,
     ) -> None:
+        import tvm_ffi  # pyrefly: ignore [missing-import]
+
         import torch
 
         stream = to_cuda_stream(stream)
@@ -427,6 +435,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             epilogue_outputs = EpilogueOutputPack(
                 epilogue.outputs, epilogue.output_count, epilogue.primary_output
             )
+            epilogue_inputs = tvm_ffi.convert(dataclasses.astuple(epilogue_inputs))
+            epilogue_outputs = tvm_ffi.convert(dataclasses.astuple(epilogue_outputs))
 
         reduction = args.local_reduce
         logical_reduce_out = reduction.output

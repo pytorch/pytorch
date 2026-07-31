@@ -26,9 +26,10 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _current_target_sm,
     _get_scaled_gemm_modes,
     _make_disk_config_key,
-    _nvgemm_bias_add_epilogue,
+    _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE,
     _rewrap_efc_compiled_obj,
     _unwrap_efc_compiled_obj,
+    CuTeDSLEpilogueArguments,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import (
@@ -256,14 +257,15 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         precompile (which writes the same key) hands off to the benchmark
         instead of recompiling serially.
         """
-        from cutlass.operators.arguments import EpilogueArguments
         from cutlass.operators.artifact import CompiledArtifact
 
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
         *gemm_tensors, bias = input_tensors
         gemm_tensors = tuple(gemm_tensors)
-        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
+        epilogue_args = CuTeDSLEpilogueArguments(
+            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
+        )
 
         kernel_name = self.kernel.metadata.operator_name
         cache_key = _create_gemm_cache_key(
@@ -301,7 +303,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.accumulator_type,
             kernel_name=kernel_name,
             epilogue_args=epilogue_args,
-            epilogue_source="nvgemm_addmm_bias_v1",
+            epilogue_source="nvgemm_addmm_bias_v2",
             fallback_fn=disk_fallback,
             base_kernel=self.kernel,
         )
@@ -531,6 +533,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             epilogue_writes=None,
             epilogue_var_renames=None,
             local_reduce=None,
+            local_reduce_finalizer_fn_code=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
 
@@ -570,6 +573,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 epilogue_writes=epilogue_writes,
                 epilogue_var_renames=epilogue_var_renames,
                 local_reduce=local_reduce,
+                local_reduce_finalizer_fn_code=local_reduce_finalizer_fn_code,
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
                 bias_node=bias_node,

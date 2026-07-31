@@ -6595,6 +6595,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
         local_reduce: GemmReductionPlan | None = None,
+        local_reduce_finalizer_fn_code: str | None = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
@@ -6648,6 +6649,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
             local_reduce=local_reduce,
+            local_reduce_finalizer_fn_code=local_reduce_finalizer_fn_code,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
         )

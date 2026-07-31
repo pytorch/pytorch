@@ -49,6 +49,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
+    "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
+)
+
 
 class CuTeDSLEpilogueArguments:
     """Epilogue arguments for direct CuTeDSL functions that bypass EVT tracing."""
@@ -365,12 +369,12 @@ def _worker_nvgemm_autotuning_precompile(
     epilogue_source = ""
     aux_tensors: tuple = ()
     if has_bias_epilogue:
-        from cutlass.operators.arguments import EpilogueArguments
-
         *gemm_list, bias = input_tensors
         input_tensors = tuple(gemm_list)
-        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
-        epilogue_source = "nvgemm_addmm_bias_v1"
+        epilogue_args = CuTeDSLEpilogueArguments(
+            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
+        )
+        epilogue_source = "nvgemm_addmm_bias_v2"
         aux_tensors = (bias,)
 
     cache_key = _create_gemm_cache_key(
@@ -1102,16 +1106,6 @@ class NVUniversalGemmKernelWrapper:
 # ── Kernel codegen class ─────────────────────────────────────────────────────
 
 
-# Module-level bias-add epilogue for benchmark tracing. Must be a real
-# (introspectable) function -- EpilogueArguments parses its source via
-# inspect.getsource -- and must contain NO string literals (the AST tracer
-# treats any constant as an immediate). The param name is deliberately not
-# ``C`` (see _build_bias_epilogue) so a 1D bias routes to the row-broadcast impl.
-def _nvgemm_bias_add_epilogue(accum, bias):
-    D = accum + bias
-    return D
-
-
 def _build_bias_epilogue(
     bias_name: str, out_name: str
 ) -> tuple[str, list[str], list[str], dict[str, str]]:
@@ -1195,6 +1189,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
         local_reduce: GemmReductionPlan | None = None,
+        local_reduce_finalizer_fn_code: str | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
     ) -> None:
@@ -1216,6 +1211,7 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue_writes = epilogue_writes or []
         self.epilogue_var_renames = epilogue_var_renames or {}
         self.local_reduce = local_reduce
+        self.local_reduce_finalizer_fn_code = local_reduce_finalizer_fn_code
         self.swap_ab = swap_ab
 
         # An addmm bias baked into the choice becomes a bias-add epilogue. With
@@ -1316,6 +1312,10 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline(
                 "from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments"
             )
+            if self.local_reduce_finalizer_fn_code is not None:
+                code.writeline(
+                    f"_LOCAL_REDUCE_FINALIZER_FN_SRC = {self.local_reduce_finalizer_fn_code!r}"
+                )
         if has_epilogue:
             if self.epilogue_is_cutedsl:
                 code.writeline(
@@ -1426,6 +1426,11 @@ class NVUniversalGemmKernel(Kernel):
 
                 feed_ptr = feed_output_ptr(reduction.feed_output)
                 secondary_feed_ptr = feed_output_ptr(reduction.secondary_feed_output)
+                finalizer_arg = (
+                    ""
+                    if self.local_reduce_finalizer_fn_code is None
+                    else ", finalizer_fn=_LOCAL_REDUCE_FINALIZER_FN_SRC"
+                )
                 run_variant_kwargs = (
                     "(_VARIANT_KWARGS or {}) | {"
                     "'local_reduce': GemmReductionArguments("
@@ -1437,7 +1442,7 @@ class NVUniversalGemmKernel(Kernel):
                     f"axis={reduction.axis}, "
                     f"reduction_type={reduction.reduction_type!r}, "
                     f"source_type={reduction.source_type!r}, "
-                    f"feeds_main={feed_main!r})"
+                    f"feeds_main={feed_main!r}{finalizer_arg})"
                     "}"
                 )
                 aux_tensors.extend(

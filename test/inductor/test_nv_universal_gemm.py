@@ -225,7 +225,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, matmul(a, b))
         self.assertIn("swap_ab=True", code)
-        self.assertIn("EpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
 
     @parametrize(
@@ -270,7 +270,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, matmul(a, b, scale), atol=0.7, rtol=1e-2)
         self.assertIn("swap_ab=True", code)
-        self.assertIn("EpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
 
     def test_matmul_swap_ab_dynamic_epilogue(self):
         k = 512
@@ -312,7 +312,7 @@ class TestNVUniversalGemm(TestCase):
             )
 
         self.assertIn("swap_ab=True", code)
-        self.assertIn("EpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
 
     def test_cudagraphs_intermediate_addmm(self):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
@@ -1075,6 +1075,34 @@ class TestNVUniversalGemmHeuristics(TestCase):
             is_logsumexp_ir(GemmEpilogueIRStore(0, near_logsumexp), "gemm", 4)
         )
 
+    def test_epilogue_pattern_registry_is_declarative(self):
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            FEED_MAIN_PATTERN_REGISTRY,
+            FEED_MAIN_PATTERNS,
+            FINALIZER_PATTERNS,
+            LOCAL_REDUCTION_PATTERNS,
+        )
+
+        feed_patterns = tuple(
+            (pattern.kind, pattern.variant) for pattern in FEED_MAIN_PATTERNS
+        )
+        feed_kinds = tuple(pattern.kind for pattern in FEED_MAIN_PATTERNS)
+        local_kinds = tuple(kind for kind, _ in LOCAL_REDUCTION_PATTERNS)
+        finalizer_kinds = tuple(pattern.kind for pattern in FINALIZER_PATTERNS)
+        self.assertEqual(len(feed_patterns), len(set(feed_patterns)))
+        self.assertEqual(len(local_kinds), len(set(local_kinds)))
+        self.assertEqual(len(finalizer_kinds), len(set(finalizer_kinds)))
+        self.assertEqual(set(FEED_MAIN_PATTERN_REGISTRY), set(feed_kinds))
+        self.assertEqual(
+            set(FEED_MAIN_PATTERNS),
+            {
+                pattern
+                for patterns in FEED_MAIN_PATTERN_REGISTRY.values()
+                for pattern in patterns
+            },
+        )
+        self.assertTrue(all(pattern.constraints for pattern in FEED_MAIN_PATTERNS))
+
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
         kernel = MagicMock()
@@ -1356,8 +1384,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return torch.relu(result), result + 1.0
 
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
-        self.assertIn("EpilogueArguments", code)
-        self.assertNotIn("CuTeDSLEpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
@@ -1437,17 +1464,32 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, torch.bmm(a, b).relu(), atol=2e-2, rtol=2e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
 
-    @parametrize("bias_kind", ("batch", "tile", "row_1d", "row_2d", "col_2d"))
+    @parametrize(
+        "bias_kind",
+        (
+            "batch",
+            "batch_broadcast",
+            "tile",
+            "row_1d",
+            "row_2d",
+            "row_3d",
+            "col_2d",
+            "col_3d",
+        ),
+    )
     def test_flex_gemm_baddbmm_pointwise_epilogue_fusion(self, bias_kind):
         batch, m, n, k = 2, 128, 192, 64
         bias_shapes = {
             "batch": (batch, m, n),
+            "batch_broadcast": (1, m, n),
             "tile": (m, n),
             "row_1d": (n,),
             "row_2d": (1, n),
+            "row_3d": (batch, 1, n),
             "col_2d": (m, 1),
+            "col_3d": (batch, m, 1),
         }
-        bias = torch.randn(*bias_shapes[bias_kind], device="cuda", dtype=torch.bfloat16)
+        bias = torch.randn(bias_shapes[bias_kind], device="cuda", dtype=torch.bfloat16)
         a = torch.randn(batch, m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(batch, k, n, device="cuda", dtype=torch.bfloat16)
 
