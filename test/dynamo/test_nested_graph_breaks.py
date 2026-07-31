@@ -1367,7 +1367,11 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(3)
         self.assertEqual(fn(inp), inp + 6)
-        self.assertEqual(cnts.frame_count, 1)
+        # `x + 1` compiles before the break in the ctx manager construction;
+        # the resume reconstructs the ctx manager (now enterable, see
+        # VariableBuilder.wrap_user_defined) and compiles the with-body `x + 2`
+        # plus `x + 3`, giving a second frame.
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_graph_break_during_module_init(self):
         """Graph break during nn.Module.__init__ should not prevent the caller
@@ -1515,7 +1519,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 6)
 
-    @unittest.expectedFailure
     def test_nested_graph_break_in_custom_ctx_manager_init(self):
         def f(x):
             with CustomizedCtxManager(x):
@@ -1526,10 +1529,81 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(3)
         res = f(x)
         ref = opt_fn(x)
-        print(ref, res)
         self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 2)
+        # The graph break happens inside __init__, i.e. before the context
+        # manager is entered, so the pre-break graph is empty (not compiled).
+        # Only the resume (enter + `x + 1` + exit) is compiled: 1 frame, 1 op.
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_ctx_manager_passed_as_sourced_arg(self):
+        # A ctx manager passed in as an argument is sourced, so it is wrapped
+        # by VariableBuilder.wrap_user_defined -- which now produces a
+        # GenericContextWrappingVariable for any type with __enter__/__exit__.
+        # It must behave like eager both when entered in a `with` and when
+        # merely used as a plain object (attribute access, never entered).
+        class Ctx:
+            def __init__(self, x):
+                self.x = x
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def f_with(cm, x):
+            with cm:
+                return x + cm.x
+
+        def f_plain(cm, x):
+            return x + cm.x
+
+        cm = Ctx(torch.ones(3))
+        x = torch.zeros(3)
+        for fn in (f_with, f_plain):
+            cnts = torch._dynamo.testing.CompileCounter()
+            res = torch.compile(fn, backend=cnts, fullgraph=True)(cm, x)
+            self.assertEqual(res, fn(cm, x))
+            self.assertEqual(cnts.frame_count, 1)
+
+    def test_ctx_manager_c_level_enter_graph_breaks(self):
+        # A sourced context manager whose __enter__/__exit__ are not plain
+        # bound-method functions (no `.__func__`) must cleanly graph-break to
+        # eager when entered, NOT be wrapped as a GenericContextWrappingVariable
+        # (whose enter/exit take `.__func__`) which would raise
+        # InternalTorchDynamoError. Covers C-level builtins (threading locks)
+        # and a staticmethod-defined dunder.
+        import threading
+
+        class StaticCtx:
+            @staticmethod
+            def __enter__():
+                return None
+
+            @staticmethod
+            def __exit__(*args):
+                return False
+
+        def f(cm, x):
+            with cm:
+                return x + 1
+
+        x = torch.ones(3)
+        # sourced (VariableBuilder.wrap_user_defined path)
+        for cm in (threading.Lock(), threading.RLock(), StaticCtx()):
+            cnts = torch._dynamo.testing.CompileCounter()
+            res = torch.compile(f, backend=cnts)(cm, x)
+            self.assertEqual(res, x + 1)
+            self.assertEqual(cnts.frame_count, 0)  # skipped to eager, no crash
+
+        # constructed in-trace (SideEffects.get_variable_cls path)
+        def g(x):
+            with StaticCtx():
+                return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(g, backend=cnts)(x), x + 1)
 
     def test_ngb_suppressed_for_inline_module(self):
         """NGB should be suppressed for functions in NGB_SUPPRESS_INLINELIST."""

@@ -8494,6 +8494,47 @@ SavedForBackwardsAOTOutput(idx=5)""",
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(dual)
 
+    def test_grid_sampler_2d_cpu_fallback_captured(self):
+        # torch._grid_sampler_2d_cpu_fallback used to have no meta kernel, so
+        # running it under FakeTensorMode hard-errored ("data is not allocated
+        # yet") and Dynamo could not capture it. Regression test for the
+        # NGB-enabled failure of test_nn.py TestNN.test_grid_sample: with the
+        # meta registrations it captures with no graph break.
+        def fn(inp, grid):
+            out = torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+            return out + 1
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        expected = fn(inp, grid)
+
+        cnt = CompileCounter()
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(inp, grid)
+        self.assertEqual(out, expected)
+        # Both the fallback and the add are captured into one graph.
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+    def test_grid_sampler_2d_cpu_fallback_backward(self):
+        # The backward also needs a meta kernel, or AOTAutograd fails to trace
+        # it. Grads must match eager.
+        def fn(inp, grid):
+            return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True).sum()
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+
+        i_ref, g_ref = inp.clone().requires_grad_(), grid.clone().requires_grad_()
+        fn(i_ref, g_ref).backward()
+
+        i_test, g_test = inp.clone().requires_grad_(), grid.clone().requires_grad_()
+        torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            i_test, g_test
+        ).backward()
+
+        self.assertEqual(i_test.grad, i_ref.grad)
+        self.assertEqual(g_test.grad, g_ref.grad)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()
