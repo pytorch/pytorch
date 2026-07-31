@@ -109,6 +109,10 @@ struct TORCH_API Generator {
 
   Generator graphsafe_get_state() const;
 
+  // See c10::GeneratorImpl::philox_state.
+  std::tuple<at::Tensor, at::Tensor, at::Tensor> philox_state(
+      uint64_t increment);
+
   std::mutex& mutex() {
     return impl_->mutex_;
   }
