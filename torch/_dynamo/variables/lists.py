@@ -213,6 +213,8 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    mp_length = sq_length
+
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
@@ -709,6 +711,9 @@ class RangeVariable(BaseListVariable):
         if length > sys.maxsize:
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
+
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.sq_length(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
