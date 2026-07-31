@@ -35,6 +35,7 @@ void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
       at::cuda::getCurrentDeviceProperties()->isLargeBar &&
       is_cuda_caching_allocator_tensor(self)) {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+#if ROCM_VERSION < 71400
     hipStreamCaptureStatus captureStatus;
     C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
     if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
@@ -43,6 +44,12 @@ void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
     } else {
       C10_CUDA_CHECK(hipErrorStreamCaptureUnsupported);
     }
+#else // ROCM_VERSION
+    // HIP reports the errors during graph capture in ROCm 7.14+
+    // no StreamCaptureStatus check required
+    at::cuda::stream_synchronize(stream);
+    r = Scalar(*self.template const_data_ptr<scalar_t>());
+#endif // ROCM_VERSION
     return;
   }
 #endif
@@ -70,7 +77,7 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
     AT_DISPATCH_V2(
       self.scalar_type(), "_local_scalar_dense_cuda", AT_WRAP([&] {
         _local_scalar_dense_cuda_impl<scalar_t>(self, r);
-      }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+      }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return r;
 }
 

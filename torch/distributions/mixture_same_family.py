@@ -13,9 +13,9 @@ __all__ = ["MixtureSameFamily"]
 class MixtureSameFamily(Distribution):
     r"""
     The `MixtureSameFamily` distribution implements a (batch of) mixture
-    distribution where all component are from different parameterizations of
+    distribution where all components are from different parameterizations of
     the same distribution type. It is parameterized by a `Categorical`
-    "selecting distribution" (over `k` component) and a component
+    "selecting distribution" (over `k` components) and a component
     distribution, i.e., a `Distribution` with a rightmost batch shape
     (equal to `[k]`) which indexes each (batch of) component.
 
@@ -44,7 +44,7 @@ class MixtureSameFamily(Distribution):
 
     Args:
         mixture_distribution: `torch.distributions.Categorical`-like
-            instance. Manages the probability of selecting component.
+            instance. Manages the probability of selecting components.
             The number of categories must match the rightmost batch
             dimension of the `component_distribution`. Must have either
             scalar `batch_shape` or `batch_shape` matching
@@ -73,7 +73,7 @@ class MixtureSameFamily(Distribution):
 
         if not isinstance(self._component_distribution, Distribution):
             raise ValueError(
-                "The Component distribution need to be an "
+                "The Component distribution needs to be an "
                 "instance of torch.distributions.Distribution"
             )
 
@@ -88,7 +88,7 @@ class MixtureSameFamily(Distribution):
                     f"batch_shape`({cdbs})"
                 )
 
-        # Check that the number of mixture component matches
+        # Check that the number of mixture components matches
         km = self._mixture_distribution.logits.shape[-1]
         kc = self._component_distribution.batch_shape[-1]
         if km is not None and kc is not None and km != kc:

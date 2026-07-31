@@ -148,7 +148,7 @@ std::string GenerateDotNodeLabel(
   if (opt_root_id) {
     ss << "\\nROOT=" << *opt_root_id;
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string GenerateDotNodeSpec(
@@ -156,7 +156,7 @@ std::string GenerateDotNodeSpec(
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   std::stringstream ss;
   ss << "label=\"" << GenerateDotNodeLabel(node, roots_ids) << '"';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
@@ -177,7 +177,7 @@ std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
   for (auto& tag : GetNodeTags(node)) {
     ss << ", " << tag.name << '=' << tag.value;
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace
@@ -219,7 +219,7 @@ std::string DumpUtil::PostOrderToDot(
     }
   }
   ss << "}\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string DumpUtil::ToText(c10::ArrayRef<const Node*> nodes) {
@@ -245,7 +245,7 @@ std::string DumpUtil::PostOrderToText(
     ss << '\n';
   }
   ss << "}\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string DumpUtil::ToBackend(
