@@ -6375,8 +6375,8 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
     @torch._dynamo.config.patch(record_runtime_overhead=True)
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
-        # record_runtime_overhead is off by default (its per-call marker hops add
-        # overhead); enable it so the prologue profiling marker is emitted.
+        # Patch record_runtime_overhead on explicitly (rather than relying on the
+        # default) so the prologue profiling marker is emitted deterministically.
         # Names for prologue profiling event
         prologue_name = "AOTDispatcher Runtime Wrapper Prologue"
 
@@ -6414,11 +6414,10 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             self.assertLess(prologue_event.time_range.end, last_start_time)
 
     def test_record_runtime_overhead_gated_on_profiler(self):
-        # record_runtime_overhead defaults True, but the "Pregraph bytecode"
-        # marker Dynamo emits into each compiled call is gated at RUNTIME on the
-        # active profiler: it fires only when a profiler is attached, so a
-        # non-profiled call pays nothing. Setting the flag False drops the marker
-        # emission entirely.
+        # The "Pregraph bytecode" marker Dynamo emits into each compiled call is
+        # gated at RUNTIME on the active profiler: with record_runtime_overhead
+        # on, it fires only when a profiler is attached (a non-profiled call pays
+        # nothing); with the flag off it is not emitted at all.
         def has_pregraph_marker():
             torch._dynamo.reset()
             f = torch.compile(lambda x: x + 1, backend="eager")
@@ -6428,13 +6427,33 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
                 f(x)
             return any("Pregraph bytecode" in e.name for e in prof.events())
 
-        # Default (on): the runtime gate lets the marker fire under a profiler
-        # even though the function was compiled without one (no recompile needed).
-        self.assertTrue(has_pregraph_marker())
-        # Flag off: the marker is never emitted, so it is absent even under a
+        # On: the runtime gate lets the marker fire under a profiler even though
+        # the function was compiled without one (no recompile needed).
+        with torch._dynamo.config.patch(record_runtime_overhead=True):
+            self.assertTrue(has_pregraph_marker())
+        # Off: the marker is not emitted at all, so it is absent even under a
         # profiler.
         with torch._dynamo.config.patch(record_runtime_overhead=False):
             self.assertFalse(has_pregraph_marker())
+
+        # The runtime gate must NOT invoke the marker fn when no profiler is
+        # active -- that is the whole point (a non-profiled call pays nothing).
+        # Spy on the marker enter on a single compiled function: it is skipped
+        # without a profiler and invoked with one.
+        with torch._dynamo.config.patch(record_runtime_overhead=True):
+            torch._dynamo.reset()
+            f = torch.compile(lambda x: x + 1, backend="eager")
+            x = torch.randn(4)
+            f(x)  # compile + warm WITHOUT a profiler
+            with mock.patch(
+                "torch._dynamo.utils.record_pregraph_bytecode_enter",
+                wraps=torch._dynamo.utils.record_pregraph_bytecode_enter,
+            ) as enter_spy:
+                f(x)  # no profiler -> gated out
+                self.assertEqual(enter_spy.call_count, 0)
+                with profile(activities=[ProfilerActivity.CPU]):
+                    f(x)  # profiler active -> gate lets it through
+                self.assertGreater(enter_spy.call_count, 0)
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
