@@ -39,30 +39,31 @@ def gemm_epilogue_op_scope(cute: Any) -> dict[str, Any]:
     }
 
 
-def with_reduction_finalizer(reduction: Any, source: str | None, cute: Any) -> Any:
-    if source is None:
-        return reduction
-    fn_name = next(
+def materialize_epilogue_function(source: str, cute: Any) -> Any:
+    function_names = [
         node.name
         for node in ast.parse(source).body
         if isinstance(node, ast.FunctionDef)
-    )
+    ]
+    if len(function_names) != 1:
+        raise NotImplementedError("expected one GEMM epilogue function")
     scope = gemm_epilogue_op_scope(cute)
     exec(source, scope)
-    return dataclasses.replace(reduction, finalize=scope[fn_name])
+    return scope[function_names[0]]
+
+
+def with_reduction_finalizer(reduction: Any, source: str | None, cute: Any) -> Any:
+    if source is None:
+        return reduction
+    return dataclasses.replace(
+        reduction, finalize=materialize_epilogue_function(source, cute)
+    )
 
 
 def materialize_reduction_consumer(source: str | None, cute: Any) -> Any:
     if source is None:
         return None
-    fn_name = next(
-        node.name
-        for node in ast.parse(source).body
-        if isinstance(node, ast.FunctionDef)
-    )
-    scope = gemm_epilogue_op_scope(cute)
-    exec(source, scope)
-    return scope[fn_name]
+    return materialize_epilogue_function(source, cute)
 
 
 def materialize_reduction_callbacks(args: Any, cute: Any) -> tuple[Any, Any, Any]:

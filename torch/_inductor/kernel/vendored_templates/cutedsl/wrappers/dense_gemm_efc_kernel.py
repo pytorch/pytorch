@@ -27,6 +27,7 @@ from cutlass.operators.status import Status
 from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     gemm_epilogue_op_scope,
+    materialize_epilogue_function,
     materialize_reduction_callbacks,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -50,25 +51,15 @@ def _direct_cutedsl_epilogue(metadata):
 
     import cutlass.cute as cute
 
-    scope = gemm_epilogue_op_scope(cute)
-    original_names = OrderedSet(scope)
-    exec(metadata.epilogue.epilogue_fn, scope)
-    direct_fn = next(
-        value
-        for name, value in scope.items()
-        if name not in original_names and callable(value)
-    )
+    direct_fn = materialize_epilogue_function(metadata.epilogue.epilogue_fn, cute)
     inputs, outputs = trace_in_out(metadata.epilogue.epilogue_fn)
     inputs = ["accum", *inputs] if "accum" not in inputs else inputs
     parameter_names = metadata.epilogue.parameter_names
     tensors = metadata.epilogue.tensors
     output_shape = tuple(tensors[outputs[-1]].shape)
-    broadcast_names = OrderedSet()
 
-    def load(name, parameter):
+    def source_mode_map(name):
         shape = tuple(tensors[name].shape)
-        if shape == output_shape:
-            return parameter.load()
         if not shape or len(shape) > 3:
             raise NotImplementedError(f"unsupported dense EFC broadcast shape: {shape}")
         stride: Any = tensors[name].stride
@@ -79,14 +70,30 @@ def _direct_cutedsl_epilogue(metadata):
         padded_shape = (1,) * (3 - len(shape)) + shape
         padded_stride = (0,) * (3 - len(stride)) + stride
         propagated_stride = tuple(
-            0 if size == 1 else step for size, step in zip(padded_shape, padded_stride)
+            0 if size == 1 else step
+            for size, step in zip(padded_shape, padded_stride, strict=True)
         )
-        source_mode_map = _build_source_mode_map(propagated_stride, len(shape))
-        broadcast_names.add(name)
-        return parameter.remap_modes[source_mode_map].load()
+        if shape == output_shape and all(propagated_stride):
+            return None
+        return _build_source_mode_map(propagated_stride, len(shape))
+
+    input_mode_maps = {
+        name: source_mode_map(name) for name in inputs if name != "accum"
+    }
+    broadcast_names = OrderedSet(
+        name for name, mode_map in input_mode_maps.items() if mode_map is not None
+    )
+
+    def load(name, parameter):
+        mode_map = input_mode_maps[name]
+        return (
+            parameter.load()
+            if mode_map is None
+            else parameter.remap_modes[mode_map].load()
+        )
 
     def epilogue(efc_config, *parameters):
-        by_name = dict(zip(parameter_names, parameters))
+        by_name = dict(zip(parameter_names, parameters, strict=True))
         values = [
             efc_config.accum() if name == "accum" else load(name, by_name[name])
             for name in inputs
@@ -111,7 +118,7 @@ def _direct_cutedsl_epilogue(metadata):
         else:
             assert isinstance(results, tuple)  # noqa: S101
             result_values = results
-        for name, value in zip(outputs, result_values):
+        for name, value in zip(outputs, result_values, strict=True):
             by_name[name].store(value)
 
     named_epilogue = common_efc.create_named_epilogue(

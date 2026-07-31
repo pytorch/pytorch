@@ -935,6 +935,32 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
+        def classify_unrolled(value):
+            values = [Expr("load", ("gemm", offset, None)) for offset in range(4)]
+            values = [value(item) for item in values]
+            result = values[0]
+            for item in values[1:]:
+                result = Expr("add", (result, item))
+            return grouped_reduction_ir(
+                GemmEpilogueIRStore(0, result), "gemm", 4, torch.bfloat16
+            )
+
+        self.assertIsNone(
+            classify_unrolled(
+                lambda value: Expr(
+                    "to_dtype",
+                    (Expr("to_dtype", (value, torch.float16)), torch.float32),
+                )
+            )
+        )
+        self.assertIsNone(
+            classify_unrolled(
+                lambda value: Expr(
+                    "to_dtype_bitcast", (value, torch.bfloat16, torch.bfloat16)
+                )
+            )
+        )
+
     def test_loop_ir_epilogue_analysis_links_reduction_consumer(self):
         import sympy
 
