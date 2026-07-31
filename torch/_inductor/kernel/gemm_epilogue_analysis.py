@@ -24,15 +24,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
-from torch._inductor.kernel.flex_gemm.epilogue_nodes import (
-    normalize_flex_gemm_epilogue_fx_node,
-    NormalizedGetItem,
-    NormalizedPrepareSoftmax,
-    NormalizedReduction,
-    NormalizedSqueeze,
-    NormalizedUnsupportedReduction,
-    NormalizedView,
-)
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     grouped_tensor_layout,
     GroupedTensorSSALayout,
@@ -43,6 +34,12 @@ from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
     GemmReductionGeometry,
     iter_fx_node_inputs,
+    NormalizedGetItem,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSqueeze,
+    NormalizedUnsupportedReduction,
+    NormalizedView,
 )
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch.utils._ordered_set import OrderedSet
@@ -73,6 +70,7 @@ class GemmLocalReduceMatch:
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
     reduction_node: torch.fx.Node | None = None
+    reduction_type: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
@@ -88,18 +86,6 @@ class GemmLocalReduceMatch:
     ) -> "GemmOutputLocalReducePlan":
         """Bind this matched value to its output consumers."""
         return GemmOutputLocalReducePlan(self, store=store, feeds_main=feeds_main)
-
-    @property
-    def reduction_type(self) -> str | None:
-        """Return the primitive reduction kind represented by this match."""
-        if self.reduction_node is None:
-            return None
-        normalized = normalize_flex_gemm_epilogue_fx_node(self.reduction_node)
-        return (
-            normalized.reduction_type
-            if isinstance(normalized, NormalizedReduction)
-            else None
-        )
 
     @classmethod
     def common(
@@ -233,7 +219,7 @@ class GemmLocalReduceAnalysis:
         """Record grouped layouts and local-reduction matches for one FX node."""
         if node.op != "call_function":
             return
-        normalized = normalize_flex_gemm_epilogue_fx_node(node)
+        normalized = self.graph.normalized_nodes.get(node)
         if isinstance(normalized, NormalizedView):
             if self.propagate_local_reduce_match(node, normalized.source):
                 return
@@ -241,7 +227,11 @@ class GemmLocalReduceAnalysis:
                 return
         elif isinstance(normalized, NormalizedReduction):
             if self.bind_grouped_reduction(
-                node, normalized.source, normalized.dim, normalized.dtype
+                node,
+                normalized.source,
+                normalized.dim,
+                normalized.dtype,
+                reduction_type=normalized.reduction_type,
             ):
                 return
         elif isinstance(normalized, NormalizedPrepareSoftmax):
@@ -289,6 +279,7 @@ class GemmLocalReduceAnalysis:
         dim: Any,
         dtype: Any = None,
         *,
+        reduction_type: str | None = None,
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
@@ -308,6 +299,7 @@ class GemmLocalReduceAnalysis:
             node,
             GemmReductionGeometry(layout.group_size, layout.axis),
             reduction_node=node,
+            reduction_type=reduction_type,
         )
         return True
 
@@ -368,7 +360,7 @@ class GemmLocalReduceAnalysis:
         """Find the grouped reduction that produces a broadcast value."""
         if not isinstance(value, torch.fx.Node):
             return None
-        normalized = normalize_flex_gemm_epilogue_fx_node(value)
+        normalized = self.graph.normalized_nodes.get(value)
         if isinstance(normalized, NormalizedReduction):
             if normalized.source is not grouped_source:
                 if self.graph.depends_on(normalized.source, grouped_source):
@@ -384,6 +376,7 @@ class GemmLocalReduceAnalysis:
                 value,
                 GemmReductionGeometry(layout.group_size, layout.axis),
                 reduction_node=value,
+                reduction_type=normalized.reduction_type,
             )
         if not is_shape_preserving_pointwise_node(value):
             return None
@@ -432,7 +425,7 @@ class GemmLocalReduceAnalysis:
         if value in seen:
             return
         seen.add(value)
-        normalized = normalize_flex_gemm_epilogue_fx_node(value)
+        normalized = self.graph.normalized_nodes.get(value)
         if isinstance(normalized, NormalizedReduction):
             self.validate_hidden_feed_main_reduction_input(
                 normalized.source, grouped_source
@@ -450,7 +443,7 @@ class GemmLocalReduceAnalysis:
         """Preserve the one-physical-value ABI across recursive source matching."""
         if match is None:
             return None
-        normalized = normalize_flex_gemm_epilogue_fx_node(match.value_node)
+        normalized = self.graph.normalized_nodes.get(match.value_node)
         if isinstance(normalized, NormalizedReduction):
             self.validate_feed_main_source_reductions(
                 source, normalized.source, match.value_node
@@ -480,7 +473,7 @@ class GemmLocalReduceAnalysis:
         """Return whether a candidate contains a grouped feed-main reduction."""
         if not isinstance(value, torch.fx.Node):
             return False
-        normalized = normalize_flex_gemm_epilogue_fx_node(value)
+        normalized = self.graph.normalized_nodes.get(value)
         if isinstance(normalized, NormalizedReduction):
             return (
                 normalized.dtype is None
@@ -509,7 +502,7 @@ class GemmLocalReduceAnalysis:
             value, torch.fx.Node
         ):
             return None
-        normalized = normalize_flex_gemm_epilogue_fx_node(grouped_source)
+        normalized = self.graph.normalized_nodes.get(grouped_source)
         if not isinstance(normalized, NormalizedView):
             return None
         source_node = normalized.source
@@ -577,7 +570,7 @@ class GemmLocalReduceAnalysis:
         output: torch.fx.Node,
     ) -> GemmLocalReduceMatch | None:
         """Match feed-main reductions through trailing pointwise nodes."""
-        normalized = normalize_flex_gemm_epilogue_fx_node(output)
+        normalized = self.graph.normalized_nodes.get(output)
         if isinstance(normalized, NormalizedView):
             return self.match_feed_main_source(
                 normalized.source, output.meta.get("val")
