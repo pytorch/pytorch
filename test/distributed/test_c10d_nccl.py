@@ -669,7 +669,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_gather_single(self):
+    def test_gather_into_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
@@ -688,7 +688,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             else:
                 gather_tensor = None
 
-            dist.gather_single(tensor, gather_tensor, dst=dst)
+            dist.gather_into_tensor(tensor, gather_tensor, dst=dst)
 
             if self.rank == dst:
                 expected = torch.arange(world_size * elems, device=device).float()
@@ -701,7 +701,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         gather_tensor = (
             torch.empty(world_size, 2, 2, device=device) if self.rank == 0 else None
         )
-        dist.gather_single(tensor, gather_tensor, dst=0)
+        dist.gather_into_tensor(tensor, gather_tensor, dst=0)
         if self.rank == 0:
             expected = torch.stack(
                 [torch.ones(2, 2, device=device) * r for r in range(world_size)]
@@ -713,7 +713,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         gather_tensor = (
             torch.empty(world_size * elems, device=device) if self.rank == 0 else None
         )
-        work = dist.gather_single(tensor, gather_tensor, dst=0, async_op=True)
+        work = dist.gather_into_tensor(tensor, gather_tensor, dst=0, async_op=True)
         work.wait()
         if self.rank == 0:
             expected = torch.arange(world_size * elems, device=device).float()
@@ -726,10 +726,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             good_input = torch.arange(elems, device=device).float()
             with self.assertRaises((ValueError, RuntimeError)):
                 bad_size = torch.empty(world_size * elems + 1, device=device)
-                dist.gather_single(good_input, bad_size, dst=0)
+                dist.gather_into_tensor(good_input, bad_size, dst=0)
             with self.assertRaises((ValueError, RuntimeError)):
                 bad_dtype = torch.empty(world_size * elems, device=device).double()
-                dist.gather_single(good_input, bad_dtype, dst=0)
+                dist.gather_into_tensor(good_input, bad_dtype, dst=0)
         dist.barrier()
 
         # NOTE: on NVIDIA (NCCL >= 2.28.3) this exercises the native ncclGather
