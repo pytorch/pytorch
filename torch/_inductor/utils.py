@@ -2228,6 +2228,8 @@ def use_triton_tdm_template(
     """Return whether dense MM operands may use the gfx1250 TDM template."""
     if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
         return False
+    # Dense add_guards callers already specialize sizes and strides in
+    # _tdm_operand_compatible below, so checking bounds first is intentional.
     if not all(
         _descriptor_shape_fits_in_int32(mat.get_size(), add_guards=add_guards)
         for mat in matrices
