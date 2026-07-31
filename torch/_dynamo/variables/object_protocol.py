@@ -893,8 +893,6 @@ def pynumber_tobase(
     index result is not a Python constant.
     """
     index = pynumber_index(tx, obj)
-    if not index.is_python_constant():
-        return None
     format_fn = {2: bin, 8: oct, 16: hex}[base]
     return ConstantVariable.create(format_fn(index.as_python_constant()))
 
