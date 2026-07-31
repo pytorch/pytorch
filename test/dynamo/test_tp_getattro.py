@@ -1943,6 +1943,52 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
         self.assertFalse(result)
 
+    def test_dunder_getattribute_dict_is_mutation_tracked(self):
+        """__dict__ via explicit/super __getattribute__ must be the tracked dict.
+
+        The generic getset-descriptor path yields an untracked copy, silently
+        dropping stores made through it.
+        """
+
+        class S:
+            def __init__(self):
+                self.y = 7
+
+        def explicit(o):
+            d = o.__getattribute__("__dict__")
+            d["z"] = 3
+            return sorted(o.__dict__.items())
+
+        def via_super(o):
+            d = super(S, o).__getattribute__("__dict__")
+            d["z"] = 3
+            return sorted(o.__dict__.items())
+
+        def identity(o):
+            return super(S, o).__getattribute__("__dict__") is o.__dict__
+
+        for fn in (explicit, via_super, identity):
+            torch._dynamo.reset()
+            expected = fn(S())
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(S())
+            self.assertEqual(actual, expected)
+
+    def test_udov_attribute_error_carries_name_and_obj(self):
+        """AttributeError from a UDOV miss must set .name/.obj like CPython."""
+
+        class Foo:
+            bar = 1
+
+        def fn(t):
+            obj = Foo()
+            try:
+                obj.missing
+            except AttributeError as e:
+                return t.sin(), e.name
+
+        _, name = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+        self.assertEqual(name, "missing")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
