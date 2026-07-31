@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -289,17 +288,20 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
     auto tmp = py::cast<std::optional<at::Tensor>>(std::move(proxy));
     TORCH_INTERNAL_ASSERT(tmp.has_value());
-    return tmp.value();
+    return std::move(tmp).value();
   }
-  void call_accumulate_grad(
+  at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const override {
     py::handle handle(py_compiler);
-    py::object stuff =
-        handle.attr("accumulate_grad")(variable, grad, has_post_hooks);
-    TORCH_INTERNAL_ASSERT(stuff.is_none());
+    py::object stuff = handle.attr("accumulate_grad")(
+        variable, variable_grad, grad, has_post_hooks);
+    auto tmp = py::cast<std::optional<at::Tensor>>(std::move(stuff));
+    TORCH_INTERNAL_ASSERT(tmp.has_value());
+    return std::move(tmp).value();
   }
 };
 
@@ -418,11 +420,12 @@ struct VerboseLogger : public PythonLogger {
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       const std::string& node_name) const {
-    auto matching_sizes = cached_keys |
-        std::views::filter([&](const CacheKey& k) {
-                            return k.node_type == node_type;
-                          }) |
-        std::views::transform(&CacheKey::key_size);
+    std::vector<size_t> matching_sizes;
+    for (const auto& k : cached_keys) {
+      if (k.node_type == node_type) {
+        matching_sizes.push_back(k.key_size);
+      }
+    }
     std::string compile_reason = fmt::format(
         "Cache miss due to new autograd node: {} with key size {}, previous key sizes=[{}]",
         node_name,

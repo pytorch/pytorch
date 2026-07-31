@@ -51,8 +51,8 @@ class TestCommMode(TestCase):
                 self.model = MLPModule(device=device)
 
             def forward(self, x):
-                x = funcol.all_gather_tensor(x, 0, world_pg)
-                x = funcol.reduce_scatter_tensor(x, "sum", 0, world_pg)
+                x = funcol.all_gather_single(x, 0, world_pg)
+                x = funcol.reduce_scatter_single(x, "sum", 0, world_pg)
                 out = self.model(x)
                 return funcol.all_reduce(out, "sum", world_pg)
 
@@ -77,8 +77,8 @@ class TestCommMode(TestCase):
                 self.model = MLPModule(device=device)
 
             def forward(self, x):
-                x = funcol.all_gather_tensor(x, 0, world_pg)
-                x = funcol.reduce_scatter_tensor(x, "sum", 0, world_pg)
+                x = funcol.all_gather_single(x, 0, world_pg)
+                x = funcol.reduce_scatter_single(x, "sum", 0, world_pg)
                 out = self.model(x)
                 return funcol.all_reduce_coalesced([out], "sum", world_pg)
 
@@ -133,13 +133,13 @@ class TestCommMode(TestCase):
 
         # tests c10d all_gather_into_tensor tracing
         with comm_mode:
-            dist.all_gather_into_tensor(all_gather_out, inp)
+            dist.all_gather_single(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops._allgather_base_, 1, 1)
 
         # tests c10d reduce_scatter tracing
         with comm_mode:
-            dist.reduce_scatter_tensor(inp, all_gather_out)
+            dist.reduce_scatter_single(inp, all_gather_out)
 
         self.checksAssert(comm_mode, c10d_ops._reduce_scatter_base_, 1, 1)
 
@@ -185,7 +185,7 @@ class TestCommMode(TestCase):
 
         # tests c10d allgather_into_tensor_coalesced_ tracing
         with comm_mode, dist._coalescing_manager():
-            dist.all_gather_into_tensor(all_gather_out, inp)
+            dist.all_gather_single(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops.allgather_into_tensor_coalesced_, 1, 1)
 
@@ -203,7 +203,7 @@ class TestCommMode(TestCase):
 
         # tests c10d reduce_scatter_tensor_coalesced
         with comm_mode, dist._coalescing_manager():
-            dist.reduce_scatter_tensor(inp, all_gather_out)
+            dist.reduce_scatter_single(inp, all_gather_out)
 
         self.checksAssert(comm_mode, c10d_ops.reduce_scatter_tensor_coalesced_, 1, 1)
 
@@ -221,6 +221,51 @@ class TestCommMode(TestCase):
             dist.all_to_all_single(inp, inp)
 
         self.checksAssert(comm_mode, c10d_ops.alltoall_base_, 1, 1)
+
+
+class TestCommModeModuleReuse(TestCase):
+    """Tests that do not require a process group."""
+
+    def test_comm_mode_repeated_module_forward(self):
+        m = torch.nn.Linear(2, 2)
+        with CommDebugMode():
+            m(torch.ones(1, 2))
+            m(torch.ones(1, 2))
+
+        # After exiting, normal forward should still work
+        m(torch.ones(1, 2))
+
+        # No hooks should remain on the module from CommDebugMode
+        self.assertEqual(len(m._forward_hooks), 0)
+        self.assertEqual(len(m._forward_pre_hooks), 0)
+
+    def test_comm_mode_many_forwards(self):
+        m = torch.nn.Linear(2, 2)
+        with CommDebugMode():
+            for _ in range(10):
+                m(torch.ones(1, 2))
+
+        m(torch.ones(1, 2))
+        self.assertEqual(len(m._forward_hooks), 0)
+
+    def test_comm_mode_nested_modules_reuse(self):
+        class TwoLayerMLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(2, 2)
+                self.fc2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.fc2(torch.relu(self.fc1(x)))
+
+        m = TwoLayerMLP()
+        with CommDebugMode():
+            m(torch.ones(1, 2))
+            m(torch.ones(1, 2))
+
+        m(torch.ones(1, 2))
+        self.assertEqual(len(m.fc1._forward_hooks), 0)
+        self.assertEqual(len(m.fc2._forward_hooks), 0)
 
 
 if __name__ == "__main__":
