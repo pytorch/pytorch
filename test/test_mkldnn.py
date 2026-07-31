@@ -22,10 +22,10 @@ import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
-    skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision
+    skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
+    parametrize, instantiate_parametrized_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    dtypes,
 )
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
@@ -388,17 +388,17 @@ class TestMkldnn(TestCase):
                 y_lower = conv_lower(x_lower).float()
                 self.assertEqual(y, y_lower, atol=5e-2, rtol=5e-3)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_deconv_1d_lower_precision(self, dtype):
         self._test_conv_deconv_lower_precision_base(1, torch.nn.Conv1d, dtype=dtype)
         self._test_conv_deconv_lower_precision_base(1, torch.nn.ConvTranspose1d, dtype=dtype)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_deconv_2d_lower_precision(self, dtype):
         self._test_conv_deconv_lower_precision_base(2, torch.nn.Conv2d, dtype=dtype)
         self._test_conv_deconv_lower_precision_base(2, torch.nn.ConvTranspose2d, dtype=dtype)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_deconv_3d_lower_precision(self, dtype):
         self._test_conv_deconv_lower_precision_base(3, torch.nn.Conv3d, dtype=dtype)
         self._test_conv_deconv_lower_precision_base(3, torch.nn.ConvTranspose3d, dtype=dtype)
@@ -459,7 +459,7 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.float32)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_nhwc_lower_precision(self, dtype):
         # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
@@ -494,7 +494,7 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.float32)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_transpose_nhwc_lower_precision(self, dtype):
         # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
@@ -1358,7 +1358,7 @@ class TestMkldnn(TestCase):
             if bias:
                 self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_linear_lowp(self, dtype):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
@@ -1633,7 +1633,7 @@ class TestMkldnn(TestCase):
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_matmul_lower_precision(self, dtype):
         support_check = {
             torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
@@ -1688,8 +1688,9 @@ class TestMkldnn(TestCase):
         with self.assertRaises(ValueError):
             torch.mkldnn_max_pool2d(x, kernel_size=3, stride=0)
 
-    def test_mkldnn_scaled_mm(self, device) -> None:
+    def test_mkldnn_scaled_mm(self) -> None:
         # test with input scale, weight scale and output_scale
+        device = "cpu"
         M, N, K = 2, 13, 16
         x = torch.randn((M, K), device=device) / K
         y = torch.randn((N, K), device=device).t() / K
@@ -1769,7 +1770,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
 
 
-instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
+instantiate_parametrized_tests(TestMkldnn)
 
 if __name__ == '__main__':
     run_tests()
