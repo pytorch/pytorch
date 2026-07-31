@@ -119,11 +119,15 @@ def log_ndtr(a: TensorLikeType) -> TensorLikeType:
     # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
     M_SQRT1_2 = 0.707106781186547524400844362104849039
     t = a * M_SQRT1_2
-    return torch.where(
+    res = torch.where(
         a < 1.0,
         torch.log(torch.special.erfcx(-t) / 2) - t * t,
         torch.log1p(-torch.erfc(t) / 2),
     )
+    # log_ndtr is always non-positive, so we force the signbit to be negative.
+    # This ensures -0.0 is preserved even if the compiler aggressively
+    # strips it under -fno-signed-zeros fast-math optimizations (#187336).
+    return torch.copysign(res, -1.0)
 
 
 @register_decomposition(aten.logit)
