@@ -1190,6 +1190,8 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_var_renames: dict[str, Any] | None = None,
         local_reduce: GemmReductionPlan | None = None,
         local_reduce_finalizer_fn_code: str | None = None,
+        local_reduce_consumer_fn_code: str | None = None,
+        local_reduce_secondary_consumer_fn_code: str | None = None,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
     ) -> None:
@@ -1212,6 +1214,10 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue_var_renames = epilogue_var_renames or {}
         self.local_reduce = local_reduce
         self.local_reduce_finalizer_fn_code = local_reduce_finalizer_fn_code
+        self.local_reduce_consumer_fn_code = local_reduce_consumer_fn_code
+        self.local_reduce_secondary_consumer_fn_code = (
+            local_reduce_secondary_consumer_fn_code
+        )
         self.swap_ab = swap_ab
 
         # An addmm bias baked into the choice becomes a bias-add epilogue. With
@@ -1315,6 +1321,15 @@ class NVUniversalGemmKernel(Kernel):
             if self.local_reduce_finalizer_fn_code is not None:
                 code.writeline(
                     f"_LOCAL_REDUCE_FINALIZER_FN_SRC = {self.local_reduce_finalizer_fn_code!r}"
+                )
+            if self.local_reduce_consumer_fn_code is not None:
+                code.writeline(
+                    f"_LOCAL_REDUCE_CONSUMER_FN_SRC = {self.local_reduce_consumer_fn_code!r}"
+                )
+            if self.local_reduce_secondary_consumer_fn_code is not None:
+                code.writeline(
+                    "_LOCAL_REDUCE_SECONDARY_CONSUMER_FN_SRC = "
+                    f"{self.local_reduce_secondary_consumer_fn_code!r}"
                 )
         if has_epilogue:
             if self.epilogue_is_cutedsl:
@@ -1431,6 +1446,16 @@ class NVUniversalGemmKernel(Kernel):
                     if self.local_reduce_finalizer_fn_code is None
                     else ", finalizer_fn=_LOCAL_REDUCE_FINALIZER_FN_SRC"
                 )
+                consumer_arg = (
+                    ""
+                    if self.local_reduce_consumer_fn_code is None
+                    else ", consumer_fn=_LOCAL_REDUCE_CONSUMER_FN_SRC"
+                )
+                secondary_consumer_arg = (
+                    ""
+                    if self.local_reduce_secondary_consumer_fn_code is None
+                    else ", secondary_consumer_fn=_LOCAL_REDUCE_SECONDARY_CONSUMER_FN_SRC"
+                )
                 run_variant_kwargs = (
                     "(_VARIANT_KWARGS or {}) | {"
                     "'local_reduce': GemmReductionArguments("
@@ -1442,7 +1467,8 @@ class NVUniversalGemmKernel(Kernel):
                     f"axis={reduction.axis}, "
                     f"reduction_type={reduction.reduction_type!r}, "
                     f"source_type={reduction.source_type!r}, "
-                    f"feeds_main={feed_main!r}{finalizer_arg})"
+                    f"feeds_main={feed_main!r}{finalizer_arg}{consumer_arg}"
+                    f"{secondary_consumer_arg})"
                     "}"
                 )
                 aux_tensors.extend(

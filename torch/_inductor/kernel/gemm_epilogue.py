@@ -209,6 +209,8 @@ class GemmReductionArguments:
     source_type: str = "identity"
     feeds_main: bool = False
     finalizer_fn: str | None = None
+    consumer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
 
     SPECIALIZATION_FIELDS: ClassVar[tuple[str, ...]] = (
         "group",
@@ -218,6 +220,8 @@ class GemmReductionArguments:
         "feeds_main",
         "secondary_feed_type",
         "finalizer_fn",
+        "consumer_fn",
+        "secondary_consumer_fn",
     )
 
     @property

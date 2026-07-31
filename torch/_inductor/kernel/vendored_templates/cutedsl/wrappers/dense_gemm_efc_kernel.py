@@ -24,14 +24,10 @@ from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import
 from cutlass.operators.providers.cutedsl.operator import CuteDslOperator
 from cutlass.operators.status import Status
 
-from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
-    canonical_tensorssa_reduction_type,
-    materialize_tensorssa_reduction,
-)
 from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     gemm_epilogue_op_scope,
-    with_reduction_finalizer,
+    materialize_reduction_callbacks,
 )
 from torch.utils._ordered_set import OrderedSet
 
@@ -181,6 +177,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             return Status.fail("Dense M-axis feed-main requires a 32-column tile")
         secondary_feed = reduction.secondary_feed_output
         secondary_type = reduction.secondary_feed_type
+        secondary_consumer = reduction.secondary_consumer_fn
         try:
             expression = reduction.descriptor
             secondary_expression = (
@@ -203,8 +200,11 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             else OrderedSet(["direct_bool_gt_zero"])
         )
         if secondary_feed is not None and (
-            secondary_expression is None
-            or secondary_expression.kind not in secondary_kinds
+            secondary_consumer is None
+            and (
+                secondary_expression is None
+                or secondary_expression.kind not in secondary_kinds
+            )
         ):
             return Status.fail("Unsupported dense EFC secondary feed expression")
         reduction_kinds = OrderedSet(
@@ -263,13 +263,8 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         local_reduce, local_reduce_feed, secondary_feed = reduction_args.tensors(
             "compile_time_tensor"
         )
-        reduction = materialize_tensorssa_reduction(
-            canonical_tensorssa_reduction_type(reduction_args.reduction_type),
-            reduction_args.source_type,
-            reduction_args.reduction_type,
-        )
-        reduction = with_reduction_finalizer(
-            reduction, reduction_args.finalizer_fn, cutlass.cute
+        reduction, consumer, secondary_consumer = materialize_reduction_callbacks(
+            reduction_args, cutlass.cute
         )
         return self.cute_compile(
             self.impl,
@@ -291,6 +286,8 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             reduction.combine,
             reduction.source,
             reduction.finalize,
+            consumer,
+            secondary_consumer,
             *epilogue_params,
             target_sm=target_sm,
         )

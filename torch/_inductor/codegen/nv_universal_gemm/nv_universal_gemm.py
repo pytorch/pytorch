@@ -504,6 +504,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         return info
 
     def get_make_kernel_render(self):
+        """Create the callable that renders this NVGEMM choice."""
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -534,6 +535,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
             epilogue_var_renames=None,
             local_reduce=None,
             local_reduce_finalizer_fn_code=None,
+            local_reduce_consumer_fn_code=None,
+            local_reduce_secondary_consumer_fn_code=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
 
@@ -574,6 +577,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 epilogue_var_renames=epilogue_var_renames,
                 local_reduce=local_reduce,
                 local_reduce_finalizer_fn_code=local_reduce_finalizer_fn_code,
+                local_reduce_consumer_fn_code=local_reduce_consumer_fn_code,
+                local_reduce_secondary_consumer_fn_code=local_reduce_secondary_consumer_fn_code,
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
                 bias_node=bias_node,

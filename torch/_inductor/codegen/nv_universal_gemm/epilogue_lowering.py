@@ -2,8 +2,7 @@
 """Recognize NVGEMM epilogues and lower them to shared contracts."""
 
 import dataclasses
-import enum
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any, cast
 
 import torch
@@ -17,18 +16,14 @@ from ...kernel.gemm_epilogue import (
     GemmReductionPlan,
 )
 from ...kernel.loop_ir_epilogue_lowering import (
-    centered_mean_consumer_type_ir,
-    centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
     GemmEpilogueIRStore,
-    is_absmax_normalize_ir,
+    grouped_reduction_axis_ir,
     is_absmax_scale_finalizer_ir,
     is_direct_bool_gt_zero_ir,
     is_logsumexp_ir,
     is_softmax_ir,
     operation_names_ir,
-    sum_multiply_consumer_type_ir,
-    sum_normalize_consumer_type_ir,
     variance_parameters_ir,
 )
 from ...scheduler import BaseSchedulerNode
@@ -41,6 +36,8 @@ class NVGemmFeedOutputs:
     typed: str | None
     secondary: str | None
     secondary_type: str | None
+    consumer: str | None = None
+    secondary_consumer: str | None = None
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -63,6 +60,11 @@ class NVGemmEpilogueProgram:
     reduction_plan: GemmReductionPlan | None
     min_tile_n: int
     finalizers: tuple["NVGemmReductionFinalizer", ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        """Whether every claimed reduction has a backend lowering contract."""
+        return not self.reductions or self.reduction_plan is not None
 
     @property
     def owned_nodes(self) -> tuple[BaseSchedulerNode, ...]:
@@ -88,8 +90,8 @@ class NVGemmEpilogueProgram:
 
 
 @dataclasses.dataclass(frozen=True)
-class NVGemmEpiloguePatternContext:
-    """Normalized candidate view shared by declarative epilogue patterns."""
+class NVGemmEpilogueCapture:
+    """Captured scheduler nodes and their interpreted Loop IR."""
 
     gemm: Buffer
     nodes: tuple[BaseSchedulerNode, ...]
@@ -102,7 +104,7 @@ class NVGemmEpiloguePatternContext:
         gemm: Buffer,
         nodes: Sequence[BaseSchedulerNode],
         analysis: GemmEpilogueIRAnalysis | None = None,
-    ) -> "NVGemmEpiloguePatternContext":
+    ) -> "NVGemmEpilogueCapture":
         normalized_nodes = tuple(nodes)
         raw_buffers = tuple(node.node for node in normalized_nodes)
         buffers = (
@@ -123,72 +125,6 @@ class NVGemmEpiloguePatternContext:
         )
 
 
-PatternMatcher = Callable[[NVGemmEpiloguePatternContext], GemmReductionConfig | None]
-
-
-@dataclasses.dataclass(frozen=True)
-class NVGemmEpiloguePattern:
-    """Declarative constraints and semantic matcher for one epilogue form."""
-
-    kind: "NVGemmEpiloguePatternKind"
-    variant: str
-    matcher: PatternMatcher
-    constraints: tuple[Callable[[NVGemmEpiloguePatternContext], bool], ...]
-
-    def match(
-        self, context: NVGemmEpiloguePatternContext
-    ) -> GemmReductionConfig | None:
-        if not all(constraint(context) for constraint in self.constraints):
-            return None
-        return self.matcher(context)
-
-
-FinalizerPredicate = Callable[
-    [
-        type["NVGemmEpilogueLowering"],
-        Buffer,
-        BaseSchedulerNode,
-        BaseSchedulerNode,
-        GemmEpilogueIRAnalysis | None,
-    ],
-    bool,
-]
-FinalizerRewrite = Callable[[GemmReductionConfig, ComputedBuffer], GemmReductionConfig]
-
-
-@dataclasses.dataclass(frozen=True)
-class NVGemmFinalizerPattern:
-    kind: "NVGemmEpiloguePatternKind"
-    accepts: Callable[[GemmReductionConfig], bool]
-    predicate: FinalizerPredicate
-    rewrite: FinalizerRewrite
-
-    def match(
-        self,
-        lowering: type["NVGemmEpilogueLowering"],
-        gemm: Buffer,
-        source: BaseSchedulerNode,
-        config: GemmReductionConfig,
-        candidates: Sequence[BaseSchedulerNode],
-        analysis: GemmEpilogueIRAnalysis | None,
-    ) -> tuple[GemmReductionConfig, BaseSchedulerNode] | None:
-        if not self.accepts(config):
-            return None
-        matches = [
-            candidate
-            for candidate in candidates
-            if candidate is not source
-            and self.predicate(lowering, gemm, source, candidate, analysis)
-        ]
-        if len(matches) != 1:
-            return None
-        finalizer = matches[0]
-        buffer = _single_computed_buffer(finalizer)
-        if buffer is None:
-            return None
-        return self.rewrite(config, buffer), finalizer
-
-
 @dataclasses.dataclass(frozen=True)
 class NVGemmReductionFinalizer:
     source_name: str
@@ -199,32 +135,25 @@ class NVGemmReductionFinalizer:
 class NVGemmEpilogueLowering:
     """Lower scheduler nodes to NVGEMM epilogue semantic plans."""
 
-    # TODO: Share the declarative pattern framework with FlexGEMM once its FX
-    # matcher can consume the same normalized capture protocol.
-
-    @staticmethod
-    def _match_patterns(
-        context: NVGemmEpiloguePatternContext,
-        patterns: Sequence[NVGemmEpiloguePattern],
-    ) -> GemmReductionConfig | None:
-        for pattern in patterns:
-            if (result := pattern.match(context)) is not None:
-                return result
-        return None
-
     @classmethod
-    def _match_pattern(
+    def _softmax_config(
         cls,
-        kind: "NVGemmEpiloguePatternKind",
         gemm_node: Buffer,
         nodes: Sequence[BaseSchedulerNode],
         analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
-        patterns = FEED_MAIN_PATTERN_REGISTRY.get(kind)
-        if patterns is None:
-            raise RuntimeError(f"unknown NVGEMM epilogue pattern: {kind.name}")
-        context = NVGemmEpiloguePatternContext.from_nodes(gemm_node, nodes, analysis)
-        return cls._match_patterns(context, patterns)
+        context = NVGemmEpilogueCapture.from_nodes(gemm_node, nodes, analysis)
+        if (
+            len(context.gemm.get_size()) != 2
+            or context.buffers is None
+            or not context.has_gemm_read
+        ):
+            return None
+        return (
+            cls._online_softmax_reduction_config(context)
+            or cls._pointwise_softmax_config(context)
+            or cls._chained_softmax_config(context)
+        )
 
     @staticmethod
     def _computed_buffers(
@@ -575,166 +504,8 @@ class NVGemmEpilogueLowering:
         return GemmReductionConfig(buffer.get_name(), group, 1, "logsumexp", "identity")
 
     @classmethod
-    def _chained_centered_reduction_config(
-        cls, context: NVGemmEpiloguePatternContext
-    ) -> GemmReductionConfig | None:
-        gemm_node, nodes = context.gemm, context.nodes
-        if len(nodes) <= 1:
-            return None
-        candidate_nodes = [
-            node for node in nodes if isinstance(node.node, ComputedBuffer)
-        ]
-        buffers = tuple(cast(ComputedBuffer, node.node) for node in candidate_nodes)
-        analysis = context.analysis or GemmEpilogueIRAnalysis.from_buffers(buffers)
-        reductions = [
-            config
-            for node in candidate_nodes
-            if (config := cls._grouped_reduce_config(gemm_node, node, analysis))
-            is not None
-            and config.axis == 0
-            and config.reduction_type in ("sum", "mean")
-            and config.source_type == "identity"
-        ]
-        if len(reductions) != 1:
-            return None
-        group, axis = reductions[0].group, reductions[0].axis
-        if axis != 0 or group > 64:
-            return None
-        layout = GemmReductionGeometry(group=group, axis=axis)
-        finalizers = [
-            buffer
-            for buffer in buffers
-            if isinstance(buffer.data, Pointwise)
-            and layout.matches_output_shape(buffer.get_size(), gemm_node.get_size())
-        ]
-        if not finalizers:
-            return None
-        finalizer = finalizers[-1]
-        store = analysis.store(finalizer.get_name())
-        role = analysis.output_role(finalizer.get_name())
-        reduction_names = frozenset(reduction.output_name for reduction in reductions)
-        if (
-            role is None
-            or gemm_node.get_name() not in role.transitive_inputs
-            or not reduction_names.issubset(role.reduction_inputs)
-        ):
-            return None
-        consumer_type = (
-            centered_mean_consumer_type_ir(
-                store, gemm_node.get_name(), reduction_names, group
-            )
-            if store is not None
-            else None
-        )
-        if consumer_type is None:
-            return None
-        return GemmReductionConfig(
-            finalizer.get_name(), group, axis, consumer_type, "identity"
-        )
-
-    @classmethod
-    def _external_centered_reduction_config(
-        cls, context: NVGemmEpiloguePatternContext
-    ) -> GemmReductionConfig | None:
-        if len(context.nodes) != 1 or context.buffers is None:
-            return None
-        scheduler_node, node = context.nodes[0], context.buffers[0]
-        if not isinstance(node.data, Pointwise):
-            return None
-        reads = list(scheduler_node.read_writes.reads)
-        if len(reads) != 2 or scheduler_node.read_writes.range_vars is None:
-            return None
-        reduction_reads = [
-            read for read in reads if read.name != context.gemm.get_name()
-        ]
-        if len(reduction_reads) != 1:
-            return None
-        reduction = V.graph.get_buffer(reduction_reads[0].name)
-        if not (
-            isinstance(reduction, ComputedBuffer)
-            and isinstance(reduction.data, Reduction)
-            and reduction.data.reduction_type == "sum"
-            and len(reduction.data.reduction_ranges) == 1
-            and len(reduction.data.ranges) == 3
-        ):
-            return None
-        try:
-            group = V.graph.sizevars.optimization_hint(
-                reduction.data.reduction_ranges[0]
-            )
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
-            return None
-        assert context.analysis is not None  # noqa: S101
-        store = context.analysis.store(node.get_name())
-        consumer_type = (
-            centered_mean_consumer_type_ir(
-                store,
-                context.gemm.get_name(),
-                frozenset((reduction.get_name(),)),
-                group,
-            )
-            if store is not None
-            else None
-        )
-        m, n = context.gemm.get_size()
-        out_m, singleton, out_n = reduction.data.ranges
-        if (
-            consumer_type is None
-            or not 1 < group <= 64
-            or not V.graph.sizevars.statically_known_equals(
-                reduction.data.reduction_ranges[0], group
-            )
-            or not V.graph.sizevars.statically_known_list_equals(
-                (m, n, singleton), (out_m * group, out_n, 1)
-            )
-            or not V.graph.sizevars.statically_known_list_equals(
-                node.get_size(), context.gemm.get_size()
-            )
-        ):
-            return None
-        return GemmReductionConfig(node.get_name(), group, 0, consumer_type, "identity")
-
-    @classmethod
-    def _unrolled_centered_reduction_config(
-        cls, context: NVGemmEpiloguePatternContext
-    ) -> GemmReductionConfig | None:
-        if len(context.nodes) != 1 or context.buffers is None:
-            return None
-        scheduler_node, node = context.nodes[0], context.buffers[0]
-        if not isinstance(node.data, Pointwise):
-            return None
-        reads = list(scheduler_node.read_writes.reads)
-        if len(reads) <= 2 or scheduler_node.read_writes.range_vars is None:
-            return None
-        try:
-            _, n = map(V.graph.sizevars.optimization_hint, context.gemm.get_size())
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
-            return None
-        group = len(reads) - 1
-        assert context.analysis is not None  # noqa: S101
-        store = context.analysis.store(node.get_name())
-        consumer_type = (
-            centered_mean_consumer_type_unrolled_ir(
-                store, context.gemm.get_name(), group
-            )
-            if store is not None
-            else None
-        )
-        if consumer_type is None or not 1 < group <= 4:
-            return None
-        if any(read.name != context.gemm.get_name() for read in reads):
-            return None
-        grouped_base = reads[1].index
-        if any(
-            V.graph.sizevars.simplify(read.index - grouped_base) != i * n
-            for i, read in enumerate(reads[1:])
-        ):
-            return None
-        return GemmReductionConfig(node.get_name(), group, 0, consumer_type, "identity")
-
-    @classmethod
     def _online_softmax_reduction_config(
-        cls, context: NVGemmEpiloguePatternContext
+        cls, context: NVGemmEpilogueCapture
     ) -> GemmReductionConfig | None:
         if len(context.nodes) != 1 or context.buffers is None:
             return None
@@ -757,7 +528,7 @@ class NVGemmEpilogueLowering:
 
     @classmethod
     def _pointwise_softmax_config(
-        cls, context: NVGemmEpiloguePatternContext
+        cls, context: NVGemmEpilogueCapture
     ) -> GemmReductionConfig | None:
         if len(context.nodes) != 1 or context.buffers is None:
             return None
@@ -790,7 +561,7 @@ class NVGemmEpilogueLowering:
 
     @classmethod
     def _chained_softmax_config(
-        cls, context: NVGemmEpiloguePatternContext
+        cls, context: NVGemmEpilogueCapture
     ) -> GemmReductionConfig | None:
         if len(context.nodes) != 3 or context.buffers is None:
             return None
@@ -863,157 +634,6 @@ class NVGemmEpilogueLowering:
         )
 
     @classmethod
-    def _grouped_sum_normalize_config_from_nodes(
-        cls, context: NVGemmEpiloguePatternContext
-    ) -> GemmReductionConfig | None:
-        gemm_node, nodes = context.gemm, context.nodes
-        assert context.buffers is not None and context.analysis is not None  # noqa: S101
-        buffers, analysis = context.buffers, context.analysis
-        reductions = [
-            config
-            for node in nodes
-            if (config := cls._grouped_reduce_config(gemm_node, node, analysis))
-            is not None
-        ]
-        finalizers = []
-        for buffer in buffers:
-            if not isinstance(buffer.data, Pointwise):
-                continue
-            if len(reductions) == 1:
-                group, axis = reductions[0].group, reductions[0].axis
-            else:
-                scheduler_node = next(
-                    (node for node in nodes if node.node is buffer), None
-                )
-                reads = (
-                    list(scheduler_node.read_writes.reads)
-                    if scheduler_node is not None
-                    else []
-                )
-                layout = GemmReductionGeometry.from_output_shape(
-                    buffer.get_size(), gemm_node.get_size()
-                )
-                if layout is not None:
-                    group, axis = layout.group_size, layout.axis
-                else:
-                    try:
-                        _, n = map(
-                            V.graph.sizevars.optimization_hint, gemm_node.get_size()
-                        )
-                    except (GuardOnDataDependentSymNode, TypeError, ValueError):
-                        continue
-                    group = len(reads) - 1
-                    if group <= 1 or group > 4:
-                        continue
-                    offsets = sorted(
-                        V.graph.sizevars.simplify(read.index - reads[0].index)
-                        for read in reads[1:]
-                    )
-                    axis = 0 if offsets == [i * n for i in range(group)] else 1
-            store = analysis.store(buffer.get_name())
-            consumer_type = (
-                sum_normalize_consumer_type_ir(
-                    store,
-                    gemm_node.get_name(),
-                    frozenset(reduction.output_name for reduction in reductions),
-                    group,
-                )
-                if store is not None
-                else None
-            )
-            if consumer_type is None:
-                continue
-            max_group = 32 if axis == 1 else 64
-            layout = GemmReductionGeometry(group=group, axis=axis)
-            if group <= max_group and layout.matches_output_shape(
-                buffer.get_size(), gemm_node.get_size()
-            ):
-                finalizers.append((buffer, group, axis, consumer_type))
-        if not finalizers or not any(
-            read.name == gemm_node.get_name()
-            for node in nodes
-            for read in node.read_writes.reads
-        ):
-            return None
-        contracts = OrderedSet(
-            (group, axis, consumer_type) for _, group, axis, consumer_type in finalizers
-        )
-        if len(contracts) != 1:
-            return None
-        group, axis, consumer_type = next(iter(contracts))
-        if reductions:
-            if len(reductions) != 1 or reductions[0].contract != (
-                group,
-                axis,
-                "sum",
-                "identity",
-            ):
-                return None
-        else:
-            reads = list(nodes[0].read_writes.reads) if len(nodes) == 1 else []
-            if (
-                group > 4
-                or len(reads) not in (group, group + 1)
-                or any(read.name != gemm_node.get_name() for read in reads)
-            ):
-                return None
-        return GemmReductionConfig(
-            finalizers[0][0].get_name(), group, axis, consumer_type, "identity"
-        )
-
-    @classmethod
-    def _grouped_absmax_normalize_config_from_nodes(
-        cls, context: NVGemmEpiloguePatternContext
-    ) -> GemmReductionConfig | None:
-        gemm_node, nodes = context.gemm, context.nodes
-        assert context.buffers is not None and context.analysis is not None  # noqa: S101
-        buffers, analysis = context.buffers, context.analysis
-        candidates = []
-        for buffer in buffers:
-            if not isinstance(buffer.data, Pointwise):
-                continue
-            layout = GemmReductionGeometry.from_output_shape(
-                buffer.get_size(), gemm_node.get_size()
-            )
-            if layout is None or layout.axis != 1:
-                continue
-            group = layout.group_size
-            store = analysis.store(buffer.get_name())
-            if 1 < group <= 32 and store is not None:
-                candidates.append((buffer, group, store))
-        reductions, reduction_nodes, _ = cls._partition_local_reductions(
-            gemm_node, nodes, analysis
-        )
-        if len(reductions) != 1:
-            return None
-        scale_names = frozenset(
-            [reductions[0].output_name]
-            + [
-                node.node.get_name()
-                for node in reduction_nodes
-                if isinstance(node.node, ComputedBuffer)
-            ]
-        )
-        finalizers = [
-            (buffer, group)
-            for buffer, group, store in candidates
-            if is_absmax_normalize_ir(store, gemm_node.get_name(), scale_names)
-        ]
-        if len(finalizers) != 1:
-            return None
-        finalizer, group = finalizers[0]
-        if len(reductions) != 1 or reductions[0].contract != (
-            group,
-            1,
-            "max",
-            "abs_scale",
-        ):
-            return None
-        return GemmReductionConfig(
-            finalizer.get_name(), group, 1, "normalize_absmax", "abs_scale"
-        )
-
-    @classmethod
     def _feed_main_config_from_nodes(
         cls,
         gemm_node: Buffer,
@@ -1022,17 +642,96 @@ class NVGemmEpilogueLowering:
         allow_softmax: bool = True,
         analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
-        context = NVGemmEpiloguePatternContext.from_nodes(gemm_node, nodes, analysis)
-        patterns = (
-            FEED_MAIN_PATTERNS
-            if allow_softmax
-            else tuple(
-                pattern
-                for pattern in FEED_MAIN_PATTERNS
-                if pattern.kind is not NVGemmEpiloguePatternKind.SOFTMAX
-            )
+        context = NVGemmEpilogueCapture.from_nodes(gemm_node, nodes, analysis)
+        matched = cls._generic_feed_main_config(context)
+        if matched is not None:
+            return matched
+        return (
+            cls._softmax_config(gemm_node, nodes, analysis) if allow_softmax else None
         )
-        return cls._match_patterns(context, patterns)
+
+    @classmethod
+    def _generic_feed_main_config(
+        cls, context: NVGemmEpilogueCapture
+    ) -> GemmReductionConfig | None:
+        if context.buffers is None or context.analysis is None:
+            return None
+        gemm_name = context.gemm.get_name()
+        for scheduler_node, buffer in zip(context.nodes, context.buffers):
+            if not isinstance(buffer.data, Pointwise):
+                continue
+            reads = OrderedSet(read.name for read in scheduler_node.read_writes.reads)
+            if gemm_name not in reads:
+                continue
+            for reduction_node in context.nodes:
+                config = cls._local_reduction_config(
+                    context.gemm, reduction_node, context.analysis
+                )
+                if (
+                    config is None
+                    or config.output_name not in reads
+                    or not config.geometry.matches_output_shape(
+                        buffer.get_size(), context.gemm.get_size()
+                    )
+                ):
+                    continue
+                role = context.analysis.output_role(buffer.get_name())
+                if (
+                    role is not None
+                    and role.transitive_inputs
+                    == frozenset((gemm_name, config.output_name))
+                    and len(role.reduction_inputs) == 1
+                    and config.output_name in role.reduction_inputs
+                ):
+                    return dataclasses.replace(config, output_name=buffer.get_name())
+            direct_reads = list(scheduler_node.read_writes.reads)
+            if len(direct_reads) < 2 or any(
+                read.name != gemm_name for read in direct_reads
+            ):
+                continue
+            try:
+                m, n = map(V.graph.sizevars.optimization_hint, context.gemm.get_size())
+            except (GuardOnDataDependentSymNode, TypeError, ValueError):
+                continue
+            regions = [
+                (group, region)
+                for group in range(2, min(max(m, n), 64) + 1)
+                if (m % group == 0 or n % group == 0)
+                and (
+                    region := context.analysis.reduction_region(
+                        buffer.get_name(),
+                        gemm_name,
+                        group,
+                        V.graph.get_dtype(gemm_name),
+                    )
+                )
+                is not None
+                and len(region.reductions) == 1
+            ]
+            if not regions:
+                continue
+            group, region = max(regions, key=lambda candidate: candidate[0])
+            axis = grouped_reduction_axis_ir(region.reductions[0], group, n)
+            if axis is None:
+                continue
+            if group > (64 if axis == 0 else 32) or (m, n)[axis] % group != 0:
+                continue
+            geometry = GemmReductionGeometry(group=group, axis=axis)
+            if not geometry.matches_output_shape(
+                buffer.get_size(), context.gemm.get_size()
+            ):
+                continue
+            reduction = region.reductions[0]
+            if reduction.source_type is None:
+                continue
+            return GemmReductionConfig(
+                buffer.get_name(),
+                group,
+                axis,
+                reduction.reduction_type,
+                reduction.source_type,
+            )
+        return None
 
     @staticmethod
     def _pointwise_finalizer_match(
@@ -1104,11 +803,46 @@ class NVGemmEpilogueLowering:
         node: BaseSchedulerNode,
         analysis: GemmEpilogueIRAnalysis | None = None,
     ) -> GemmReductionConfig | None:
-        for _, matcher in LOCAL_REDUCTION_PATTERNS:
-            config = matcher(gemm_node, node, analysis)
-            if config is not None:
-                return config
-        return None
+        return (
+            cls._grouped_reduce_config(gemm_node, node, analysis)
+            or cls._grouped_variance_config(gemm_node, node, analysis)
+            or cls._grouped_logsumexp_config(gemm_node, node, analysis)
+            or cls._direct_bool_mask_config(gemm_node, node, analysis)
+        )
+
+    @classmethod
+    def _reduction_finalizer(
+        cls,
+        source: BaseSchedulerNode,
+        config: GemmReductionConfig,
+        candidates: Sequence[BaseSchedulerNode],
+        analysis: GemmEpilogueIRAnalysis,
+    ) -> tuple[GemmReductionConfig, BaseSchedulerNode, bool] | None:
+        matches = []
+        for candidate in candidates:
+            if candidate is source:
+                continue
+            match = cls._pointwise_finalizer_match(source, candidate)
+            if match is None:
+                continue
+            _, buffer, _ = match
+            finalizer = analysis.reduction_finalizer(
+                buffer.get_name(), config.output_name, config.group
+            )
+            if finalizer is not None:
+                matches.append((candidate, buffer, finalizer))
+        if len(matches) != 1:
+            return None
+        candidate, buffer, finalizer = matches[0]
+        if finalizer.kind == "mean" and config.reduction_type == "sum":
+            config = dataclasses.replace(config, reduction_type="mean")
+        elif finalizer.kind == "absmax_scale" and (
+            config.reduction_type,
+            config.source_type,
+        ) == ("max", "abs"):
+            config = dataclasses.replace(config, source_type="abs_scale")
+        config = dataclasses.replace(config, output_name=buffer.get_name())
+        return config, candidate, finalizer.kind != "identity"
 
     @classmethod
     def _partition_local_reductions(
@@ -1125,6 +859,19 @@ class NVGemmEpilogueLowering:
         reduction_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
         reduction_finalizers: list[NVGemmReductionFinalizer] = []
         claimed: OrderedSet[BaseSchedulerNode] = OrderedSet()
+        if analysis is None:
+            buffers = cls._computed_buffers(
+                tuple(
+                    child
+                    for epilogue_node in epilogue_nodes
+                    for child in epilogue_node.get_nodes()
+                )
+            )
+            analysis = (
+                GemmEpilogueIRAnalysis.from_buffers(buffers)
+                if buffers is not None
+                else None
+            )
 
         for node in epilogue_nodes:
             if node in claimed:
@@ -1132,30 +879,27 @@ class NVGemmEpilogueLowering:
             config = cls._local_reduction_config(gemm_node, node, analysis)
             if config is None:
                 continue
-            finalizers: tuple[BaseSchedulerNode, ...] = ()
             candidates = tuple(
                 candidate for candidate in epilogue_nodes if candidate not in claimed
             )
-            for pattern in FINALIZER_PATTERNS:
+            finalizer_match = (
+                cls._reduction_finalizer(node, config, candidates, analysis)
+                if analysis is not None
+                else None
+            )
+            if finalizer_match is not None:
                 source_name = config.output_name
-                finalizer_match = pattern.match(
-                    cls, gemm_node, node, config, candidates, analysis
-                )
-                if finalizer_match is not None:
-                    config, finalizer = finalizer_match
-                    finalizers = (finalizer,)
-                    if pattern.kind is NVGemmEpiloguePatternKind.POINTWISE_FINALIZER:
-                        buffer = _single_computed_buffer(finalizer)
-                        assert buffer is not None  # noqa: S101
-                        reduction_finalizers.append(
-                            NVGemmReductionFinalizer(
-                                source_name, config.output_name, buffer
-                            )
-                        )
-                    break
-            for finalizer in finalizers:
+                config, finalizer, materialize = finalizer_match
                 claimed.add(finalizer)
                 reduction_nodes.add(finalizer)
+                if materialize:
+                    buffer = _single_computed_buffer(finalizer)
+                    assert buffer is not None  # noqa: S101
+                    reduction_finalizers.append(
+                        NVGemmReductionFinalizer(
+                            source_name, config.output_name, buffer
+                        )
+                    )
             claimed.add(node)
             reduction_nodes.add(node)
             reductions.append(config)
@@ -1189,6 +933,14 @@ class NVGemmEpilogueLowering:
             if feed_main is not None
             else None
         )
+        if (
+            feed_main is not None
+            and feed_main.reduction_type
+            not in ("online_softmax", "variance", "logsumexp")
+            and (feed_outputs is None or feed_outputs.consumer is None)
+        ):
+            feed_main = None
+            feed_outputs = None
         reduction_plan = cls._static_reduction_plan(
             gemm_node, tuple(reductions), feed_main, feed_outputs
         )
@@ -1228,9 +980,37 @@ class NVGemmEpilogueLowering:
             ),
             OrderedSet(),
         )
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+
+        buffers = {
+            scheduler_node.node.get_name(): scheduler_node.node
+            for scheduler_node in nodes
+            if isinstance(scheduler_node.node, ComputedBuffer)
+        }
+
+        def consumer_source(buffer: ComputedBuffer) -> str | None:
+            if len(feed_reads) > 1:
+                return None
+            reduction_name = next(iter(feed_reads)) if feed_reads else None
+            try:
+                return LoopIRCuteDSLCodegen.consumer_from_buffer(
+                    gemm_node.get_name(),
+                    reduction_name,
+                    buffer,
+                    "_local_reduce_consumer",
+                    feed_main.group,
+                )
+            except NotImplementedError:
+                return None
+
+        matched_buffer = buffers.get(output_name)
+        matched_source = (
+            consumer_source(matched_buffer) if matched_buffer is not None else None
+        )
         equivalent = []
         secondary = None
         secondary_type = None
+        secondary_consumer = None
         geometry = feed_main.geometry
         for scheduler_node in nodes:
             buffer = scheduler_node.node
@@ -1248,49 +1028,30 @@ class NVGemmEpilogueLowering:
                 for read in scheduler_node.read_writes.reads
                 if read.name != gemm_node.get_name()
             )
-            if not feed_reads or candidate_reads != feed_reads:
+            if candidate_reads != feed_reads:
                 continue
-            store = GemmEpilogueIRAnalysis.store_from_buffer(buffer)
-            reduction_names = frozenset(feed_reads)
-            consumer_type = (
-                sum_normalize_consumer_type_ir(
-                    store,
-                    gemm_node.get_name(),
-                    reduction_names,
-                    feed_main.group,
-                )
-                or centered_mean_consumer_type_ir(
-                    store,
-                    gemm_node.get_name(),
-                    reduction_names,
-                    feed_main.group,
-                )
-                if store is not None
-                else None
-            )
-            if consumer_type == feed_main.reduction_type:
+            candidate_source = consumer_source(buffer)
+            if candidate_source is None:
+                continue
+            if candidate_source == matched_source:
                 equivalent.append(buffer.get_name())
             elif secondary is None:
-                candidate_type = (
-                    sum_multiply_consumer_type_ir(
-                        store,
-                        gemm_node.get_name(),
-                        reduction_names,
-                        feed_main.group,
-                    )
-                    if store is not None
-                    else None
-                )
-                if candidate_type is not None:
-                    secondary = buffer.get_name()
-                    secondary_type = candidate_type
+                secondary = buffer.get_name()
+                secondary_consumer = candidate_source
         for output in equivalent:
             if typed is None:
                 typed = output
             elif output != typed and secondary is None:
                 secondary = output
                 secondary_type = feed_main.reduction_type
-        return NVGemmFeedOutputs(output_name, typed, secondary, secondary_type)
+        return NVGemmFeedOutputs(
+            output_name,
+            typed,
+            secondary,
+            secondary_type,
+            matched_source,
+            secondary_consumer,
+        )
 
     @staticmethod
     def _static_reduction_plan(
@@ -1354,8 +1115,8 @@ class NVGemmEpilogueLowering:
     def _finalize_reduction_plan(
         gemm_node: Buffer, plan: NVGemmEpilogueProgram
     ) -> GemmReductionPlan | None:
-        if len(plan.reductions) > 1:
-            raise NotImplementedError("NVGEMM supports one grouped local reduction")
+        if not plan.supported:
+            return None
         reduction_plan = plan.reduction_plan
         if (
             reduction_plan is None
@@ -1372,224 +1133,8 @@ class NVGemmEpilogueLowering:
         return reduction_plan
 
 
-def _is_2d_gemm(context: NVGemmEpiloguePatternContext) -> bool:
-    return len(context.gemm.get_size()) == 2
-
-
-def _has_computed_buffers(context: NVGemmEpiloguePatternContext) -> bool:
-    return context.buffers is not None
-
-
-def _reads_gemm(context: NVGemmEpiloguePatternContext) -> bool:
-    return context.has_gemm_read
-
-
-STANDARD_PATTERN_CONSTRAINTS = (_is_2d_gemm, _has_computed_buffers)
-
-
-class NVGemmEpiloguePatternKind(enum.Enum):
-    CENTERED_REDUCTION = enum.auto()
-    SOFTMAX = enum.auto()
-    SUM_NORMALIZE = enum.auto()
-    ABSMAX_NORMALIZE = enum.auto()
-    GROUPED_REDUCTION = enum.auto()
-    VARIANCE = enum.auto()
-    LOGSUMEXP = enum.auto()
-    BOOL_MASK = enum.auto()
-    MEAN_FINALIZER = enum.auto()
-    LAYOUT_FINALIZER = enum.auto()
-    ABSMAX_FINALIZER = enum.auto()
-    POINTWISE_FINALIZER = enum.auto()
-
-
-FEED_MAIN_PATTERNS = (
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.CENTERED_REDUCTION,
-        "chained",
-        NVGemmEpilogueLowering._chained_centered_reduction_config,
-        (_is_2d_gemm,),
-    ),
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.CENTERED_REDUCTION,
-        "external_reduction",
-        NVGemmEpilogueLowering._external_centered_reduction_config,
-        (*STANDARD_PATTERN_CONSTRAINTS, _reads_gemm),
-    ),
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.CENTERED_REDUCTION,
-        "unrolled",
-        NVGemmEpilogueLowering._unrolled_centered_reduction_config,
-        (*STANDARD_PATTERN_CONSTRAINTS, _reads_gemm),
-    ),
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.SOFTMAX,
-        "online_reduction",
-        NVGemmEpilogueLowering._online_softmax_reduction_config,
-        (*STANDARD_PATTERN_CONSTRAINTS, _reads_gemm),
-    ),
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.SOFTMAX,
-        "pointwise",
-        NVGemmEpilogueLowering._pointwise_softmax_config,
-        (*STANDARD_PATTERN_CONSTRAINTS, _reads_gemm),
-    ),
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.SOFTMAX,
-        "chained",
-        NVGemmEpilogueLowering._chained_softmax_config,
-        (*STANDARD_PATTERN_CONSTRAINTS, _reads_gemm),
-    ),
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.SUM_NORMALIZE,
-        "sum_normalize",
-        NVGemmEpilogueLowering._grouped_sum_normalize_config_from_nodes,
-        (*STANDARD_PATTERN_CONSTRAINTS, _reads_gemm),
-    ),
-    NVGemmEpiloguePattern(
-        NVGemmEpiloguePatternKind.ABSMAX_NORMALIZE,
-        "absmax_normalize",
-        NVGemmEpilogueLowering._grouped_absmax_normalize_config_from_nodes,
-        (*STANDARD_PATTERN_CONSTRAINTS, _reads_gemm),
-    ),
-)
-FEED_MAIN_PATTERN_REGISTRY = {
-    kind: tuple(pattern for pattern in FEED_MAIN_PATTERNS if pattern.kind is kind)
-    for kind in (
-        NVGemmEpiloguePatternKind.CENTERED_REDUCTION,
-        NVGemmEpiloguePatternKind.SOFTMAX,
-        NVGemmEpiloguePatternKind.SUM_NORMALIZE,
-        NVGemmEpiloguePatternKind.ABSMAX_NORMALIZE,
-    )
-}
-
-
-LOCAL_REDUCTION_PATTERNS = (
-    (
-        NVGemmEpiloguePatternKind.GROUPED_REDUCTION,
-        NVGemmEpilogueLowering._grouped_reduce_config,
-    ),
-    (
-        NVGemmEpiloguePatternKind.VARIANCE,
-        NVGemmEpilogueLowering._grouped_variance_config,
-    ),
-    (
-        NVGemmEpiloguePatternKind.LOGSUMEXP,
-        NVGemmEpilogueLowering._grouped_logsumexp_config,
-    ),
-    (
-        NVGemmEpiloguePatternKind.BOOL_MASK,
-        NVGemmEpilogueLowering._direct_bool_mask_config,
-    ),
-)
-
-
 def _single_computed_buffer(node: BaseSchedulerNode) -> ComputedBuffer | None:
     nodes = node.get_nodes()
     if len(nodes) != 1 or not isinstance(nodes[0].node, ComputedBuffer):
         return None
     return nodes[0].node
-
-
-def _match_mean_finalizer(
-    lowering: type[NVGemmEpilogueLowering],
-    gemm: Buffer,
-    source: BaseSchedulerNode,
-    candidate: BaseSchedulerNode,
-    analysis: GemmEpilogueIRAnalysis | None,
-) -> bool:
-    match = lowering._pointwise_finalizer_match(
-        source, candidate, require_reduction=True
-    )
-    if match is None:
-        return False
-    source_config = lowering._local_reduction_config(gemm, source, analysis)
-    source_buffer, finalizer_buffer, _ = match
-    if source_config is None:
-        return False
-    finalizer_analysis = analysis or GemmEpilogueIRAnalysis.from_buffers(
-        (source_buffer, finalizer_buffer)
-    )
-    finalizer_ir = finalizer_analysis.reduction_finalizer(
-        finalizer_buffer.get_name(), source_config.output_name, source_config.group
-    )
-    return finalizer_ir is not None and finalizer_ir.kind == "mean"
-
-
-def _match_layout_finalizer(
-    lowering: type[NVGemmEpilogueLowering],
-    gemm: Buffer,
-    source: BaseSchedulerNode,
-    candidate: BaseSchedulerNode,
-    analysis: GemmEpilogueIRAnalysis | None,
-) -> bool:
-    return lowering._is_layout_finalizer(source, candidate)
-
-
-def _match_absmax_finalizer(
-    lowering: type[NVGemmEpilogueLowering],
-    gemm: Buffer,
-    source: BaseSchedulerNode,
-    candidate: BaseSchedulerNode,
-    analysis: GemmEpilogueIRAnalysis | None,
-) -> bool:
-    return lowering._is_absmax_scale_finalizer(source, candidate)
-
-
-def _match_pointwise_finalizer(
-    lowering: type[NVGemmEpilogueLowering],
-    gemm: Buffer,
-    source: BaseSchedulerNode,
-    candidate: BaseSchedulerNode,
-    analysis: GemmEpilogueIRAnalysis | None,
-) -> bool:
-    return lowering._pointwise_finalizer_match(source, candidate) is not None
-
-
-def _rewrite_mean_finalizer(
-    config: GemmReductionConfig, buffer: ComputedBuffer
-) -> GemmReductionConfig:
-    return dataclasses.replace(
-        config, output_name=buffer.get_name(), reduction_type="mean"
-    )
-
-
-def _rewrite_layout_finalizer(
-    config: GemmReductionConfig, buffer: ComputedBuffer
-) -> GemmReductionConfig:
-    return dataclasses.replace(config, output_name=buffer.get_name())
-
-
-def _rewrite_absmax_finalizer(
-    config: GemmReductionConfig, buffer: ComputedBuffer
-) -> GemmReductionConfig:
-    return dataclasses.replace(
-        config, output_name=buffer.get_name(), source_type="abs_scale"
-    )
-
-
-FINALIZER_PATTERNS = (
-    NVGemmFinalizerPattern(
-        NVGemmEpiloguePatternKind.MEAN_FINALIZER,
-        lambda config: config.reduction_type == "sum",
-        _match_mean_finalizer,
-        _rewrite_mean_finalizer,
-    ),
-    NVGemmFinalizerPattern(
-        NVGemmEpiloguePatternKind.LAYOUT_FINALIZER,
-        lambda config: True,
-        _match_layout_finalizer,
-        _rewrite_layout_finalizer,
-    ),
-    NVGemmFinalizerPattern(
-        NVGemmEpiloguePatternKind.ABSMAX_FINALIZER,
-        lambda config: (config.reduction_type, config.source_type) == ("max", "abs"),
-        _match_absmax_finalizer,
-        _rewrite_absmax_finalizer,
-    ),
-    NVGemmFinalizerPattern(
-        NVGemmEpiloguePatternKind.POINTWISE_FINALIZER,
-        lambda config: True,
-        _match_pointwise_finalizer,
-        _rewrite_layout_finalizer,
-    ),
-)

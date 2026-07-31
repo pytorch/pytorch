@@ -40,7 +40,7 @@ from ...scheduler import (
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 from ..cutlass.python_evt import _ACCUMULATOR_ARG_NAME, CutlassEVTCodegen
-from .epilogue_lowering import NVGemmEpilogueLowering, NVGemmEpiloguePatternKind
+from .epilogue_lowering import NVGemmEpilogueLowering
 from .nv_universal_gemm import NVUniversalGemmCaller
 
 
@@ -292,24 +292,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             if computed_buffers is not None
             else None
         )
-        softmax = self._match_pattern(
-            NVGemmEpiloguePatternKind.SOFTMAX,
-            ir_node,
-            all_scheduler_nodes,
-            ir_analysis,
-        )
-        if (
-            softmax is None
-            and sum(
-                isinstance(scheduler_node.node.data, Reduction)
-                for scheduler_node in all_scheduler_nodes
-                if isinstance(scheduler_node.node, ComputedBuffer)
-            )
-            > 1
-        ):
-            log.debug("NVGEMM supports one grouped local reduction")
-            return False
         epilogue_plan = self._epilogue_plan(ir_node, all_scheduler_nodes, ir_analysis)
+        if not epilogue_plan.supported:
+            log.debug("NVGEMM could not lower every captured reduction region")
+            return False
         feed_main = epilogue_plan.feed_main
         if feed_main is not None:
             fused_names = OrderedSet(
@@ -612,24 +598,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             if not self.is_nv_universal_gemm_template(node)
         ]
         combined_nodes = [*epilogue_nodes, *node2.get_nodes()]
-        combined_softmax = self._match_pattern(
-            NVGemmEpiloguePatternKind.SOFTMAX, template, combined_nodes
-        )
-        if (
-            combined_softmax is None
-            and sum(
-                isinstance(node.node.data, Reduction)
-                for node in combined_nodes
-                if isinstance(node.node, ComputedBuffer)
-            )
-            > 1
-        ):
+        combined_program = self._epilogue_plan(template, combined_nodes)
+        if not combined_program.supported:
             return False
-        combined_feed_main = self._match_pattern(
-            NVGemmEpiloguePatternKind.CENTERED_REDUCTION,
-            template,
-            combined_nodes,
-        )
+        combined_feed_main = combined_program.feed_main
         feed_main_ordered = combined_feed_main is not None and (
             bool(epilogue_nodes)
             or all(
@@ -646,22 +618,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         exact_reduction_candidate = bool(candidate_reductions) and all(
             node in candidate_reduction_nodes for node in node2.get_nodes()
         )
-        combined_program = self._epilogue_plan(template, combined_nodes)
         eligible = isinstance(template, Buffer) and (
             bool(candidate_reductions)
             or feed_main_ordered
-            or combined_softmax is not None
             or bool(combined_program.finalizers)
-            or self._match_pattern(
-                NVGemmEpiloguePatternKind.SUM_NORMALIZE, template, combined_nodes
-            )
-            is not None
-            or self._match_pattern(
-                NVGemmEpiloguePatternKind.ABSMAX_NORMALIZE,
-                template,
-                combined_nodes,
-            )
-            is not None
         )
         if not eligible:
             return False
@@ -797,6 +757,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         epilogue_var_renames: dict[str, Any] = {}
         local_reduce: GemmReductionPlan | None = None
         local_reduce_finalizer_fn_code: str | None = None
+        local_reduce_consumer_fn_code: str | None = None
+        local_reduce_secondary_consumer_fn_code: str | None = None
 
         if epilogue_nodes:
             scheduler = V.graph.scheduler
@@ -819,6 +781,13 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     )
                 if feed_main is not None:
                     assert local_reduce is not None  # noqa: S101
+                    if epilogue_plan.feed_outputs is not None:
+                        local_reduce_consumer_fn_code = (
+                            epilogue_plan.feed_outputs.consumer
+                        )
+                        local_reduce_secondary_consumer_fn_code = (
+                            epilogue_plan.feed_outputs.secondary_consumer
+                        )
                     primary_output = local_reduce.primary_output
                     epilogue_fn_code = (
                         f"def {EPILOGUE_FN_NAME}(accum):\n    D = accum\n    return D"
@@ -920,6 +889,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             epilogue_var_renames=epilogue_var_renames,
             local_reduce=local_reduce,
             local_reduce_finalizer_fn_code=local_reduce_finalizer_fn_code,
+            local_reduce_consumer_fn_code=local_reduce_consumer_fn_code,
+            local_reduce_secondary_consumer_fn_code=local_reduce_secondary_consumer_fn_code,
         )
 
         if not only_gen_src_code:
