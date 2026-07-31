@@ -939,26 +939,23 @@ class TestNVUniversalGemmHeuristics(TestCase):
             GemmReductionConfig("out", 4, 1, "sum", "identity"),
         )
 
-    def test_grouped_reduction_checks_all_reductions(self):
+    def test_grouped_reduction_rejects_ambiguous_composite(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
             GemmEpilogueIRStore,
             grouped_reduction_ir,
         )
 
-        unrelated = Expr(
-            "reduction",
-            (torch.float32, torch.float32, "sum", Expr("load", ("x", 0, None))),
-        )
-        source = Expr(
+        summed = Expr(
             "reduction",
             (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
         )
-        store = GemmEpilogueIRStore(0, Expr("add", (unrelated, source)))
-        self.assertEqual(
-            grouped_reduction_ir(store, "gemm", 4, torch.float32),
-            ("sum", "identity"),
+        maximum = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "max", Expr("load", ("gemm", 0, None))),
         )
+        store = GemmEpilogueIRStore(0, Expr("add", (summed, maximum)))
+        self.assertIsNone(grouped_reduction_ir(store, "gemm", 4, torch.float32))
 
     def test_epilogue_ir_preserves_empty_tuple_argument(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
