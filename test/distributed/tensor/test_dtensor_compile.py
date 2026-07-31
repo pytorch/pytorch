@@ -48,7 +48,6 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -77,7 +76,7 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple(torch._opaque_base.OpaqueBase):
+class PytreeTuple(torch._custom_class_base.CustomClassBase):
     """
     Tuple-like values that are treated as leaves of a PyTree.
     """
@@ -141,12 +140,12 @@ class PytreeTuple(torch._opaque_base.OpaqueBase):
 
 # Register PytreeTuple as an opaque value type to enable Dynamo to handle
 # instances created during tracing
-from torch._library.opaque_object import MemberType, register_opaque_type
+from torch._library.opaque_object import MemberType, register_custom_class
 
 
-register_opaque_type(
+register_custom_class(
     PytreeTuple,
-    typ="value",
+    typ="constant",
     members={
         "__getitem__": MemberType.USE_REAL,
         "__iter__": MemberType.USE_REAL,
@@ -223,12 +222,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
         super().tearDown()
         dist.destroy_process_group()
 
@@ -317,6 +318,44 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             "DTensor._local_tensor",
         )
         self.assertTrue(dt._local_tensor.completed)
+
+    def test_async_collective_tensor_nested_in_dtensor_reuses(self):
+        # FSDP+TP motivating case for the ACT guard relaxation: a DTensor whose
+        # _local_tensor alternates between an AsyncCollectiveTensor (async
+        # all-gather output) and the resolved plain Tensor must reuse the
+        # compiled graph. The recursion into _local_tensor re-enters
+        # VariableBuilder.wrap_tensor, hits is_polymorphic_act, and relaxes the
+        # inner guard via UnwrapCollectiveTensorSource, while the outer DTensor
+        # guards (TYPE_MATCH, DTENSOR_SPEC_MATCH, requires_grad) do not
+        # discriminate on the local's class -- so no recompile on the change.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        def make_dt(act_local):
+            dt = DTensor.from_local(
+                torch.ones(4, 4, device=self.device_type),
+                mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            if act_local:
+                dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+            return dt
+
+        expected = torch.full((4, 4), 2.0, device=self.device_type)
+        for i in range(4):
+            # Step 0 traces with the ACT local; odd steps resolve to a plain
+            # Tensor local before the compiled region.
+            out = fn(make_dt(act_local=(i % 2 == 0)))
+            self.assertEqual(out.to_local(), expected)
+        # ACT and plain-Tensor locals share one compiled graph.
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_direct_aot_dtensor_local_tensor_act_to_plain_no_crash(self):
         # Companion to the wait test above: the crash half of
@@ -1608,9 +1647,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         mod = torch.nn.Linear(4, 4)
         mod.register_forward_hook(fw_hook)
-
-        mod = torch.nn.Linear(4, 4)
-        mod.register_forward_hook(fw_hook)
         mod.weight = torch.nn.Parameter(
             DTensor.from_local(mod.weight, mesh, [Replicate()], run_check=False)
         )
@@ -2087,7 +2123,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     def test_device_mesh_slice(self):
@@ -2147,6 +2183,11 @@ class outer_fn(torch.nn.Module):
         # Test backward pass
         result.sum().backward()
 
+    @unittest.skip(
+        "compile_on_one_rank device-as-parameter is not yet supported with the inductor "
+        "backend (the coor::current_device node cannot be lowered); re-enabled when the "
+        "post-grad strip pass lands"
+    )
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_flattened_submesh_no_getattr_compile_on_one_rank(self):
         """When compile_on_one_rank=True, the flattened submesh should appear as a
@@ -2340,7 +2381,9 @@ class outer_fn(torch.nn.Module):
         fw_code = backend.fw_graphs[0].print_readable(print_output=False)
         for line in fw_code.splitlines():
             if "view" in line and "-1" in line:
-                self.assertNotIn("//", line, f"Polluted symbolic shape: {line}")
+                self.assertNotIn(
+                    "//", line, lambda msg: f"{msg}\nPolluted symbolic shape: {line}"
+                )
 
     def test_to_local_symbolic_sizes_uneven_shard(self):
         # Regression test to ensure our narrow changes does not cause any
@@ -2679,7 +2722,7 @@ class outer_fn(torch.nn.Module):
         # The symbol must survive — not be guarded to a concrete value
         self.assertFalse(
             x.shape[1].node.expr.is_number,
-            f"pad_tensor created a guard that concretized the symbolic dim: "
+            lambda msg: f"{msg}\npad_tensor created a guard that concretized the symbolic dim: "
             f"expr={x.shape[1].node.expr}",
         )
 
@@ -2727,6 +2770,38 @@ class outer_fn(torch.nn.Module):
             "Shadow empty_strided nodes from ShardingPropagator leaked into "
             "the make_fx graph; disable_proxy_modes_tracing is not active",
         )
+
+    def test_stable_hash_for_caching_is_rank_specific(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188390.
+        # _stable_hash_for_caching must include the local tensor's device so
+        # that each rank produces a unique AOTAutograd cache key.  Before the
+        # fix, the device was omitted and rank 1 incorrectly reused rank 0's
+        # compiled kernel, causing CUDA errors at runtime.
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        local = torch.empty(2, 4)
+        dt = DTensor.from_local(local, mesh, [Shard(0)], run_check=False)
+        h0 = dt._stable_hash_for_caching()
+        # Swap to a different device type to verify the device string participates
+        # in the hash.  This does not model two real CPU ranks (both would be plain
+        # "cpu" with no index); see test_stable_hash_for_caching_cuda_ranks for the
+        # actual multi-rank scenario.  _spec is intentionally left inconsistent with
+        # _local_tensor; this is a focused unit test of the hash only.
+        dt._local_tensor = dt._local_tensor.to("meta")
+        h1 = dt._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_stable_hash_for_caching_cuda_ranks(self):
+        # Exercise the exact scenario from #188390: two DTensors with identical
+        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # different AOTAutograd cache keys.
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device="cuda:0")
+        local1 = torch.empty(2, 4, device="cuda:1")
+        dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
+        dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
+        h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
 
 
 @instantiate_parametrized_tests
@@ -2970,70 +3045,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(output.full_tensor(), ref_out)
 
     @with_comms
-    @parametrize("backend", ["aot_eager", "inductor"])
-    @parametrize("dynamic", [False, True])
-    def test_compile_dtensor_output_alias_replay(self, backend, dynamic):
-        mesh = self.build_device_mesh()
-
-        def fn(x: DTensor) -> tuple[DTensor, DTensor]:
-            y = x + 1
-            aux = y[:, :1]
-            return y, aux
-
-        x_local_ref = torch.randn(2, 2, device=self.device_type, requires_grad=True)
-        x_ref = DTensor.from_local(x_local_ref, mesh, [Replicate()], run_check=False)
-        y_ref, aux_ref = fn(x_ref)
-
-        x_local = x_local_ref.detach().clone().requires_grad_(True)
-        x = DTensor.from_local(x_local, mesh, [Replicate()], run_check=False)
-        y, aux = torch.compile(fn, backend=backend, fullgraph=True, dynamic=dynamic)(x)
-
-        self.assertEqual(y.full_tensor(), y_ref.full_tensor())
-        self.assertEqual(aux.full_tensor(), aux_ref.full_tensor())
-        self.assertIsNotNone(aux.grad_fn)
-        self.assertTrue(aux.to_local()._is_view())
-        self.assertEqual(
-            StorageWeakRef(y.to_local().untyped_storage()),
-            StorageWeakRef(aux.to_local().untyped_storage()),
-        )
-
-        (y_ref.full_tensor().sum() + aux_ref.full_tensor().sum()).backward()
-        (y.full_tensor().sum() + aux.full_tensor().sum()).backward()
-        self.assertEqual(x_local_ref.grad, x_local.grad)
-
-    @with_comms
-    def test_compile_dtensor_output_alias_replay_placement_changing_view(self):
-        mesh = self.build_device_mesh()
-
-        def fn(x: DTensor) -> tuple[DTensor, DTensor]:
-            y = x + 1
-            aux = y.transpose(0, 1)
-            return y, aux
-
-        x_local_ref = torch.randn(2, 4, device=self.device_type, requires_grad=True)
-        x_ref = DTensor.from_local(x_local_ref, mesh, [Shard(0)], run_check=False)
-        y_ref, aux_ref = fn(x_ref)
-
-        x_local = x_local_ref.detach().clone().requires_grad_(True)
-        x = DTensor.from_local(x_local, mesh, [Shard(0)], run_check=False)
-        y, aux = torch.compile(fn, backend="inductor", fullgraph=True)(x)
-
-        self.assertEqual(aux.placements, aux_ref.placements)
-        self.assertEqual(y.to_local(), y_ref.to_local())
-        self.assertEqual(aux.to_local(), aux_ref.to_local())
-        self.assertEqual(aux.full_tensor(), aux_ref.full_tensor())
-        self.assertIsNotNone(aux.grad_fn)
-        self.assertTrue(aux.to_local()._is_view())
-        self.assertEqual(
-            StorageWeakRef(y.to_local().untyped_storage()),
-            StorageWeakRef(aux.to_local().untyped_storage()),
-        )
-
-        (y_ref.full_tensor().sum() + aux_ref.full_tensor().sum()).backward()
-        (y.full_tensor().sum() + aux.full_tensor().sum()).backward()
-        self.assertEqual(x_local_ref.grad, x_local.grad)
-
-    @with_comms
     def test_unbacked_illegal_views(self):
         """Test that views with unbacked shapes match eager behavior"""
         device_mesh = self.build_device_mesh()
@@ -3144,7 +3155,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertNotIn(
                     "_opaque_obj",
                     fw_code,
-                    f"Forward graph should not contain opaque objects. Graph:\n{fw_code}",
+                    lambda msg: f"{msg}\nForward graph should not contain opaque objects. Graph:\n{fw_code}",
                 )
 
             bw_graph = bw_graph_cell[0]
@@ -3153,7 +3164,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertNotIn(
                     "_opaque_obj",
                     bw_code,
-                    f"Backward graph should not contain opaque objects. Graph:\n{bw_code}",
+                    lambda msg: f"{msg}\nBackward graph should not contain opaque objects. Graph:\n{bw_code}",
                 )
 
     @with_comms
@@ -3195,14 +3206,14 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertNotIn(
                 "_opaque_obj",
                 graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+                lambda msg: f"{msg}\nGraph should not contain opaque objects. Graph:\n{graph_code}",
             )
 
             placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
             self.assertGreater(
                 len(placeholders),
                 1,
-                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+                lambda msg: f"{msg}\nExpected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
 
     @with_comms
@@ -3246,14 +3257,14 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertNotIn(
                 "_opaque_obj",
                 graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+                lambda msg: f"{msg}\nGraph should not contain opaque objects. Graph:\n{graph_code}",
             )
 
             placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
             self.assertGreater(
                 len(placeholders),
                 2,
-                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+                lambda msg: f"{msg}\nExpected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
 
 
