@@ -62,7 +62,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, TypeSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -77,7 +77,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, GetSet, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import CustomClassObjectVariable
@@ -699,7 +699,13 @@ class TensorVariable(VariableTracker):
                 )
 
         if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
+            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
+            # A sourced class self-guards when observed downstream (e.g.
+            # `w.__class__ is SomeType`), which keeps type observation sound even
+            # when the input's own class guard is relaxed (see
+            # VariableBuilder.wrap_tensor and ACT input polymorphism).
+            source = self.source and TypeSource(self.source)
+            return VariableTracker.build(tx, self.python_type(), source)
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -1386,7 +1392,7 @@ class TensorVariable(VariableTracker):
 
     def _collect_backward_inputs(
         self, vars_iter: Iterable[VariableTracker], error_on_non_leaf: bool = False
-    ) -> list[VariableTracker] | None:
+    ) -> list["TensorVariable"]:
         """
         Collect unique leaf tensors from vars_iter for backward.
 
@@ -1442,7 +1448,6 @@ class TensorVariable(VariableTracker):
                     if node not in seen_nodes:
                         seen_nodes.add(node)
                         result.append(var)
-        # pyrefly: ignore [bad-return]
         return result
 
     def method_backward(
@@ -1472,6 +1477,15 @@ class TensorVariable(VariableTracker):
 
         TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
         """
+        if self.layout != torch.strided or self.is_nested:
+            unimplemented(
+                gb_type="Tensor.backward() with non-strided tensor",
+                context=f"call_method {self} backward",
+                explanation="Dynamo's Tensor.backward() lowering does not support "
+                "non-strided tensors.",
+                hints=["Run backward() on this tensor outside the compiled region."],
+            )
+
         if not self.requires_grad and not self.has_grad_fn:
             raise TorchRuntimeError(
                 "tensor does not require grad and does not have a grad_fn"
@@ -1500,8 +1514,7 @@ class TensorVariable(VariableTracker):
                     "cannot see the leaf tensors that receive gradients. This can "
                     "happen when the autograd graph crosses a graph-break boundary.",
                     hints=[
-                        "Move the backward() call into the same compiled region as "
-                        "the forward computation.",
+                        "Call backward() in the same compiled region as the forward computation.",
                     ],
                 )
         else:
@@ -1526,6 +1539,36 @@ class TensorVariable(VariableTracker):
                     ],
                 )
 
+        has_post_accumulate_grad_hook = any(
+            name == "register_post_accumulate_grad_hook"
+            and hooked_tensor.as_proxy().node is input_var.as_proxy().node
+            for hooked_tensor, _, _, name in tx.output.side_effects.tensor_hooks.values()
+            for input_var in input_vars
+        ) or any(
+            input_var.as_proxy().node.meta.get("has_post_accumulate_grad_hook", False)
+            for input_var in input_vars
+        )
+        for input_var in input_vars:
+            if input_var.source and input_var.source.subguards_allowed():
+                hooks = input_var.get_real_value()._post_accumulate_grad_hooks
+                hooks_source = AttrSource(
+                    input_var.source, "_post_accumulate_grad_hooks"
+                )
+                if hooks is None:
+                    install_guard(hooks_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+                else:
+                    install_guard(hooks_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                    has_post_accumulate_grad_hook |= bool(hooks)
+
+        if has_post_accumulate_grad_hook:
+            unimplemented(
+                gb_type="Tensor.backward() with post-accumulate-grad hooks",
+                context=f"call_method {self} backward",
+                explanation="Dynamo's Tensor.backward() lowering cannot preserve "
+                "post-accumulate-grad hooks.",
+                hints=["Run backward() outside the compiled region."],
+            )
+
         # Build autograd.grad call
         grad_kwargs = {"allow_unused": VariableTracker.build(tx, auto_detect)}
         if retain_graph is not None:
@@ -1539,14 +1582,9 @@ class TensorVariable(VariableTracker):
             grad_args.append(gradient)
 
         autograd_grad_fn = VariableTracker.build(tx, torch.autograd.grad)
-        if config.trace_autograd_ops:
+        # Direct user calls to autograd.grad still honor trace_autograd_ops.
+        with config.patch(trace_autograd_ops=True):
             grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
-        else:
-            # Tensor.backward() lowers through the same autograd.grad handler, but
-            # direct user calls to autograd.grad should still honor the public
-            # trace_autograd_ops flag.
-            with config.patch(trace_autograd_ops=True):
-                grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
 
         # Accumulate gradients for unique leaf tensors under no_grad context
         # to replicate eager autograd engine.
@@ -1564,6 +1602,16 @@ class TensorVariable(VariableTracker):
             grad_i = grads_var.call_method(
                 tx, "__getitem__", [VariableTracker.build(tx, idx)], {}
             )
+            if isinstance(grad_i, TensorVariable) and (
+                grad_i.layout != torch.strided or grad_i.is_nested
+            ):
+                unimplemented(
+                    gb_type="Tensor.backward() with non-strided gradients",
+                    context=f"gradient for backward input {idx}",
+                    explanation="Dynamo's Tensor.backward() lowering cannot "
+                    "accumulate non-strided gradients.",
+                    hints=["Run backward() outside the compiled region."],
+                )
             accumulate_grad_fn.call_function(tx, [input_var, grad_i], {})
 
         grad_mode_var.exit(tx)
@@ -2078,6 +2126,9 @@ class TensorVariable(VariableTracker):
         # see [On tensor.register_hook]
 
         if not self.source:
+            if name == "register_post_accumulate_grad_hook":
+                self.as_proxy().node.meta["has_post_accumulate_grad_hook"] = True
+
             # For intermediate tensors (those without a source), we have two approaches:
             # 1. When compiled autograd is enabled: use BackwardState to defer hook execution
             # 2. When compiled autograd is NOT enabled: use a custom autograd function
@@ -2173,6 +2224,8 @@ class TensorVariable(VariableTracker):
             hooked_proxy.node.meta["example_value"] = tensor_proxy.node.meta[
                 "example_value"
             ]
+            if name == "register_post_accumulate_grad_hook":
+                hooked_proxy.node.meta["has_post_accumulate_grad_hook"] = True
             self.proxy = hooked_proxy
             self.synchronize_attributes(tx)
             return variables.RemovableHandleVariable(
@@ -3116,17 +3169,46 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    # NB: ndim/itemsize are ALWAYS specialized constants (numpy exposes them via
+    # PyGetSetDef on ndarray), unlike size/shape which may carry free symbols.
+    def _get_ndim(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).ndim)
+
+    def _get_itemsize(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).itemsize)
+
+    def _get_numpy_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from ..utils import numpy_attr_wrapper
+
+        proxy = tx.output.create_proxy(
+            "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
+        )
+        return NumpyNdarrayVariable.create(tx, proxy)
+
+    tp_getset = {
+        "ndim": GetSet(_get_ndim, None),
+        "itemsize": GetSet(_get_itemsize, None),
+        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T")),
+        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real")),
+        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag")),
+        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat")),
+    }
+
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
         # no intrinsic reason ndarray properties are related to Tensor
         # properties.  The inheritance here is for implementation sharing.
-
+        # tp_getset (ndim/itemsize/T/real/imag/flat) is resolved by
+        # generic_getattr before this method is reached, so it is not
+        # consulted here.
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
-
-        result = None
 
         example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
@@ -3138,15 +3220,6 @@ class NumpyNdarrayVariable(TensorVariable):
                     "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
                 ),
             )
-
-        if name in ["T", "real", "imag", "flat"]:
-            proxy = tx.output.create_proxy(
-                "call_function",
-                numpy_attr_wrapper,
-                (self.as_proxy(), name),
-                {},
-            )
-            result = NumpyNdarrayVariable.create(tx, proxy)
 
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
@@ -3161,9 +3234,7 @@ class NumpyNdarrayVariable(TensorVariable):
         #
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
-        elif name in ("ndim", "itemsize"):
-            return VariableTracker.build(tx, getattr(example_ndarray, name))
-        elif name in ("shape", "stride"):
+        if name in ("shape", "stride"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return VariableTracker.build(tx, tuple(int(r) for r in r))
             return insert_into_graph()
@@ -3185,9 +3256,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        if result is None:
-            raise NotImplementedError
-        return result
+        raise NotImplementedError
 
     @staticmethod
     def patch_args(
