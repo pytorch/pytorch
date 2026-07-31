@@ -141,8 +141,7 @@ def _format_fx_tensor(node: torch.fx.Node) -> str:
 def _format_geometry(geometry: Any) -> str:
     """Format grouped GEMM geometry in logical M/N terms."""
     axis = "M" if geometry.axis == 0 else "N"
-    swapped = ", TensorSSA-swapped" if geometry.swapped else ""
-    return f"axis={axis}, group={geometry.group}{swapped}"
+    return f"axis={axis}, group={geometry.group}"
 
 
 def _format_main_transform(transform: Any | None) -> str:
