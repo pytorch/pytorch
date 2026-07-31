@@ -7610,28 +7610,32 @@ class Scheduler:
         # materialization traffic offsets coalescing regressions here.
         unfused_cost = sum(memory.weighted_cost() for memory in unfused_memory)
         fused_cost = fused_memory.weighted_cost()
-        # Fusing also saves one kernel launch. GB/s is numerically bytes/ns, so
-        # bandwidth times 1 us gives a byte-equivalent launch credit.
         try:
             dram_gbps = get_gpu_dram_gbps()
+            valid_dram_gbps = math.isfinite(dram_gbps) and dram_gbps > 0
         except Exception:
             dram_gbps = 0
-        launch_credit = (
-            int(dram_gbps * _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS)
-            if math.isfinite(dram_gbps) and dram_gbps > 0
-            else 0
-        )
-        if fused_cost > unfused_cost + launch_credit:
+            valid_dram_gbps = False
+        if valid_dram_gbps:
+            # GB/s is numerically bytes/ns, so division converts the
+            # byte-equivalent costs to estimated time in nanoseconds.
+            unfused_time_ns = (
+                unfused_cost / dram_gbps + _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS
+            )
+            fused_time_ns = fused_cost / dram_gbps
+            regresses = fused_time_ns > unfused_time_ns
+        else:
+            regresses = fused_cost > unfused_cost
+        if regresses:
             loop_ordering_log.debug(
                 "rejecting reindex of %s and %s: unfused memory %s (cost=%d), "
-                "fused memory %s (cost=%d), launch credit=%d",
+                "fused memory %s (cost=%d)",
                 node1.get_name(),
                 node2.get_name(),
                 unfused_memory,
                 unfused_cost,
                 fused_memory,
                 fused_cost,
-                launch_credit,
             )
             return True
         return False
