@@ -440,18 +440,20 @@ class InductorChoices:
 
     @staticmethod
     def should_use_persistent_reduction(
-        features: SIMDKernelFeatures, cooperative_reduction: bool
+        features: SIMDKernelFeatures,
+        cooperative_reduction: bool,
     ) -> bool:
         """
         Heuristic to decide if a persistent reduction should be used.
         """
         if not config.triton.persistent_reductions:
             return False
+        reduction_hint = features.get_reduction_hint()
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(reduction_hint, 64)
 
-        if features.get_reduction_hint() not in (
+        if reduction_hint not in (
             ReductionHint.INNER,
             ReductionHint.OUTER_TINY,
         ):
