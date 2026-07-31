@@ -16,7 +16,6 @@ specialized implementations for each hardware backend's unique features.
 """
 
 import inspect
-import sys
 import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
@@ -658,17 +657,21 @@ _device_initialized = False
 def register_interface_for_device(
     device: str | torch.device, device_interface: type[DeviceInterface]
 ) -> None:
+    """Register a DeviceInterface for a device type.
+
+    Registration must happen before ``torch._inductor.utils`` is imported:
+    the registry-derived GPU classification (GPU_TYPES / is_gpu() /
+    get_gpu_type()) is scanned exactly once, at that import. In-tree backends
+    satisfy this by construction (init_device_reg() runs inside the scan
+    itself). Out-of-tree backends register at package import, either
+    autoloaded during ``import torch`` (TORCH_DEVICE_BACKEND_AUTOLOAD) or via
+    an explicit ``import torch_npu``-style import, both of which precede any
+    import of inductor. Registering later is not supported and will not be
+    reflected in the snapshot.
+    """
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
-    # Late registration must refresh inductor's registry-derived GPU-type
-    # caches. sys.modules avoids importing inductor from dynamo.
-    inductor_utils = sys.modules.get("torch._inductor.utils")
-    if inductor_utils is not None:
-        for cached in ("_gpu_types", "get_gpu_type"):
-            fn = getattr(inductor_utils, cached, None)
-            if fn is not None:
-                fn.cache_clear()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:

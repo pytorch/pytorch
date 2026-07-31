@@ -109,12 +109,10 @@ T = TypeVar("T")
 
 # Defined before the torch._dynamo import below to avoid a circular import
 # when pulled in from dynamo; hence the lazy registry imports in the bodies.
-@functools.cache
 def _gpu_types() -> list[str]:
-    """GPU-class device types from the registered DeviceInterfaces, skipping
-    indexed aliases such as "cuda:0". Memoized so the hot is_gpu() path is
-    constant-time; register_interface_for_device() invalidates it when a
-    backend registers late.
+    """Freshly scan the DeviceInterface registry for GPU-class device types,
+    skipping indexed aliases such as "cuda:0". Production code should use the
+    GPU_TYPES snapshot below; this scan exists to compute it and for tests.
     """
     from torch._dynamo.device_interface import get_registered_device_interfaces
 
@@ -125,41 +123,25 @@ def _gpu_types() -> list[str]:
     ]
 
 
-class _GpuTypes:
-    """Registry-derived, list-like replacement for the old hardcoded GPU_TYPES."""
+def _device_is_available(device: str) -> bool:
+    """Whether a registered DeviceInterface reports the device available.
 
-    def __iter__(self) -> Iterator[str]:
-        return iter(_gpu_types())
+    Tolerates partially-implemented out-of-tree interfaces: the base-class
+    is_available() raises NotImplementedError, which must not propagate out
+    of registry-driven consumers (some run at module import time). Device
+    types with no registered interface are likewise treated as unavailable.
+    """
+    from torch._dynamo.device_interface import get_interface_for_device
 
-    def __contains__(self, item: object) -> bool:
-        return item in _gpu_types()
-
-    def __len__(self) -> int:
-        return len(_gpu_types())
-
-    def __eq__(self, other: object) -> bool:
-        return _gpu_types() == other
-
-    __hash__ = None  # type: ignore[assignment]
-
-    def __repr__(self) -> str:
-        return repr(_gpu_types())
-
-
-GPU_TYPES = _GpuTypes()
+    try:
+        return get_interface_for_device(device).is_available()
+    except NotImplementedError:
+        return False
 
 
 @functools.cache
 def get_gpu_type() -> str:
-    from torch._dynamo.device_interface import get_interface_for_device
-
-    avail_gpus = []
-    for gpu_type in _gpu_types():
-        try:
-            if get_interface_for_device(gpu_type).is_available():
-                avail_gpus.append(gpu_type)
-        except NotImplementedError:
-            continue
+    avail_gpus = [gpu for gpu in GPU_TYPES if _device_is_available(gpu)]
 
     if not avail_gpus:
         return "cuda"
@@ -173,7 +155,16 @@ def get_gpu_type() -> str:
     # Registry order is insertion order and may differ between processes
     # (out-of-tree backends register at import time), so fall back to a
     # stable choice rather than a positional one.
-    return "cuda" if "cuda" in avail_gpus else sorted(avail_gpus)[0]
+    chosen = "cuda" if "cuda" in avail_gpus else sorted(avail_gpus)[0]
+    log.warning(
+        "Multiple GPU types %s are available but the current accelerator (%s) "
+        "is not one of them; defaulting to %r. Codegen may target the wrong "
+        "device.",
+        avail_gpus,
+        acc,
+        chosen,
+    )
+    return chosen
 
 
 from torch._dynamo.device_interface import get_interface_for_device
@@ -200,6 +191,15 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+
+# Scanned exactly once, when this module is imported. Safe because both
+# registration paths precede any import of inductor: autoloaded out-of-tree
+# backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
+# of torch/__init__.py) and explicit ones at their package import (e.g.
+# `import torch_npu`), while in-tree backends are registered by
+# init_device_reg() inside the scan itself. Registering after this module is
+# imported is not supported (see register_interface_for_device).
+GPU_TYPES: list[str] = _gpu_types()
 
 
 _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
@@ -3575,8 +3575,6 @@ def device_need_guard(device: str) -> bool:
         return False
     # A GPU-class device still only needs stream guards if it exposes streams;
     # e.g. MPS is a GPU but does not, so it must be excluded here.
-    from torch._dynamo.device_interface import get_interface_for_device
-
     return get_interface_for_device(device).exposes_streams()
 
 

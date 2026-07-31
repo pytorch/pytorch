@@ -13,9 +13,11 @@ from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
+    _device_is_available,
     get_gpu_shared_memory,
     get_gpu_type,
     GPU_TYPES,
@@ -82,12 +84,13 @@ GPU_TYPE = get_gpu_type()
 
 def _is_multigpu(gpu: str) -> bool:
     # Resolve through the DeviceInterface registry: GPU_TYPES may include
-    # out-of-tree backends with no torch.<gpu> module (getattr would raise).
-    interface = get_interface_for_device(gpu)
-    if not interface.is_available():
+    # out-of-tree backends with no torch.<gpu> module (getattr would raise)
+    # or with partially-implemented interfaces (base methods raise
+    # NotImplementedError).
+    if not _device_is_available(gpu):
         return False
     try:
-        return interface.device_count() >= 2
+        return get_interface_for_device(gpu).device_count() >= 2
     except NotImplementedError:
         return False
 
