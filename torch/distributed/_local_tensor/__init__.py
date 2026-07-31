@@ -794,14 +794,18 @@ class _LocalOffsetBasedRNGTracker:
         if self.distribute_region_enabled:
             # sync to rank 0's state if no explicit generator
             if generator is None:
+                any_rank_state = lm._any_local_rng_state()
+                any_rank_cpu, any_rank_cuda = any_rank_state
+
+                if torch.accelerator.is_available():
+                    if self._device.index not in any_rank_cuda:
+                        raise AssertionError
+                    any_rank_device_state = any_rank_cuda[self._device.index]
+                else:
+                    any_rank_device_state = any_rank_cpu
+
                 from torch.distributed.tensor._random import _PhiloxState
 
-                # Get the device RNG state directly from the base_state_tensor
-                # (already fetched via the device handle at line above).
-                # This is device-agnostic and works for any accelerator
-                # (cuda, xpu, npu, etc.) without relying on torch.accelerator registration.
-                first_rank = next(iter(lm.ranks))
-                any_rank_device_state = base_state_tensor._local_tensors[first_rank]
                 any_rank_philox = _PhiloxState(any_rank_device_state)
                 state.seed = int(any_rank_philox.seed.item())
                 state.offset = int(any_rank_philox.offset.item())
