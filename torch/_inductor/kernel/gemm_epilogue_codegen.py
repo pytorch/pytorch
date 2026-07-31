@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 """Shared CuTeDSL emission primitives for GEMM epilogues."""
 
+import ast
 from typing import Any
 
 import torch
@@ -33,6 +34,19 @@ def gemm_epilogue_op_scope(cute: Any) -> dict[str, Any]:
         "silu": lambda x: x * sigmoid(x),
         "tanh": cute.math.tanh,
     }
+
+
+def materialize_epilogue_function(source: str, cute: Any) -> Any:
+    function_names = [
+        node.name
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef)
+    ]
+    if len(function_names) != 1:
+        raise NotImplementedError("expected one GEMM epilogue function")
+    scope = gemm_epilogue_op_scope(cute)
+    exec(source, scope)
+    return scope[function_names[0]]
 
 
 class GemmEpilogueCuteDSLBody:

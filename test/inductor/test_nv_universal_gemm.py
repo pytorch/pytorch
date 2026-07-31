@@ -935,6 +935,32 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
         self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
+        def classify_unrolled(value):
+            values = [Expr("load", ("gemm", offset, None)) for offset in range(4)]
+            values = [value(item) for item in values]
+            result = values[0]
+            for item in values[1:]:
+                result = Expr("add", (result, item))
+            return grouped_reduction_ir(
+                GemmEpilogueIRStore(0, result), "gemm", 4, torch.bfloat16
+            )
+
+        self.assertIsNone(
+            classify_unrolled(
+                lambda value: Expr(
+                    "to_dtype",
+                    (Expr("to_dtype", (value, torch.float16)), torch.float32),
+                )
+            )
+        )
+        self.assertIsNone(
+            classify_unrolled(
+                lambda value: Expr(
+                    "to_dtype_bitcast", (value, torch.bfloat16, torch.bfloat16)
+                )
+            )
+        )
+
     def test_grouped_reduction_ir_normalizes_loop_representation(self):
         from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
