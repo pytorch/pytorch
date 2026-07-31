@@ -269,8 +269,8 @@ struct C10_API FakeTensorMode {
       c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
-  // drop a single tracked constant; called from ExtraMeta's destructor so an
-  // entry never outlives the fake tensor it belongs to (no stale key / leak)
+  // remove entry from tensor_to_constant_ and constant_storage_mapping_; called
+  // in ExtraMeta's destructor
   void remove_constant(c10::ExtraMeta* extra_meta);
 
   // key = the fake tensor's ExtraMeta, value = the real constant tensor's impl.
