@@ -1199,10 +1199,11 @@ class DistributedDataParallel(Module, Joinable):
     def _delayed_all_reduce_hook(self, grad):
         world_size = dist.get_world_size(self.process_group)
 
-        self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
-        _ = dist.all_reduce(
-            self._delay_grad_buffer, group=self.process_group, async_op=True
-        )
+        delay_grad_buffer = self._delay_grad_buffer
+        if delay_grad_buffer is None:
+            raise AssertionError("Delayed gradient buffer is not initialized")
+        delay_grad_buffer.div_(world_size)
+        _ = dist.all_reduce(delay_grad_buffer, group=self.process_group, async_op=True)
         return grad
 
     def _register_delay_all_reduce_hook(
@@ -1941,7 +1942,7 @@ class DistributedDataParallel(Module, Joinable):
             authoritative_rank = self._find_common_rank(self._distributed_rank, False)
             self._sync_module_buffers(authoritative_rank)
 
-    # When running in join model, agrees upon a common rank and broadcast model
+    # When running in join mode, agrees upon a common rank and broadcast model
     # parameters to all other ranks.
     def _sync_final_model(self, is_last_joiner):
         # Agree upon the process that will be the authoritative model copy.
