@@ -660,8 +660,9 @@ static nlohmann::json errata_json_handle;
 
 bool plan_errata_exception(
     const cudnnHandle_t handle,
-    const std::string& executionPlanTag,
+    const cudnn_frontend::ExecutionPlan& plan,
     const Tensor& x) {
+  const auto& executionPlanTag = plan.getTag();
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
   // rule_id is an arbitrary string, here we use the issue number if there is
@@ -675,6 +676,33 @@ bool plan_errata_exception(
                       "engine"              : 5,
                       "cudnn_version_start" : 92301,
                       "cudnn_version_end"   : 92400
+                    }
+                ]
+            })");
+  // cuDNN engines 58 and 63 may dispatch to a cuBLASLt kernel that performs
+  // illegal memory accesses on sm_120. Engine IDs are cuDNN-version-specific,
+  // so restrict this workaround to the affected cuDNN and GPU versions.
+  static auto hardcoded_errata_json_handle_sm120 = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "sm120_conv_fwd_engine_58",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 58,
+                      "cudnn_version_start" : 92300,
+                      "cudnn_version_end"   : -1
+                    },
+                    { "rule_id"             : "sm120_conv_bwd_data_engine_63",
+                      "operation"           : "ConvBwdData",
+                      "engine"              : 63,
+                      "cudnn_version_start" : 92300,
+                      "cudnn_version_end"   : -1
+                    },
+                    { "rule_id"             : "sm120_conv_bwd_filter_engine_63",
+                      "operation"           : "ConvBwdFilter",
+                      "engine"              : 63,
+                      "cudnn_version_start" : 92300,
+                      "cudnn_version_end"   : -1
                     }
                 ]
             })");
@@ -702,6 +730,18 @@ bool plan_errata_exception(
           })) {
     return true;
   }
+  if (cudnn_frontend::check_errata(
+          hardcoded_errata_json_handle_sm120,
+          executionPlanTag,
+          handle,
+          [&plan]() {
+            const auto plan_json =
+                nlohmann::json::parse(plan.getJsonRepresentation());
+            return plan_json.contains("engine") &&
+                plan_json["engine"].value("smVersion", -1) == 1200;
+          })) {
+    return true;
+  }
   if (!has_json && x.dim() > 4) {
     return cudnn_frontend::check_errata(
         hardcoded_errata_json_handle_3d, executionPlanTag, handle, []() {
@@ -724,7 +764,7 @@ void generate_and_filter_plans(
     at::DataPtr& workspace_ptr) {
   auto initial_predicate_function =
       [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return plan_errata_exception(handle, plan.getTag(), x);
+    return plan_errata_exception(handle, plan, x);
   };
   auto plans =
       generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
@@ -1024,7 +1064,7 @@ bool try_configs(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag(), x)) {
+      if (plan_errata_exception(handle, plan, x)) {
         continue;
       }
       run_conv_plan(handle, x, y, w, plan, operation);
@@ -1058,7 +1098,7 @@ bool try_configs_fused(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag(), x)) {
+      if (plan_errata_exception(handle, plan, x)) {
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);

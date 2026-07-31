@@ -10,6 +10,7 @@ import hashlib
 import io
 import itertools
 import logging
+import operator
 import os
 import pickle
 import sys
@@ -51,6 +52,7 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     GatherOptions,
     get_debug_level,
+    NanCheckHook,
     PrefixStore,
     ProcessGroup,
     ReconfigureOptions,
@@ -118,6 +120,7 @@ __all__ = [
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
+    "gather_single",
     "gather_into_tensor",
     "gather_object",
     "get_backend_config",
@@ -192,19 +195,19 @@ _XCCL_AVAILABLE = True
 try:
     try:
         # pyrefly: ignore [missing-import]
-        from torchcomms._comms import _BackendWrapper
+        from torchcomms._comms import (
+            _BackendWrapper,
+            _is_backend_registered as _torchcomms_is_backend_registered,
+        )
     except ImportError:
         # pyrefly: ignore [missing-import]
         from torchcomms._backend_wrapper import _BackendWrapper
 
-    # pyrefly: ignore [missing-import]
-    # pyrefly: ignore [missing-import]
-    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
+        def _torchcomms_is_backend_registered(backend: str) -> bool:
+            return False
 
     # pyrefly: ignore [missing-import]
-    from torchcomms._comms import (
-        _is_backend_registered as _torchcomms_is_backend_registered,
-    )
+    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
 
     # pyrefly: ignore [missing-import]
     from torchcomms.hooks import FlightRecorderHook
@@ -213,43 +216,23 @@ try:
 except ImportError:
     _TORCHCOMM_AVAILABLE = False
 
+    def _torchcomms_is_backend_built(backend: str) -> bool:
+        return False
+
+    def _torchcomms_is_backend_registered(backend: str) -> bool:
+        return False
+
 
 def _use_torchcomms_enabled() -> bool:
     """Check if torchcomms is enabled via config."""
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
-def _torchcomms_handles_backend(backend) -> bool:
-    """True if TorchComms can create a comm for *backend*.
-
-    Backends TorchComms doesn't own -- custom c10d plugins such as ``mooncake``
-    or ``ucc`` -- must fall through to the normal ProcessGroup path even when
-    TorchComms is enabled, rather than being routed through ``new_comm`` /
-    ``split_group`` (which cannot construct them).
-
-    ``backend`` may be ``None`` (inherits the parent's TorchComms-owned
-    backend), a bare name (``"nccl"``), or a device-qualified string
-    (``"cpu:gloo,cuda:nccl"``). A built-in backend reports via
-    ``is_backend_built``; a backend dynamically registered through
-    ``torchcomms.register_backend`` (e.g. a Python adapter) reports via
-    ``_is_backend_registered`` -- so registering such an adapter is enough to
-    move that backend onto the native TorchComms path with no change here.
-    """
-    if not _TORCHCOMM_AVAILABLE:
-        return False
-    if backend is None:
-        return True
-    for part in str(backend).lower().split(","):
-        part = part.strip()
-        name = part.split(":", 1)[1] if ":" in part else part
-        if not name:
-            continue
-        if not (
-            _torchcomms_is_backend_registered(name)
-            or _torchcomms_is_backend_built(name)
-        ):
-            return False
-    return True
+def _is_torchcomms_backend(backend: str) -> bool:
+    return _use_torchcomms_enabled() and (
+        _torchcomms_is_backend_registered(backend)
+        or _torchcomms_is_backend_built(backend)
+    )
 
 
 def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
@@ -702,19 +685,24 @@ def _create_nccl_process_group(
     return backend_class
 
 
+def _nccl2_options(
+    backend_options: object | None,
+) -> "ProcessGroupNCCL.Options":
+    if backend_options is None:
+        return ProcessGroupNCCL.Options()
+    if not isinstance(backend_options, ProcessGroupNCCL.Options):
+        raise AssertionError(
+            "Expected backend_options argument to be of type ProcessGroupNCCL.Options"
+        )
+    return backend_options
+
+
 def _create_nccl2_process_group(
     opts: _DistributedBackendOptions, backend_options: object | None
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    # Accept a ProcessGroupNCCL2.Options if given; otherwise (None, or a
-    # ProcessGroupNCCL.Options passed through the generic path) build a fresh one.
-    if backend_options is not None and isinstance(
-        backend_options, ProcessGroupNCCL2.Options
-    ):
-        pg_options = backend_options
-    else:
-        pg_options = ProcessGroupNCCL2.Options()
+    pg_options = _nccl2_options(backend_options)
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -729,12 +717,7 @@ def _create_nccl_lazy_process_group(
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    if backend_options is not None and isinstance(
-        backend_options, ProcessGroupNCCL2.Options
-    ):
-        pg_options = backend_options
-    else:
-        pg_options = ProcessGroupNCCL2.Options()
+    pg_options = _nccl2_options(backend_options)
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -800,19 +783,31 @@ def _register_builtin_gloo_backend() -> None:
 
 
 def _register_builtin_nccl_backend() -> None:
+    creator_fn = (
+        _create_nccl2_process_group
+        if os.environ.get("TORCH_DIST_USE_NCCL2") == "1"
+        else _create_nccl_process_group
+    )
     Backend.register_backend(
         Backend.NCCL,
-        _create_nccl_process_group,
+        creator_fn,
         extended_api=True,
         devices=Backend.backend_capability[Backend.NCCL],
         _backend_type=ProcessGroup.BackendType.NCCL,
     )
 
 
+def _register_builtin_nccl_legacy_backend() -> None:
+    Backend.register_backend(
+        "nccl-legacy",
+        _create_nccl_process_group,
+        extended_api=True,
+        devices=["cuda"],
+        _backend_type=ProcessGroup.BackendType.CUSTOM,
+    )
+
+
 def _register_builtin_nccl2_backend() -> None:
-    # In-tree torchcomms NCCL backend. CUSTOM backend type; registering with
-    # devices=["cuda"] sets capability without claiming the cuda default (which
-    # stays "nccl"), so this only takes effect when explicitly requested.
     Backend.register_backend(
         "nccl2",
         _create_nccl2_process_group,
@@ -1000,6 +995,27 @@ def _parse_backend_string(
             f"or use one of: {sorted(Backend.default_device_backend_map.values())}"
         )
     return dict.fromkeys(device_types, backend)
+
+
+def _get_default_backend_type_for_backend_config(
+    backend_config: BackendConfig,
+) -> ProcessGroup.BackendType:
+    if Backend.NCCL in backend_config.device_backend_map.values():
+        return ProcessGroup.BackendType.NCCL
+
+    custom_backend = next(
+        (
+            backend
+            for backend in backend_config.device_backend_map.values()
+            if Backend.backend_type_map.get(str(backend))
+            == ProcessGroup.BackendType.CUSTOM
+            or _is_torchcomms_backend(str(backend))
+        ),
+        None,
+    )
+    if custom_backend is not None:
+        return ProcessGroup.BackendType.CUSTOM
+    return ProcessGroup.BackendType.GLOO
 
 
 class _reduce_op:
@@ -2404,7 +2420,6 @@ def init_process_group(
         and device_id is not None
         and ":" not in backend
         and backend not in (Backend.UNDEFINED, Backend.MPI, Backend.FAKE)
-        and _torchcomms_handles_backend(backend)
     ):
         bare = backend.lower()
         qualified: dict[str, str] = {}
@@ -2675,22 +2690,9 @@ def _new_process_group_helper(
     # In order to correctly call pg._has_hooks(), we should set the default backend
     # when multi backend is passed in
     if not pg_backend_set:
-        if Backend.NCCL in backend_config.device_backend_map.values():
-            pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-        else:
-            custom_backend = next(
-                (
-                    backend
-                    for backend in backend_config.device_backend_map.values()
-                    if Backend.backend_type_map.get(str(backend))
-                    == ProcessGroup.BackendType.CUSTOM
-                ),
-                None,
-            )
-            if custom_backend is not None:
-                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+        pg._set_default_backend(
+            _get_default_backend_type_for_backend_config(backend_config)
+        )
 
     if device_id:
         pg.bound_device_id = device_id
@@ -2700,11 +2702,7 @@ def _new_process_group_helper(
         # a single store can be reused by multiple groups.
         backend_prefix_store = PrefixStore(f"{device}/", prefix_store)
 
-        if (
-            _use_torchcomms_enabled()
-            and backend_str not in [Backend.FAKE]
-            and _torchcomms_handles_backend(backend_str)
-        ):
+        if _use_torchcomms_enabled() and backend_str not in [Backend.FAKE]:
             torch_device = torch.device(device)
             # Pass this rank's actual device WITH its index. A device-type-only
             # torch.device(device) makes the TorchComms bootstrap default the
@@ -2871,6 +2869,12 @@ def _new_process_group_helper(
         raise AssertionError("group_desc must not be None")
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
+
+    # Backend-agnostic NaN checking, for backends without a native checker
+    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself). The group owns the
+    # hook, so there is no handle to keep alive here.
+    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
+        NanCheckHook.attach(pg)
 
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
@@ -5390,7 +5394,7 @@ def gather(
 
 
 @_exception_logger
-def gather_into_tensor(
+def gather_single(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
     dst: int | None = None,
@@ -5443,7 +5447,7 @@ def gather_into_tensor(
         >>>     gather_tensor = torch.zeros(2 * 2, dtype=torch.int64, device=device)
         >>> else:
         >>>     gather_tensor = None
-        >>> dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        >>> dist.gather_single(tensor, gather_tensor, dst=0)
         >>> gather_tensor
         tensor([1, 2, 3, 4], device='cuda:0')  # Rank 0
         None                                    # Rank 1
@@ -5452,7 +5456,7 @@ def gather_into_tensor(
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
-            gather_into_tensor,
+            gather_single,
             relevant_args,
             tensor,
             gather_tensor=gather_tensor,
@@ -5465,7 +5469,7 @@ def gather_into_tensor(
     _check_single_tensor(tensor, "tensor")
     group = _group_or_default_group(group)
     if _rank_not_in_group(group):
-        _warn_not_in_group("gather_into_tensor")
+        _warn_not_in_group("gather_single")
         return
     if dst is None and group_dst is None:
         dst = 0
@@ -5486,7 +5490,7 @@ def gather_into_tensor(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    work = group.gather_into_tensor(output_tensor, tensor, opts)
+    work = group.gather_single(output_tensor, tensor, opts)
 
     if async_op:
         return work
@@ -5495,6 +5499,31 @@ def gather_into_tensor(
     ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
+
+
+@_exception_logger
+@deprecated(
+    "`torch.distributed.gather_into_tensor` is deprecated. "
+    "Please use `torch.distributed.gather_single` instead.",
+    category=FutureWarning,
+)
+def gather_into_tensor(
+    tensor: torch.Tensor,
+    gather_tensor: torch.Tensor | None = None,
+    dst: int | None = None,
+    group: ProcessGroup | None = None,
+    async_op: bool = False,
+    group_dst: int | None = None,
+):
+    """
+    Gather the input tensor from all ranks into a single output tensor on ``dst``.
+
+    .. warning::
+        `gather_into_tensor` is deprecated. Users should use `gather_single`
+        instead.
+
+    """
+    return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
 
 
 @_exception_logger
@@ -6334,8 +6363,15 @@ def monitored_barrier(
         _warn_not_in_group("monitored_barrier")
         return
 
-    if get_backend(group) != Backend.GLOO:
-        raise ValueError("monitored_barrier is only implemented for GLOO backend.")
+    # monitored_barrier runs on a CPU backend (GLOO, or its torchcomms
+    # BackendWrapper equivalent). Require the group to have a CPU backend rather
+    # than matching the "gloo" name, so a device-qualified group (e.g.
+    # "cpu:gloo,cuda:nccl") is accepted for its CPU backend.
+    group_to_use = group or _get_default_group()
+    if torch.device("cpu") not in group_to_use._device_types:
+        raise ValueError(
+            "monitored_barrier requires a group with a CPU-capable backend (e.g. GLOO)."
+        )
 
     if timeout is None:
         timeout = _get_default_timeout(get_backend(group))
@@ -6350,7 +6386,6 @@ def monitored_barrier(
 
     _check_valid_timeout(timeout)
 
-    group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
         timeout, wait_all_ranks=wait_all_ranks
     )
@@ -6824,6 +6859,12 @@ def _new_group_with_tag(
         timeout = _get_default_timeout(backend)
     _check_valid_timeout(timeout)
 
+    if ranks is not None:
+        try:
+            ranks = [operator.index(rank) for rank in ranks]
+        except TypeError as error:
+            raise TypeError("ranks must be a sequence of integers") from error
+
     if use_local_synchronization:
         # MPI backend doesn't have a way for us to perform a partial sync
         if backend == Backend.MPI:
@@ -6837,8 +6878,6 @@ def _new_group_with_tag(
     if ranks is not None:
         if sort_ranks:
             ranks = sorted(ranks)
-        else:
-            ranks = list(ranks)
         if len(set(ranks)) != len(ranks):
             raise ValueError(
                 f"ranks list must not contain duplicate entries, got {ranks}"
@@ -7808,6 +7847,9 @@ def _supports_reconfigure(group: ProcessGroup | None = None) -> bool:
     """
     Return whether ``group`` supports the reconfigure-based fault tolerance API.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
             the default process group is used.
@@ -7822,6 +7864,9 @@ def _get_reconfigure_handle(group: ProcessGroup | None = None) -> str:
 
     The handle encodes the information peers exchange out-of-band to
     (re)initialize the communicator via :func:`_reconfigure`.
+
+    .. warning::
+        This API is experimental and subject to change or removal.
 
     Args:
         group (ProcessGroup, optional): The process group to query. If ``None``,
@@ -7841,6 +7886,9 @@ def _reconfigure(
     """
     Reconfigure ``group`` with a new set of peers for fault tolerance.
 
+    .. warning::
+        This API is experimental and subject to change or removal.
+
     Args:
         uuid (int): Uniquely identifies this instance of the communicator. Pass
             a fresh value on every (re)initialization.
@@ -7855,6 +7903,13 @@ def _reconfigure(
 
     Returns:
         Work: An async work handle for the reconfigure operation.
+
+    Example::
+        >>> # xdoctest: +SKIP("requires out-of-band rendezvous")
+        >>> dist.init_process_group("gloo", enable_reconfigure=True)
+        >>> # Every peer receives the same fresh UUID and rank-ordered handles.
+        >>> uuid, handles = rendezvous_reconfigure(dist._get_reconfigure_handle())
+        >>> dist._reconfigure(uuid=uuid, handles=handles).wait()
     """
     pg = group or _get_default_group()
     opts = ReconfigureOptions()
