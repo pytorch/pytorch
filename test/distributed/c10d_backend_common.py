@@ -47,6 +47,7 @@ class BackendConfig:
     supports_sequence_numbers: bool = True
     supports_collectives_timing: bool = False
     supports_work_sequence_number: bool = False
+    supports_work_result: bool = False
     supports_gather_single: bool = False
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
@@ -67,6 +68,7 @@ C10D_BACKENDS = (
         supports_dropped_p2p_work=True,
         supports_collectives_timing=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
         supports_gather_single=True,
         float8_dtypes=FLOAT8_DTYPES,
     ),
@@ -78,6 +80,7 @@ C10D_BACKENDS = (
         supports_dropped_p2p_work=True,
         supports_collectives_timing=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
         supports_gather_single=True,
         float8_dtypes=FLOAT8_DTYPES,
     ),
@@ -155,6 +158,7 @@ def instantiate_backend_tests(namespace, suite_name, base_class, backends):
                 "supports_sequence_numbers": backend.supports_sequence_numbers,
                 "supports_collectives_timing": backend.supports_collectives_timing,
                 "supports_work_sequence_number": backend.supports_work_sequence_number,
+                "supports_work_result": backend.supports_work_result,
                 "supports_gather_single": backend.supports_gather_single,
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
