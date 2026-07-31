@@ -135,13 +135,11 @@ def is_valid_inplace_sample_input(sample_input, op, inplace_variant):
     if not isinstance(sample_input.input, torch.Tensor):
         return False
 
-    # In-place variants cannot change the input's shape or dtype.
+    # Check if input's dtype matches the output's dtype
     args = (sample_input.input,) + sample_input.args
     kwargs = sample_input.kwargs
-    output = op(*args, **kwargs)
-    if sample_input.input.shape != output.shape:
-        return False
-    return sample_input.input.dtype == output.dtype
+    output_dtype = op(*args, **kwargs).dtype
+    return sample_input.input.dtype == output_dtype
 
 
 # This is kind of dangerous, please think carefully before using it.
