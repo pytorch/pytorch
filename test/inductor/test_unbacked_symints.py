@@ -1384,10 +1384,16 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    def test_cat_extern_kernel_inputs_unbacked_size(self, device):
+    @inductor_config.patch(
+        {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
+    )
+    @parametrize("dynamic", [False, True, None])
+    def test_cat_extern_kernel_inputs_unbacked_size(self, device, dynamic):
         # The mm outputs are written straight into the cat destination, whose
         # size depends on every slice length, so all of them have to be in
-        # scope before the first mm allocates the destination.
+        # scope before the first mm allocates the destination. Lower both
+        # pointwise cat thresholds to force ConcatKernel path instead of
+        # pointwise_cat.
         def fn(x, ends, w):
             outputs = []
             start = 0
@@ -1397,13 +1403,16 @@ class TestUnbackedSymints(InductorTestCase):
                 start = end
             return torch.cat(outputs, dim=0)
 
+        # requires_grad is load bearing: the inference graph happens to schedule
+        # every item() before the allocation anyway, so only the training
+        # forward exposes the missing dependency.
         example_inputs = (
             make_tensor(64, 32, dtype=torch.float32, device=device, requires_grad=True),
             torch.tensor([16, 32, 48, 64], dtype=torch.int64, device=device),
             make_tensor(32, 32, dtype=torch.float32, device=device, requires_grad=True),
         )
 
-        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        actual = torch.compile(fn, fullgraph=True, dynamic=dynamic)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 

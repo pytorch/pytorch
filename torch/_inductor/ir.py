@@ -8091,6 +8091,9 @@ class ExternKernel(InputsKernel):
         if isinstance(self.layout, NonOwningLayout) and self.should_allocate():
             # We allocate the buffer we alias into (e.g. a cat destination), so
             # its size symbols must be in scope before this kernel runs.
+            # should_allocate() is also what keeps us off TMADescriptor, whose
+            # NonOwningLayout does not satisfy NonOwningLayout.get_free_symbol_uses's
+            # StorageBox assertion.
             r |= self.layout.get_free_symbol_uses(unbacked_only)
         for arg in self.constant_args:
             r |= maybe_get_symbols(arg)
