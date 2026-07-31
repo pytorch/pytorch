@@ -15,6 +15,10 @@
 #include <ATen/cuda/detail/BLASConstants.h>
 #include <ATen/cuda/detail/CublasLtUtils.h>
 
+#include <optional>
+#include <string>
+#include <vector>
+
 #ifdef USE_ROCM
 #include <c10/cuda/CUDAStream.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -1698,6 +1702,210 @@ bool gemm_and_bias(
   return true;
 }
 
+template <typename Dtype, typename C_Dtype>
+bool gemm_with_distinct_c_and_d(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<Dtype> alpha_val,
+    const Dtype* mat1_ptr,
+    int64_t mat1_ld,
+    const Dtype* mat2_ptr,
+    int64_t mat2_ld,
+    at::opmath_type<Dtype> beta_val,
+    const C_Dtype* c_ptr,
+    int64_t c_ld,
+    C_Dtype* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation) {
+
+  if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
+    #ifdef USE_ROCM
+    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+    #endif
+  } else if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::Half>) {
+    #ifdef USE_ROCM
+    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+    #endif
+    if (at::globalContext().allowFP16AccumulationCuBLAS())
+      TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
+  }
+
+  const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>();
+  const cudaDataType_t abType = type_info.ab_type;
+  const cudaDataType_t cType = type_info.c_type;
+  const cublasComputeType_t computeType = type_info.compute_type;
+  const cudaDataType_t scaleType = type_info.scale_type;
+  CuBlasLtMatmulPreference preference;
+  void * alpha_ptr = &alpha_val;
+  void * beta_ptr = &beta_val;
+#ifndef USE_ROCM
+  at::Half halpha_val;
+  at::Half hbeta_val;
+#endif
+  if constexpr (std::is_same_v<Dtype, at::Half>) {
+#ifndef USE_ROCM
+    if (computeType == CUBLAS_COMPUTE_16F) {
+      halpha_val = alpha_val;
+      hbeta_val = beta_val;
+      alpha_ptr = &halpha_val;
+      beta_ptr = &hbeta_val;
+    }
+#endif
+  }
+#ifndef USE_ROCM
+  if constexpr (std::is_same_v<Dtype, at::Half>) {
+    auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
+    if (fp16_reduction !=
+        at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+      uint32_t mask =
+          fp16_reduction ==
+                  at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
+              ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
+                 CUBLASLT_REDUCTION_SCHEME_NONE)
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
+    }
+  } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
+    auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
+    if (bf16_reduction !=
+        at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+      uint32_t mask =
+          bf16_reduction ==
+                  at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
+              ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
+                 CUBLASLT_REDUCTION_SCHEME_NONE)
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
+    }
+  }
+#endif
+
+  CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
+  cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
+  cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
+  auto stream = at::cuda::getCurrentCUDAStream();
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#else
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    stream = _getCarveoutStream(
+        at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+    _syncCurrentWithCarveoutStream(stream, true);
+  }
+#endif
+  const cublasLtEpilogue_t epilogue =
+      detail::cublasLtEpilogue(activation, nullptr);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+
+  CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
+  CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, c_ld);
+  CuBlasLtMatrixLayout Ddesc(cType, m, n, result_ld);
+
+  auto ltworkspace = CublasLtWorkspace();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
+
+#ifndef USE_ROCM
+  uint32_t a_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
+  uint32_t b_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
+  uint32_t c_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(c_ptr));
+  uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
+#endif
+
+  cublasLtMatmulHeuristicResult_t heuristicResult = {};
+  int returnedResult = 0;
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Ddesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
+  cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
+  if (returnedResult == 0) {
+    cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
+  }
+  else {
+    cublasStatus = cublasLtMatmul(
+        ltHandle,
+        computeDesc.descriptor(),
+        alpha_ptr,
+        mat1_ptr,
+        Adesc.descriptor(),
+        mat2_ptr,
+        Bdesc.descriptor(),
+        beta_ptr,
+        c_ptr,
+        Cdesc.descriptor(),
+        result_ptr,
+        Ddesc.descriptor(),
+        &heuristicResult.algo,
+        ltworkspace.ptr,
+        ltworkspace.size,
+        stream);
+#ifdef USE_ROCM
+    if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+      _syncCurrentWithCarveoutStream(stream, false);
+    }
+#endif
+  }
+  if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
+    TORCH_WARN(
+      "gemm_with_distinct_c_and_d error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling cublasLtMatmul with transpose_mat1 ",
+      transpose_mat1,
+      " transpose_mat2 ",
+      transpose_mat2,
+      " m ",
+      m,
+      " n ",
+      n,
+      " k ",
+      k,
+      " mat1_ld ",
+      mat1_ld,
+      " mat2_ld ",
+      mat2_ld,
+      " c_ld ",
+      c_ld,
+      " result_ld ",
+      result_ld,
+      " abType ",
+      abType,
+      " cType ",
+      cType,
+      " computeType ",
+      computeType,
+      " scaleType ",
+      scaleType,
+      ". Will attempt to recover by calling the existing addmm path.");
+    return false;
+  }
+  return true;
+}
+
 template bool gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -1791,6 +1999,78 @@ template bool gemm_and_bias(
     int64_t mat2_ld,
     const at::BFloat16* bias,
     float* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template bool gemm_with_distinct_c_and_d(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<double> alpha_val,
+    const double* mat1_ptr,
+    int64_t mat1_ld,
+    const double* mat2_ptr,
+    int64_t mat2_ld,
+    at::opmath_type<double> beta_val,
+    const double* c_ptr,
+    int64_t c_ld,
+    double* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template bool gemm_with_distinct_c_and_d(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<float> alpha_val,
+    const float* mat1_ptr,
+    int64_t mat1_ld,
+    const float* mat2_ptr,
+    int64_t mat2_ld,
+    at::opmath_type<float> beta_val,
+    const float* c_ptr,
+    int64_t c_ld,
+    float* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template bool gemm_with_distinct_c_and_d(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::Half> alpha_val,
+    const at::Half* mat1_ptr,
+    int64_t mat1_ld,
+    const at::Half* mat2_ptr,
+    int64_t mat2_ld,
+    at::opmath_type<at::Half> beta_val,
+    const at::Half* c_ptr,
+    int64_t c_ld,
+    at::Half* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template bool gemm_with_distinct_c_and_d(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::BFloat16> alpha_val,
+    const at::BFloat16* mat1_ptr,
+    int64_t mat1_ld,
+    const at::BFloat16* mat2_ptr,
+    int64_t mat2_ld,
+    at::opmath_type<at::BFloat16> beta_val,
+    const at::BFloat16* c_ptr,
+    int64_t c_ld,
+    at::BFloat16* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 

@@ -8,6 +8,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -151,6 +152,7 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   return false;
   #endif
 }
+
 /*
  * Check whether for the given input we want to enable the Lt interface
  */
@@ -227,6 +229,52 @@ static bool isInputCompliesAddmmCudaLt(
       mat2_sizes[0] > 1 && mat2_sizes[1] > 1
     )
   );
+}
+
+static bool canUseAddmmCudaLtWithDistinctCAndD(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    Activation activation,
+    bool disable_addmm_cuda_lt) {
+  if (disable_addmm_cuda_lt) {
+    return false;
+  }
+  if (activation != Activation::None || beta.toComplexDouble() == 0.0) {
+    return false;
+  }
+  if (result.is_same(self) || self.dim() != 2 || result.dim() != 2) {
+    return false;
+  }
+  if (self.sizes()[0] != result.sizes()[0] || self.sizes()[1] != result.sizes()[1]) {
+    return false;
+  }
+  if (!self.is_contiguous() || !result.is_contiguous()) {
+    return false;
+  }
+  if (self.is_conj() || result.is_conj() || self.is_neg() || result.is_neg()) {
+    return false;
+  }
+  if (at::get_overlap_status(self, result) != at::MemOverlapStatus::No) {
+    return false;
+  }
+  if (self.scalar_type() != mat1.scalar_type() || result.scalar_type() != mat1.scalar_type()) {
+    return false;
+  }
+  const auto scalar_type = mat1.scalar_type();
+  if (
+#ifndef USE_ROCM
+      scalar_type != at::ScalarType::Double &&
+#endif
+      scalar_type != at::ScalarType::Float &&
+      scalar_type != at::ScalarType::Half &&
+      scalar_type != at::ScalarType::BFloat16) {
+    return false;
+  }
+  // Match the existing cuBLASLt shape guard.
+  return mat2.sizes()[0] > 1 && mat2.sizes()[1] > 1;
 }
 
 template <typename scalar_t>
@@ -336,6 +384,33 @@ bool launchGemmCublas(
   return true; // success!
 }
 
+template <typename scalar_t>
+bool launchGemmWithDistinctCAndDCublasLt(
+    cublasCommonArgs& args,
+    const Tensor& self,
+    const Scalar& alpha,
+    const Scalar& beta,
+    Activation activation) {
+  return at::cuda::blas::gemm_with_distinct_c_and_d<scalar_t>(
+    args.transa == 't',
+    args.transb == 't',
+    args.m,
+    args.n,
+    args.k,
+    alpha.to<at::opmath_type<scalar_t>>(),
+    args.mata->const_data_ptr<scalar_t>(),
+    args.lda,
+    args.matb->const_data_ptr<scalar_t>(),
+    args.ldb,
+    beta.to<at::opmath_type<scalar_t>>(),
+    self.const_data_ptr<scalar_t>(),
+    self.stride(0),
+    args.result->data_ptr<scalar_t>(),
+    args.result_ld,
+    activation_to_gemm_and_blas_arg(activation)
+  );
+}
+
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Shape checks {
   // Make sure to keep addmm_cuda below in sync with this code; it
@@ -387,6 +462,34 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
       // We do not copy bias only when we need the bias ptr
     if (beta.toComplexDouble() != 0.0 && !use_bias_ptr_lt) {
+      const bool distinct_c_and_d_candidate =
+          result.numel() != 0 && mat1.sizes()[1] != 0 &&
+          canUseAddmmCudaLtWithDistinctCAndD(
+              result,
+              self,
+              mat1,
+              mat2,
+              beta,
+              activation,
+              persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override);
+      if (distinct_c_and_d_candidate) {
+        cublasCommonArgs args(mat1, mat2, result);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
+        bool distinct_c_and_d_lt_success = false;
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+          at::ScalarType::Half,
+          at::ScalarType::BFloat16,
+          scalar_type,
+          "addmm_cuda_lt_distinct_c_and_d",
+          [&] {
+            distinct_c_and_d_lt_success = launchGemmWithDistinctCAndDCublasLt<scalar_t>(
+                args, self, alpha, beta, activation);
+          }
+        );
+        if (distinct_c_and_d_lt_success) {
+          return result;
+        }
+      }
       // NOTE: self should broadcast over result
       at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
     }
