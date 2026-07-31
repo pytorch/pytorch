@@ -32,9 +32,6 @@ inline THPObjectPtr call_with_context(PyObject* callable, PyObject* args) {
     return THPObjectPtr(PyObject_CallObject(callable, args));
   }
   auto* py_context = context->ptr(getPyInterpreter());
-  if (Py_IsNone(py_context)) {
-    return THPObjectPtr(PyObject_CallObject(callable, args));
-  }
   if (at::ThreadLocalState::is_python_context_origin_thread()) {
     return THPObjectPtr(PyObject_CallObject(callable, args));
   }

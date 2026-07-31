@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/python_context.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_node_creation_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -111,6 +112,11 @@ std::unique_ptr<SavedVariableHooks> PythonEngine::
   return PyDefaultSavedVariableHooks::get_hooks();
 }
 
+std::vector<std::unique_ptr<NodeCreationHook>> PythonEngine::
+    get_node_creation_hooks() {
+  return PyDefaultNodeCreationHooks::get_hooks();
+}
+
 variable_list PythonEngine::execute(
     const edge_list& roots,
     const variable_list& inputs,
@@ -136,7 +142,8 @@ variable_list PythonEngine::execute(
 c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     c10::intrusive_ptr<Node> graph_root,
-    InputBuffer&& input_buffer) {
+    InputBuffer&&
+        input_buffer) { // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
   try {
     return Engine::execute_with_graph_task(
         graph_task, std::move(graph_root), std::move(input_buffer));
@@ -183,6 +190,7 @@ static PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   constexpr const char* accepted_kwargs[] = {
       "tensors",
       "grad_tensors",

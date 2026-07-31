@@ -215,6 +215,44 @@ function install_132 {
   ldconfig
 }
 
+function install_134 {
+  CUDNN_VERSION=9.24.0.43
+  CUSPARSELT_VERSION=0.8.1.1
+  echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
+  # CUDA 13.4 ships no runfile-local installer yet, so install the toolkit from
+  # the NVIDIA preview network repo (https://packages.nvidia.com).
+  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+  case "$ID" in
+    ubuntu)
+      codename=$(grep -oP '(?<=^VERSION_CODENAME=).+' /etc/os-release | tr -d '"')
+      wget -q https://packages.nvidia.com/${codename}/nvidia-preview-keyring.deb
+      dpkg -i nvidia-preview-keyring.deb
+      apt-get update
+      apt-get -y install cuda-toolkit-13-4
+      rm -f nvidia-preview-keyring.deb
+      ;;
+    almalinux|rhel|centos)
+      wget -q https://packages.nvidia.com/el8/nvidia-preview-keyring.rpm
+      rpm -i nvidia-preview-keyring.rpm
+      dnf clean all
+      dnf -y install cuda-toolkit-13-4
+      rm -f nvidia-preview-keyring.rpm
+      ;;
+    *) echo "install_134: unsupported OS '$ID'"; exit 1 ;;
+  esac
+
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  install_cudnn 13 $CUDNN_VERSION
+
+  install_nvshmem 13 $NVSHMEM_VERSION
+
+  CUDA_VERSION=13.4 bash install_nccl.sh
+
+  CUDA_VERSION=13.4 bash install_cusparselt.sh $CUSPARSELT_VERSION
+
+  ldconfig
+}
+
 # idiomatic parameter and option handling in sh
 while test $# -gt 0
 do
@@ -230,6 +268,8 @@ do
     13.0|13.0.*) install_130;
         ;;
     13.2|13.2.*) install_132;
+        ;;
+    13.4|13.4.*) install_134;
         ;;
     *) echo "bad argument $1"; exit 1
         ;;
