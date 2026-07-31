@@ -1081,9 +1081,7 @@ void FakeTensorMode::set_constant(
   if (constant_storage) {
     constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
   }
-  // Back-pointer so remove_constant can prune this tensor's weak alias entry.
-  extra_meta->constant_storage_ = constant_storage;
-  extra_meta->is_fake_constant_ = true;
+  extra_meta->has_fake_constant_ = true;
   tensor_to_constant_[extra_meta] = std::move(constant);
 }
 
@@ -1114,7 +1112,7 @@ void FakeTensorMode::invalidate_constant_aliases(
       if (auto* extra_meta = impl->maybe_get_extra_meta()) {
         // clear the flag so the tensor's later ~ExtraMeta skips the redundant
         // remove_constant (the entry is gone); safe since impl is alive here.
-        extra_meta->is_fake_constant_ = false;
+        extra_meta->has_fake_constant_ = false;
         tensor_to_constant_.erase(extra_meta);
       }
     }
@@ -1124,17 +1122,25 @@ void FakeTensorMode::invalidate_constant_aliases(
 
 void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
   std::lock_guard<std::mutex> lock(constant_mutex_);
-  tensor_to_constant_.erase(extra_meta);
-  // Also drop this (now-dead) tensor's weak entry from the storage map, pruning
-  // any other expired aliases while we're here. Without this the vector grows
-  // unbounded as constants churn over one storage, and each dead weak ref pins a
-  // weakcount on a destroyed TensorImpl until the storage is invalidated. The
-  // storage pointer is used only as a map key (never dereferenced), so it is
-  // safe even if the storage itself has already been freed.
-  auto* storage = extra_meta->constant_storage_;
+  // Recover the constant's storage from the value map before erasing, so we know
+  // which alias bucket to prune. This reconstructs the same key set_constant
+  // inserted (constant.storage().unsafeGetStorageImpl()).
+  auto value_it = tensor_to_constant_.find(extra_meta);
+  if (value_it == tensor_to_constant_.end()) {
+    return;
+  }
+  const c10::TensorImpl& constant = *value_it->second;
+  c10::StorageImpl* storage =
+      constant.has_storage() ? constant.storage().unsafeGetStorageImpl()
+                             : nullptr;
+  tensor_to_constant_.erase(value_it);
   if (storage == nullptr) {
     return;
   }
+  // Drop this (now-dead) tensor's weak entry from the storage map, pruning any
+  // other expired aliases while we're here. Without this the vector grows
+  // unbounded as constants churn over one storage, and each dead weak ref pins a
+  // weakcount on a destroyed TensorImpl until the storage is invalidated.
   auto it = constant_storage_mapping_.find(storage);
   if (it == constant_storage_mapping_.end()) {
     return;
@@ -1151,7 +1157,7 @@ void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
 }
 
 ExtraMeta::~ExtraMeta() {
-  if (is_fake_constant_ && fake_tensor_mode_) {
+  if (has_fake_constant_ && fake_tensor_mode_) {
     fake_tensor_mode_->remove_constant(this);
   }
 }
