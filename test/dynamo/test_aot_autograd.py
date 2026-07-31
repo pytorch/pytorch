@@ -22,6 +22,7 @@ from torch._functorch.aot_autograd import _aot_export_function, create_functiona
 from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._inductor.graph import GraphLowering
+from torch._inductor.utils import fresh_cache
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental import _config as fx_config
@@ -1614,6 +1615,96 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
         )
 
+    def test_mutated_input_overlaps_unmutated_input_recompile(self):
+        def f(a, b):
+            a.add_(1)
+            return a + b
+
+        def non_overlapping_args(x):
+            return x[:5], x[5:10]
+
+        def overlapping_args(x):
+            return x[:5], x[4:9]
+
+        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(
+            f, non_overlapping_args, overlapping_args
+        )
+        self.assertExpectedInline(
+            guard_failure,
+            """0/0: check_overlapping(overlapping=[], non_overlapping=[a, b])""",
+        )
+
+    def test_compute_overlapping_tensors_separate_storages(self):
+        from torch._C._dynamo.guards import compute_overlapping_tensors
+
+        a = torch.arange(2)
+        b = torch.arange(2)
+        self.assertEqual(compute_overlapping_tensors([a, b], symbolic=False), set())
+
+        base = torch.arange(4)
+        self.assertEqual(
+            compute_overlapping_tensors([base[:1], base[1:2]], symbolic=False),
+            set(),
+        )
+        self.assertEqual(
+            compute_overlapping_tensors([base[:2], base[1:3]], symbolic=False),
+            {0, 1},
+        )
+
+    @torch.compiler.config.patch(force_disable_caches=False)
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    def test_input_storage_overlap_guard_compile_order(self):
+        def fn(x, y):
+            x.add_(1)
+            y.clamp_(min=0)
+            return x.squeeze(1, 2).clone()
+
+        def non_alias_args():
+            a = torch.full((1, 1, 1), -10.0)
+            return a, a.view(-1).clone()
+
+        def alias_args():
+            a = torch.full((1, 1, 1), -10.0)
+            return a, a.view(-1)
+
+        for backend in ("aot_eager", "inductor"):
+            with fresh_cache():
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend=backend)
+                self.assertEqual(opt_fn(*non_alias_args()), torch.tensor([-9.0]))
+                self.assertEqual(opt_fn(*alias_args()), torch.tensor([0.0]))
+
+                torch._dynamo.reset()
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(*non_alias_args()),
+                    torch.tensor([-9.0]),
+                )
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(*alias_args()),
+                    torch.tensor([0.0]),
+                )
+
+    def test_input_storage_overlap_guard_preserves_groups(self):
+        def fn(a, b, c, d):
+            a.add_(1)
+            c.add_(10)
+            return b.clone(), d.clone()
+
+        def args_ab_cd():
+            base_ab = torch.zeros(1)
+            base_cd = torch.zeros(1)
+            return base_ab[:], base_ab[:], base_cd[:], base_cd[:]
+
+        def args_ac_bd():
+            base_ac = torch.zeros(1)
+            base_bd = torch.zeros(1)
+            return base_ac[:], base_bd[:], base_ac[:], base_bd[:]
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        self.assertEqual(opt_fn(*args_ab_cd()), fn(*args_ab_cd()))
+        self.assertEqual(opt_fn(*args_ac_bd()), fn(*args_ac_bd()))
+
     def _test_no_storage_overlap_guards(self, f, argsfn):
         # Compile f with aot_eager backend, and run it with the argument set returned by
         # argsfn function. Meanwhile, keep track of the aotautograd_gurads, so as to make
@@ -1653,7 +1744,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self._test_no_storage_overlap_guards(f, overlapping_args)
 
-    def test_no_storage_overlap_guards_no_aliasing(self):
+    def test_storage_overlap_guards_no_aliasing_with_mutation(self):
         def f(a, b):
             a.add_(1)
             b.add_(1)
@@ -1662,7 +1753,59 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         def non_overlapping_args(input):
             return input[:10], torch.arange(20)[5:15]
 
-        self._test_no_storage_overlap_guards(f, non_overlapping_args)
+        class Compiler:
+            def __init__(self):
+                self.counter = CompileCounterWithBackend("aot_eager")
+
+            def __call__(self, *args, **kwargs):
+                self.guards = TracingContext.get().guards_context.aotautograd_guards
+                return self.counter(*args, **kwargs)
+
+        compiler = Compiler()
+
+        input = torch.arange(20)
+        opt_input = input.clone().detach()
+
+        out = f(*non_overlapping_args(input))
+        opt_out = torch.compile(f, backend=compiler, dynamic=True)(
+            *non_overlapping_args(opt_input)
+        )
+        self.assertEqual(out, opt_out)
+
+        overlap_guards = [g for g in compiler.guards if isinstance(g, StorageOverlap)]
+        self.assertEqual(len(overlap_guards), 1)
+        self.assertEqual(overlap_guards[0].overlapping_sources, [])
+        self.assertEqual(
+            {
+                getattr(s, "local_name", s.name)
+                for s in overlap_guards[0].non_overlapping_sources
+            },
+            {"a", "b"},
+        )
+
+    def test_many_unaliased_mutated_inputs_use_single_storage_overlap_guard(self):
+        def f(*args):
+            for arg in args:
+                arg.add_(1)
+            return args[0]
+
+        class Compiler:
+            def __init__(self):
+                self.counter = CompileCounterWithBackend("aot_eager")
+
+            def __call__(self, *args, **kwargs):
+                self.guards = TracingContext.get().guards_context.aotautograd_guards
+                return self.counter(*args, **kwargs)
+
+        compiler = Compiler()
+        args = tuple(torch.arange(4) + i for i in range(16))
+
+        torch.compile(f, backend=compiler, dynamic=True)(*args)
+
+        overlap_guards = [g for g in compiler.guards if isinstance(g, StorageOverlap)]
+        self.assertEqual(len(overlap_guards), 1)
+        self.assertEqual(overlap_guards[0].overlapping_sources, [])
+        self.assertEqual(len(overlap_guards[0].non_overlapping_sources), len(args))
 
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.
