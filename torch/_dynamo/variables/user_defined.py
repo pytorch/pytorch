@@ -1905,15 +1905,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: PyNumber_Index checks tp_as_number->nb_index.
-        if self.lookup_class_mro_attr("__index__") is int.__index__:
-            # int subclass (e.g. IntEnum/IntFlag member): __index__ is the
-            # inherited int slot, which has no Python body to trace. CPython's
-            # PyNumber_Index returns the underlying int directly, so const-fold
-            # instead of graph breaking on the C slot wrapper.
-            if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            real_value: int = self.get_real_python_backed_value()  # type: ignore[assignment]
-            return variables.ConstantVariable.create(int(real_value))
         return self.SLOT0(tx, "__index__")
 
     def nb_int_impl(
