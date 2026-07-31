@@ -190,7 +190,7 @@ class DefaultStager(CheckpointStager):
                     "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
                 )
 
-            # waits for the enqued copy operations to finish.
+            # waits for the enqueued copy operations to finish.
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
 
         return state_dict
