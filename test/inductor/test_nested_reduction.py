@@ -1581,6 +1581,19 @@ class _NestedReductionBase:
         w = torch.randn(B, K, device=GPU_TYPE)
         self._check_rejected(f, (x, w))
 
+    def test_x_group_size_cap_boundary_fuses(self):
+        """K at exactly MAX_NON_INNER_GROUP_SIZE still fuses."""
+        B, K, D = 4, 128, 512
+
+        def f(x, w):
+            x_normed = _rmsnorm(x.reshape(B * K, D)).reshape(B, K, D)
+            return (w[:, :, None] * x_normed).sum(dim=1)
+
+        x = torch.randn(B, K, D, device=GPU_TYPE)
+        w = torch.randn(B, K, device=GPU_TYPE)
+        self.check_numeric(f, (x, w))
+        self.check_fusion()
+
     def test_small_outer_reduction_fuses(self):
         self._norm_block_reduce(_rmsnorm, "amax", 4, 128, 16)
 
