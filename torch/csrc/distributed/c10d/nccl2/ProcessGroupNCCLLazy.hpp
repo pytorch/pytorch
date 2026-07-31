@@ -26,10 +26,10 @@ class TORCH_API ProcessGroupNCCLLazy
   static constexpr std::string_view kBackendName = "nccl-lazy";
 
   ProcessGroupNCCLLazy(
-      const c10::intrusive_ptr<::c10d::Store>& store,
+      c10::intrusive_ptr<::c10d::Store> store,
       int rank,
       int size,
-      const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options =
+      c10::intrusive_ptr<ProcessGroupNCCL::Options> options =
           ProcessGroupNCCL::Options::create());
 
   const std::string getBackendName() const override {
