@@ -443,13 +443,16 @@ def grouped_reduction_ir(
     """Classify a primitive or unrolled grouped reduction loop body."""
     allowed_conversion_dtypes = frozenset((source_dtype, torch.float32))
     candidates = [expr for expr in _walk(store.value) if expr.op == "reduction"]
+    matches = []
     for reduction in candidates:
         reduction_type = str(reduction.args[2])
         source_type = _source_transform(
             reduction.args[3], source_name, allowed_conversion_dtypes
         )
         if source_type is not None:
-            return reduction_type, source_type
+            matches.append((reduction_type, source_type))
+    if candidates:
+        return matches[0] if len(candidates) == len(matches) == 1 else None
 
     root = _strip_conversions(store.value)
     while isinstance(root, GemmEpilogueIRExpression) and root.op in (
