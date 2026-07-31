@@ -1122,32 +1122,24 @@ void FakeTensorMode::invalidate_constant_aliases(
 
 void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
   std::lock_guard<std::mutex> lock(constant_mutex_);
-  // Recover the constant's storage from the value map before erasing, so we know
-  // which alias bucket to prune. This reconstructs the same key set_constant
-  // inserted (constant.storage().unsafeGetStorageImpl()).
-  auto value_it = tensor_to_constant_.find(extra_meta);
-  if (value_it == tensor_to_constant_.end()) {
+  // get the constant storage associated with this tensor
+  auto constant_it = tensor_to_constant_.find(extra_meta);
+  if (constant_it == tensor_to_constant_.end()) {
     return;
   }
-  const c10::TensorImpl& constant = *value_it->second;
-  c10::StorageImpl* storage =
-      constant.has_storage() ? constant.storage().unsafeGetStorageImpl()
-                             : nullptr;
-  tensor_to_constant_.erase(value_it);
+  c10::StorageImpl* storage = constant_it->second->has_storage()
+      ? constant_it->second->storage().unsafeGetStorageImpl()
+      : nullptr;
+  tensor_to_constant_.erase(constant_it);
   if (storage == nullptr) {
     return;
   }
-  // Drop this (now-dead) tensor's weak entry from the storage map, pruning any
-  // other expired aliases while we're here. Without this the vector grows
-  // unbounded as constants churn over one storage, and each dead weak ref pins a
-  // weakcount on a destroyed TensorImpl until the storage is invalidated.
+  // remove all invalid aliases from constant_storage_mapping_
   auto it = constant_storage_mapping_.find(storage);
   if (it == constant_storage_mapping_.end()) {
     return;
   }
   auto& aliases = it->second;
-  // std::erase_if (not resize) since weak_intrusive_ptr is not
-  // default-constructible; drops every expired alias in one pass.
   std::erase_if(aliases, [](const c10::weak_intrusive_ptr<c10::TensorImpl>& w) {
     return w.expired();
   });
