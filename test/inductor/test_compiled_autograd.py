@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     parametrize,
     scoped_load_inline,
+    skipIfCppFakeTensor,
     skipIfWindows,
     skipIfXpu,
 )
@@ -3105,6 +3106,7 @@ main()
         """
         self.run_as_subprocess(script)
 
+    @skipIfCppFakeTensor("no tensor subclass activation-memory support")
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_free_activation_memory_subclass(self):
         # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper

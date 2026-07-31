@@ -932,14 +932,14 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        # _apply is traced by dynamo at the bytecode level, and torch._subclasses
-        # is in dynamo's MOD_SKIPLIST, revisit later for c++
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
             if torch._has_compatible_shallow_copy_type(
                 tensor, tensor_applied
-            ) and not isinstance(tensor_applied, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+            ) and not isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                tensor_applied, FakeTensor
+            ):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -964,13 +964,20 @@ class Module:
             # `with torch.no_grad():`
             with torch.no_grad():
                 param_applied = fn(param)
-            p_should_use_set_data = compute_should_use_set_data(param, param_applied)
+            # C++ fake parameters are Tensor objects with the Parameter marker.
+            param_is_fake = (
+                isinstance(param, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+                or (type(param) is Tensor and isinstance(param, Parameter))
+            )
+            p_should_use_set_data = not param_is_fake and compute_should_use_set_data(
+                param, param_applied
+            )
 
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
                 should_use_swap_tensors
                 or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+                or param_is_fake
             )
 
             param_grad = param.grad

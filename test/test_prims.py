@@ -6,8 +6,14 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
-                                                  set_default_dtype)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    set_default_dtype,
+    TestCase,
+    TEST_SCIPY,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -353,6 +359,17 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
             x = torch.randn(4, dtype=torch.complex64, device='meta').conj()
             x + 1
 
+    @parametrize("math_bit", ("conj", "neg"))
+    def test_as_strided_math_bit(self, math_bit):
+        x = torch.empty((0, 1), dtype=torch.complex128).conj()
+        x = x if math_bit == "conj" else x.imag
+
+        result = prims.as_strided(x, x.shape, x.stride(), x.storage_offset())
+
+        self.assertEqual(result.is_conj(), x.is_conj())
+        self.assertEqual(result.is_neg(), x.is_neg())
+        self.assertTrue(torch._C._is_alias_of(result, x))
+
     def test_clone_meta_stride_preservation_dense(self):
         tensor = torch.randn(1, 5).t()
         meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
@@ -366,6 +383,9 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
     def test_check_deprecation_warning(self):
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')
+
+
+instantiate_parametrized_tests(TestPrimsBasic)
 
 
 instantiate_device_type_tests(TestPrims, globals())
