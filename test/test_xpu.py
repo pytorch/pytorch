@@ -3507,6 +3507,20 @@ class TestXpuAutocast(TestAutocast):
                 amp_dtype=torch.float16,
             )
 
+    def test_autocast_torch_addmm_activation(self):
+        args = tuple(
+            torch.randn((8, 8), device="xpu", dtype=torch.float32) for _ in range(3)
+        )
+        for amp_dtype in (torch.float16, torch.bfloat16):
+            self._run_autocast_outofplace(
+                "_addmm_activation",
+                args,
+                amp_dtype,
+                device="xpu",
+                add_kwargs={"use_gelu": True},
+                amp_dtype=amp_dtype,
+            )
+
     def test_autocast_checkpointing(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(8, 8), torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)

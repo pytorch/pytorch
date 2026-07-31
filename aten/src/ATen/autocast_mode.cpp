@@ -558,6 +558,9 @@ TORCH_LIBRARY_IMPL(aten, AutocastXPU, m) {
 
   AT_FORALL_LOWER_PRECISION_FP(_KERNEL_XPU_LOW_PRECISION_FP)
 
+  // Fix #191796: Avoid type mismatch in nn.TransformerEncoder.
+  KERNEL_XPU(_addmm_activation, lower_precision_fp)
+
   // fp32
 #define _KERNEL_XPU_FP32(...) KERNEL_XPU(__VA_ARGS__, fp32)
 
