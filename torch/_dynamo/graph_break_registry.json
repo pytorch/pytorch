@@ -2342,6 +2342,28 @@
       "Hints": []
     }
   ],
+  "GB4382": [
+    {
+      "Gb_type": "Callable torch._check*() messages in HOP branches",
+      "Context": "str(message_vt)",
+      "Explanation": "Callable torch._check*() messages cannot be preserved lazily in a compiled higher-order-operator branch.",
+      "Hints": [
+        "Pass a constant message instead of a callable.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2810": [
+    {
+      "Gb_type": "Non-RuntimeError torch._check*() in HOP branch",
+      "Context": "str(error_type)",
+      "Explanation": "Specialized torch._check*() exception types cannot be preserved by a compiled higher-order-operator branch.",
+      "Hints": [
+        "Use torch._check() if RuntimeError is acceptable.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0158": [
     {
       "Gb_type": "Unsupported ndarray method call",
