@@ -247,6 +247,28 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         dist.barrier()
         self._destroy_pg()
 
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce_rejects_noncontiguous(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, 4, device=device)[::2]
+        with self.assertRaises(ValueError):
+            dist.all_reduce(t)
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
+    def test_send_recv_rejects_noncontiguous(self):
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, 4, device=device)[::2]
+        if self.rank == 0:
+            with self.assertRaises(ValueError):
+                dist.send(t, dst=1)
+        elif self.rank == 1:
+            with self.assertRaises(ValueError):
+                dist.recv(t, src=0)
+        self._destroy_pg()
+
 
 if __name__ == "__main__":
     run_tests()

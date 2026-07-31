@@ -91,6 +91,16 @@ class NCCL4PyBackend(C10DBackend):
     def getBackendName(self):
         return "nccl4py"
 
+    def _check_tensor(self, tensor):
+        if not tensor.is_cuda:
+            raise ValueError(f"nccl4py: expected CUDA tensor, got {tensor.device}")
+        if not tensor.is_contiguous():
+            raise ValueError("nccl4py: expected contiguous tensor")
+
+    def _check_tensors(self, tensors):
+        for t in tensors:
+            self._check_tensor(t)
+
     def _op_stream(self, async_op):
         if async_op:
             current = torch.cuda.current_stream(self._device)
@@ -140,6 +150,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def send(self, tensor_list, dst, tag=0):
+        self._check_tensors(tensor_list)
         stream = torch.cuda.current_stream(self._device)
         s = stream.cuda_stream
         with nccl.group():
@@ -148,6 +159,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def recv(self, tensor_list, src, tag=0):
+        self._check_tensors(tensor_list)
         stream = torch.cuda.current_stream(self._device)
         s = stream.cuda_stream
         with nccl.group():
@@ -156,6 +168,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def broadcast(self, tensor_list, opts):
+        self._check_tensors(tensor_list)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         with nccl.group():
@@ -164,6 +177,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def allreduce(self, tensor_list, opts):
+        self._check_tensors(tensor_list)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, tensor_list[0])
@@ -177,6 +191,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def reduce(self, tensor_list, opts):
+        self._check_tensors(tensor_list)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, tensor_list[0])
@@ -190,6 +205,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def allgather(self, output_tensors, input_tensors, opts):
+        self._check_tensors(input_tensors)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         flats = []
@@ -209,11 +225,14 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def all_gather_single(self, output, input, opts):
+        self._check_tensor(output)
+        self._check_tensor(input)
         stream = self._op_stream(opts.asyncOp)
         self._comm.allgather(input, output, stream=stream.cuda_stream)
         return self._make_work(stream)
 
     def gather(self, output_tensors, input_tensors, opts):
+        self._check_tensors(input_tensors)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         root = opts.rootRank
@@ -238,6 +257,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def scatter(self, output_tensors, input_tensors, opts):
+        self._check_tensors(output_tensors)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         root = opts.rootRank
@@ -254,6 +274,7 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def reduce_scatter(self, output_tensors, input_tensors, opts):
+        self._check_tensors(output_tensors)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, output_tensors[0])
@@ -269,6 +290,8 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def reduce_scatter_single(self, output, input, opts):
+        self._check_tensor(output)
+        self._check_tensor(input)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, output)
@@ -282,6 +305,8 @@ class NCCL4PyBackend(C10DBackend):
     def all_to_all_single(
         self, output, input, output_split_sizes, input_split_sizes, opts
     ):
+        self._check_tensor(output)
+        self._check_tensor(input)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         if not output_split_sizes and not input_split_sizes:
@@ -311,6 +336,8 @@ class NCCL4PyBackend(C10DBackend):
         return self._make_work(stream)
 
     def alltoall(self, output_tensors, input_tensors, opts):
+        self._check_tensors(output_tensors)
+        self._check_tensors(input_tensors)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         with nccl.group():
