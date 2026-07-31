@@ -217,8 +217,7 @@ TensorCheck::TensorCheck(
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
   // In terms of a sparse_csr tensor, it does not support strides information
-  std::vector<SymInt> sym_strides_storage(v.ndimension(), -1);
-  c10::SymIntArrayRef sym_strides(sym_strides_storage);
+  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
   bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
       v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
       v.layout() == c10::kSparseBsr;
