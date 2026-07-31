@@ -157,6 +157,7 @@ class HeuristicType(Enum):
 
 class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
+    SCALAR_ONLINE_SOFTMAX = 1
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
@@ -324,7 +325,6 @@ class InductorMeta(typing.TypedDict, total=False):
     tiling_scores: typing.Any
     min_xblock: int
     min_rblock: int
-    has_scalar_online_softmax_reduction: bool
     persistent_reduction: bool
     native_matmul_persistent_rblock: int
     add_persistent_rblock: bool

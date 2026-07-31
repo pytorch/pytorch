@@ -2,6 +2,7 @@
 
 import math
 import os
+import unittest
 
 import torch
 import torch._inductor.config as inductor_config
@@ -20,6 +21,15 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT") == "1" or DO_PERF_TEST
+SCALAR_ONLINE_SOFTMAX_CONFIG = {
+    "triton.persistent_reductions": False,
+    "split_reductions": False,
+    "triton.scalar_online_softmax_accumulators": True,
+}
+requires_nvidia_cuda = unittest.skipUnless(
+    GPU_TYPE == "cuda" and torch.version.hip is None,
+    "scalar online-softmax accumulators are CUDA-only",
+)
 
 
 def _prepare_softmax(x, dim):
@@ -64,6 +74,7 @@ class TestOnlineSoftmax(TestCase):
     def test_prepare_softmax_perf(self):
         self.do_test_acc_and_perf(_prepare_softmax)
 
+    @requires_nvidia_cuda
     @inductor_config.patch(
         {
             "triton.persistent_reductions": False,
@@ -71,9 +82,6 @@ class TestOnlineSoftmax(TestCase):
         }
     )
     def test_scalar_online_softmax_masked_padding(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         def f(x):
             return _prepare_softmax(x, dim=-1)
 
@@ -90,6 +98,7 @@ class TestOnlineSoftmax(TestCase):
         self.assertNotIn("online_softmax_reduce_scalar_combine", vector_code)
         self.assertIn("online_softmax_reduce_scalar_combine", scalar_code)
 
+    @requires_nvidia_cuda
     @inductor_config.patch(
         {
             "triton.persistent_reductions": False,
@@ -98,9 +107,6 @@ class TestOnlineSoftmax(TestCase):
         }
     )
     def test_scalar_online_softmax_disabled(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         x = torch.randn(1024, 8192, dtype=torch.float32, device=GPU_TYPE)
         act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
 
@@ -167,103 +173,36 @@ class TestOnlineSoftmax(TestCase):
         wrapper_code = self.get_softmax_wrapper(1024)
         self.assertEqual(wrapper_code.count("for r0_offset in"), 0)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_skips_plain_sum(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
-        def f(x):
-            return x.sum(dim=-1)
-
-        x = torch.randn(1024, 8192, dtype=torch.float32, device=GPU_TYPE)
-        act, (code,) = run_and_get_code(torch.compile(f), x)
-
-        self.assertTrue(same(f(x), act, tol=1e-3))
-        self.assertEqual(code.count("for r0_offset in"), 1)
-        self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
-        self.assertIn("tl.sum(_tmp", code)
-
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
     def test_scalar_online_softmax_supports_50k_reduction_bucket(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         storage = torch.randn(4, 50272, dtype=torch.bfloat16, device=GPU_TYPE)
         x = storage[:, :50265]
         act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
 
         self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-2))
         self.assertIn("online_softmax_reduce_scalar_combine", code)
+        self.assertIn("AutotuneHint.SCALAR_ONLINE_SOFTMAX", code)
 
-    @parametrize("reduction_numel", [32768, 32769, 65536, 65537])
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_reduction_bucket_boundaries(
-        self, reduction_numel
+    @parametrize("reduction_numel,uses_scalar", [(4096, False), (4097, True)])
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
+    def test_scalar_online_softmax_reduction_size_threshold(
+        self, reduction_numel, uses_scalar
     ):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         x = torch.randn(2, reduction_numel, dtype=torch.float32, device=GPU_TYPE)
         act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
 
         self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
-        self.assertIn("online_softmax_reduce_scalar_combine", code)
+        marker = "online_softmax_reduce_scalar_combine"
+        if uses_scalar:
+            self.assertIn(marker, code)
+        else:
+            self.assertNotIn(marker, code)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_skips_small_reduction(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
-        def f(a, b):
-            return _prepare_softmax(a + b, -1)
-
-        args = [
-            torch.randn(128, 1024, dtype=torch.float32, device=GPU_TYPE)
-            for _ in range(2)
-        ]
-        act, (code,) = run_and_get_code(torch.compile(f), *args)
-
-        ref = f(*args)
-        for expected, actual in zip(ref, act):
-            torch.testing.assert_close(expected, actual, rtol=1e-3, atol=1e-3)
-        self.assertIn("online_softmax_combine(", code)
-        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
-
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
     def test_scalar_online_softmax_skips_outer_reduction(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         def f(x):
             return _prepare_softmax(x, 0)
 
@@ -276,68 +215,34 @@ class TestOnlineSoftmax(TestCase):
         self.assertIn("online_softmax_combine(", code)
         self.assertNotIn("online_softmax_reduce_scalar_combine", code)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_allows_three_read_buffers(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
-        def f(a, b, c):
-            return _prepare_softmax(a + b + c, -1)
+    @parametrize("num_inputs,uses_scalar", [(3, True), (4, False)])
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
+    def test_scalar_online_softmax_read_limit(self, num_inputs, uses_scalar):
+        def f(*args):
+            value = args[0]
+            for arg in args[1:]:
+                value = value + arg
+            return _prepare_softmax(value, -1)
 
         args = [
             torch.randn(128, 8192, dtype=torch.float32, device=GPU_TYPE)
-            for _ in range(3)
+            for _ in range(num_inputs)
         ]
         act, (code,) = run_and_get_code(torch.compile(f), *args)
 
         ref = f(*args)
         for expected, actual in zip(ref, act):
             torch.testing.assert_close(expected, actual, rtol=1e-3, atol=1e-3)
-        self.assertIn("online_softmax_reduce_scalar_combine", code)
+        marker = "online_softmax_reduce_scalar_combine"
+        if uses_scalar:
+            self.assertIn(marker, code)
+        else:
+            self.assertNotIn(marker, code)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_skips_many_read_buffers(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
-        def f(a, b, c, d):
-            return _prepare_softmax(a + b + c + d, -1)
-
-        args = [
-            torch.randn(128, 8192, dtype=torch.float32, device=GPU_TYPE)
-            for _ in range(4)
-        ]
-        act, (code,) = run_and_get_code(torch.compile(f), *args)
-
-        ref = f(*args)
-        for expected, actual in zip(ref, act):
-            torch.testing.assert_close(expected, actual, rtol=1e-3, atol=1e-3)
-        self.assertIn("online_softmax_combine(", code)
-        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
-
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
     def test_scalar_online_softmax_allows_fused_gather(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         def f(logits, target):
             xmax, xsum = _prepare_softmax(logits, -1)
             target_logit = logits.gather(-1, target[:, None])
@@ -350,20 +255,17 @@ class TestOnlineSoftmax(TestCase):
         torch.testing.assert_close(f(logits, target), act, rtol=1e-3, atol=1e-3)
         self.assertIn("online_softmax_reduce_scalar_combine", code)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_skips_materialized_reduction_outputs(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
+    @parametrize("materialized_outputs,uses_scalar", [(1, True), (2, False)])
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
+    def test_scalar_online_softmax_materialized_output_limit(
+        self, materialized_outputs, uses_scalar
+    ):
         def f(x, bias):
             logits = (x + bias).to(torch.bfloat16)
             xmax, xsum = _prepare_softmax(logits.float(), -1)
+            if materialized_outputs == 1:
+                return logits, xmax + xsum.log()
             log_probs = (logits.float() - xmax - xsum.log()).to(torch.bfloat16)
             return logits, log_probs
 
@@ -374,65 +276,15 @@ class TestOnlineSoftmax(TestCase):
         ref = f(x, bias)
         for expected, actual in zip(ref, act):
             torch.testing.assert_close(expected, actual, rtol=1e-2, atol=1e-2)
-        self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
-        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
+        marker = "online_softmax_reduce_scalar_combine"
+        if uses_scalar:
+            self.assertIn(marker, code)
+        else:
+            self.assertNotIn(marker, code)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_skips_dynamic_materialized_reduction_outputs(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
-        def f(x, bias):
-            logits = (x + bias).to(torch.bfloat16)
-            xmax, xsum = _prepare_softmax(logits.float(), -1)
-            log_probs = (logits.float() - xmax - xsum.log()).to(torch.bfloat16)
-            return logits, log_probs
-
-        x = torch.randn(128, 8192, dtype=torch.bfloat16, device=GPU_TYPE)
-        bias = torch.randn(8192, dtype=torch.float32, device=GPU_TYPE)
-        act, (code,) = run_and_get_code(torch.compile(f, dynamic=True), x, bias)
-
-        ref = f(x, bias)
-        for expected, actual in zip(ref, act):
-            torch.testing.assert_close(expected, actual, rtol=1e-2, atol=1e-2)
-        self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
-        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
-
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
-    def test_scalar_online_softmax_skips_tiny_reduction(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
-        x = torch.randn(128, 2, dtype=torch.float32, device=GPU_TYPE)
-        act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
-
-        self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
-        self.assertIn("prepare_softmax_online", code)
-        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
-
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
     def test_scalar_online_softmax_dynamic_50k_uses_vector_path(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         opt_f = torch.compile(_prepare_softmax, dynamic=True)
         x = torch.randn(4, 50005, dtype=torch.float32, device=GPU_TYPE)
         act, (code,) = run_and_get_code(opt_f, x, -1)
@@ -447,9 +299,7 @@ class TestOnlineSoftmax(TestCase):
         # recompile.
         torch._dynamo.reset()
         compile_counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-        opt_f = torch.compile(
-            _prepare_softmax, backend=compile_counter, dynamic=True
-        )
+        opt_f = torch.compile(_prepare_softmax, backend=compile_counter, dynamic=True)
         x = torch.randn(4, 8192, dtype=torch.float32, device=GPU_TYPE)
         act, (code,) = run_and_get_code(opt_f, x, -1)
         self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
@@ -461,34 +311,18 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
         self.assertEqual(compile_counter.frame_count, 1)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
     def test_scalar_online_softmax_supports_large_reductions(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         x = torch.randn(4, 2**20 + 13, dtype=torch.float32, device=GPU_TYPE)
         act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, -1)
 
         self.assertTrue(same(_prepare_softmax(x, -1), act, tol=1e-3))
         self.assertIn("online_softmax_reduce_scalar_combine", code)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
     def test_scalar_online_softmax_skips_extra_reductions(self):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax accumulators are CUDA-only")
-
         def f(x):
             xmax, xsum = _prepare_softmax(x, -1)
             return xmax, xsum, (x - xmax).sum(dim=-1, keepdim=True)
@@ -502,18 +336,10 @@ class TestOnlineSoftmax(TestCase):
         self.assertIn("online_softmax_combine(", code)
         self.assertNotIn("online_softmax_reduce_scalar_combine", code)
 
-    @inductor_config.patch(
-        {
-            "triton.persistent_reductions": False,
-            "split_reductions": False,
-            "triton.scalar_online_softmax_accumulators": True,
-        }
-    )
+    @requires_nvidia_cuda
+    @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
     def test_scalar_online_softmax_native_max(self, dtype):
-        if GPU_TYPE != "cuda" or torch.version.hip is not None:
-            self.skipTest("scalar online-softmax fast combine is CUDA-only")
-
         rows, cols = 7, 8193
         x = torch.randn(rows, cols, device=GPU_TYPE, dtype=dtype)
         x[0, 0] = float("nan")

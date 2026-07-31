@@ -14,10 +14,7 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import (
-    ReductionHint,
-    TRITON_MAX_BLOCK,
-)
+from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
@@ -214,10 +211,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         device_major = triton_meta["device"].major
         warp_size = triton_meta["device"].warp_size_or_default
 
-        has_scalar_online_softmax_reduction = inductor_meta.get(
-            "has_scalar_online_softmax_reduction", False
+        has_scalar_online_softmax_reduction = (
+            AutotuneHint.SCALAR_ONLINE_SOFTMAX
+            in inductor_meta.get("autotune_hints", ())
         )
-        if has_scalar_online_softmax_reduction and 8192 <= rnumel:
+        if has_scalar_online_softmax_reduction and 8192 <= rnumel and "y" in size_hints:
             MAX_R0_BLOCK = 4096
         elif device_major is not None and device_major >= 10:
             # Prefer smaller MAX_R0_BLOCK for Blackwell by default
@@ -312,6 +310,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             and "y" not in size_hints
         ):
             scalar_acc_configs = [
+                make_config(1, min(rnumel, 4096)),
                 make_config(1, min(rnumel, 8192), num_warps=4),
                 make_config(1, min(rnumel, 16384), num_warps=8),
             ]
@@ -334,7 +333,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
-            return configs + [contiguous_config] + scalar_acc_configs
+            return configs + (scalar_acc_configs or [contiguous_config])
         elif reduction_hint == ReductionHint.OUTER:
             return configs + [outer_config]
         elif reduction_hint == ReductionHint.OUTER_TINY:

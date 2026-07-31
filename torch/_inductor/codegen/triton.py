@@ -3300,8 +3300,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
-        self.has_scalar_online_softmax_reduction = False
-        self.has_non_scalar_reduction = False
+        self.all_reductions_use_scalar_online_softmax: bool | None = None
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
@@ -5013,6 +5012,60 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=tuple(target_shape),
         )
 
+    def _should_use_scalar_online_softmax(
+        self,
+        reduction_type: ReductionType,
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> bool:
+        if (
+            self.persistent_reduction
+            or not config.triton.scalar_online_softmax_accumulators
+            or reduction_type != "online_softmax_reduce"
+            or isinstance(value, tuple)
+            or self.num_load > 3
+            or self.num_reduction_dims != 1
+            or self.features.get_reduction_hint(self.tiling_scores)
+            != ReductionHint.INNER
+            or self.features.op_counts().get("reduction", 0) > 2
+        ):
+            return False
+
+        sizevars = V.graph.sizevars
+        reduction_numel_hint = next_power_of_2(
+            int(sizevars.optimization_hint(self.features.reduction_numel))
+        )
+        if reduction_numel_hint < 8192:
+            return False
+
+        scheduler_nodes = tuple(self.features.scheduler_nodes())
+        if not scheduler_nodes:
+            return False
+        device = scheduler_nodes[0].get_device()
+        if device is None or device.type != "cuda" or torch.version.hip is not None:
+            return False
+
+        scheduler_node_set = OrderedSet(scheduler_nodes)
+        materialized_numel = int(sizevars.optimization_hint(self.features.numel))
+        materialized_numel *= int(
+            sizevars.optimization_hint(self.features.reduction_numel)
+        )
+        materialized_names: OrderedSet[str] = OrderedSet()
+        for node in scheduler_nodes:
+            for dep in node.read_writes.writes:
+                if (
+                    not isinstance(dep, MemoryDep)
+                    or dep.name in V.graph.removed_buffers
+                    or dep.numel_hint() < materialized_numel
+                ):
+                    continue
+                scheduler_buf = node.scheduler.name_to_buf.get(dep.name)
+                if scheduler_buf is not None and all(
+                    user.node in scheduler_node_set for user in scheduler_buf.users
+                ):
+                    continue
+                materialized_names.add(dep.name)
+        return len(materialized_names) < 2
+
     def reduction(
         self,
         dtype: torch.dtype,
@@ -5250,7 +5303,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return TritonKernelOverrides.where(cond, tval, fval)
 
         if self.persistent_reduction:
-            self.has_non_scalar_reduction = True
+            self.all_reductions_use_scalar_online_softmax = False
             default = ir.Reduction.default_value(reduction_type, src_dtype)
 
             def update_constant_dtype(constant, src_dtype, dst_dtype):
@@ -5389,69 +5442,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if reduction_type in arg_with_value_reduction_types
                 else result_var
             )
-            num_reduction_ops = self.features.op_counts().get("reduction", 0)
-            reduction_numel = self.features.reduction_numel
-            sizevars = V.graph.sizevars
-            reduction_numel_hint_unrounded = int(
-                sizevars.optimization_hint(reduction_numel)
+            use_scalar_online_softmax = self._should_use_scalar_online_softmax(
+                reduction_type, value
             )
-            reduction_numel_hint = next_power_of_2(reduction_numel_hint_unrounded)
-            reduction_hint = self.features.get_reduction_hint(self.tiling_scores)
-
-            def materialized_reduction_output_count() -> int:
-                names: OrderedSet[str] = OrderedSet()
-                scheduler_nodes = OrderedSet(self.features.scheduler_nodes())
-                materialized_numel = int(
-                    sizevars.optimization_hint(self.features.numel)
+            if self.all_reductions_use_scalar_online_softmax is None:
+                self.all_reductions_use_scalar_online_softmax = (
+                    use_scalar_online_softmax
                 )
-                materialized_numel *= reduction_numel_hint_unrounded
-                for node in self.features.scheduler_nodes():
-                    for dep in node.read_writes.writes:
-                        if (
-                            not isinstance(dep, MemoryDep)
-                            or dep.name in V.graph.removed_buffers
-                            or dep.numel_hint() < materialized_numel
-                        ):
-                            continue
-                        scheduler_buf = node.scheduler.name_to_buf.get(dep.name)
-                        if scheduler_buf is not None and all(
-                            user.node in scheduler_nodes for user in scheduler_buf.users
-                        ):
-                            continue
-                        names.add(dep.name)
-                return len(names)
-
-            use_scalar_online_softmax = (
-                config.triton.scalar_online_softmax_accumulators
-                and reduction_type == "online_softmax_reduce"
-                and not isinstance(value, tuple)
-                # Use emitted loads, not scheduler dependency count: fused
-                # CE-style gather kernels can have a wider dependency set but
-                # only two actual in-loop loads.
-                and self.num_load <= 3
-                and self.num_reduction_dims == 1
-                and reduction_hint == ReductionHint.INNER
-                and num_reduction_ops <= 2
-                # Small reductions are already cheap on the vector path.
-                and reduction_numel_hint >= 8192
-            )
-            if use_scalar_online_softmax:
-                device = next(iter(self.features.scheduler_nodes())).get_device()
-                use_scalar_online_softmax = (
-                    device is not None
-                    and device.type == "cuda"
-                    and torch.version.hip is None
+            else:
+                self.all_reductions_use_scalar_online_softmax &= (
+                    use_scalar_online_softmax
                 )
-            if use_scalar_online_softmax:
-                # Scalar accumulation trades vector accumulator state for an
-                # in-loop block reduction. That loses when the fused kernel
-                # still has to materialize multiple full reduction-axis outputs.
-                use_scalar_online_softmax = materialized_reduction_output_count() < 2
-            self.has_scalar_online_softmax_reduction |= use_scalar_online_softmax
-            self.has_non_scalar_reduction |= not use_scalar_online_softmax
-
-            scalar_acc_shape = tuple(self.dense_size_list()[:dim])
-            scalar_acc_size = f"[{', '.join(scalar_acc_shape)}]"
             accumulator = self.cse.namedvar(
                 f"_{result_prefix}",
                 dtype=torch_acc_type,
@@ -5519,6 +5520,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 accumulator_sum = f"_{result_var}_sum"
 
                 if use_scalar_online_softmax:
+                    scalar_acc_shape = tuple(self.dense_size_list()[:dim])
+                    scalar_acc_size = f"[{', '.join(scalar_acc_shape)}]"
                     self.body.writeline(
                         f"{accumulator_max} = tl.full({scalar_acc_size}, float('-inf'), {acc_type})"
                     )
@@ -6849,6 +6852,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Used by both standalone codegen_kernel() and ComboKernel.combo_grid_meta()
         (which calls this on each sub_kernel).
         """
+        autotune_hints = set(self.autotune_hints)  # noqa: set_linter
+        if self.all_reductions_use_scalar_online_softmax is True:
+            autotune_hints.add(AutotuneHint.SCALAR_ONLINE_SOFTMAX)
         out: dict[str, Any] = {
             "no_x_dim": self.no_x_dim,
             "atomic_add_found": self.atomic_add_found,
@@ -6856,7 +6862,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_store": self.num_store,
             "num_reduction": self.num_reduction,
             # Triton will not accept an OrderedSet for autotune_hints
-            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
+            "autotune_hints": autotune_hints,
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
@@ -6873,11 +6879,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["min_xblock"] = self.min_xblock
         if self.min_rblock is not None:
             out["min_rblock"] = self.min_rblock
-        if (
-            self.has_scalar_online_softmax_reduction
-            and not self.has_non_scalar_reduction
-        ):
-            out["has_scalar_online_softmax_reduction"] = True
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
         if (rblock := self._get_native_matmul_persistent_rblock()) is not None:
