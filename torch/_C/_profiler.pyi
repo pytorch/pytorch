@@ -328,6 +328,7 @@ class _CuptiMonitorModule:
         groups: list[tuple],
         render: tuple | None = None,
         counters: tuple | None = None,
+        compression_level: int = 1,
     ) -> bytes: ...
 
 _cupti_monitor: _CuptiMonitorModule
