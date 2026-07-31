@@ -677,9 +677,14 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
             source=ConstantSource("kv_len"),
             dynamic_dim=DimDynamic.DYNAMIC,
         )
+        v_len = graph.sizevars.shape_env.create_symbol(
+            384,
+            source=ConstantSource("v_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
         query = make_qkv("query", q_len)
         key = make_qkv("key", kv_len)
-        value = make_qkv("value", kv_len)
+        value = make_qkv("value", v_len)
 
         graph.unaligned_buffers.add("value")
         guards_before = len(graph.sizevars.shape_env.guards)
@@ -694,10 +699,14 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
 
         new_guards = graph.sizevars.shape_env.guards[guards_before:]
         int32_max = torch.iinfo(torch.int32).max
-        self.assertEqual(len(new_guards), 2)
+        self.assertEqual(len(new_guards), 3)
         self.assertEqual(
             {guard[0] for guard in new_guards},
-            {sympy.Le(q_len, int32_max), sympy.Le(kv_len, int32_max)},
+            {
+                sympy.Le(q_len, int32_max),
+                sympy.Le(kv_len, int32_max),
+                sympy.Le(v_len, int32_max),
+            },
         )
 
     def test_flex_templates_gate_descriptors_on_tma_or_tdm(self):
