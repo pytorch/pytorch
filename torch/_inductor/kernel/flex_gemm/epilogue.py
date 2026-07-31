@@ -78,6 +78,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmPhysicalReduction,
     FlexGemmStructuralInt,
     grouped_tensor_layout,
+    GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
     iter_fx_node_inputs,
     lower_full_scalar,
@@ -1302,10 +1303,15 @@ class FlexGemmEpilogueEmitter:
             )
         }
         self.grouped_tensors = {
-            node: grouped.layout
+            node: GroupedTensorSSALayout(
+                group=grouped.layout.group, axis=grouped.layout.axis
+            )
             for node, grouped in analysis.local_reduce.grouped_layouts.items()
         }
-        self.active_grouped_layouts = OrderedSet(analysis.required_geometries)
+        self.active_grouped_layouts = OrderedSet(
+            GroupedTensorSSALayout(group=geometry.group, axis=geometry.axis)
+            for geometry in analysis.required_geometries
+        )
         self.store_sources: dict[torch.fx.Node, Any] = {}
         self.physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction] = {}
         self.local_reduce = self.outputs.local_reduce

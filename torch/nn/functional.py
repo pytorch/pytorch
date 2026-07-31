@@ -7146,7 +7146,9 @@ def grouped_mm(
             updates), the trailing dimension of ``mat_a`` and the leading dimension of
             ``mat_b`` are partitioned according to the same ``offs`` tensor. For the
             common forward pass (``out = input @ weight.T``) ``mat_b`` is 3D with
-            shape ``(num_groups, N, K)``.
+            shape ``(num_groups, K, N)``. If expert weights are stored in the standard
+            ``nn.Linear`` layout ``(num_groups, N, K)``, pass
+            ``weight.transpose(-2, -1)`` as ``mat_b``.
         offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
             delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
             of group ``i`` and ``offs[-1]`` must be strictly less than the total
