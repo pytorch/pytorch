@@ -10,7 +10,7 @@ import traceback
 import types
 import unittest
 from copy import deepcopy
-from functools import partial
+from functools import partial, update_wrapper
 from typing import NamedTuple
 from unittest.mock import patch
 
@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.testing import same
 from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -1511,8 +1511,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1581,8 +1579,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1594,8 +1590,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1612,8 +1606,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
@@ -1623,8 +1615,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module6(self):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()
@@ -1634,8 +1624,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module7(self):
         # Test lazy module works well with namedtuple/dict input
         m = LazyModuleWithNamedTupleInput()
@@ -1691,8 +1679,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             exp_res = opt_m(x, y)
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module_speculation_log_divergence(self):
         class ModWithOneLazyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -1729,6 +1715,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         expect_res = mod(x)
         self.assertTrue(torch.allclose(expect_res, actual_res))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_lazy_module_symbolic_shapes(self):
+        # Regression test: lazy module initialization must handle symbolic
+        # shapes from dynamic inputs without hitting "SymIntArrayRef expected
+        # to contain only concrete integers".
+        m = torch.nn.LazyBatchNorm1d()
+
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(x):
+            return m(x)
+
+        x = torch.randn(16, 3, 6)
+        result = fn(x)
+        self.assertEqual(result.shape, x.shape)
+        self.assertIsInstance(m, torch.nn.BatchNorm1d)
+        self.assertEqual(m.num_features, 3)
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1816,7 +1818,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
-    @expectedFailureDynamic
     @skipIfHpu
     def test_lazy_module3(self, device):
         m = LazyMLP()
@@ -1886,6 +1887,81 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             result = opt_mod.state_dict(destination)
         self.assertIs(result, destination)
         self.assertStateDictEqual(destination, mod_state_dict)
+
+    def test_state_dict_with_wrapper_state(self):
+        def make_compiled_module(value):
+            opt_mod = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+            opt_mod.register_parameter(
+                "wrapper_parameter", torch.nn.Parameter(torch.full((), value))
+            )
+            opt_mod.register_buffer("wrapper_buffer", torch.full((), value))
+            opt_mod.add_module("wrapper_module", torch.nn.Linear(1, 1))
+            # Exercise the collision that the legacy `_orig_mod.` prefix disambiguates.
+            opt_mod._parameters["weight"] = torch.nn.Parameter(torch.full((), value))
+            return opt_mod
+
+        opt_mod = make_compiled_module(7.0)
+        state_dict = opt_mod.state_dict()
+        self.assertEqual(
+            list(state_dict),
+            [
+                "wrapper_parameter",
+                "weight",
+                "wrapper_buffer",
+                "_orig_mod.weight",
+                "_orig_mod.bias",
+                "wrapper_module.weight",
+                "wrapper_module.bias",
+            ],
+        )
+
+        loaded = make_compiled_module(0.0)
+        incompatible_keys = loaded.load_state_dict(state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(loaded.state_dict(), state_dict)
+
+        opt_mod = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+        opt_mod.register_parameter("none_parameter", None)
+        opt_mod.register_buffer("cache", torch.ones(()), persistent=False)
+        self.assertEqual(list(opt_mod.state_dict()), ["weight", "bias"])
+
+        opt_mod = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+        save_pre_hook_calls = []
+
+        def save_pre_hook(module, prefix, keep_vars):
+            save_pre_hook_calls.append(module)
+            module.register_parameter("late", torch.nn.Parameter(torch.full((), 4.0)))
+
+        opt_mod.register_state_dict_pre_hook(save_pre_hook)
+        state_dict = opt_mod.state_dict()
+        self.assertEqual(save_pre_hook_calls, [opt_mod])
+        self.assertEqual(
+            list(state_dict), ["late", "_orig_mod.weight", "_orig_mod.bias"]
+        )
+
+        loaded = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+        load_pre_hook_calls = []
+
+        def load_pre_hook(
+            module,
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        ):
+            load_pre_hook_calls.append(module)
+            module.register_parameter("late", torch.nn.Parameter(torch.zeros(())))
+
+        loaded.register_load_state_dict_pre_hook(load_pre_hook)
+        incompatible_keys = loaded.load_state_dict(state_dict)
+        self.assertEqual(load_pre_hook_calls, [loaded])
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(loaded._parameters["late"], state_dict["late"])
 
     def test_load_state_dict(self):
         mod = MockModule()
@@ -2018,6 +2094,68 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             opt_mod._orig_mod.loaded, old_style_state_dict["_orig_mod.custom"]
         )
 
+    def test_load_state_dict_legacy_state_dict_hook_key(self):
+        class CustomState(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.loaded = None
+
+            def forward(self, x):
+                return x
+
+        for replace_state_dict in (False, True):
+            with self.subTest(replace_state_dict=replace_state_dict):
+                state_dict_hook_calls = []
+
+                def state_dict_hook(module, state_dict, prefix, local_metadata):
+                    state_dict_hook_calls.append(prefix)
+                    if replace_state_dict:
+                        return collections.OrderedDict(
+                            [(prefix + "custom", torch.ones(()))]
+                        )
+                    state_dict[prefix + "custom"] = torch.ones(())
+
+                def load_state_dict_hook(
+                    module,
+                    state_dict,
+                    prefix,
+                    local_metadata,
+                    strict,
+                    missing_keys,
+                    unexpected_keys,
+                    error_msgs,
+                ):
+                    module.loaded = state_dict.pop(prefix + "custom", None)
+
+                def make_compiled_module():
+                    module = CustomState()
+                    if replace_state_dict:
+                        module._register_state_dict_hook(state_dict_hook)
+                    else:
+                        module.register_state_dict_post_hook(state_dict_hook)
+                    module.register_load_state_dict_pre_hook(load_state_dict_hook)
+                    return torch.compile(module, backend="eager")
+
+                public_value = torch.full((), 2)
+                opt_mod = make_compiled_module()
+                incompatible_keys = opt_mod.load_state_dict(
+                    collections.OrderedDict([("custom", public_value)])
+                )
+                self.assertEqual(incompatible_keys.missing_keys, [])
+                self.assertEqual(incompatible_keys.unexpected_keys, [])
+                self.assertEqual(opt_mod._orig_mod.loaded, public_value)
+                self.assertEqual(state_dict_hook_calls, [])
+
+                legacy_value = torch.full((), 3)
+                opt_mod = make_compiled_module()
+                incompatible_keys = opt_mod.load_state_dict(
+                    collections.OrderedDict([("_orig_mod.custom", legacy_value)])
+                )
+                self.assertEqual(incompatible_keys.missing_keys, [])
+                self.assertEqual(incompatible_keys.unexpected_keys, [])
+                self.assertEqual(opt_mod._orig_mod.loaded, legacy_value)
+                self.assertEqual(state_dict_hook_calls, [""])
+
     def test_load_state_dict_legacy_extra_keys(self):
         class NestedModule(torch.nn.Module):
             def __init__(self, mod) -> None:
@@ -2133,6 +2271,68 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(incompatible_keys.missing_keys, ["linear.bias"])
         self.assertEqual(incompatible_keys.unexpected_keys, ["linear.extra"])
         self.assertEqual(hook_calls, [(mod.linear, ["linear.bias"], ["linear.extra"])])
+
+    def test_descendant_load_state_dict_post_hook_public_names(self):
+        class Pair(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.nn.Linear(1, 1)
+                self.b = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        class Parent(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        for compile_parent in (False, True):
+            with self.subTest(compile_parent=compile_parent):
+                mod = Pair()
+                hook_calls = []
+
+                def post_hook(module, incompatible_keys):
+                    hook_calls.append(
+                        (
+                            module,
+                            list(incompatible_keys.missing_keys),
+                            list(incompatible_keys.unexpected_keys),
+                        )
+                    )
+                    incompatible_keys.missing_keys.clear()
+                    incompatible_keys.unexpected_keys.clear()
+
+                mod.b.register_load_state_dict_post_hook(post_hook)
+                opt_mod = torch.compile(mod, backend="eager")
+                if compile_parent:
+                    opt_mod = torch.compile(Parent(opt_mod), backend="eager")
+                    state_dict = Parent(Pair()).state_dict()
+                    prefix = "mod."
+                else:
+                    state_dict = Pair().state_dict()
+                    prefix = ""
+
+                del state_dict[prefix + "a.bias"]
+                del state_dict[prefix + "b.bias"]
+                state_dict[prefix + "extra"] = torch.ones(())
+
+                incompatible_keys = opt_mod.load_state_dict(state_dict)
+                self.assertEqual(incompatible_keys.missing_keys, [])
+                self.assertEqual(incompatible_keys.unexpected_keys, [])
+                self.assertEqual(
+                    hook_calls,
+                    [
+                        (
+                            mod.b,
+                            [prefix + "a.bias", prefix + "b.bias"],
+                            [prefix + "extra"],
+                        )
+                    ],
+                )
 
     def test_nested_state_dict(self):
         class NestedModule(torch.nn.Module):
@@ -3020,6 +3220,85 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_celu_matches_eager(self):
+        for alpha, inplace in itertools.product((0.5, 1.0, 2.0), (False, True)):
+            with self.subTest(alpha=alpha, inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=alpha)
+                    return torch.celu(x, alpha=alpha)
+
+                eager_inp = torch.linspace(-2, 2, 17)
+                compiled_inp = eager_inp.clone()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+                self.assertEqual(fn(eager_inp), opt_fn(compiled_inp))
+                self.assertEqual(eager_inp, compiled_inp)
+
+    def test_celu_zero_alpha_raises(self):
+        for inplace in (False, True):
+            with self.subTest(inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=0.0)
+                    return torch.celu(x, alpha=0.0)
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    fn(torch.randn(8))
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(8))
+
+    def test_partial_monkeypatched_forward_no_recompile(self):
+        class Hook:
+            def pre_forward(self, module, *args, **kwargs):
+                return args, kwargs
+
+            def post_forward(self, module, output):
+                return output
+
+        def add_hook_to_module(module):
+            old_forward = module.forward
+            module._old_forward = old_forward
+            module._hf_hook = Hook()
+
+            def new_forward(module, *args, **kwargs):
+                args, kwargs = module._hf_hook.pre_forward(module, *args, **kwargs)
+                output = module._old_forward(*args, **kwargs)
+                return module._hf_hook.post_forward(module, output)
+
+            module.forward = update_wrapper(partial(new_forward, module), old_forward)
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = torch.nn.Linear(4, 4)
+                add_hook_to_module(self.q_proj)
+
+            def forward(self, x):
+                return self.q_proj(x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cnt)
+        def run(layer, x):
+            return layer(x)
+
+        x = torch.randn(2, 4)
+        layers = [Layer() for _ in range(4)]
+
+        self.assertTrue(same(layers[0](x), run(layers[0], x)))
+        with patch.object(torch._dynamo.config, "error_on_recompile", True):
+            for layer in layers[1:]:
+                self.assertTrue(same(layer(x), run(layer, x)))
+        self.assertEqual(cnt.frame_count, 1)
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
@@ -3132,6 +3411,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
+
+    def test_forward_hook_handle_attr_in_hasattr(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.encoder = torch.nn.Linear(8, 4)
+                self.decoder = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                if not hasattr(self, "_forward_hook"):
+                    self._forward_hook = self.register_forward_hook(
+                        lambda module, inputs, output: output + 1
+                    )
+                return self.decoder(self.encoder(x))
+
+        model = TestModule().eval()
+        x = torch.randn(2, 8)
+
+        with torch.no_grad():
+            model(x)
+            expected = model(x)
+
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            actual = compiled_model(x)
+
+        self.assertEqual(actual, expected)
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
@@ -3729,6 +4035,77 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertFalse(hasattr(model, "foo"))
         self.assertFalse(hasattr(compiled_model, "foo"))
+
+    def test_custom_getattr_hasattr_no_recursion(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    if (
+                        hasattr(self, "custom_attributes")
+                        and name in self.custom_attributes
+                    ):
+                        return self.custom_attributes[name]
+                    raise
+
+            def forward(self, x):
+                return self.linear(x).relu()
+
+        mod = Mod()
+        x = torch.randn(2, 4)
+        compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), compiled_mod(x))
+
+        class ModWithAttrs(Mod):
+            def __init__(self):
+                super().__init__()
+                self.custom_attributes = {"scale": 2.0}
+
+            def forward(self, x):
+                return self.linear(x) * self.scale
+
+        mod2 = ModWithAttrs()
+        compiled_mod2 = torch.compile(mod2, backend="eager", fullgraph=True)
+        self.assertEqual(mod2(x), compiled_mod2(x))
+
+    def test_lazy_module_custom_getattr_no_recursion(self):
+        class LazyMod(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.UninitializedParameter()
+
+            def initialize_parameters(self, x):
+                with torch.no_grad():
+                    self.weight.materialize((x.shape[-1],))
+                    self.weight.fill_(2.0)
+
+            def forward(self, x):
+                return x * self.weight
+
+        class LazyModWithGetattr(LazyMod):
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    if (
+                        hasattr(self, "custom_attributes")
+                        and name in self.custom_attributes
+                    ):
+                        return self.custom_attributes[name]
+                    raise
+
+        mod = LazyMod()
+        mod.__class__ = LazyModWithGetattr
+        x = torch.randn(2, 4)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
+        res = compiled_mod(x)
+        self.assertEqual(x * 2.0, res)
 
     def test_globals_change_in_other_file(self):
         global _variable, _variable1
@@ -4368,6 +4745,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         input_tensor = torch.randn(1, 10)
         # This would error before fixing guard orering on nn.Modules (https://github.com/pytorch/pytorch/issues/170429)
         _ = runner_func(model, input_tensor)
+
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_prepend_forward_pre_hook_after_hook_with_closure(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def make_hook(offset):
+            def hook(module, args):
+                return (args[0] + offset,)
+
+            return hook
+
+        def prepended_hook(module, args):
+            return args[0] + 2.0
+
+        model = SimpleModel()
+        existing_handle = model.linear.register_forward_pre_hook(make_hook(1.0))
+        prepended_handle = model.linear.register_forward_pre_hook(
+            prepended_hook, prepend=True
+        )
+
+        self.assertEqual(
+            list(model.linear._forward_pre_hooks.keys()),
+            [prepended_handle.id, existing_handle.id],
+        )
+        self.assertEqual(
+            list(dict.keys(model.linear._forward_pre_hooks)),
+            [existing_handle.id, prepended_handle.id],
+        )
+
+        compiled_model = torch.compile(model, fullgraph=True, backend="eager")
+        input_tensor = torch.randn(1, 10)
+        self.assertEqual(compiled_model(input_tensor), model(input_tensor))
 
     def test_prepend_hook_ordering(self):
         class HookedLinear(torch.nn.Linear):

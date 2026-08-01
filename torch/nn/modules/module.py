@@ -137,6 +137,43 @@ _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 _LOAD_STATE_DICT_PUBLIC_PREFIXES = "_load_state_dict_public_prefixes"
 
 
+def _replace_load_state_dict_prefix(
+    key: str, public_prefixes: dict[str, str], *, to_public: bool
+) -> str:
+    best_source = None
+    best_target = None
+    best_rank = (-1, -1)
+    for internal_prefix, public_prefix in public_prefixes.items():
+        if to_public:
+            source, target = internal_prefix, public_prefix
+        else:
+            source, target = public_prefix, internal_prefix
+        rank = (len(source), len(internal_prefix))
+        if key.startswith(source) and rank > best_rank:
+            best_source, best_target = source, target
+            best_rank = rank
+
+    if best_source is None or best_target is None:
+        return key
+    return best_target + key[len(best_source) :]
+
+
+def _translate_load_state_dict_incompatible_keys(
+    incompatible_keys: _IncompatibleKeys,
+    public_prefixes: dict[str, str],
+    *,
+    to_public: bool,
+) -> None:
+    incompatible_keys.missing_keys[:] = [
+        _replace_load_state_dict_prefix(key, public_prefixes, to_public=to_public)
+        for key in incompatible_keys.missing_keys
+    ]
+    incompatible_keys.unexpected_keys[:] = [
+        _replace_load_state_dict_prefix(key, public_prefixes, to_public=to_public)
+        for key in incompatible_keys.unexpected_keys
+    ]
+
+
 def register_module_buffer_registration_hook(
     hook: Callable[..., None],
 ) -> RemovableHandle:
@@ -933,12 +970,14 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
+        # _apply is traced by dynamo at the bytecode level, and torch._subclasses
+        # is in dynamo's MOD_SKIPLIST, revisit later for c++
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
             if torch._has_compatible_shallow_copy_type(
                 tensor, tensor_applied
-            ) and not isinstance(tensor_applied, FakeTensor):
+            ) and not isinstance(tensor_applied, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -969,7 +1008,7 @@ class Module:
             p_should_use_swap_tensors = (
                 should_use_swap_tensors
                 or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)
+                or isinstance(param, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             )
 
             param_grad = param.grad
@@ -2399,6 +2438,26 @@ class Module:
                 error_msgs,
             )
 
+        self._load_from_state_dict_after_pre_hooks(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
+    def _load_from_state_dict_after_pre_hooks(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ) -> None:
         persistent_buffers = {
             k: v
             for k, v in self._buffers.items()
@@ -2426,7 +2485,7 @@ class Module:
                     continue
 
                 # This is used to avoid copying uninitialized parameters into
-                # non-lazy modules, since they dont have the hook to do the checks
+                # non-lazy modules, since they don't have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
                 is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
@@ -2543,41 +2602,14 @@ class Module:
         if public_prefixes is None:
             return None
 
-        public_prefix = None
-        longest_internal_prefix_len = -1
-        for internal_prefix, mapped_public_prefix in public_prefixes.items():
-            if prefix.startswith(internal_prefix) and (
-                len(internal_prefix) > longest_internal_prefix_len
-            ):
-                longest_internal_prefix_len = len(internal_prefix)
-                public_prefix = mapped_public_prefix + prefix[len(internal_prefix) :]
-        if public_prefix is None or public_prefix == prefix:
-            return None
-
-        def translate_to_public(key: str) -> str:
-            if key.startswith(prefix):
-                return public_prefix + key[len(prefix) :]
-            return key
-
-        incompatible_keys.missing_keys[:] = [
-            translate_to_public(key) for key in incompatible_keys.missing_keys
-        ]
-        incompatible_keys.unexpected_keys[:] = [
-            translate_to_public(key) for key in incompatible_keys.unexpected_keys
-        ]
+        _translate_load_state_dict_incompatible_keys(
+            incompatible_keys, public_prefixes, to_public=True
+        )
 
         def restore() -> None:
-            def translate_to_internal(key: str) -> str:
-                if key.startswith(public_prefix):
-                    return prefix + key[len(public_prefix) :]
-                return key
-
-            incompatible_keys.missing_keys[:] = [
-                translate_to_internal(key) for key in incompatible_keys.missing_keys
-            ]
-            incompatible_keys.unexpected_keys[:] = [
-                translate_to_internal(key) for key in incompatible_keys.unexpected_keys
-            ]
+            _translate_load_state_dict_incompatible_keys(
+                incompatible_keys, public_prefixes, to_public=False
+            )
 
         return restore
 
@@ -2686,18 +2718,18 @@ class Module:
                     incompatible_keys, prefix, local_state_dict
                 )
             )
-            for hook in module._load_state_dict_post_hooks.values():
-                out = hook(module, incompatible_keys)
-                if out is not None:
-                    if restore_incompatible_keys is not None:
-                        restore_incompatible_keys()
-                    raise AssertionError(
-                        "Hooks registered with ``register_load_state_dict_post_hook`` are not "
-                        "expected to return new values, if incompatible_keys need to be modified, "
-                        "it should be done inplace."
-                    )
-            if restore_incompatible_keys is not None:
-                restore_incompatible_keys()
+            try:
+                for hook in module._load_state_dict_post_hooks.values():
+                    out = hook(module, incompatible_keys)
+                    if out is not None:
+                        raise AssertionError(
+                            "Hooks registered with ``register_load_state_dict_post_hook`` are not "
+                            "expected to return new values, if incompatible_keys need to be modified, "
+                            "it should be done inplace."
+                        )
+            finally:
+                if restore_incompatible_keys is not None:
+                    restore_incompatible_keys()
 
         load(self, state_dict)
         del load
@@ -2748,6 +2780,10 @@ class Module:
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Return an iterator over module parameters.
+
+        The exact order of the returned parameters is unspecified, but repeated
+        calls to the ``parameters()`` method of an unchanged module return the
+        parameters in the same order.
 
         This is typically passed to an optimizer.
 

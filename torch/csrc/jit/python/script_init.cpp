@@ -684,7 +684,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       auto ad = item.a.toGenericDict();
       auto bd = item.b.toGenericDict();
       for (auto& item : ad) {
-        // Dictionaory keys cannot contain List/Dicts that require tags
+        // Dictionary keys cannot contain List/Dicts that require tags
         // so we do not have to check them.
         // Furthermore without ordered dicts it is expensive to find the
         // equivalent key
@@ -1052,7 +1052,7 @@ void initJitScriptBindings(PyObject* module) {
                       err << qualname->qualifiedName() << ' ';
                     }
                     err << "which does not have a __setstate__ method defined!";
-                    throw std::runtime_error(err.str());
+                    throw std::runtime_error(std::move(err).str());
                   }
                 }
 
@@ -1062,7 +1062,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               })
           .def(py::pickle(
               [](const Object& self)
@@ -1079,7 +1079,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
@@ -1116,7 +1116,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __setstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               }));
 
   py::class_<Object::Property>(m, "ScriptObjectProperty")
@@ -1156,7 +1156,8 @@ void initJitScriptBindings(PyObject* module) {
         if (!method) {
           std::stringstream ss;
           ss << std::hex << static_cast<const void*>(&self);
-          return py::str("<torch.ScriptObject object at " + ss.str() + ">");
+          return py::str(
+              "<torch.ScriptObject object at " + std::move(ss).str() + ">");
         }
         return invokeScriptMethodFromPython(*method, args, kwargs);
       });
@@ -1255,7 +1256,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& m, const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
             m.save(buf, _extra_files);
-            return py::bytes(buf.str());
+            return py::bytes(std::move(buf).str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def(
@@ -1284,7 +1285,7 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream buf;
             m._save_for_mobile(
                 buf, _extra_files, _save_mobile_debug_info, _use_flatbuffer);
-            return py::bytes(buf.str());
+            return py::bytes(std::move(buf).str());
           },
           py::arg("_extra_files") = ExtraFilesMap(),
           py::arg("_save_mobile_debug_info") = false,
@@ -1687,7 +1688,7 @@ void initJitScriptBindings(PyObject* module) {
             module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(buf, _extra_files);
-            return py::bytes(buf.str());
+            return py::bytes(std::move(buf).str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly(
@@ -2182,7 +2183,8 @@ void initJitScriptBindings(PyObject* module) {
         std::ostringstream buffer_output;
         bool success =
             _backport_for_mobile(filename_input, buffer_output, version);
-        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+        return success ? py::bytes(std::move(buffer_output).str())
+                       : py::bytes("");
       });
   m.def(
       "_backport_for_mobile_from_buffer_to_buffer",
@@ -2190,7 +2192,8 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer_input);
         std::ostringstream buffer_output;
         bool success = _backport_for_mobile(in, buffer_output, version);
-        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+        return success ? py::bytes(std::move(buffer_output).str())
+                       : py::bytes("");
       });
   m.def("_get_model_bytecode_version", [](const std::string& filename) {
     return _get_model_bytecode_version(filename);
