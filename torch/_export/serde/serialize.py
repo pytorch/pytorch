@@ -110,6 +110,8 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 
+_DO_NOT_SPECIALIZE_ZERO_ONE_SYMBOLS_KEY = "torch_do_not_specialize_zero_one_symbols"
+
 
 class SerializeError(RuntimeError):
     pass
@@ -2185,8 +2187,9 @@ class GraphModuleSerializer(metaclass=Final):
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
 
-    def serialize_graph_module_metadata(self, meta: dict[str, Any]):
+    def serialize_graph_module_metadata(self, graph_module: torch.fx.GraphModule):
         ret = {}
+        meta = graph_module.meta
         if custom := meta.get("custom"):
             log.debug("\n[serialize_graph_module_metadata] %s", custom)
             try:
@@ -2195,6 +2198,31 @@ class GraphModuleSerializer(metaclass=Final):
                 raise SerializeError(
                     f"Failed to serialize custom metadata for graph with error {e}"
                 ) from e
+
+        opt_out_symbols: set[str] = set()
+        for node in graph_module.graph.nodes:
+            for value in pytree.tree_leaves(node.meta.get("val")):
+                symbolic_values: Iterable[Any]
+                if isinstance(value, torch.Tensor):
+                    symbolic_values = (
+                        *value.shape,
+                        *value.stride(),
+                        value.storage_offset(),
+                    )
+                else:
+                    symbolic_values = (value,)
+                for symbolic_value in symbolic_values:
+                    if not isinstance(symbolic_value, torch.SymInt):
+                        continue
+                    shape_env = symbolic_value.node.shape_env
+                    if shape_env is not None:
+                        opt_out_symbols.update(
+                            str(s) for s in shape_env.do_not_specialize_zero_one_symbols
+                        )
+        if opt_out_symbols:
+            ret[_DO_NOT_SPECIALIZE_ZERO_ONE_SYMBOLS_KEY] = json.dumps(
+                sorted(opt_out_symbols)
+            )
 
         return ret
 
@@ -2206,7 +2234,7 @@ class GraphModuleSerializer(metaclass=Final):
             graph=graph,
             signature=self.serialize_signature(self.graph_signature),
             module_call_graph=self.serialize_module_call_graph(self.module_call_graph),
-            metadata=self.serialize_graph_module_metadata(graph_module.meta),
+            metadata=self.serialize_graph_module_metadata(graph_module),
             treespec_namedtuple_fields=self.treespec_namedtuple_fields,
         )
 
@@ -2418,6 +2446,15 @@ class GraphModuleDeserializer(metaclass=Final):
                 # ShapeEnv meta
                 if isinstance(sym, sympy.Symbol):
                     self.shape_env.var_to_stack[sym] = CapturedTraceback.extract(skip=1)
+                    if str(sym) in self.do_not_specialize_zero_one_symbol_names or (
+                        symbolic_shapes.symbol_is_type(sym, SymT.SIZE)
+                        and sym.is_nonnegative
+                        and sym.is_positive is None
+                    ):
+                        # srepr preserves the nonnegative assumption for older
+                        # payloads. New payloads record the provenance explicitly
+                        # so positive size-one Dims can retain the opt-out too.
+                        self.shape_env.do_not_specialize_zero_one_symbols.add(sym)
             return sym
 
         expr = sympy.sympify(
@@ -2961,6 +2998,13 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
+            self.do_not_specialize_zero_one_symbol_names = set(
+                json.loads(
+                    serialized_graph_module.metadata.get(
+                        _DO_NOT_SPECIALIZE_ZERO_ONE_SYMBOLS_KEY, "[]"
+                    )
+                )
+            )
             self.constants = deserialize_torch_artifact(constants)
             self.signature = self.deserialize_signature(
                 serialized_graph_module.signature

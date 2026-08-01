@@ -56,7 +56,7 @@ import torch.utils._pytree as pytree
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
-from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
+from torch._C._functorch import is_batchedtensor, is_gradtrackingtensor
 from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
@@ -1329,8 +1329,7 @@ def _free_unbacked_symbols_with_path(
     elif isinstance(a, torch.Tensor) and (
         is_batchedtensor(a) or is_gradtrackingtensor(a)
     ):
-        unwrapped_tensor = get_unwrapped(a)
-        r.update(go(unwrapped_tensor, path))
+        match_tensor(a)
     elif (
         isinstance(a, torch.Tensor)
         and not is_batchedtensor(a)
@@ -1571,6 +1570,12 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
     sym_node = a.node
     if sym_node.shape_env is None:
         raise AssertionError("shape_env should not be None")
+    if shape_env.do_not_specialize_zero_one_symbols and (
+        sym_node.expr.free_symbols & shape_env.do_not_specialize_zero_one_symbols
+    ):
+        result = _static_eval_sym_bool(a)
+        return result if result is not None else default
+
     r = sym_node.shape_env.evaluate_sym_node(
         sym_node, size_oblivious=False, fallback_value=default
     )
@@ -4192,6 +4197,7 @@ class ShapeEnv:
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
         self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.do_not_specialize_zero_one_symbols: set[sympy.Symbol] = set()
 
         # Used by _get_unbacked_replacements / _sub_unbacked_exprs for
         # optimization_hint canonicalization of unbacked expressions.
@@ -4835,12 +4841,20 @@ class ShapeEnv:
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size: list[sympy.Expr] = []
         for i, val in enumerate(tensor_size):
+            hint = hint_overrides.get(i, val)
+            # Only declared Dims use this set; backed_size_oblivious is handled
+            # earlier in _guard_or.
+            skip_zero_one_guard_specialization = isinstance(
+                constraint_dims[i], StrictMinMaxConstraint
+            ) and hint in (0, 1)
             sym = self.create_symbol(
-                hint_overrides.get(i, val),
+                hint,
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
-                do_not_specialize_zero_one=config.backed_size_oblivious,
+                do_not_specialize_zero_one=config.backed_size_oblivious
+                or skip_zero_one_guard_specialization,
+                skip_zero_one_guard_specialization=skip_zero_one_guard_specialization,
                 symbolic_context=symbolic_context,
             )
             if (
@@ -5278,7 +5292,7 @@ class ShapeEnv:
 
         for i, sym in enumerate(sym_sizes):
             if isinstance(sym, torch.SymInt) and i in hint_overrides:
-                self.var_to_hint_override[sym.node.expr] = hint_overrides[i]
+                self.var_to_hint_override[sym.node._expr] = hint_overrides[i]
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -5704,6 +5718,7 @@ class ShapeEnv:
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: bool | None = True,
         do_not_specialize_zero_one: bool = False,
+        skip_zero_one_guard_specialization: bool = False,
         symbolic_context: SymbolicContext | None = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
@@ -5851,10 +5866,24 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             symbol_id = self._generate_unique_id(source.name)
+            zero_is_in_dim_range = False
             if type(val) is int or is_nested_int(val):
-                sympy_expr = make_symbol(
-                    SymT.SIZE, symbol_id, positive=positive, integer=True
+                zero_is_in_dim_range = (
+                    positive
+                    and skip_zero_one_guard_specialization
+                    and isinstance(constraint_dim, StrictMinMaxConstraint)
+                    and constraint_dim.vr.lower <= 0
                 )
+                if zero_is_in_dim_range:
+                    sympy_expr = make_symbol(
+                        SymT.SIZE, symbol_id, nonnegative=True, integer=True
+                    )
+                else:
+                    sympy_expr = make_symbol(
+                        SymT.SIZE, symbol_id, positive=positive, integer=True
+                    )
+                if skip_zero_one_guard_specialization and val in (0, 1):
+                    self.do_not_specialize_zero_one_symbols.add(sympy_expr)
             else:
                 sympy_expr = make_symbol(
                     SymT.FLOAT, symbol_id, positive=positive, real=True
@@ -5886,7 +5915,14 @@ class ShapeEnv:
             if isinstance(val, int):
                 if positive:
                     # Add assertions for the newly created symbols
-                    self._add_assertion(sympy_expr > 1)
+                    if skip_zero_one_guard_specialization:
+                        if zero_is_in_dim_range:
+                            premise = sympy.Ge(sympy_expr, 0, evaluate=False)
+                        else:
+                            premise = sympy.Gt(sympy_expr, 0, evaluate=False)
+                        self._add_assertion(premise)
+                    else:
+                        self._add_assertion(sympy_expr > 1)
 
                     # Apply default range, which assumes not zero-one
                     self.var_to_range[sympy_expr] = self._default_value_range(
@@ -6268,12 +6304,25 @@ class ShapeEnv:
             for i, src in enumerate(sources):
                 source_index[src.name] = i
 
-            def get_expression(tensor_dim_src: Source) -> sympy.Expr:
+            example_value_replacements = {
+                k: sympy.sympify(v) for k, v in self.var_to_hint_override.items()
+            }
+
+            def replace_with_example_values(expr: sympy.Basic) -> sympy.Basic:
+                return expr.xreplace(self.backed_var_to_val).xreplace(
+                    example_value_replacements
+                )
+
+            def get_expression(
+                tensor_dim_src: Source, *, ignore_replacements: bool = False
+            ) -> sympy.Expr:
                 fake = placeholders[source_index[tensor_dim_src.base.name]]  # type: ignore[attr-defined]
                 if tensor_dim_src.idx is None:  # type: ignore[attr-defined]
                     raise AssertionError("tensor_dim_src.idx must not be None")
                 symint = fake.shape[tensor_dim_src.idx]  # type: ignore[attr-defined]
                 if isinstance(symint, torch.SymInt):
+                    if ignore_replacements:
+                        return symint.node._expr
                     return symint.node.expr
                 else:
                     if type(symint) is not int:
@@ -6285,13 +6334,32 @@ class ShapeEnv:
                 # Check whether given input shape values satisfy a specified equation s = s'.
                 # - Raise when the equation was violated by the given input shape values.
                 # - Otherwise issue a guard to constrain them.
-                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
+                eq = sympy.Eq(expr1, expr2)
+                example_expr1 = get_expression(src1, ignore_replacements=True)
+                example_expr2 = get_expression(src2, ignore_replacements=True)
+                example_eq = sympy.Eq(example_expr1, example_expr2)
+                concrete_val = self._maybe_evaluate_static(
+                    replace_with_example_values(example_eq),
+                    compute_hint=True,
+                )
+                evaluated_eq = False
+                if concrete_val is None:
+                    concrete_val = self.evaluate_expr(eq)
+                    evaluated_eq = True
                 if not concrete_val:
                     raise ConstraintViolationError(
-                        f"{src1.name} = {expr1 if isinstance(expr1, int) else expr1.xreplace(self.backed_var_to_val)}"
+                        f"{src1.name} = {replace_with_example_values(example_expr1)}"
                         " is not equal to "
-                        f"{src2.name} = {expr2 if isinstance(expr2, int) else expr2.xreplace(self.backed_var_to_val)}"
+                        f"{src2.name} = {replace_with_example_values(example_expr2)}"
                     )
+                if not evaluated_eq:
+                    concrete_val = self.evaluate_expr(eq)
+                    if not concrete_val:
+                        raise ConstraintViolationError(
+                            f"{src1.name} = {replace_with_example_values(example_expr1)}"
+                            " is not equal to "
+                            f"{src2.name} = {replace_with_example_values(example_expr2)}"
+                        )
 
             for srcEq, root, fn in equalities_inputs.derived_equalities:
                 expr1 = get_expression(srcEq)
@@ -6306,13 +6374,45 @@ class ShapeEnv:
                 # Check whether given input shape values satisfy a specified equation s = fn(s').
                 # - Raise when the equation was violated by the given input shape values.
                 # - Otherwise issue a guard to constrain them.
-                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2_))
+                eq = sympy.Eq(expr1, expr2_)
+                concrete_val = self._maybe_evaluate_static(
+                    replace_with_example_values(eq),
+                    compute_hint=True,
+                )
+                if concrete_val is not None and not bool(concrete_val):
+                    raise ConstraintViolationError(
+                        f"Expected input {srcEq.name} to be equal to "
+                        f"{fn(sympy.Symbol(debug_name))}, "
+                        f"where {debug_name} = {replace_with_example_values(expr2)}, "
+                        f"but got {replace_with_example_values(expr1)}"
+                    )
+                if (
+                    isinstance(root, sympy.Symbol)
+                    and not (eq is sympy.S.true or eq is True)
+                    and concrete_val is not None
+                    and expr1.free_symbols
+                    and expr1.free_symbols <= expr2_.free_symbols
+                ):
+                    raise ConstraintViolationError(
+                        f"Expected input {srcEq.name} to be equal to "
+                        f"{fn(sympy.Symbol(debug_name))}, but this equality "
+                        f"would specialize {debug_name} to the example value"
+                    )
+                try:
+                    concrete_val = self.evaluate_expr(eq)
+                except GuardOnDataDependentSymNode:
+                    if concrete_val is None or bool(concrete_val):
+                        concrete_val = self.guard_or_defer_runtime_assert(
+                            eq,
+                            f"Expected input {srcEq.name} to be equal to "
+                            f"{fn(sympy.Symbol(debug_name))}",
+                        )
                 if not concrete_val:
                     raise ConstraintViolationError(
                         f"Expected input {srcEq.name} to be equal to "
                         f"{fn(sympy.Symbol(debug_name))}, "
-                        f"where {debug_name} = {expr2.xreplace(self.backed_var_to_val)}, "
-                        f"but got {expr1.xreplace(self.backed_var_to_val)}"
+                        f"where {debug_name} = {replace_with_example_values(expr2)}, "
+                        f"but got {replace_with_example_values(expr1)}"
                     )
 
             for phantom_symbol in equalities_inputs.phantom_symbols:
@@ -8078,6 +8178,24 @@ class ShapeEnv:
                     "Specializing %s to %s", self.var_to_sources[a][0].name, tgt
                 )
                 self.log.debug("SPECIALIZATION", stack_info=True)
+        if a in self.do_not_specialize_zero_one_symbols:
+            if isinstance(tgt, sympy.Symbol):
+                # Exact aliases are indistinguishable after replacement.
+                self.do_not_specialize_zero_one_symbols.add(tgt)
+            elif tgt.free_symbols and not (
+                tgt.free_symbols & self.do_not_specialize_zero_one_symbols
+            ):
+                # Replacing the symbol with an ordinary composite expression
+                # would erase its opt-out provenance. Do not mark every input
+                # to the expression, since that changes unrelated guards.
+                log.info(
+                    "skipped set_replacement %s = %s (%s) "
+                    "[would lose zero/one opt-out provenance]",
+                    a,
+                    tgt,
+                    msg,
+                )
+                return
         log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
         self.replacements[a] = tgt
         # NB: the replacement may get refined, but the user will find the
