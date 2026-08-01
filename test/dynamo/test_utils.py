@@ -28,6 +28,21 @@ _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    def test_cleanup_hook_tolerates_missing_name(self):
+        # During interpreter shutdown the scope's module __dict__ may already be
+        # cleared before the weakref callback fires the hook. The hook must not
+        # raise KeyError (which would surface as an "Exception ignored in
+        # weakref callback").
+        scope = {}
+        hook = utils.CleanupHook.create(scope, "myglobal", object())
+        del scope["myglobal"]
+        hook()
+
+        # The normal path still removes the installed global.
+        hook2 = utils.CleanupHook.create(scope, "myglobal", object())
+        hook2()
+        self.assertNotIn("myglobal", scope)
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])
