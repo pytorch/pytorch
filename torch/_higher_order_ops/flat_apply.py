@@ -8,7 +8,6 @@ import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.fake_impl import FakeImplError
 from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator
 
@@ -18,7 +17,7 @@ _P = ParamSpec("_P")
 _Ts = TypeVarTuple("_Ts")
 
 
-class NotGraphableError(FakeImplError):
+class NotGraphableError(RuntimeError):
     pass
 
 

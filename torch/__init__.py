@@ -1644,6 +1644,7 @@ def is_storage(obj: object, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
         True
         >>>
         >>> # TypedStorage (legacy)
+        >>> warnings.filterwarnings("ignore", message=".*TypedStorage is deprecated")  # docs: hide
         >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
         >>> torch.is_storage(typed_storage)
         True
@@ -2168,36 +2169,47 @@ def is_warn_always_enabled() -> builtins.bool:
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
 
-_TORCH_CHECK_USER_ERROR = object()
-_torch_check_user_error_suppressed = _ContextVar(
-    "torch_check_user_error_suppressed", default=False
+class _TorchCheckUserError(RuntimeError):
+    pass
+
+
+_torch_check_user_error_enabled = _ContextVar(
+    "torch_check_user_error_enabled", default=False
 )
 
 
 @_contextmanager
+def _enable_torch_check_user_error() -> typing.Generator[None, None, None]:
+    token = _torch_check_user_error_enabled.set(True)
+    try:
+        yield
+    finally:
+        _torch_check_user_error_enabled.reset(token)
+
+
+@_contextmanager
 def _suppress_torch_check_user_error() -> typing.Generator[None, None, None]:
-    """Prevent fake-only implementations from marking nested validation errors."""
-    token = _torch_check_user_error_suppressed.set(True)
+    """Prevent fake-only implementations from exposing nested validation errors."""
+    token = _torch_check_user_error_enabled.set(False)
     try:
         try:
             yield
-        except RuntimeError as e:
-            if (
-                type(e) is RuntimeError
-                and e.__dict__.get("_torch_check_user_error") is _TORCH_CHECK_USER_ERROR
-            ):
-                del e.__dict__["_torch_check_user_error"]
-            raise
+        except _TorchCheckUserError as e:
+            if type(e) is not _TorchCheckUserError:
+                raise
+            args_descriptor = typing.cast(_Any, BaseException.__dict__["args"])
+            exception_args = args_descriptor.__get__(e, BaseException)
+            raise RuntimeError(*exception_args).with_traceback(
+                e.__traceback__
+            ) from None
     finally:
-        _torch_check_user_error_suppressed.reset(token)
+        _torch_check_user_error_enabled.reset(token)
 
 
 def _check_with(
     error_type: type[BaseException],
     cond: builtins.bool | SymBool,
     message: _LiteralString | _Callable[[], object] | None,
-    *,
-    _user_error: builtins.bool = False,
 ) -> None:
     if not isinstance(cond, (builtins.bool, SymBool)):
         if isinstance(cond, torch.Tensor):
@@ -2231,12 +2243,7 @@ def _check_with(
         # str/object; both are accepted.
         message_evaluated = str(message() if callable(message) else message)
 
-    error = error_type(message_evaluated)
-    if _user_error:
-        if type(error) is not RuntimeError:
-            raise AssertionError("_user_error requires an exact RuntimeError")
-        error.__dict__["_torch_check_user_error"] = _TORCH_CHECK_USER_ERROR
-    raise error
+    raise error_type(message_evaluated)
 
 
 def _check(
@@ -2267,10 +2274,9 @@ def _check_user_error(
 ) -> None:
     """Core-only check for audited validation errors that mirror eager."""
     _check_with(
-        RuntimeError,
+        _TorchCheckUserError if _torch_check_user_error_enabled.get() else RuntimeError,
         cond,
         message,
-        _user_error=not _torch_check_user_error_suppressed.get(),
     )
 
 

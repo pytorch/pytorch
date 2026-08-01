@@ -1226,6 +1226,253 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(res_exp, res_act)
         self.assertEqual(x0, x1)
 
+    # ACT (AsyncCollectiveTensor) can be constructed directly, so the guard
+    # relaxation for ACT inputs is exercised here on CPU without a process group.
+    # The end-to-end path with a real collective + inductor is covered by
+    # test/distributed/test_inductor_collectives.py.
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_async_collective_tensor_input_polymorphism(self):
+        # A graph traced on an ACT input must be reused when the resolved plain
+        # Tensor is passed at runtime (and vice versa), with no class recompile.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, w):
+            return (x @ w).sum()
+
+        x = torch.randn(4, 4)
+        base = torch.randn(4, 4)
+        for i in range(4):
+            w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
+            self.assertEqual(fn(x, w), (x @ base).sum())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_async_collective_tensor_input_polymorphism_aot_eager(self):
+        # Same as above but through AOTAutograd (aot_eager), which exercises the
+        # runtime wrapper that unwraps/waits an ACT input and passes a plain
+        # Tensor through unchanged -- the mechanism a bare eager backend skips.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, w):
+            return (x @ w).sum()
+
+        x = torch.randn(4, 4)
+        base = torch.randn(4, 4)
+        for i in range(4):
+            w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
+            self.assertEqual(fn(x, w), (x @ base).sum())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_async_collective_tensor_inner_access(self):
+        # Reading the ACT inner tensor (w.elem) under fullgraph must trace and
+        # reconstruct it correctly -- for an ACT input the inner tensor is guarded
+        # through UnwrapCollectiveTensorSource, so this exercises that source's
+        # reconstruct() (whose absence previously hard-errored). The isinstance
+        # check discriminates ACT from Tensor, so the two classes compile separate
+        # graphs (no reuse here); the plain-Tensor reuse path is covered by
+        # test_async_collective_tensor_input_polymorphism.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(w):
+            return (w.elem if isinstance(w, AsyncCollectiveTensor) else w).sum()
+
+        base = torch.randn(4, 4)
+        for i in range(4):
+            w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
+            self.assertEqual(fn(w), base.sum())
+        # isinstance(w, ACT) discriminates, so the two classes need separate graphs.
+        self.assertEqual(cnt.frame_count, 2)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_async_collective_tensor_reverse_direction_still_guards(self):
+        # Reverse direction: trace on a plain Tensor, then pass an ACT at runtime.
+        # This must recompile -- the relaxation only applies when the traced value
+        # is an ACT (a Tensor-traced graph may not await the collective).
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, w):
+            return (x @ w).sum()
+
+        x = torch.randn(4, 4)
+        base = torch.randn(4, 4)
+        for i in range(4):
+            # Step 0 traces with the plain Tensor; odd steps pass the ACT.
+            w = base if i % 2 == 0 else AsyncCollectiveTensor(base)
+            self.assertEqual(fn(x, w), (x @ base).sum())
+        self.assertEqual(cnt.frame_count, 2)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    @parametrize("channel", ["isinstance", "class", "type", "match"])
+    def test_async_collective_tensor_type_introspection_recompiles(self, channel):
+        # A region that observes the ACT class must recompile on the class change
+        # and stay correct: the relaxed class guard is reinstalled on observation.
+        # The non-observing control below (same matmul, no class check) reuses one
+        # graph across the ACT/Tensor alternation, so the extra compile is caused
+        # by the observation, not by the input class per se. This is what pins the
+        # reinstall-on-observation behavior: without the relaxation the control
+        # would recompile too (ACT vs Tensor guards differ regardless), so a plain
+        # "observing recompiles" assertion would pass even if the relaxation
+        # regressed.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def make_fn(channel):
+            if channel == "isinstance":
+
+                def fn(x, w):
+                    if isinstance(w, AsyncCollectiveTensor):
+                        return (x @ w).sum() * 2
+                    return (x @ w).sum()
+
+            elif channel == "class":
+
+                def fn(x, w):
+                    if w.__class__ is AsyncCollectiveTensor:
+                        return (x @ w).sum() * 2
+                    return (x @ w).sum()
+
+            elif channel == "type":
+
+                def fn(x, w):
+                    if type(w) is AsyncCollectiveTensor:
+                        return (x @ w).sum() * 2
+                    return (x @ w).sum()
+
+            else:  # match
+
+                def fn(x, w):
+                    match w:
+                        case AsyncCollectiveTensor():
+                            return (x @ w).sum() * 2
+                        case _:
+                            return (x @ w).sum()
+
+            return fn
+
+        def control(x, w):
+            return (x @ w).sum()
+
+        def run(f):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+            step = torch.compile(f, backend=cnt, fullgraph=True)
+            x = torch.randn(4, 4)
+            base = torch.randn(4, 4)
+            for i in range(4):
+                w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
+                self.assertEqual(step(x, w), f(x, w))
+            return cnt.frame_count
+
+        # Observing the class recompiles across the ACT<->Tensor change...
+        self.assertEqual(run(make_fn(channel)), 2)
+        # ...while the same computation without the class check reuses one graph.
+        self.assertEqual(run(control), 1)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    @parametrize("channel", ["isinstance", "isinstance_tuple", "match"])
+    def test_async_collective_tensor_nondiscriminating_checks_reuse(self, channel):
+        # A class check that is True for both an ACT and the resolved Tensor
+        # (e.g. isinstance(w, torch.Tensor)) must NOT recompile.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def make_fn(channel):
+            if channel == "isinstance":
+
+                def fn(x, w):
+                    return (x @ w).sum() if isinstance(w, torch.Tensor) else w
+
+            elif channel == "isinstance_tuple":
+
+                def fn(x, w):
+                    return (x @ w).sum() if isinstance(w, (torch.Tensor, int)) else w
+
+            else:  # match
+
+                def fn(x, w):
+                    match w:
+                        case torch.Tensor():
+                            return (x @ w).sum()
+                        case _:
+                            return w
+
+            return fn
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        fn = make_fn(channel)
+        step = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4, 4)
+        base = torch.randn(4, 4)
+        for i in range(4):
+            w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
+            self.assertEqual(step(x, w), (x @ base).sum())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_async_collective_tensor_dynamic_shapes(self):
+        # The unwrapped inner tensor is guarded through UnwrapCollectiveTensorSource;
+        # dynamic shapes over that source must stay correct across ACT/Tensor.
+        #
+        # Reuse is imperfect under dynamic=True. The ShapeEnv derives the ACT
+        # inner-dim symbol from a plain ".elem" AttrSource, not from
+        # UnwrapCollectiveTensorSource, so the symbolic-shape guard evaluates
+        # L['w'].elem.size() and fails with AttributeError on a resolved plain
+        # Tensor. The ACT and the Tensor therefore land in two separate cache
+        # entries. This split is one-time and stable (each class always hits its
+        # own entry); it is NOT a per-alternation recompile, so 4 and 8 reps both
+        # compile exactly twice. Static shapes reuse perfectly (one entry).
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def run(reps, dynamic):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True, dynamic=dynamic)
+            def fn(x, w):
+                return (x @ w).sum()
+
+            base = torch.randn(4, 4)
+            x = torch.randn(3, 4)
+            for i in range(reps):
+                w = AsyncCollectiveTensor(base) if i % 2 == 0 else base
+                self.assertEqual(fn(x, w), (x @ base).sum())
+            return cnt.frame_count
+
+        # Static shapes: ACT and Tensor share one cache entry (perfect reuse).
+        self.assertEqual(run(reps=4, dynamic=False), 1)
+        # Dynamic shapes: a one-time, stable ACT/Tensor split into two entries --
+        # more reps add no further compiles.
+        self.assertEqual(run(reps=4, dynamic=True), 2)
+        self.assertEqual(run(reps=8, dynamic=True), 2)
+
+    def test_tensor_dunder_class_provenance(self):
+        # var_getattr("__class__") now attaches a source (TypeSource) for all
+        # tensors. Reading a plain tensor's __class__ and branching on it must
+        # still trace and produce the correct result.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            factor = 1 if x.__class__ is torch.Tensor else 2
+            return (x + 1).sum() * factor
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        self.assertEqual(fn(x), (x + 1).sum())
+        self.assertEqual(fn(y), (y + 1).sum())
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_subclass_override_shape_and_to(self):
         # This is a slight variabtion of
         # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435

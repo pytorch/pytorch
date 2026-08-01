@@ -15,7 +15,6 @@ from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
 from .effects import EffectType
-from .fake_impl import MissingFakeImplError
 
 
 device_types_t: TypeAlias = str | Sequence[str] | None  # noqa: PYI042
@@ -777,7 +776,7 @@ class CustomOpDef:
                     return utils.generate_trivial_fake_impl(
                         self._opoverload, *args, **kwargs
                     )
-                raise MissingFakeImplError(
+                raise RuntimeError(
                     f"There was no fake impl registered for {self}. "
                     f"This is necessary for torch.compile/export/fx tracing to work. "
                     f"Please use `{self._init_fn.__name__}.register_fake` to add an "

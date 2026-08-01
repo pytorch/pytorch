@@ -24,7 +24,6 @@ from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.fake_impl import FakeImplError
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
@@ -199,10 +198,6 @@ class UnsupportedMutationAliasingException(RuntimeError):
 @dataclass
 class MetadataMismatchError(RuntimeError):
     reason: str
-
-
-class FakeTensorInternalError(FakeImplError):
-    pass
 
 
 class FakeTensorTLS(threading.local):
@@ -2457,19 +2452,19 @@ class FakeTensorMode(TorchDispatchMode):
                     raise AssertionError(f"Expected Tensor, got {type(b)}")
                 assert_metadata_eq(assert_eq, a, b)
             else:
-                raise FakeTensorInternalError(f"Unsupported type {type(a)}")
+                raise RuntimeError(f"Unsupported type {type(a)}")
 
         try:
             true_output = self._dispatch_impl(func, types, args, kwargs)
         except Exception as e:
-            raise FakeTensorInternalError(
+            raise RuntimeError(
                 f"FakeTensor cache crosscheck failure: func={func}, "
                 f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
             ) from e
         try:
             assert_helper(true_output, output)
         except Exception as e:
-            raise FakeTensorInternalError(
+            raise RuntimeError(
                 f"FakeTensor cache crosscheck failure: func={func}, "
                 f"args={args}, kwargs={kwargs}"
             ) from e
@@ -2953,14 +2948,6 @@ class FakeTensorMode(TorchDispatchMode):
                     func,
                     exc,
                 )
-            except RuntimeError as exc:
-                # This auxiliary execution uses trace-time example values. Its
-                # errors cannot select a user handler without baking that
-                # value-dependent branch into the graph.
-                raise FakeTensorInternalError(
-                    "propagate_real_tensors real execution raised RuntimeError"
-                ) from exc
-
             if not is_builtin:
                 mutation_checker.check()  # type: ignore[possibly-undefined]
                 library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
@@ -3833,7 +3820,7 @@ def _infer_fake_from_real_tensor(
     mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: torch.Tensor
 ) -> torch.Tensor:
     def unsupported(reason: str) -> None:
-        raise FakeTensorInternalError(
+        raise RuntimeError(
             f"propagate_real_tensors: we cannot infer a Fake kernel "
             f"(meta kernel) for operator {op._name} because {reason}. "
             f"Please use torch.library.register_fake to add a Fake kernel."
@@ -3900,7 +3887,7 @@ def inferred_fake_kernel_from_real_out(
     # to avoid baking non-symbolic float/int outputs into the graph.
     real_flat_out, spec = pytree.tree_flatten(real_out)
     if not all(isinstance(t, torch.Tensor) for t in real_flat_out):
-        raise FakeTensorInternalError(
+        raise RuntimeError(
             f"propagate_real_tensors: we don't support operators that return "
             f"non-Tensors. Got {op._schema}"
         )
