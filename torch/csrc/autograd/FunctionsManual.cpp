@@ -4528,33 +4528,51 @@ Tensor linalg_matrix_sqrth_differential(
   return 0.5 * (out + out.mH());
 }
 
+// Solves H X + X H = R for Hermitian positive-definite H = Q diag(s) Q^H.
+// Eigendecomposing H directly (rather than A^H A, whose eigenvalues are the
+// squared singular values) keeps small singular values at full precision.
+static Tensor polar_sylvester_solve(
+    const Tensor& Q,
+    const Tensor& s,
+    const Tensor& R) {
+  auto denom = s.unsqueeze(-1) + s.unsqueeze(-2);
+  auto inner = at::matmul(at::matmul(Q.mH(), R), Q).div(denom);
+  return at::matmul(at::matmul(Q, inner), Q.mH());
+}
+
+// X H^{-1} reusing the eigendecomposition of H.
+static Tensor polar_apply_hinv(
+    const Tensor& Q,
+    const Tensor& s,
+    const Tensor& X) {
+  return at::matmul(at::matmul(X, Q).div(s.unsqueeze(-2)), Q.mH());
+}
+
 Tensor linalg_polar_backward(
     const Tensor& grad_U,
     const Tensor& grad_H,
     const Tensor& A,
     const Tensor& U,
     const Tensor& H) {
+  if (!grad_U.defined() && !grad_H.defined()) {
+    return {};
+  }
   at::NoTF32Guard disable_tf32;
-  Tensor grad_H_eff = grad_H;
-  Tensor grad_A_from_U;
-  if (grad_U.defined()) {
-    // Y = grad_U H^{-H}; H is Hermitian positive-definite, so solve via its
-    // Cholesky factor rather than a generic (pivoted LU) solve.
-    auto L = at::linalg_cholesky(H);
-    auto Y = at::cholesky_solve(grad_U.mH(), L).mH();
-    grad_A_from_U = Y;
-    auto extra = -at::matmul(U.mH(), Y);
-    grad_H_eff = grad_H_eff.defined() ? grad_H_eff + extra : std::move(extra);
-  }
+  auto [s, Q] = at::linalg_eigh(H);
+  s = s.clamp_min(0);
   Tensor grad_A;
-  if (grad_H_eff.defined()) {
-    auto S_bar =
-        linalg_matrix_sqrth_differential(at::matmul(A.mH(), A), grad_H_eff);
-    grad_A = at::matmul(A, S_bar + S_bar.mH());
+  if (grad_U.defined()) {
+    auto C = at::matmul(U.mH(), grad_U);
+    // Project out the component parallel to U before applying H^{-1}; the
+    // tangential component goes through the Sylvester solve.
+    auto normal = polar_apply_hinv(Q, s, grad_U - at::matmul(U, C));
+    auto X = polar_sylvester_solve(Q, s, C - C.mH());
+    grad_A = normal + at::matmul(U, X);
   }
-  if (grad_A_from_U.defined()) {
-    grad_A =
-        grad_A.defined() ? grad_A + grad_A_from_U : std::move(grad_A_from_U);
+  if (grad_H.defined()) {
+    auto Z = polar_sylvester_solve(Q, s, grad_H + grad_H.mH());
+    auto from_H = at::matmul(A, Z);
+    grad_A = grad_A.defined() ? grad_A + from_H : std::move(from_H);
   }
   return grad_A;
 }
@@ -4565,12 +4583,13 @@ std::tuple<Tensor, Tensor> linalg_polar_jvp(
     const Tensor& U,
     const Tensor& H) {
   at::NoTF32Guard disable_tf32;
-  // H = sqrt(A^H A), so dH is the sqrth differential applied to d(A^H A).
-  // U = A H^{-1}, so dU = (dA - U dH) H^{-1}, solved via Cholesky of H.
+  // d(H^2) = d(A^H A) gives H dH + dH H = dA^H A + A^H dA, and
+  // U = A H^{-1} gives dU = (dA - U dH) H^{-1}.
+  auto [s, Q] = at::linalg_eigh(H);
+  s = s.clamp_min(0);
   auto dM = at::matmul(dA.mH(), A) + at::matmul(A.mH(), dA);
-  auto dH = linalg_matrix_sqrth_differential(at::matmul(A.mH(), A), dM);
-  auto L = at::linalg_cholesky(H);
-  auto dU = at::cholesky_solve((dA - at::matmul(U, dH)).mH(), L).mH();
+  auto dH = polar_sylvester_solve(Q, s, dM);
+  auto dU = polar_apply_hinv(Q, s, dA - at::matmul(U, dH));
   return std::make_tuple(std::move(dU), std::move(dH));
 }
 

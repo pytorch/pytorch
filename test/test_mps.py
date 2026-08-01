@@ -12081,12 +12081,10 @@ class TestLinalgMPS(TestCaseMPS):
             rhs = torch.exp(torch.diagonal(a.cpu(), dim1=-2, dim2=-1).sum(-1))
             self.assertEqual(lhs, rhs, atol=1e-3, rtol=1e-3)
 
-    @dtypes(torch.float32)
+    @dtypes(torch.float32, torch.complex64)
     @parametrize("shape", [(4, 4), (5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
     def test_polar_backward(self, device, dtype, shape):
-        # linalg.polar backward is real-only on MPS (the H solve routes through
-        # Cholesky, unsupported for complex on MPS), so compare A.grad against
-        # CPU for the same random output grads gU, gH.
+        # Compare A.grad against CPU for the same random output grads gU, gH.
         torch.manual_seed(0)
         A_cpu = torch.randn(*shape, dtype=dtype, requires_grad=True)
         A_mps = A_cpu.detach().to(device).requires_grad_(True)

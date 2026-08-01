@@ -1961,9 +1961,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_polar",
         op=torch.linalg.polar,
         dtypes=floating_and_complex_types(),
-        # The backward solves with H (via Cholesky), which MPS does not
-        # support for complex; the real MPS backward works.
-        backward_dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_polar,
